@@ -74,9 +74,7 @@ async def query_gpus(nvidia_smi: str = "nvidia-smi", *, timeout_seconds: float =
     if exe is None:
         return GpuQueryResult(available=False, error="nvidia-smi not found")
     try:
-        proc = await asyncio.create_subprocess_exec(
-            exe, *NVIDIA_SMI_ARGS, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE
-        )
+        proc = await asyncio.create_subprocess_exec(exe, *NVIDIA_SMI_ARGS, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE)
     except OSError as exc:
         return GpuQueryResult(available=False, error=f"nvidia-smi failed to start: {exc.strerror}")
     try:

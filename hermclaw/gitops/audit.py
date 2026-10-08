@@ -13,7 +13,13 @@ from hermclaw.contracts.events import EventType
 from hermclaw.core.errors import HermclawError, PolicyViolation, ProtectedBranchError, StaleBaseError
 from hermclaw.core.redaction import DEFAULT_REDACTOR
 from hermclaw.events.store import append_event
-from hermclaw.gitops.errors import CommitNotVerifiedError, NothingToCommitError, NothingToPushError, PushRejectedError
+from hermclaw.gitops.errors import (
+    CommitNotVerifiedError,
+    NothingToCommitError,
+    NothingToPushError,
+    PushRejectedError,
+    WorkspaceStateError,
+)
 from hermclaw.gitops.urls import redact_url
 from hermclaw.persistence.models import GitOperation
 
@@ -27,6 +33,7 @@ REFUSAL_ERRORS: tuple[type[HermclawError], ...] = (
     NothingToPushError,
     PushRejectedError,
     StaleBaseError,
+    WorkspaceStateError,
 )
 
 

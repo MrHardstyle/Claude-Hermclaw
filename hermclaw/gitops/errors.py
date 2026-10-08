@@ -28,6 +28,7 @@ __all__ = [
     "GitTimeoutError",
     "InvalidRemoteUrl",
     "MergeConflictError",
+    "NotJobBranchError",
     "NothingToCommitError",
     "NothingToPushError",
     "ProtectedBranchError",
@@ -88,6 +89,12 @@ class CommitNotVerifiedError(GitError):
 
     code = "COMMIT_NOT_VERIFIED"
     http_status = 409
+
+
+class NotJobBranchError(PolicyViolation):
+    """Only runtime-created job branches (``policies.git.branch_prefix``) may be pushed."""
+
+    code = "NOT_JOB_BRANCH"
 
 
 class NothingToCommitError(GitError):

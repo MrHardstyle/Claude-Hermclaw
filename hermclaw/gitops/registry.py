@@ -120,8 +120,9 @@ class RepositoryRegistry:
                 if metadata is not None:
                     row.metadata_ = dict(metadata)
             else:
+                unchanged = RepositoryInfo.from_row(row)
                 await session.rollback()
-                return RepositoryInfo.from_row(row)
+                return unchanged
             await session.flush()
             await append_event(
                 session,

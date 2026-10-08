@@ -159,7 +159,11 @@ class HeartbeatSender:
             if not ack.compatible:
                 log.error(
                     "orchestrator reports this worker as incompatible",
-                    extra={"expected_protocol_version": ack.expected_protocol_version, "own": WORKER_PROTOCOL_VERSION, "ack_message": ack.message},
+                    extra={
+                        "expected_protocol_version": ack.expected_protocol_version,
+                        "own": WORKER_PROTOCOL_VERSION,
+                        "ack_message": ack.message,
+                    },
                 )
             self._last_compatible = ack.compatible
         return ack

@@ -137,6 +137,7 @@ class PromptBudget:
     tests_chars: int
     constraints_chars: int
     misc_chars: int
+    section_total: int = 0  # the total the section budgets were derived from (< total_chars after scaling)
 
     @classmethod
     def for_profile(cls, profile: ModelProfileConfig, settings: PlannerSettings, *, system_chars: int = 0) -> PromptBudget:
@@ -159,6 +160,7 @@ class PromptBudget:
             tests_chars=max(int(total * 0.05), 300),
             constraints_chars=max(int(total * 0.04), 300),
             misc_chars=max(int(total * 0.04), 600),
+            section_total=total,
         )
 
     def scaled(self, factor: float) -> PromptBudget:
@@ -281,6 +283,73 @@ def planner_user_payload(
         "constraints": cons,
         "existing_tests": tests,
         "risk_policy": risk,
+    }
+    return payload, stats
+
+
+REPLAN_SHARED_SHARE = 0.55
+REPLAN_SECTION_SHARES: dict[str, float] = {
+    "current_plan": 0.28,
+    "completed_steps": 0.15,
+    "failed_step": 0.17,
+    "deterministic_evidence": 0.30,
+    "open_steps": 0.05,
+    "research_evidence": 0.05,
+}
+
+
+def replan_user_payload(
+    *,
+    job: dict[str, Any],
+    inputs: PlannerInput,
+    constraints: Sequence[str],
+    capabilities: list[dict[str, Any]],
+    risk_policy: dict[str, Any],
+    test_command: str | None,
+    package: dict[str, Any],
+    budget: PromptBudget,
+) -> tuple[dict[str, Any], dict[str, Any]]:
+    """Replanner input: original goal, trigger, current plan, completed/failed/open steps, deterministic evidence,
+    current repository facts and research evidence (Bauplan §16), each section within its share of the budget."""
+    section_total = budget.section_total or budget.total_chars
+    shared_budget = PromptBudget.from_total(max(int(section_total * REPLAN_SHARED_SHARE), 1))
+    base, stats = planner_user_payload(
+        job=job,
+        inputs=inputs,
+        constraints=constraints,
+        capabilities=capabilities,
+        risk_policy=risk_policy,
+        test_command=test_command,
+        budget=shared_budget,
+    )
+    job_doc = dict(base["job"])
+    original_goal = job_doc.pop("goal", "")
+    rest = section_total - shared_budget.total_chars
+    sections: dict[str, Any] = {}
+    truncated: list[str] = []
+    for key, share in REPLAN_SECTION_SHARES.items():
+        value, was_truncated = shrink_json(package.get(key), max(int(rest * share), 200))
+        sections[key] = value
+        if was_truncated:
+            truncated.append(key)
+    stats["replan_sections_truncated"] = truncated
+    payload = {
+        "original_goal": original_goal,
+        "job": job_doc,
+        "trigger": package.get("trigger", {}),
+        "current_plan": sections["current_plan"],
+        "completed_steps": sections["completed_steps"],
+        "failed_step": sections["failed_step"],
+        "deterministic_evidence": sections["deterministic_evidence"],
+        "open_steps": sections["open_steps"],
+        "repository_inventory": base["repository_inventory"],
+        "retrieved_context": base["retrieved_context"],
+        "research_summary": base["research_summary"],
+        "research_evidence": sections["research_evidence"],
+        "capabilities": base["capabilities"],
+        "constraints": base["constraints"],
+        "existing_tests": base["existing_tests"],
+        "risk_policy": base["risk_policy"],
     }
     return payload, stats
 

@@ -106,15 +106,14 @@ class ValidationContext:
                 kind_capability[kind.value] = cap
         known = collect_known_paths(inputs)
         test_command, framework = detect_test_command(inputs)
-        context_text = "\n".join(
-            [
-                *(s.snippet for s in inputs.retrieved_context),
-                extra_text,
-                json.dumps(inputs.repository_inventory, ensure_ascii=False, default=str),
-                json.dumps(inputs.research_summary, ensure_ascii=False, default=str),
-                *inputs.existing_tests,
-            ]
-        )
+        parts = [
+            *(s.snippet for s in inputs.retrieved_context),
+            extra_text,
+            json.dumps(inputs.repository_inventory, ensure_ascii=False, default=str) if inputs.repository_inventory else "",
+            json.dumps(inputs.research_summary, ensure_ascii=False, default=str) if inputs.research_summary else "",
+            *inputs.existing_tests,
+        ]
+        context_text = "\n".join(p for p in parts if p.strip())
         return cls(
             config_capabilities=config_caps,
             available_capabilities=available,

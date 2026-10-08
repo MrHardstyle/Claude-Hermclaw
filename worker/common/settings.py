@@ -50,7 +50,7 @@ DEFAULT_DATA_DIR = Path("/var/lib/hermclaw-worker")
 DEFAULT_TOKEN_FALLBACK = Path("/etc/hermclaw-worker/worker-token")
 DEFAULT_OLLAMA_URL = "http://127.0.0.1:11434"
 DEFAULT_CONTAINER_LABEL = "hermclaw.managed=true"
-TOKEN_CREDENTIAL_NAME = "worker-token"
+TOKEN_CREDENTIAL_NAME = "worker-token"  # noqa: S105 - credential file name, not a secret
 
 BASE_CAPABILITIES: dict[WorkerKind, tuple[str, ...]] = {
     WorkerKind.execution: ("sandbox", "workspace_sync"),
