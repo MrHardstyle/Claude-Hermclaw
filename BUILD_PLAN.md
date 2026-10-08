@@ -76,7 +76,7 @@ Legende: `[x]` erledigt mit Evidence · `[~]` erledigt, Live-Verifikation auf Zi
 - [x] 4.2 event service. — Evidence: hermclaw/events/store.py append_event (redacted, NOTIFY)
 - [x] 4.3 sequence ordering. — Evidence: BIGINT IDENTITY sequence (test_append_orders_and_redacts)
 - [x] 4.4 correlation IDs. — Evidence: correlation_id (Default = job_id)
-- [ ] 4.5 SSE endpoint. — Evidence: –
+- [x] 4.5 SSE endpoint. — Evidence: hermclaw/api/events.py stream_job_events (fastapi.sse) + X-Accel-Buffering
 - [x] 4.6 reconnect/last-event-id. — Evidence: stream_events Replay ab Last-Event-ID (test_sse_stream_replay_then_live_and_reconnect)
 - [x] 4.7 event retention. — Evidence: purge_events (test_retention_keeps_active_jobs)
 - [ ] 4.8 UI test client. — Evidence: –
@@ -386,15 +386,15 @@ Legende: `[x]` erledigt mit Evidence · `[~]` erledigt, Live-Verifikation auf Zi
 
 ## P30 – API
 
-- [ ] 30.1 job API. — Evidence: –
-- [ ] 30.2 controls. — Evidence: –
-- [ ] 30.3 workers. — Evidence: –
-- [ ] 30.4 models. — Evidence: –
-- [ ] 30.5 resources. — Evidence: –
-- [ ] 30.6 artifacts. — Evidence: –
-- [ ] 30.7 events. — Evidence: –
-- [ ] 30.8 research. — Evidence: –
-- [ ] 30.9 auth. — Evidence: –
+- [x] 30.1 job API. — Evidence: hermclaw/api/jobs.py POST/GET /api/jobs, GET /api/jobs/{id} (tests/integration/test_api.py)
+- [x] 30.2 controls. — Evidence: cancel/pause/resume/retry/replan (test_job_lifecycle_controls)
+- [x] 30.3 workers. — Evidence: GET /api/workers
+- [x] 30.4 models. — Evidence: GET /api/models (+stats aus model_invocations)
+- [x] 30.5 resources. — Evidence: GET /api/resources
+- [x] 30.6 artifacts. — Evidence: GET /api/jobs/{id}/artifacts, /api/artifacts/{id}/download (confined, test_artifact_download_confined)
+- [x] 30.7 events. — Evidence: GET /api/jobs/{id}/events + SSE /events/stream (test_sse_stream_over_real_http)
+- [x] 30.8 research. — Evidence: GET /api/jobs/{id}/research
+- [x] 30.9 auth. — Evidence: Bearer-Token + Scopes read/control/admin, api_tokens (test_auth_required_and_scopes)
 
 ## P31 – UI
 
