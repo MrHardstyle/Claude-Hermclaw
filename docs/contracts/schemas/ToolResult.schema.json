@@ -1,0 +1,84 @@
+{
+  "$defs": {
+    "ToolName": {
+      "enum": [
+        "list_files",
+        "read_file",
+        "read_range",
+        "find_text",
+        "search_repo",
+        "search_symbol",
+        "git_status",
+        "git_diff",
+        "write_file",
+        "replace_text",
+        "apply_patch",
+        "run_command",
+        "run_test",
+        "request_scope_expansion",
+        "request_research",
+        "request_replan",
+        "checkpoint",
+        "complete_step",
+        "block_step"
+      ],
+      "title": "ToolName",
+      "type": "string"
+    }
+  },
+  "additionalProperties": false,
+  "properties": {
+    "tool": {
+      "$ref": "#/$defs/ToolName"
+    },
+    "ok": {
+      "title": "Ok",
+      "type": "boolean"
+    },
+    "output": {
+      "default": "",
+      "title": "Output",
+      "type": "string"
+    },
+    "error_code": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Error Code"
+    },
+    "data": {
+      "additionalProperties": true,
+      "title": "Data",
+      "type": "object"
+    },
+    "truncated": {
+      "default": false,
+      "title": "Truncated",
+      "type": "boolean"
+    },
+    "mutated_paths": {
+      "items": {
+        "type": "string"
+      },
+      "title": "Mutated Paths",
+      "type": "array"
+    },
+    "terminal": {
+      "default": false,
+      "title": "Terminal",
+      "type": "boolean"
+    }
+  },
+  "required": [
+    "tool",
+    "ok"
+  ],
+  "title": "ToolResult",
+  "type": "object"
+}

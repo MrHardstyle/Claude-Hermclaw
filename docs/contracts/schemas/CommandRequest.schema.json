@@ -1,0 +1,93 @@
+{
+  "additionalProperties": false,
+  "description": "Execution worker: run a command inside the sandbox for a workspace.",
+  "properties": {
+    "request_id": {
+      "title": "Request Id",
+      "type": "string"
+    },
+    "job_id": {
+      "title": "Job Id",
+      "type": "string"
+    },
+    "step_id": {
+      "title": "Step Id",
+      "type": "string"
+    },
+    "workspace": {
+      "description": "workspace id on the execution worker",
+      "title": "Workspace",
+      "type": "string"
+    },
+    "command": {
+      "maxLength": 8000,
+      "minLength": 1,
+      "title": "Command",
+      "type": "string"
+    },
+    "image": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Image"
+    },
+    "timeout_seconds": {
+      "default": 600,
+      "maximum": 7200,
+      "minimum": 1,
+      "title": "Timeout Seconds",
+      "type": "integer"
+    },
+    "network": {
+      "default": false,
+      "title": "Network",
+      "type": "boolean"
+    },
+    "env": {
+      "additionalProperties": {
+        "type": "string"
+      },
+      "title": "Env",
+      "type": "object"
+    },
+    "cpus": {
+      "anyOf": [
+        {
+          "type": "number"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Cpus"
+    },
+    "memory": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Memory"
+    }
+  },
+  "required": [
+    "request_id",
+    "job_id",
+    "step_id",
+    "workspace",
+    "command"
+  ],
+  "title": "CommandRequest",
+  "type": "object"
+}

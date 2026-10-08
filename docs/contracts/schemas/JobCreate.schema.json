@@ -1,0 +1,130 @@
+{
+  "$defs": {
+    "RepositoryRef": {
+      "additionalProperties": false,
+      "properties": {
+        "name": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "registered repository name",
+          "title": "Name"
+        },
+        "url": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "git remote URL (registered on the fly if allowed)",
+          "title": "Url"
+        },
+        "base_branch": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Base Branch"
+        }
+      },
+      "title": "RepositoryRef",
+      "type": "object"
+    }
+  },
+  "additionalProperties": false,
+  "description": "Free user prompt plus optional repository and constraints.",
+  "properties": {
+    "prompt": {
+      "maxLength": 50000,
+      "minLength": 3,
+      "title": "Prompt",
+      "type": "string"
+    },
+    "title": {
+      "anyOf": [
+        {
+          "maxLength": 200,
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Title"
+    },
+    "repository": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/RepositoryRef"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null
+    },
+    "constraints": {
+      "items": {
+        "type": "string"
+      },
+      "maxItems": 50,
+      "title": "Constraints",
+      "type": "array"
+    },
+    "priority": {
+      "default": 50,
+      "maximum": 100,
+      "minimum": 0,
+      "title": "Priority",
+      "type": "integer"
+    },
+    "allow_network_research": {
+      "default": true,
+      "title": "Allow Network Research",
+      "type": "boolean"
+    },
+    "auto_commit": {
+      "default": true,
+      "title": "Auto Commit",
+      "type": "boolean"
+    },
+    "create_merge_request": {
+      "anyOf": [
+        {
+          "type": "boolean"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Create Merge Request"
+    },
+    "metadata": {
+      "additionalProperties": true,
+      "title": "Metadata",
+      "type": "object"
+    }
+  },
+  "required": [
+    "prompt"
+  ],
+  "title": "JobCreate",
+  "type": "object"
+}

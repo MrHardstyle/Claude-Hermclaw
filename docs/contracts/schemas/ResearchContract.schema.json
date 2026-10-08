@@ -1,0 +1,180 @@
+{
+  "$defs": {
+    "Claim": {
+      "additionalProperties": false,
+      "properties": {
+        "claim": {
+          "maxLength": 2000,
+          "minLength": 3,
+          "title": "Claim",
+          "type": "string"
+        },
+        "source_ids": {
+          "items": {
+            "type": "string"
+          },
+          "minItems": 1,
+          "title": "Source Ids",
+          "type": "array"
+        },
+        "confidence": {
+          "maximum": 1,
+          "minimum": 0,
+          "title": "Confidence",
+          "type": "number"
+        },
+        "used_for_decision": {
+          "default": false,
+          "title": "Used For Decision",
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "claim",
+        "source_ids",
+        "confidence"
+      ],
+      "title": "Claim",
+      "type": "object"
+    },
+    "SourceRecord": {
+      "additionalProperties": false,
+      "properties": {
+        "source_id": {
+          "title": "Source Id",
+          "type": "string"
+        },
+        "title": {
+          "title": "Title",
+          "type": "string"
+        },
+        "url": {
+          "title": "Url",
+          "type": "string"
+        },
+        "domain": {
+          "title": "Domain",
+          "type": "string"
+        },
+        "retrieved_at": {
+          "format": "date-time",
+          "title": "Retrieved At",
+          "type": "string"
+        },
+        "published_at": {
+          "anyOf": [
+            {
+              "format": "date-time",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Published At"
+        },
+        "source_type": {
+          "default": "unknown",
+          "enum": [
+            "official_docs",
+            "official_repo",
+            "standard",
+            "vendor",
+            "secondary",
+            "forum",
+            "unknown"
+          ],
+          "title": "Source Type",
+          "type": "string"
+        },
+        "authority_score": {
+          "maximum": 1,
+          "minimum": 0,
+          "title": "Authority Score",
+          "type": "number"
+        },
+        "relevance_score": {
+          "maximum": 1,
+          "minimum": 0,
+          "title": "Relevance Score",
+          "type": "number"
+        },
+        "content_hash": {
+          "title": "Content Hash",
+          "type": "string"
+        }
+      },
+      "required": [
+        "source_id",
+        "title",
+        "url",
+        "domain",
+        "retrieved_at",
+        "authority_score",
+        "relevance_score",
+        "content_hash"
+      ],
+      "title": "SourceRecord",
+      "type": "object"
+    }
+  },
+  "additionalProperties": false,
+  "properties": {
+    "question": {
+      "title": "Question",
+      "type": "string"
+    },
+    "queries": {
+      "items": {
+        "type": "string"
+      },
+      "title": "Queries",
+      "type": "array"
+    },
+    "sources": {
+      "items": {
+        "$ref": "#/$defs/SourceRecord"
+      },
+      "title": "Sources",
+      "type": "array"
+    },
+    "claims": {
+      "items": {
+        "$ref": "#/$defs/Claim"
+      },
+      "title": "Claims",
+      "type": "array"
+    },
+    "contradictions": {
+      "items": {
+        "items": {
+          "type": "integer"
+        },
+        "type": "array"
+      },
+      "title": "Contradictions",
+      "type": "array"
+    },
+    "synthesis": {
+      "default": "",
+      "title": "Synthesis",
+      "type": "string"
+    },
+    "status": {
+      "default": "completed",
+      "enum": [
+        "completed",
+        "partial",
+        "failed"
+      ],
+      "title": "Status",
+      "type": "string"
+    }
+  },
+  "required": [
+    "question"
+  ],
+  "title": "ResearchContract",
+  "type": "object"
+}

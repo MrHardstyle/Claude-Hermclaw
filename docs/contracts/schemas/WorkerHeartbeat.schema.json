@@ -1,0 +1,249 @@
+{
+  "$defs": {
+    "GpuInfo": {
+      "additionalProperties": false,
+      "properties": {
+        "index": {
+          "default": 0,
+          "title": "Index",
+          "type": "integer"
+        },
+        "name": {
+          "default": "",
+          "title": "Name",
+          "type": "string"
+        },
+        "memory_total_mb": {
+          "default": 0,
+          "title": "Memory Total Mb",
+          "type": "integer"
+        },
+        "memory_used_mb": {
+          "default": 0,
+          "title": "Memory Used Mb",
+          "type": "integer"
+        },
+        "utilization_percent": {
+          "default": 0,
+          "title": "Utilization Percent",
+          "type": "integer"
+        },
+        "temperature_c": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Temperature C"
+        },
+        "driver": {
+          "default": "",
+          "title": "Driver",
+          "type": "string"
+        }
+      },
+      "title": "GpuInfo",
+      "type": "object"
+    },
+    "LoadedModel": {
+      "additionalProperties": false,
+      "properties": {
+        "name": {
+          "title": "Name",
+          "type": "string"
+        },
+        "size_bytes": {
+          "default": 0,
+          "title": "Size Bytes",
+          "type": "integer"
+        },
+        "size_vram_bytes": {
+          "default": 0,
+          "title": "Size Vram Bytes",
+          "type": "integer"
+        },
+        "context_length": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Context Length"
+        },
+        "expires_at": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Expires At"
+        }
+      },
+      "required": [
+        "name"
+      ],
+      "title": "LoadedModel",
+      "type": "object"
+    },
+    "WorkerKind": {
+      "enum": [
+        "execution",
+        "model",
+        "media"
+      ],
+      "title": "WorkerKind",
+      "type": "string"
+    },
+    "WorkerState": {
+      "enum": [
+        "offline",
+        "starting",
+        "ready",
+        "busy",
+        "draining",
+        "sleeping",
+        "waking",
+        "error"
+      ],
+      "title": "WorkerState",
+      "type": "string"
+    }
+  },
+  "additionalProperties": false,
+  "properties": {
+    "worker_id": {
+      "title": "Worker Id",
+      "type": "string"
+    },
+    "hostname": {
+      "title": "Hostname",
+      "type": "string"
+    },
+    "kind": {
+      "$ref": "#/$defs/WorkerKind"
+    },
+    "state": {
+      "$ref": "#/$defs/WorkerState"
+    },
+    "protocol_version": {
+      "default": 1,
+      "title": "Protocol Version",
+      "type": "integer"
+    },
+    "worker_version": {
+      "title": "Worker Version",
+      "type": "string"
+    },
+    "capabilities": {
+      "items": {
+        "type": "string"
+      },
+      "title": "Capabilities",
+      "type": "array"
+    },
+    "cpu_percent": {
+      "default": 0.0,
+      "title": "Cpu Percent",
+      "type": "number"
+    },
+    "load_avg": {
+      "items": {
+        "type": "number"
+      },
+      "title": "Load Avg",
+      "type": "array"
+    },
+    "ram_total_mb": {
+      "default": 0,
+      "title": "Ram Total Mb",
+      "type": "integer"
+    },
+    "ram_used_mb": {
+      "default": 0,
+      "title": "Ram Used Mb",
+      "type": "integer"
+    },
+    "disk_free_mb": {
+      "default": 0,
+      "title": "Disk Free Mb",
+      "type": "integer"
+    },
+    "gpus": {
+      "items": {
+        "$ref": "#/$defs/GpuInfo"
+      },
+      "title": "Gpus",
+      "type": "array"
+    },
+    "loaded_models": {
+      "items": {
+        "$ref": "#/$defs/LoadedModel"
+      },
+      "title": "Loaded Models",
+      "type": "array"
+    },
+    "active_job": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Active Job"
+    },
+    "active_step": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Active Step"
+    },
+    "uptime_seconds": {
+      "default": 0,
+      "title": "Uptime Seconds",
+      "type": "integer"
+    },
+    "service_versions": {
+      "additionalProperties": {
+        "type": "string"
+      },
+      "title": "Service Versions",
+      "type": "object"
+    },
+    "sent_at": {
+      "format": "date-time",
+      "title": "Sent At",
+      "type": "string"
+    }
+  },
+  "required": [
+    "worker_id",
+    "hostname",
+    "kind",
+    "state",
+    "worker_version",
+    "sent_at"
+  ],
+  "title": "WorkerHeartbeat",
+  "type": "object"
+}

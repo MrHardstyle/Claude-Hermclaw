@@ -1,0 +1,81 @@
+{
+  "$defs": {
+    "FindingSeverity": {
+      "enum": [
+        "minor",
+        "major",
+        "blocker"
+      ],
+      "title": "FindingSeverity",
+      "type": "string"
+    },
+    "ReviewFinding": {
+      "additionalProperties": false,
+      "properties": {
+        "severity": {
+          "$ref": "#/$defs/FindingSeverity"
+        },
+        "path": {
+          "default": "",
+          "maxLength": 500,
+          "title": "Path",
+          "type": "string"
+        },
+        "summary": {
+          "maxLength": 2000,
+          "minLength": 3,
+          "title": "Summary",
+          "type": "string"
+        },
+        "evidence": {
+          "default": "",
+          "maxLength": 4000,
+          "title": "Evidence",
+          "type": "string"
+        },
+        "suggested_fix": {
+          "default": "",
+          "maxLength": 4000,
+          "title": "Suggested Fix",
+          "type": "string"
+        }
+      },
+      "required": [
+        "severity",
+        "summary"
+      ],
+      "title": "ReviewFinding",
+      "type": "object"
+    }
+  },
+  "additionalProperties": false,
+  "properties": {
+    "verdict": {
+      "enum": [
+        "pass",
+        "fix_required"
+      ],
+      "title": "Verdict",
+      "type": "string"
+    },
+    "findings": {
+      "items": {
+        "$ref": "#/$defs/ReviewFinding"
+      },
+      "maxItems": 50,
+      "title": "Findings",
+      "type": "array"
+    },
+    "summary": {
+      "default": "",
+      "maxLength": 4000,
+      "title": "Summary",
+      "type": "string"
+    }
+  },
+  "required": [
+    "verdict"
+  ],
+  "title": "ReviewContract",
+  "type": "object"
+}

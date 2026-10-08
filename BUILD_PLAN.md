@@ -47,48 +47,48 @@ Legende: `[x]` erledigt mit Evidence · `[~]` erledigt, Live-Verifikation auf Zi
 
 ## P02 – Backend Skeleton
 
-- [ ] 2.1 Python package. — Evidence: –
-- [ ] 2.2 settings. — Evidence: –
-- [ ] 2.3 config loader. — Evidence: –
-- [ ] 2.4 structured logging. — Evidence: –
-- [ ] 2.5 error model. — Evidence: –
-- [ ] 2.6 health endpoint. — Evidence: –
-- [ ] 2.7 test framework. — Evidence: –
-- [ ] 2.8 lint/type checking. — Evidence: –
-- [ ] 2.9 CI base. — Evidence: –
-- [ ] 2.10 version endpoint. — Evidence: –
+- [x] 2.1 Python package. — Evidence: hermclaw/ (pyproject, editable install)
+- [x] 2.2 settings. — Evidence: hermclaw/core/settings.py
+- [x] 2.3 config loader. — Evidence: hermclaw/core/config.py + config/*.example.yaml, tests/unit/test_config_and_redaction.py
+- [x] 2.4 structured logging. — Evidence: hermclaw/core/logging.py (JSON + Redaction)
+- [x] 2.5 error model. — Evidence: hermclaw/core/errors.py
+- [x] 2.6 health endpoint. — Evidence: GET /api/health (tests/integration/test_api_skeleton.py)
+- [x] 2.7 test framework. — Evidence: pytest + pytest-asyncio + hypothesis, tests/conftest.py (Wegwerf-DB pro Session)
+- [x] 2.8 lint/type checking. — Evidence: ruff + mypy --strict sauber (Makefile lint/typecheck)
+- [~] 2.9 CI base. — Evidence: .gitlab-ci.yml (lint/test/ui); Lauf auf GitLab .226 blockiert (BLOCKER-001)
+- [x] 2.10 version endpoint. — Evidence: GET /api/version
 
 ## P03 – Persistence
 
-- [ ] 3.1 DB models. — Evidence: –
-- [ ] 3.2 Alembic. — Evidence: –
-- [ ] 3.3 all core tables. — Evidence: –
-- [ ] 3.4 indexes/constraints. — Evidence: –
+- [x] 3.1 DB models. — Evidence: hermclaw/persistence/models.py
+- [x] 3.2 Alembic. — Evidence: alembic.ini, migrations/env.py (async), 0001_initial_schema
+- [x] 3.3 all core tables. — Evidence: 39 Tabellen inkl. aller §10-Tabellen (test_all_required_tables_exist)
+- [x] 3.4 indexes/constraints. — Evidence: FK/Check/Unique/partial unique (test_constraints_enforced)
 - [ ] 3.5 repositories. — Evidence: –
-- [ ] 3.6 transaction boundary. — Evidence: –
-- [ ] 3.7 migration tests. — Evidence: –
-- [ ] 3.8 rollback tests. — Evidence: –
-- [ ] 3.9 restart persistence test. — Evidence: –
+- [x] 3.6 transaction boundary. — Evidence: session_scope() commit/rollback
+- [x] 3.7 migration tests. — Evidence: test_migration_matches_models (Autogenerate-Diff leer)
+- [x] 3.8 rollback tests. — Evidence: test_migration_downgrade_and_upgrade_roundtrip
+- [x] 3.9 restart persistence test. — Evidence: test_restart_persistence
 
 ## P04 – Event Store
 
-- [ ] 4.1 append-only event contract. — Evidence: –
-- [ ] 4.2 event service. — Evidence: –
-- [ ] 4.3 sequence ordering. — Evidence: –
-- [ ] 4.4 correlation IDs. — Evidence: –
+- [x] 4.1 append-only event contract. — Evidence: hermclaw/contracts/events.py EventEnvelope + EventType
+- [x] 4.2 event service. — Evidence: hermclaw/events/store.py append_event (redacted, NOTIFY)
+- [x] 4.3 sequence ordering. — Evidence: BIGINT IDENTITY sequence (test_append_orders_and_redacts)
+- [x] 4.4 correlation IDs. — Evidence: correlation_id (Default = job_id)
 - [ ] 4.5 SSE endpoint. — Evidence: –
-- [ ] 4.6 reconnect/last-event-id. — Evidence: –
-- [ ] 4.7 event retention. — Evidence: –
+- [x] 4.6 reconnect/last-event-id. — Evidence: stream_events Replay ab Last-Event-ID (test_sse_stream_replay_then_live_and_reconnect)
+- [x] 4.7 event retention. — Evidence: purge_events (test_retention_keeps_active_jobs)
 - [ ] 4.8 UI test client. — Evidence: –
 
 ## P05 – State Machines
 
-- [ ] 5.1 Job states. — Evidence: –
-- [ ] 5.2 Step states. — Evidence: –
-- [ ] 5.3 transition tables. — Evidence: –
-- [ ] 5.4 invalid transitions. — Evidence: –
-- [ ] 5.5 property tests. — Evidence: –
-- [ ] 5.6 recovery mapping. — Evidence: –
+- [x] 5.1 Job states. — Evidence: hermclaw/runtime/state_machines.py
+- [x] 5.2 Step states. — Evidence: hermclaw/runtime/state_machines.py
+- [x] 5.3 transition tables. — Evidence: hermclaw/runtime/state_machines.py
+- [x] 5.4 invalid transitions. — Evidence: InvalidTransition (test_invalid_transition_raises)
+- [x] 5.5 property tests. — Evidence: Hypothesis random walks (tests/unit/test_state_machines.py)
+- [x] 5.6 recovery mapping. — Evidence: recovery_step_state/recovery_job_state
 
 ## P06 – Git Engine
 
@@ -188,18 +188,18 @@ Legende: `[x]` erledigt mit Evidence · `[~]` erledigt, Live-Verifikation auf Zi
 
 ## P13 – Contracts
 
-- [ ] 13.1 JobContract. — Evidence: –
-- [ ] 13.2 PlanContract. — Evidence: –
-- [ ] 13.3 StepContract. — Evidence: –
-- [ ] 13.4 ScopeContract. — Evidence: –
-- [ ] 13.5 WorkerInput. — Evidence: –
-- [ ] 13.6 WorkerResult. — Evidence: –
-- [ ] 13.7 ToolCall. — Evidence: –
-- [ ] 13.8 VerificationContract. — Evidence: –
-- [ ] 13.9 ReviewContract. — Evidence: –
-- [ ] 13.10 ResearchContract. — Evidence: –
-- [ ] 13.11 ArtifactContract. — Evidence: –
-- [ ] 13.12 JSON schema export. — Evidence: –
+- [x] 13.1 JobContract. — Evidence: hermclaw/contracts/*.py
+- [x] 13.2 PlanContract. — Evidence: hermclaw/contracts/*.py
+- [x] 13.3 StepContract. — Evidence: hermclaw/contracts/*.py
+- [x] 13.4 ScopeContract. — Evidence: hermclaw/contracts/*.py
+- [x] 13.5 WorkerInput. — Evidence: hermclaw/contracts/*.py
+- [x] 13.6 WorkerResult. — Evidence: hermclaw/contracts/*.py
+- [x] 13.7 ToolCall. — Evidence: hermclaw/contracts/*.py
+- [x] 13.8 VerificationContract. — Evidence: hermclaw/contracts/*.py
+- [x] 13.9 ReviewContract. — Evidence: hermclaw/contracts/*.py
+- [x] 13.10 ResearchContract. — Evidence: hermclaw/contracts/*.py
+- [x] 13.11 ArtifactContract. — Evidence: hermclaw/contracts/*.py
+- [x] 13.12 JSON schema export. — Evidence: python -m hermclaw.contracts.schema_export → docs/contracts/schemas/*.schema.json
 
 ## P14 – Gemma Planner
 

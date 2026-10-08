@@ -1,0 +1,90 @@
+{
+  "additionalProperties": false,
+  "properties": {
+    "request_id": {
+      "title": "Request Id",
+      "type": "string"
+    },
+    "exit_code": {
+      "anyOf": [
+        {
+          "type": "integer"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "title": "Exit Code"
+    },
+    "timed_out": {
+      "default": false,
+      "title": "Timed Out",
+      "type": "boolean"
+    },
+    "stdout": {
+      "default": "",
+      "title": "Stdout",
+      "type": "string"
+    },
+    "stderr": {
+      "default": "",
+      "title": "Stderr",
+      "type": "string"
+    },
+    "stdout_truncated": {
+      "default": false,
+      "title": "Stdout Truncated",
+      "type": "boolean"
+    },
+    "stderr_truncated": {
+      "default": false,
+      "title": "Stderr Truncated",
+      "type": "boolean"
+    },
+    "duration_ms": {
+      "default": 0,
+      "title": "Duration Ms",
+      "type": "integer"
+    },
+    "sandbox": {
+      "default": "podman",
+      "enum": [
+        "podman",
+        "docker",
+        "local"
+      ],
+      "title": "Sandbox",
+      "type": "string"
+    },
+    "container_name": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Container Name"
+    },
+    "error": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Error"
+    }
+  },
+  "required": [
+    "request_id",
+    "exit_code"
+  ],
+  "title": "CommandResult",
+  "type": "object"
+}

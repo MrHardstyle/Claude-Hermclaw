@@ -1,0 +1,651 @@
+{
+  "$defs": {
+    "AbsenceEvidence": {
+      "additionalProperties": false,
+      "properties": {
+        "description": {
+          "default": "",
+          "maxLength": 500,
+          "title": "Description",
+          "type": "string"
+        },
+        "type": {
+          "const": "absence",
+          "default": "absence",
+          "title": "Type",
+          "type": "string"
+        },
+        "path_glob": {
+          "title": "Path Glob",
+          "type": "string"
+        },
+        "pattern": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "regex; if None the path itself must not exist",
+          "title": "Pattern"
+        },
+        "expected_matches": {
+          "const": 0,
+          "default": 0,
+          "title": "Expected Matches",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "path_glob"
+      ],
+      "title": "AbsenceEvidence",
+      "type": "object"
+    },
+    "ArtifactEvidence": {
+      "additionalProperties": false,
+      "properties": {
+        "description": {
+          "default": "",
+          "maxLength": 500,
+          "title": "Description",
+          "type": "string"
+        },
+        "type": {
+          "const": "artifact",
+          "default": "artifact",
+          "title": "Type",
+          "type": "string"
+        },
+        "kind": {
+          "minLength": 1,
+          "title": "Kind",
+          "type": "string"
+        },
+        "name_glob": {
+          "default": "*",
+          "title": "Name Glob",
+          "type": "string"
+        },
+        "min_count": {
+          "default": 1,
+          "minimum": 1,
+          "title": "Min Count",
+          "type": "integer"
+        },
+        "min_size_bytes": {
+          "default": 1,
+          "minimum": 0,
+          "title": "Min Size Bytes",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "kind"
+      ],
+      "title": "ArtifactEvidence",
+      "type": "object"
+    },
+    "CommandEvidence": {
+      "additionalProperties": false,
+      "properties": {
+        "description": {
+          "default": "",
+          "maxLength": 500,
+          "title": "Description",
+          "type": "string"
+        },
+        "type": {
+          "const": "command",
+          "default": "command",
+          "title": "Type",
+          "type": "string"
+        },
+        "command": {
+          "maxLength": 2000,
+          "minLength": 1,
+          "title": "Command",
+          "type": "string"
+        },
+        "expect_exit_code": {
+          "default": 0,
+          "title": "Expect Exit Code",
+          "type": "integer"
+        },
+        "stdout_pattern": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Stdout Pattern"
+        },
+        "timeout_seconds": {
+          "default": 300,
+          "maximum": 3600,
+          "minimum": 1,
+          "title": "Timeout Seconds",
+          "type": "integer"
+        },
+        "network": {
+          "default": false,
+          "title": "Network",
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "command"
+      ],
+      "title": "CommandEvidence",
+      "type": "object"
+    },
+    "DiffEvidence": {
+      "additionalProperties": false,
+      "properties": {
+        "description": {
+          "default": "",
+          "maxLength": 500,
+          "title": "Description",
+          "type": "string"
+        },
+        "type": {
+          "const": "diff",
+          "default": "diff",
+          "title": "Type",
+          "type": "string"
+        },
+        "must_change": {
+          "description": "globs that must appear in the diff",
+          "items": {
+            "type": "string"
+          },
+          "title": "Must Change",
+          "type": "array"
+        },
+        "must_not_change": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Must Not Change",
+          "type": "array"
+        },
+        "max_changed_files": {
+          "anyOf": [
+            {
+              "minimum": 0,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Max Changed Files"
+        },
+        "allow_empty": {
+          "default": false,
+          "title": "Allow Empty",
+          "type": "boolean"
+        }
+      },
+      "title": "DiffEvidence",
+      "type": "object"
+    },
+    "PlanStep": {
+      "additionalProperties": false,
+      "properties": {
+        "id": {
+          "description": "S001, S002, ...",
+          "title": "Id",
+          "type": "string"
+        },
+        "title": {
+          "maxLength": 200,
+          "minLength": 3,
+          "title": "Title",
+          "type": "string"
+        },
+        "kind": {
+          "$ref": "#/$defs/StepKind"
+        },
+        "capability": {
+          "maxLength": 64,
+          "minLength": 2,
+          "title": "Capability",
+          "type": "string"
+        },
+        "goal": {
+          "maxLength": 4000,
+          "minLength": 5,
+          "title": "Goal",
+          "type": "string"
+        },
+        "depends_on": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Depends On",
+          "type": "array"
+        },
+        "repo_hints": {
+          "items": {
+            "type": "string"
+          },
+          "maxItems": 40,
+          "title": "Repo Hints",
+          "type": "array"
+        },
+        "constraints": {
+          "items": {
+            "type": "string"
+          },
+          "maxItems": 40,
+          "title": "Constraints",
+          "type": "array"
+        },
+        "acceptance": {
+          "items": {
+            "discriminator": {
+              "mapping": {
+                "absence": "#/$defs/AbsenceEvidence",
+                "artifact": "#/$defs/ArtifactEvidence",
+                "command": "#/$defs/CommandEvidence",
+                "diff": "#/$defs/DiffEvidence",
+                "presence": "#/$defs/PresenceEvidence",
+                "schema": "#/$defs/SchemaEvidence",
+                "scope": "#/$defs/ScopeEvidence",
+                "security": "#/$defs/SecurityEvidence",
+                "test": "#/$defs/TestEvidence"
+              },
+              "propertyName": "type"
+            },
+            "oneOf": [
+              {
+                "$ref": "#/$defs/PresenceEvidence"
+              },
+              {
+                "$ref": "#/$defs/AbsenceEvidence"
+              },
+              {
+                "$ref": "#/$defs/CommandEvidence"
+              },
+              {
+                "$ref": "#/$defs/TestEvidence"
+              },
+              {
+                "$ref": "#/$defs/DiffEvidence"
+              },
+              {
+                "$ref": "#/$defs/ScopeEvidence"
+              },
+              {
+                "$ref": "#/$defs/SchemaEvidence"
+              },
+              {
+                "$ref": "#/$defs/SecurityEvidence"
+              },
+              {
+                "$ref": "#/$defs/ArtifactEvidence"
+              }
+            ]
+          },
+          "maxItems": 30,
+          "title": "Acceptance",
+          "type": "array"
+        },
+        "preferred_worker_capabilities": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Preferred Worker Capabilities",
+          "type": "array"
+        },
+        "risk": {
+          "$ref": "#/$defs/Risk",
+          "default": "low"
+        },
+        "allowed_new_paths": {
+          "items": {
+            "type": "string"
+          },
+          "maxItems": 40,
+          "title": "Allowed New Paths",
+          "type": "array"
+        },
+        "forbidden_paths": {
+          "items": {
+            "type": "string"
+          },
+          "maxItems": 40,
+          "title": "Forbidden Paths",
+          "type": "array"
+        },
+        "network": {
+          "default": false,
+          "title": "Network",
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "id",
+        "title",
+        "kind",
+        "capability",
+        "goal"
+      ],
+      "title": "PlanStep",
+      "type": "object"
+    },
+    "PresenceEvidence": {
+      "additionalProperties": false,
+      "properties": {
+        "description": {
+          "default": "",
+          "maxLength": 500,
+          "title": "Description",
+          "type": "string"
+        },
+        "type": {
+          "const": "presence",
+          "default": "presence",
+          "title": "Type",
+          "type": "string"
+        },
+        "path_glob": {
+          "title": "Path Glob",
+          "type": "string"
+        },
+        "pattern": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "regex that must match at least min_matches times",
+          "title": "Pattern"
+        },
+        "min_matches": {
+          "default": 1,
+          "minimum": 1,
+          "title": "Min Matches",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "path_glob"
+      ],
+      "title": "PresenceEvidence",
+      "type": "object"
+    },
+    "ResearchRequest": {
+      "additionalProperties": false,
+      "properties": {
+        "question": {
+          "maxLength": 1000,
+          "minLength": 5,
+          "title": "Question",
+          "type": "string"
+        },
+        "reason": {
+          "default": "",
+          "maxLength": 1000,
+          "title": "Reason",
+          "type": "string"
+        }
+      },
+      "required": [
+        "question"
+      ],
+      "title": "ResearchRequest",
+      "type": "object"
+    },
+    "Risk": {
+      "enum": [
+        "low",
+        "medium",
+        "high"
+      ],
+      "title": "Risk",
+      "type": "string"
+    },
+    "SchemaEvidence": {
+      "additionalProperties": false,
+      "properties": {
+        "description": {
+          "default": "",
+          "maxLength": 500,
+          "title": "Description",
+          "type": "string"
+        },
+        "type": {
+          "const": "schema",
+          "default": "schema",
+          "title": "Type",
+          "type": "string"
+        },
+        "path": {
+          "title": "Path",
+          "type": "string"
+        },
+        "format": {
+          "default": "json",
+          "enum": [
+            "json",
+            "yaml",
+            "toml"
+          ],
+          "title": "Format",
+          "type": "string"
+        },
+        "json_schema": {
+          "anyOf": [
+            {
+              "additionalProperties": true,
+              "type": "object"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Json Schema"
+        }
+      },
+      "required": [
+        "path"
+      ],
+      "title": "SchemaEvidence",
+      "type": "object"
+    },
+    "ScopeEvidence": {
+      "additionalProperties": false,
+      "properties": {
+        "description": {
+          "default": "",
+          "maxLength": 500,
+          "title": "Description",
+          "type": "string"
+        },
+        "type": {
+          "const": "scope",
+          "default": "scope",
+          "title": "Type",
+          "type": "string"
+        }
+      },
+      "title": "ScopeEvidence",
+      "type": "object"
+    },
+    "SecurityEvidence": {
+      "additionalProperties": false,
+      "properties": {
+        "description": {
+          "default": "",
+          "maxLength": 500,
+          "title": "Description",
+          "type": "string"
+        },
+        "type": {
+          "const": "security",
+          "default": "security",
+          "title": "Type",
+          "type": "string"
+        },
+        "secret_scan": {
+          "default": true,
+          "title": "Secret Scan",
+          "type": "boolean"
+        },
+        "conflict_markers": {
+          "default": true,
+          "title": "Conflict Markers",
+          "type": "boolean"
+        }
+      },
+      "title": "SecurityEvidence",
+      "type": "object"
+    },
+    "StepKind": {
+      "enum": [
+        "inventory",
+        "discover",
+        "research",
+        "plan",
+        "implement",
+        "test",
+        "verify",
+        "review",
+        "replan",
+        "ssh",
+        "database",
+        "docker",
+        "deploy",
+        "documentation",
+        "image",
+        "video"
+      ],
+      "title": "StepKind",
+      "type": "string"
+    },
+    "TestEvidence": {
+      "additionalProperties": false,
+      "properties": {
+        "description": {
+          "default": "",
+          "maxLength": 500,
+          "title": "Description",
+          "type": "string"
+        },
+        "type": {
+          "const": "test",
+          "default": "test",
+          "title": "Type",
+          "type": "string"
+        },
+        "command": {
+          "maxLength": 2000,
+          "minLength": 1,
+          "title": "Command",
+          "type": "string"
+        },
+        "framework": {
+          "default": "generic",
+          "enum": [
+            "pytest",
+            "unittest",
+            "npm",
+            "phpunit",
+            "go",
+            "cargo",
+            "generic"
+          ],
+          "title": "Framework",
+          "type": "string"
+        },
+        "min_passed": {
+          "default": 1,
+          "minimum": 0,
+          "title": "Min Passed",
+          "type": "integer"
+        },
+        "timeout_seconds": {
+          "default": 600,
+          "maximum": 7200,
+          "minimum": 1,
+          "title": "Timeout Seconds",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "command"
+      ],
+      "title": "TestEvidence",
+      "type": "object"
+    }
+  },
+  "additionalProperties": false,
+  "properties": {
+    "goal": {
+      "maxLength": 4000,
+      "minLength": 3,
+      "title": "Goal",
+      "type": "string"
+    },
+    "summary": {
+      "default": "",
+      "maxLength": 4000,
+      "title": "Summary",
+      "type": "string"
+    },
+    "assumptions": {
+      "items": {
+        "type": "string"
+      },
+      "maxItems": 40,
+      "title": "Assumptions",
+      "type": "array"
+    },
+    "risks": {
+      "items": {
+        "type": "string"
+      },
+      "maxItems": 40,
+      "title": "Risks",
+      "type": "array"
+    },
+    "research_needed": {
+      "items": {
+        "$ref": "#/$defs/ResearchRequest"
+      },
+      "maxItems": 10,
+      "title": "Research Needed",
+      "type": "array"
+    },
+    "steps": {
+      "items": {
+        "$ref": "#/$defs/PlanStep"
+      },
+      "maxItems": 60,
+      "minItems": 1,
+      "title": "Steps",
+      "type": "array"
+    }
+  },
+  "required": [
+    "goal",
+    "steps"
+  ],
+  "title": "PlanContract",
+  "type": "object"
+}

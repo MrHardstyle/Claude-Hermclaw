@@ -1,0 +1,51 @@
+{
+  "$defs": {
+    "ToolName": {
+      "enum": [
+        "list_files",
+        "read_file",
+        "read_range",
+        "find_text",
+        "search_repo",
+        "search_symbol",
+        "git_status",
+        "git_diff",
+        "write_file",
+        "replace_text",
+        "apply_patch",
+        "run_command",
+        "run_test",
+        "request_scope_expansion",
+        "request_research",
+        "request_replan",
+        "checkpoint",
+        "complete_step",
+        "block_step"
+      ],
+      "title": "ToolName",
+      "type": "string"
+    }
+  },
+  "additionalProperties": false,
+  "properties": {
+    "turn": {
+      "minimum": 0,
+      "title": "Turn",
+      "type": "integer"
+    },
+    "tool": {
+      "$ref": "#/$defs/ToolName"
+    },
+    "args": {
+      "additionalProperties": true,
+      "title": "Args",
+      "type": "object"
+    }
+  },
+  "required": [
+    "turn",
+    "tool"
+  ],
+  "title": "ToolCall",
+  "type": "object"
+}

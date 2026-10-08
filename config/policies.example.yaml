@@ -1,0 +1,93 @@
+# Hermclaw Next – runtime policies.
+commands:
+  forbidden_patterns:
+    - '(^|[;&|]\s*)(sudo|su)(\s|$)'
+    - 'rm\s+-rf\s+/(\s|$)'
+    - '\bmkfs(\.|\s)'
+    - '\b(shutdown|reboot|poweroff|halt)\b'
+    - '\bdd\s+if=.*\sof=/dev/'
+    - '\b(iptables|nft)\b'
+    - 'curl[^|]*\|\s*(ba)?sh'
+    - '\bgit\s+(push|commit|reset\s+--hard|rebase|merge|tag|checkout\s+-B|branch\s+-[dD]|remote|clean\s+-[fdx]+)'
+  destructive_patterns:
+    - '\brm\s+-[rf]+'
+    - '\bdrop\s+(table|database|schema)\b'
+    - '\btruncate\b'
+    - '\bsystemctl\s+(stop|disable|mask)\b'
+  mutate_patterns:
+    - '\b(apt|apt-get|pip|npm|pnpm|yarn|composer)\s+(install|add|remove|update|upgrade)\b'
+    - '\bsystemctl\s+(start|restart|reload|enable)\b'
+    - '\b(mv|cp|chmod|chown|mkdir|touch|tee|sed\s+-i)\b'
+  read_patterns:
+    - '^\s*(ls|cat|head|tail|grep|rg|find|stat|wc|df|du|free|uptime|uname|whoami|id|ps|ss|ip|journalctl|systemctl\s+status|nginx\s+-t|docker\s+ps|podman\s+ps)\b'
+  max_output_bytes: 200000
+sandbox:
+  engine: podman
+  image: docker.io/library/python:3.12-slim
+  images:
+    python: docker.io/library/python:3.12-slim
+    node: docker.io/library/node:22-bookworm-slim
+    php: docker.io/library/php:8.3-cli
+    generic: docker.io/library/debian:trixie-slim
+  cpus: 2.0
+  memory: 2g
+  pids_limit: 512
+  tmpfs_size: 512m
+  default_timeout_seconds: 600
+  network_default: none
+scope:
+  always_forbidden: [".git/**", "**/.env", "**/.env.*", "**/*.pem", "**/*.key", "**/id_rsa*", "**/id_ed25519*", "**/secrets/**"]
+  max_target_paths: 25
+  max_new_paths: 25
+coder:
+  max_turns: 20
+  max_output_tokens: 6144
+  tool_output_chars: 12000
+stagnation: {warn_after: 2, diagnose_after: 3, stop_after: 4}
+correction: {max_corrections_per_step: 2, max_attempts_per_step: 3, max_replans_per_job: 2}
+verifier:
+  max_changed_files: 40
+  allow_deletions: true
+  lint_commands: {}
+review:
+  required_for_kinds: [implement, database, docker, deploy, ssh]
+  timeout_seconds: 1500
+research:
+  search_provider: searxng
+  searxng_url: http://127.0.0.1:8888
+  max_queries: 4
+  max_sources: 8
+  fetch_timeout_seconds: 20
+  max_fetch_bytes: 2000000
+  primary_domains:
+    - docs.python.org
+    - fastapi.tiangolo.com
+    - docs.sqlalchemy.org
+    - alembic.sqlalchemy.org
+    - www.postgresql.org
+    - github.com
+    - docs.ollama.com
+    - docs.litellm.ai
+    - docs.podman.io
+    - nginx.org
+    - docs.gitlab.com
+    - developer.mozilla.org
+    - react.dev
+    - vite.dev
+    - playwright.dev
+    - www.debian.org
+    - systemd.io
+    - www.php.net
+    - docs.docker.com
+git:
+  branch_prefix: hermclaw/
+  protected_branches: [main, master, "release/*"]
+  author_name: Hermclaw Runtime
+  author_email: hermclaw@localhost
+  create_merge_request: false
+events: {retention_days: 90, heartbeat_seconds: 15}
+leases: {default_ttl_seconds: 300, heartbeat_seconds: 30, preemption_grace_seconds: 120}
+ssh:
+  allowed_hosts: [webui-223, exec-222, model-224]
+  default_timeout_seconds: 120
+  require_approval_for_mutations: true

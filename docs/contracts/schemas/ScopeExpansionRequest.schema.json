@@ -1,0 +1,38 @@
+{
+  "additionalProperties": false,
+  "properties": {
+    "paths": {
+      "items": {
+        "type": "string"
+      },
+      "maxItems": 20,
+      "minItems": 1,
+      "title": "Paths",
+      "type": "array"
+    },
+    "operations": {
+      "items": {
+        "enum": [
+          "create",
+          "modify",
+          "delete"
+        ],
+        "type": "string"
+      },
+      "title": "Operations",
+      "type": "array"
+    },
+    "justification": {
+      "maxLength": 2000,
+      "minLength": 10,
+      "title": "Justification",
+      "type": "string"
+    }
+  },
+  "required": [
+    "paths",
+    "justification"
+  ],
+  "title": "ScopeExpansionRequest",
+  "type": "object"
+}

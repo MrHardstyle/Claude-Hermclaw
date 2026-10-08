@@ -1,0 +1,56 @@
+# Hermclaw Next – host topology (roles fixed by architecture, Bauplan §2).
+# Copy to /etc/hermclaw/hosts.yaml and fill in the real MAC addresses from the inventory.
+hosts:
+  - id: orchestrator-225
+    address: 192.168.178.225
+    role: orchestrator
+    services:
+      - {name: api, port: 8000, http_path: /api/health}
+      - {name: litellm, port: 4000, http_path: /health/liveliness}
+      - {name: postgresql, port: 5432}
+  - id: webui-223
+    address: 192.168.178.223
+    role: webui
+    ssh: {user: hermclaw-admin}
+    services:
+      - {name: nginx, port: 80, http_path: /}
+  - id: exec-222
+    address: 192.168.178.222
+    role: execution_worker
+    worker_kind: execution
+    worker_api: http://192.168.178.222:8787
+    ssh: {user: hermclaw-admin}
+    wake_on_lan:
+      enabled: true
+      mac: "00:00:00:00:02:22"          # TODO: replace with real MAC (inventory)
+      broadcast: 192.168.178.255
+      ping_timeout_seconds: 90
+      service_timeout_seconds: 180
+    services:
+      - {name: worker_api, port: 8787, http_path: /health}
+  - id: model-224
+    address: 192.168.178.224
+    role: model_worker
+    worker_kind: model
+    worker_api: http://192.168.178.224:8787
+    ssh: {user: hermclaw-admin}
+    wake_on_lan:
+      enabled: true
+      mac: "00:00:00:00:02:24"          # TODO: replace with real MAC (inventory)
+      broadcast: 192.168.178.255
+      ping_timeout_seconds: 90
+      service_timeout_seconds: 240
+    services:
+      - {name: worker_api, port: 8787, http_path: /health}
+      - {name: ollama, port: 11434, http_path: /api/version}
+  - id: gitlab-226
+    address: 192.168.178.226
+    role: gitlab
+    services:
+      - {name: ssh, port: 22}
+  - id: terra-60
+    address: 192.168.178.60
+    role: backup
+    ssh: {user: root, key_ref: "file:/etc/hermclaw/ssh/backup_ed25519"}
+    services:
+      - {name: ssh, port: 22}

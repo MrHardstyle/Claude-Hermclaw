@@ -1,0 +1,48 @@
+{
+  "additionalProperties": false,
+  "description": "Generic envelope for dispatching a step to a worker.",
+  "properties": {
+    "job_id": {
+      "title": "Job Id",
+      "type": "string"
+    },
+    "step_id": {
+      "title": "Step Id",
+      "type": "string"
+    },
+    "attempt_id": {
+      "title": "Attempt Id",
+      "type": "string"
+    },
+    "capability": {
+      "title": "Capability",
+      "type": "string"
+    },
+    "payload": {
+      "additionalProperties": true,
+      "title": "Payload",
+      "type": "object"
+    },
+    "deadline_at": {
+      "anyOf": [
+        {
+          "format": "date-time",
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Deadline At"
+    }
+  },
+  "required": [
+    "job_id",
+    "step_id",
+    "attempt_id",
+    "capability"
+  ],
+  "title": "WorkerInput",
+  "type": "object"
+}

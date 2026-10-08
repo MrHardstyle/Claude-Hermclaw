@@ -1,0 +1,89 @@
+[build-system]
+requires = ["setuptools>=69", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "hermclaw"
+version = "0.1.0rc1"
+description = "Hermclaw Next – universal local multi-agent system (orchestrator runtime and workers)"
+readme = "README.md"
+requires-python = ">=3.12"
+license = { text = "Proprietary" }
+dependencies = [
+  "fastapi>=0.135",
+  "uvicorn[standard]>=0.30",
+  "pydantic>=2.7",
+  "pydantic-settings>=2.3",
+  "sqlalchemy[asyncio]>=2.0.30",
+  "alembic>=1.13",
+  "psycopg[binary]>=3.2",
+  "pgvector>=0.3",
+  "httpx>=0.27",
+  "pyyaml>=6",
+  "beautifulsoup4>=4.12",
+  "lxml>=5",
+  "tree-sitter>=0.23",
+  "tree-sitter-language-pack>=0.6",
+]
+
+[project.optional-dependencies]
+dev = [
+  "pytest>=8",
+  "pytest-asyncio>=0.24",
+  "hypothesis>=6",
+  "ruff>=0.6",
+  "mypy>=1.10",
+  "types-PyYAML",
+]
+
+[project.scripts]
+hermclaw = "hermclaw.cli:main"
+hermclaw-exec-worker = "worker.execution.app:main"
+hermclaw-model-worker = "worker.model.app:main"
+
+[tool.setuptools.packages.find]
+include = ["hermclaw*", "worker*"]
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+asyncio_default_fixture_loop_scope = "session"
+asyncio_default_test_loop_scope = "session"
+testpaths = ["tests"]
+markers = [
+  "integration: needs local PostgreSQL/git/podman",
+  "slow: long running",
+  "live: needs real target hosts (BLOCKER-001), skipped by default",
+]
+addopts = "-ra -m 'not live'"
+filterwarnings = ["ignore::DeprecationWarning:tree_sitter.*"]
+
+[tool.ruff]
+line-length = 140
+target-version = "py312"
+extend-exclude = ["ui", ".venv", "migrations/versions"]
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I", "B", "UP", "S", "ASYNC", "RUF", "SIM", "PL"]
+ignore = [
+  "S101",    # assert in tests
+  "S603", "S607",  # subprocess usage is intentional and policy-checked
+  "PLR0913", "PLR0912", "PLR0915", "PLR2004", "PLR0911",
+  "RUF001", "RUF002", "RUF003",  # German umlauts in strings/comments
+  "S608",    # SQL built from fixed identifiers only
+  "B008",    # FastAPI Depends defaults
+  "PLC0415", # deliberate lazy imports (startup cost, optional deps, cycles)
+]
+
+[tool.ruff.lint.per-file-ignores]
+"hermclaw/persistence/db.py" = ["PLW0603"]
+"hermclaw/core/settings.py" = ["S105"]
+"hermclaw/core/redaction.py" = ["S105"]
+"tests/**" = ["S", "PLR", "B011", "ASYNC"]
+
+[tool.mypy]
+python_version = "3.12"
+strict = true
+ignore_missing_imports = true
+plugins = ["pydantic.mypy"]
+exclude = ["^ui/", "^migrations/", "^tests/fixtures/"]
+warn_unused_ignores = false

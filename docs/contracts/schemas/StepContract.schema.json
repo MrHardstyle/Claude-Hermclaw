@@ -1,0 +1,664 @@
+{
+  "$defs": {
+    "AbsenceEvidence": {
+      "additionalProperties": false,
+      "properties": {
+        "description": {
+          "default": "",
+          "maxLength": 500,
+          "title": "Description",
+          "type": "string"
+        },
+        "type": {
+          "const": "absence",
+          "default": "absence",
+          "title": "Type",
+          "type": "string"
+        },
+        "path_glob": {
+          "title": "Path Glob",
+          "type": "string"
+        },
+        "pattern": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "regex; if None the path itself must not exist",
+          "title": "Pattern"
+        },
+        "expected_matches": {
+          "const": 0,
+          "default": 0,
+          "title": "Expected Matches",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "path_glob"
+      ],
+      "title": "AbsenceEvidence",
+      "type": "object"
+    },
+    "ArtifactEvidence": {
+      "additionalProperties": false,
+      "properties": {
+        "description": {
+          "default": "",
+          "maxLength": 500,
+          "title": "Description",
+          "type": "string"
+        },
+        "type": {
+          "const": "artifact",
+          "default": "artifact",
+          "title": "Type",
+          "type": "string"
+        },
+        "kind": {
+          "minLength": 1,
+          "title": "Kind",
+          "type": "string"
+        },
+        "name_glob": {
+          "default": "*",
+          "title": "Name Glob",
+          "type": "string"
+        },
+        "min_count": {
+          "default": 1,
+          "minimum": 1,
+          "title": "Min Count",
+          "type": "integer"
+        },
+        "min_size_bytes": {
+          "default": 1,
+          "minimum": 0,
+          "title": "Min Size Bytes",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "kind"
+      ],
+      "title": "ArtifactEvidence",
+      "type": "object"
+    },
+    "CommandEvidence": {
+      "additionalProperties": false,
+      "properties": {
+        "description": {
+          "default": "",
+          "maxLength": 500,
+          "title": "Description",
+          "type": "string"
+        },
+        "type": {
+          "const": "command",
+          "default": "command",
+          "title": "Type",
+          "type": "string"
+        },
+        "command": {
+          "maxLength": 2000,
+          "minLength": 1,
+          "title": "Command",
+          "type": "string"
+        },
+        "expect_exit_code": {
+          "default": 0,
+          "title": "Expect Exit Code",
+          "type": "integer"
+        },
+        "stdout_pattern": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Stdout Pattern"
+        },
+        "timeout_seconds": {
+          "default": 300,
+          "maximum": 3600,
+          "minimum": 1,
+          "title": "Timeout Seconds",
+          "type": "integer"
+        },
+        "network": {
+          "default": false,
+          "title": "Network",
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "command"
+      ],
+      "title": "CommandEvidence",
+      "type": "object"
+    },
+    "DiffEvidence": {
+      "additionalProperties": false,
+      "properties": {
+        "description": {
+          "default": "",
+          "maxLength": 500,
+          "title": "Description",
+          "type": "string"
+        },
+        "type": {
+          "const": "diff",
+          "default": "diff",
+          "title": "Type",
+          "type": "string"
+        },
+        "must_change": {
+          "description": "globs that must appear in the diff",
+          "items": {
+            "type": "string"
+          },
+          "title": "Must Change",
+          "type": "array"
+        },
+        "must_not_change": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Must Not Change",
+          "type": "array"
+        },
+        "max_changed_files": {
+          "anyOf": [
+            {
+              "minimum": 0,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Max Changed Files"
+        },
+        "allow_empty": {
+          "default": false,
+          "title": "Allow Empty",
+          "type": "boolean"
+        }
+      },
+      "title": "DiffEvidence",
+      "type": "object"
+    },
+    "PresenceEvidence": {
+      "additionalProperties": false,
+      "properties": {
+        "description": {
+          "default": "",
+          "maxLength": 500,
+          "title": "Description",
+          "type": "string"
+        },
+        "type": {
+          "const": "presence",
+          "default": "presence",
+          "title": "Type",
+          "type": "string"
+        },
+        "path_glob": {
+          "title": "Path Glob",
+          "type": "string"
+        },
+        "pattern": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "regex that must match at least min_matches times",
+          "title": "Pattern"
+        },
+        "min_matches": {
+          "default": 1,
+          "minimum": 1,
+          "title": "Min Matches",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "path_glob"
+      ],
+      "title": "PresenceEvidence",
+      "type": "object"
+    },
+    "Risk": {
+      "enum": [
+        "low",
+        "medium",
+        "high"
+      ],
+      "title": "Risk",
+      "type": "string"
+    },
+    "SchemaEvidence": {
+      "additionalProperties": false,
+      "properties": {
+        "description": {
+          "default": "",
+          "maxLength": 500,
+          "title": "Description",
+          "type": "string"
+        },
+        "type": {
+          "const": "schema",
+          "default": "schema",
+          "title": "Type",
+          "type": "string"
+        },
+        "path": {
+          "title": "Path",
+          "type": "string"
+        },
+        "format": {
+          "default": "json",
+          "enum": [
+            "json",
+            "yaml",
+            "toml"
+          ],
+          "title": "Format",
+          "type": "string"
+        },
+        "json_schema": {
+          "anyOf": [
+            {
+              "additionalProperties": true,
+              "type": "object"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Json Schema"
+        }
+      },
+      "required": [
+        "path"
+      ],
+      "title": "SchemaEvidence",
+      "type": "object"
+    },
+    "ScopeContract": {
+      "additionalProperties": false,
+      "properties": {
+        "source": {
+          "default": "planner_and_repo_intelligence",
+          "enum": [
+            "planner_and_repo_intelligence",
+            "runtime_expansion",
+            "replanner",
+            "manual"
+          ],
+          "title": "Source",
+          "type": "string"
+        },
+        "version": {
+          "default": 1,
+          "minimum": 1,
+          "title": "Version",
+          "type": "integer"
+        },
+        "strict_target_paths": {
+          "default": true,
+          "title": "Strict Target Paths",
+          "type": "boolean"
+        },
+        "target_paths": {
+          "description": "existing files (or globs) that may be modified",
+          "items": {
+            "type": "string"
+          },
+          "title": "Target Paths",
+          "type": "array"
+        },
+        "allowed_new_paths": {
+          "description": "paths/globs where new files may be created",
+          "items": {
+            "type": "string"
+          },
+          "title": "Allowed New Paths",
+          "type": "array"
+        },
+        "forbidden_paths": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Forbidden Paths",
+          "type": "array"
+        },
+        "allowed_operations": {
+          "items": {
+            "enum": [
+              "create",
+              "modify",
+              "delete"
+            ],
+            "type": "string"
+          },
+          "title": "Allowed Operations",
+          "type": "array"
+        },
+        "reason": {
+          "default": "",
+          "title": "Reason",
+          "type": "string"
+        }
+      },
+      "title": "ScopeContract",
+      "type": "object"
+    },
+    "ScopeEvidence": {
+      "additionalProperties": false,
+      "properties": {
+        "description": {
+          "default": "",
+          "maxLength": 500,
+          "title": "Description",
+          "type": "string"
+        },
+        "type": {
+          "const": "scope",
+          "default": "scope",
+          "title": "Type",
+          "type": "string"
+        }
+      },
+      "title": "ScopeEvidence",
+      "type": "object"
+    },
+    "SecurityEvidence": {
+      "additionalProperties": false,
+      "properties": {
+        "description": {
+          "default": "",
+          "maxLength": 500,
+          "title": "Description",
+          "type": "string"
+        },
+        "type": {
+          "const": "security",
+          "default": "security",
+          "title": "Type",
+          "type": "string"
+        },
+        "secret_scan": {
+          "default": true,
+          "title": "Secret Scan",
+          "type": "boolean"
+        },
+        "conflict_markers": {
+          "default": true,
+          "title": "Conflict Markers",
+          "type": "boolean"
+        }
+      },
+      "title": "SecurityEvidence",
+      "type": "object"
+    },
+    "StepKind": {
+      "enum": [
+        "inventory",
+        "discover",
+        "research",
+        "plan",
+        "implement",
+        "test",
+        "verify",
+        "review",
+        "replan",
+        "ssh",
+        "database",
+        "docker",
+        "deploy",
+        "documentation",
+        "image",
+        "video"
+      ],
+      "title": "StepKind",
+      "type": "string"
+    },
+    "StepStatus": {
+      "enum": [
+        "pending",
+        "ready",
+        "leased",
+        "running",
+        "checkpointed",
+        "testing",
+        "verifying",
+        "reviewing",
+        "completed",
+        "failed",
+        "blocked",
+        "cancelled"
+      ],
+      "title": "StepStatus",
+      "type": "string"
+    },
+    "TestEvidence": {
+      "additionalProperties": false,
+      "properties": {
+        "description": {
+          "default": "",
+          "maxLength": 500,
+          "title": "Description",
+          "type": "string"
+        },
+        "type": {
+          "const": "test",
+          "default": "test",
+          "title": "Type",
+          "type": "string"
+        },
+        "command": {
+          "maxLength": 2000,
+          "minLength": 1,
+          "title": "Command",
+          "type": "string"
+        },
+        "framework": {
+          "default": "generic",
+          "enum": [
+            "pytest",
+            "unittest",
+            "npm",
+            "phpunit",
+            "go",
+            "cargo",
+            "generic"
+          ],
+          "title": "Framework",
+          "type": "string"
+        },
+        "min_passed": {
+          "default": 1,
+          "minimum": 0,
+          "title": "Min Passed",
+          "type": "integer"
+        },
+        "timeout_seconds": {
+          "default": 600,
+          "maximum": 7200,
+          "minimum": 1,
+          "title": "Timeout Seconds",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "command"
+      ],
+      "title": "TestEvidence",
+      "type": "object"
+    }
+  },
+  "additionalProperties": false,
+  "properties": {
+    "id": {
+      "format": "uuid",
+      "title": "Id",
+      "type": "string"
+    },
+    "job_id": {
+      "format": "uuid",
+      "title": "Job Id",
+      "type": "string"
+    },
+    "step_key": {
+      "title": "Step Key",
+      "type": "string"
+    },
+    "title": {
+      "title": "Title",
+      "type": "string"
+    },
+    "kind": {
+      "$ref": "#/$defs/StepKind"
+    },
+    "capability": {
+      "title": "Capability",
+      "type": "string"
+    },
+    "goal": {
+      "title": "Goal",
+      "type": "string"
+    },
+    "status": {
+      "$ref": "#/$defs/StepStatus"
+    },
+    "risk": {
+      "$ref": "#/$defs/Risk",
+      "default": "low"
+    },
+    "depends_on": {
+      "items": {
+        "type": "string"
+      },
+      "title": "Depends On",
+      "type": "array"
+    },
+    "constraints": {
+      "items": {
+        "type": "string"
+      },
+      "title": "Constraints",
+      "type": "array"
+    },
+    "acceptance": {
+      "items": {
+        "discriminator": {
+          "mapping": {
+            "absence": "#/$defs/AbsenceEvidence",
+            "artifact": "#/$defs/ArtifactEvidence",
+            "command": "#/$defs/CommandEvidence",
+            "diff": "#/$defs/DiffEvidence",
+            "presence": "#/$defs/PresenceEvidence",
+            "schema": "#/$defs/SchemaEvidence",
+            "scope": "#/$defs/ScopeEvidence",
+            "security": "#/$defs/SecurityEvidence",
+            "test": "#/$defs/TestEvidence"
+          },
+          "propertyName": "type"
+        },
+        "oneOf": [
+          {
+            "$ref": "#/$defs/PresenceEvidence"
+          },
+          {
+            "$ref": "#/$defs/AbsenceEvidence"
+          },
+          {
+            "$ref": "#/$defs/CommandEvidence"
+          },
+          {
+            "$ref": "#/$defs/TestEvidence"
+          },
+          {
+            "$ref": "#/$defs/DiffEvidence"
+          },
+          {
+            "$ref": "#/$defs/ScopeEvidence"
+          },
+          {
+            "$ref": "#/$defs/SchemaEvidence"
+          },
+          {
+            "$ref": "#/$defs/SecurityEvidence"
+          },
+          {
+            "$ref": "#/$defs/ArtifactEvidence"
+          }
+        ]
+      },
+      "title": "Acceptance",
+      "type": "array"
+    },
+    "repo_hints": {
+      "items": {
+        "type": "string"
+      },
+      "title": "Repo Hints",
+      "type": "array"
+    },
+    "scope": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/ScopeContract"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null
+    },
+    "turn_budget": {
+      "default": 20,
+      "title": "Turn Budget",
+      "type": "integer"
+    },
+    "network": {
+      "default": false,
+      "title": "Network",
+      "type": "boolean"
+    },
+    "metadata": {
+      "additionalProperties": true,
+      "title": "Metadata",
+      "type": "object"
+    }
+  },
+  "required": [
+    "id",
+    "job_id",
+    "step_key",
+    "title",
+    "kind",
+    "capability",
+    "goal",
+    "status"
+  ],
+  "title": "StepContract",
+  "type": "object"
+}

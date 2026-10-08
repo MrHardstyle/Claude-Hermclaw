@@ -1,0 +1,33 @@
+# Capability registry: what a step needs and where it runs.
+capabilities:
+  - {name: inventory, worker_kind: orchestrator, description: deterministic repository inventory}
+  - {name: discover, worker_kind: orchestrator, model_role: embedding, resources: [], description: repository intelligence retrieval}
+  - {name: research, worker_kind: orchestrator, model_role: fast, network: true, description: web research with sources}
+  - {name: planning, worker_kind: orchestrator, model_role: planner, resources: [large-model-224]}
+  - {name: coding, worker_kind: execution, model_role: coder, resources: [large-model-224, code-executor-222]}
+  - {name: testing, worker_kind: execution, resources: [code-executor-222]}
+  - {name: review, worker_kind: orchestrator, model_role: heavy, resources: [large-model-224]}
+  - {name: ssh, worker_kind: orchestrator, model_role: coder, resources: [large-model-224]}
+  - {name: database, worker_kind: execution, model_role: coder, resources: [large-model-224, code-executor-222]}
+  - {name: docker, worker_kind: execution, model_role: coder, resources: [large-model-224, code-executor-222]}
+  - {name: deploy, worker_kind: orchestrator, model_role: coder, resources: [large-model-224]}
+  - {name: documentation, worker_kind: execution, model_role: coder, resources: [large-model-224, code-executor-222]}
+  - {name: image, worker_kind: media, resources: [gpu-224]}
+  - {name: video, worker_kind: media, resources: [gpu-224, video-224]}
+step_kind_capability:
+  inventory: inventory
+  discover: discover
+  research: research
+  plan: planning
+  implement: coding
+  test: testing
+  verify: testing
+  review: review
+  replan: planning
+  ssh: ssh
+  database: database
+  docker: docker
+  deploy: deploy
+  documentation: documentation
+  image: image
+  video: video

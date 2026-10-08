@@ -1,0 +1,69 @@
+{
+  "additionalProperties": false,
+  "properties": {
+    "source": {
+      "default": "planner_and_repo_intelligence",
+      "enum": [
+        "planner_and_repo_intelligence",
+        "runtime_expansion",
+        "replanner",
+        "manual"
+      ],
+      "title": "Source",
+      "type": "string"
+    },
+    "version": {
+      "default": 1,
+      "minimum": 1,
+      "title": "Version",
+      "type": "integer"
+    },
+    "strict_target_paths": {
+      "default": true,
+      "title": "Strict Target Paths",
+      "type": "boolean"
+    },
+    "target_paths": {
+      "description": "existing files (or globs) that may be modified",
+      "items": {
+        "type": "string"
+      },
+      "title": "Target Paths",
+      "type": "array"
+    },
+    "allowed_new_paths": {
+      "description": "paths/globs where new files may be created",
+      "items": {
+        "type": "string"
+      },
+      "title": "Allowed New Paths",
+      "type": "array"
+    },
+    "forbidden_paths": {
+      "items": {
+        "type": "string"
+      },
+      "title": "Forbidden Paths",
+      "type": "array"
+    },
+    "allowed_operations": {
+      "items": {
+        "enum": [
+          "create",
+          "modify",
+          "delete"
+        ],
+        "type": "string"
+      },
+      "title": "Allowed Operations",
+      "type": "array"
+    },
+    "reason": {
+      "default": "",
+      "title": "Reason",
+      "type": "string"
+    }
+  },
+  "title": "ScopeContract",
+  "type": "object"
+}

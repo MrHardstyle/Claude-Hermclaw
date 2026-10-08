@@ -1,0 +1,82 @@
+# Hermclaw Next – model profiles (roles fixed by architecture, Bauplan §3).
+# Aliases are LiteLLM model_names; `model` is the Ollama tag on host model-224.
+litellm:
+  base_url: http://127.0.0.1:4000
+  api_key_ref: cred:litellm-master-key
+  request_timeout_seconds: 1200
+# usable RAM+VRAM on .224 for resident models (32 GB RAM + 8 GB VRAM minus OS/headroom)
+model_host_capacity_gb: 34
+profiles:
+  - alias: fast-router
+    role: fast
+    model: qwen3:8b
+    context_tokens: 16384
+    max_output_tokens: 2048
+    temperature: 0.1
+    think: false
+    timeout_seconds: 180
+    priority: 30
+    resource_group: small-model-224
+    exclusive: false
+    memory_gb: 7
+  - alias: planner-gemma
+    role: planner
+    model: gemma4:26b
+    context_tokens: 32768
+    max_output_tokens: 8192
+    temperature: 0.2
+    think: false
+    timeout_seconds: 1200
+    priority: 70
+    resource_group: large-model-224
+    exclusive: true
+    memory_gb: 19
+  - alias: planner-gemma-fallback
+    role: planner_fallback
+    model: gemma4:12b
+    fallback_for: planner-gemma
+    context_tokens: 32768
+    max_output_tokens: 8192
+    temperature: 0.2
+    think: false
+    timeout_seconds: 900
+    priority: 70
+    resource_group: large-model-224
+    exclusive: true
+    memory_gb: 10
+  - alias: coder-main
+    role: coder
+    model: qwen3-coder:30b
+    context_tokens: 32768
+    max_output_tokens: 6144
+    temperature: 0.15
+    think: false
+    timeout_seconds: 900
+    priority: 50
+    resource_group: large-model-224
+    exclusive: true
+    memory_gb: 23
+  - alias: heavy-review
+    role: heavy
+    model: qwen3.8:27b
+    context_tokens: 24576
+    max_output_tokens: 4096
+    temperature: 0.1
+    think: false
+    timeout_seconds: 1500
+    priority: 60
+    resource_group: large-model-224
+    exclusive: true
+    memory_gb: 25
+  - alias: embedding
+    role: embedding
+    kind: embedding
+    model: embeddinggemma-2:740m
+    context_tokens: 8192
+    max_output_tokens: 0
+    timeout_seconds: 120
+    priority: 20
+    resource_group: small-model-224
+    exclusive: false
+    memory_gb: 2
+    embedding_dimensions: 768
