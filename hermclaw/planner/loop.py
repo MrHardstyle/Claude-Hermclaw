@@ -3,7 +3,8 @@
 One schema-constrained ``ChatModel.chat`` call, then at most ``max_repair_attempts`` repair turns in total. A
 repair turn sends the exact validation error list (schema, semantic or enrichment errors) plus the previous JSON
 answer back to the model. The model's reasoning is never part of the conversation: the gateway only returns the
-final content, and from that content only the JSON object is echoed (surrounding prose is dropped).
+final content, and from that content only a successfully parsed JSON object is echoed, re-serialised (prose,
+markdown and unparseable text are dropped). Error lists are redacted before they are stored, emitted or sent.
 
 After the budget is exhausted a ``PlannerError`` (``PLANNER_INVALID_OUTPUT``) is raised whose details carry the
 complete validation error history. Technical model failures (timeouts, unreachable gateway) are not repaired here;
@@ -18,11 +19,12 @@ from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, field
 from typing import Any
 
+from hermclaw.core.redaction import DEFAULT_REDACTOR
 from hermclaw.models.protocols import CallContext, ChatMessage, ChatModel, ChatResult
 from hermclaw.planner.errors import PlanInvalid, PlannerError
 from hermclaw.planner.inputs import PlannerSettings
 from hermclaw.planner.parsing import extract_json_object
-from hermclaw.planner.prompt import json_candidate, repair_message
+from hermclaw.planner.prompt import compact_json, repair_message
 
 
 @dataclass
@@ -124,18 +126,19 @@ async def run_structured_loop[T](
             latency_ms=result.latency_ms,
         )
         attempts.append(record)
+        data: dict[str, Any] | None = None
         try:
             data = extract_json_object(result.content, reasoning_chars=result.reasoning_chars)
             value = validate(data)
         except PlanInvalid as invalid:
             record.phase = invalid.phase
-            record.errors = invalid.errors[: settings.max_errors_reported] or [f"{invalid.phase}: invalid plan"]
+            record.errors = _error_list(invalid, result, settings)
             remaining = max_calls - attempt
             if remaining <= 0:
                 break
             if on_repair is not None:
                 await on_repair(record, remaining - 1)
-            conversation = _repair_conversation(messages, result.content, record.errors, remaining - 1, settings)
+            conversation = _repair_conversation(messages, data, record.errors, remaining - 1, settings)
             continue
         return LoopOutcome(value=value, result=result, attempts=attempts, duration_ms=int((time.monotonic() - started) * 1000))
     last = attempts[-1]
@@ -153,13 +156,30 @@ async def run_structured_loop[T](
     )
 
 
+TRUNCATED_HINT = "the answer was cut off at the output token limit; answer with a shorter plan (fewer steps, shorter texts)"
+
+
+def _error_list(invalid: PlanInvalid, result: ChatResult, settings: PlannerSettings) -> list[str]:
+    """The exact, redacted validation errors of one answer (persisted, emitted and sent back to the model)."""
+    errors = [DEFAULT_REDACTOR.text(e) for e in invalid.errors[: settings.max_errors_reported]]
+    if invalid.phase == "parse" and result.finish_reason == "length":
+        errors.append(TRUNCATED_HINT)
+    return errors or [f"{invalid.phase}: invalid plan"]
+
+
 def _repair_conversation(
-    base: list[ChatMessage], content: str, errors: list[str], remaining_after: int, settings: PlannerSettings
+    base: list[ChatMessage], data: dict[str, Any] | None, errors: list[str], remaining_after: int, settings: PlannerSettings
 ) -> list[ChatMessage]:
-    """Base prompt + the previous JSON answer (only the JSON part, never prose) + the exact error list."""
+    """Base prompt + the previous answer + the exact error list.
+
+    Only a successfully parsed JSON object is echoed, redacted and re-serialised canonically, so prose, markdown
+    or any reasoning-like text around or inside a broken answer can never travel back into the conversation. An
+    answer that did not parse is not echoed at all; the parse error alone is reported.
+    """
     conversation = list(base)
-    candidate = json_candidate(content or "")
-    if candidate is not None and len(candidate) <= settings.max_echo_chars:
-        conversation.append(ChatMessage(role="assistant", content=candidate))
+    if data is not None:
+        echo = compact_json(DEFAULT_REDACTOR.obj(data))
+        if len(echo) <= settings.max_echo_chars:
+            conversation.append(ChatMessage(role="assistant", content=echo))
     conversation.append(ChatMessage(role="user", content=repair_message(errors, remaining_after)))
     return conversation

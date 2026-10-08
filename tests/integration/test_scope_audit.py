@@ -3,16 +3,19 @@
 from __future__ import annotations
 
 from pathlib import Path
+from typing import Any
 
 import pytest
 
 from hermclaw.contracts.events import EventType
 from hermclaw.contracts.scope import ScopeExpansionRequest
-from hermclaw.core.interfaces import GitStatusEntry
+from hermclaw.core.interfaces import GitStatusEntry, WorkspaceHandle
+from hermclaw.persistence.models import Step
 from hermclaw.scope.audit import ScopeAuditor
-from hermclaw.scope.engine import ScopeEngine
+from hermclaw.scope.engine import ScopeDecision, ScopeEngine
 from hermclaw.scope.expansion import ScopeExpansionHandler
 from tests.integration.test_scope_support import (
+    SM,
     FakeRepo,
     build_repo,
     events_for,
@@ -32,7 +35,7 @@ def repo(tmp_repo: Path) -> Path:
     return build_repo(tmp_repo)
 
 
-async def _scoped(sessionmaker, repo: Path, **fields):
+async def _scoped(sessionmaker: SM, repo: Path, **fields: Any) -> tuple[Step, WorkspaceHandle, ScopeDecision]:
     fields.setdefault("repo_hints", ["src/app/core.py"])
     fields.setdefault("allowed_new_paths", ["tests/test_new.py"])
     step = await make_step(sessionmaker, **fields)
@@ -41,7 +44,7 @@ async def _scoped(sessionmaker, repo: Path, **fields):
     return step, ws, decision
 
 
-async def test_allowed_changes_pass_and_are_recorded(sessionmaker, repo: Path) -> None:
+async def test_allowed_changes_pass_and_are_recorded(sessionmaker: SM, repo: Path) -> None:
     step, _, _ = await _scoped(sessionmaker, repo)
     auditor = ScopeAuditor(sessionmaker, make_config())
     report = await auditor.audit_changes(
@@ -56,7 +59,7 @@ async def test_allowed_changes_pass_and_are_recorded(sessionmaker, repo: Path) -
     assert await events_for(sessionmaker, step.id, EventType.SCOPE_VIOLATION) == []
 
 
-async def test_violations_emit_event_and_persist(sessionmaker, repo: Path) -> None:
+async def test_violations_emit_event_and_persist(sessionmaker: SM, repo: Path) -> None:
     step, _, _ = await _scoped(sessionmaker, repo)
     auditor = ScopeAuditor(sessionmaker, make_config())
     changes = [
@@ -90,7 +93,7 @@ async def test_violations_emit_event_and_persist(sessionmaker, repo: Path) -> No
     assert rows[0].evidence["hints"]  # generation evidence preserved next to the audit
 
 
-async def test_audit_of_real_git_status(sessionmaker, repo: Path) -> None:
+async def test_audit_of_real_git_status(sessionmaker: SM, repo: Path) -> None:
     step, _, _ = await _scoped(sessionmaker, repo)
     write(repo, "src/app/core.py", "def run():\n    return 'x'\n")
     write(repo, "tests/test_new.py", "def test_new():\n    assert True\n")
@@ -105,7 +108,7 @@ async def test_audit_of_real_git_status(sessionmaker, repo: Path) -> None:
     assert ("notes/untracked.md", "create") in violating  # untracked file of the fixture is outside scope too
 
 
-async def test_audit_without_scope_denies_everything(sessionmaker, repo: Path) -> None:
+async def test_audit_without_scope_denies_everything(sessionmaker: SM, repo: Path) -> None:
     step = await make_step(sessionmaker, repo_hints=["src/app/core.py"])
     report = await ScopeAuditor(sessionmaker, make_config()).audit_changes(step.id, [("src/app/core.py", "modify")])
     assert not report.ok and report.scope_version is None and report.scope_status is None
@@ -113,7 +116,7 @@ async def test_audit_without_scope_denies_everything(sessionmaker, repo: Path) -
     assert len(await events_for(sessionmaker, step.id, EventType.SCOPE_VIOLATION)) == 1
 
 
-async def test_audit_of_unavailable_scope_records_into_that_version(sessionmaker, repo: Path) -> None:
+async def test_audit_of_unavailable_scope_records_into_that_version(sessionmaker: SM, repo: Path) -> None:
     step, _, decision = await _scoped(sessionmaker, repo, repo_hints=["missing/*.py"], allowed_new_paths=[])
     assert decision.status == "unavailable"
     report = await ScopeAuditor(sessionmaker, make_config()).audit_changes(step.id, [("src/app/core.py", "modify")])
@@ -122,7 +125,7 @@ async def test_audit_of_unavailable_scope_records_into_that_version(sessionmaker
     assert rows[0].evidence["audits"][0]["ok"] is False and rows[0].evidence["unavailable_reason"]["code"] == "no_resolvable_scope"
 
 
-async def test_audit_uses_newest_version_after_expansion(sessionmaker, repo: Path) -> None:
+async def test_audit_uses_newest_version_after_expansion(sessionmaker: SM, repo: Path) -> None:
     step, ws, _ = await _scoped(sessionmaker, repo)
     auditor = ScopeAuditor(sessionmaker, make_config())
     before = await auditor.audit_changes(step.id, [("tests/test_core.py", "modify")])
@@ -136,7 +139,7 @@ async def test_audit_uses_newest_version_after_expansion(sessionmaker, repo: Pat
     assert len(rows[0].evidence["audits"]) == 1 and len(rows[1].evidence["audits"]) == 1
 
 
-async def test_audit_history_is_bounded(sessionmaker, repo: Path) -> None:
+async def test_audit_history_is_bounded(sessionmaker: SM, repo: Path) -> None:
     step, _, _ = await _scoped(sessionmaker, repo)
     auditor = ScopeAuditor(sessionmaker, make_config())
     for i in range(22):

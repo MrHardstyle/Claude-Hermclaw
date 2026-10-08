@@ -22,10 +22,11 @@ import os
 import uuid
 from collections.abc import AsyncIterator, Sequence
 from dataclasses import dataclass
+from datetime import datetime
 from pathlib import Path
 from typing import Any, Literal
 
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from hermclaw.contracts.common import Severity
@@ -53,6 +54,7 @@ from hermclaw.gitops.errors import (
     BaseBranchNotFound,
     CommitNotVerifiedError,
     GitCommandError,
+    GitLabError,
     NothingToCommitError,
     NothingToPushError,
     NotJobBranchError,
@@ -60,6 +62,7 @@ from hermclaw.gitops.errors import (
     WorkspaceNotFound,
     WorkspacePathViolation,
     WorkspaceStateError,
+    WorkspaceTamperedError,
 )
 from hermclaw.gitops.gitlab import GitLabClient
 from hermclaw.gitops.locks import KeyedLocks, combined_lock
@@ -239,6 +242,11 @@ class GitEngine:
         key = f"create-{job_id}-{repo.id}"
         return combined_lock(self._locks, key, self._lock_dir() / f"{key}.lock", wait_seconds=self.timeouts.lock_wait)
 
+    def _verification_lock(self, verification_run_id: uuid.UUID) -> contextlib.AbstractAsyncContextManager[None]:
+        """Serialises commits that cite the same verification run (a run may back exactly one commit)."""
+        key = f"vr-{verification_run_id}"
+        return combined_lock(self._locks, key, self._lock_dir() / f"{key}.lock", wait_seconds=self.timeouts.lock_wait)
+
     # ================================================================================== audit
     async def _record(self, rec: OpRecord, *, status: str, error: BaseException | None = None) -> None:
         """Record a failed/refused operation; never masks the original error."""
@@ -270,6 +278,7 @@ class GitEngine:
         async with self._mirror_lock(info):
             return await self._sync_mirror_locked(info, job_id=job_id)
 
+    clone = sync_mirror  # Bauplan §27 operation names: the first sync clones, later ones fetch
     fetch = sync_mirror
 
     async def _sync_mirror_locked(self, info: RepositoryInfo, *, job_id: uuid.UUID | None) -> Path:
@@ -427,7 +436,9 @@ class GitEngine:
                         )
                     remote_job_sha = await ops.rev_parse(self.runner, mirror, f"refs/heads/{branch}")
                     await self.runner.run(
-                        ["clone", "--quiet", "--origin", "origin", "--branch", base, "--", str(mirror), str(tmp)],
+                        # --no-hardlinks: the sandbox can write the workspace; it must never share object files
+                        # (inodes) with the mirror or other jobs' workspaces
+                        ["clone", "--quiet", "--no-hardlinks", "--origin", "origin", "--branch", base, "--", str(mirror), str(tmp)],
                         timeout_s=self.timeouts.network,
                     )
                 start = base_sha
@@ -447,7 +458,9 @@ class GitEngine:
                 raise
             rec.sha_before = base_sha
             rec.sha_after = start
-            rec.details.update({"base_sha": base_sha, "path": str(ws_path), "resumed_from_remote_branch": resumed})
+            rec.details.update(
+                {"base_sha": base_sha, "path": str(ws_path), "resumed_from_remote_branch": resumed, "remote_job_sha": remote_job_sha}
+            )
             try:
                 async with self._sm() as session:
                     row = Workspace(
@@ -477,8 +490,7 @@ class GitEngine:
         await self.runner.run(["config", "push.default", "nothing"], cwd=path)
         await self.runner.run(["config", "core.autocrlf", "false"], cwd=path)
         gdir = await ops.git_dir(self.runner, path)
-        lines = gitattributes_lines(self.policies.scope.always_forbidden)
-        await asyncio.to_thread(_fs.write_text, gdir / "info" / "attributes", "\n".join(lines) + "\n")
+        await asyncio.to_thread(_fs.write_text, gdir / "info" / "attributes", self._attributes_text())
 
     async def get_workspace(self, workspace_id: uuid.UUID) -> WorkspaceInfo:
         info, _repo, _path = await self._load(workspace_id, require_active=False)
@@ -501,7 +513,10 @@ class GitEngine:
         info, _repo, _path = await self._load(ws)
         return info.to_handle()
 
-    async def _load(self, ws: WorkspaceRef, *, require_active: bool = True) -> tuple[WorkspaceInfo, RepositoryInfo | None, Path]:
+    async def _load(
+        self, ws: WorkspaceRef, *, require_active: bool = True, verify: bool = True
+    ) -> tuple[WorkspaceInfo, RepositoryInfo | None, Path]:
+        """Row + repository + path. ``require_active`` also demands a usable work tree whose git metadata is intact."""
         ws_id = ws if isinstance(ws, uuid.UUID) else ws.id
         async with self._sm() as session:
             row = await session.get(Workspace, ws_id)
@@ -518,7 +533,53 @@ class GitEngine:
                 raise WorkspaceStateError(f"workspace is {info.status}", details={"workspace_id": str(info.id), "status": info.status})
             if not await ops.is_work_tree(self.runner, path):
                 raise WorkspaceStateError("workspace directory is missing or not a git work tree", details={"workspace_id": str(info.id)})
+            if verify:
+                await self._verify_integrity(info, path)
         return info, repo, path
+
+    @contextlib.asynccontextmanager
+    async def _locked(
+        self, ws: WorkspaceRef, *, require_active: bool = True
+    ) -> AsyncIterator[tuple[WorkspaceInfo, RepositoryInfo | None, Path]]:
+        """Workspace lock + a fresh load *inside* the lock (a concurrent cleanup/update may have changed the row)."""
+        first, _repo, _path = await self._load(ws, require_active=False)
+        async with self._workspace_lock(first.id):
+            yield await self._load(first.id, require_active=require_active)
+
+    def _attributes_text(self) -> str:
+        return "\n".join(gitattributes_lines(self.policies.scope.always_forbidden)) + "\n"
+
+    async def _verify_integrity(self, info: WorkspaceInfo, path: Path) -> None:
+        """Refuse workspaces whose ``.git`` was modified outside the runtime; re-assert the ``-diff`` attributes."""
+        problems = await ops.integrity_problems(self.runner, path)
+        if problems:
+            err = WorkspaceTamperedError(
+                "workspace git metadata was modified outside the runtime; refusing to run git in it",
+                details={"workspace_id": str(info.id), "problems": _cap(problems, 20)},
+            )
+            rec = OpRecord(
+                operation="workspace.integrity",
+                job_id=info.job_id,
+                workspace_id=info.id,
+                ref=info.branch,
+                details={"problems": _cap(problems, 20)},
+            )
+            await self._record(rec, status="refused", error=err)
+            raise err
+        attributes = path / ".git" / "info" / "attributes"
+        expected = self._attributes_text()
+        if await asyncio.to_thread(_fs.read_text, attributes) != expected:
+            await asyncio.to_thread(_fs.write_text_nofollow, attributes, expected)
+            rec = OpRecord(
+                operation="workspace.attributes",
+                job_id=info.job_id,
+                workspace_id=info.id,
+                ref=info.branch,
+                details={"repaired": True, "lines": expected.count("\n")},
+            )
+            async with self._sm() as session:
+                await write_audit(session, rec, status="ok")
+                await session.commit()
 
     async def _assert_on_branch(self, info: WorkspaceInfo, path: Path) -> None:
         busy = await ops.operations_in_progress(self.runner, path)
@@ -596,8 +657,7 @@ class GitEngine:
         Out-of-scope, forbidden and ``always_forbidden`` paths stay untouched in the working tree and are
         reported in ``refused`` (plus a ``scope.violation`` event). Nothing outside the scope is ever staged.
         """
-        info, _repo, path = await self._load(ws)
-        async with self._workspace_lock(info.id):
+        async with self._locked(ws) as (info, _repo, path):
             rec = OpRecord(
                 operation="stage",
                 job_id=info.job_id,
@@ -665,13 +725,15 @@ class GitEngine:
                             job_id=info.job_id,
                             step_id=step_id,
                             severity=Severity.warning,
-                            payload={
-                                "workspace_id": str(info.id),
-                                "phase": "stage",
-                                "scope_version": scope.version,
-                                "refused": rec.details["refused"],
-                                "refused_count": len(refused),
-                            },
+                            payload=DEFAULT_REDACTOR.obj(
+                                {
+                                    "workspace_id": str(info.id),
+                                    "phase": "stage",
+                                    "scope_version": scope.version,
+                                    "refused": rec.details["refused"],
+                                    "refused_count": len(refused),
+                                }
+                            ),
                         )
                     await session.commit()
                 return StageResult(staged=staged, refused=refused)
@@ -693,8 +755,7 @@ class GitEngine:
         already used for a commit, or did not cover a staged path. ``always_forbidden`` paths (and, if
         ``scope`` is given, any out-of-scope path) in the index are refused as scope violations.
         """
-        info, _repo, path = await self._load(ws)
-        async with self._workspace_lock(info.id):
+        async with self._locked(ws) as (info, _repo, path), self._verification_lock(verification_run_id):
             rec = OpRecord(
                 operation="commit",
                 job_id=info.job_id,
@@ -738,6 +799,8 @@ class GitEngine:
                     row.status = "committed"
                     op_row = await write_audit(session, rec, status="ok")
                     await session.commit()
+                # the run is used now; later waiters re-check inside the lock, so the lock file can go
+                await asyncio.to_thread(_fs.remove_file, self._lock_dir() / f"vr-{verification_run_id}.lock")
                 return CommitResult(
                     sha=new_sha,
                     parent_sha=parent,
@@ -777,6 +840,9 @@ class GitEngine:
                 ).first()
                 if used is not None:
                     problems.append("verification run was already used for a commit")
+                state_since = await self._workspace_state_since(session, info.id)
+                if state_since is not None and run.created_at < state_since:
+                    problems.append("verification run predates the current workspace state (workspace created or rebased after it)")
                 verified = _verified_paths(run.changed_files)
         if problems:
             raise CommitNotVerifiedError(
@@ -784,6 +850,23 @@ class GitEngine:
                 details={"verification_run_id": str(verification_run_id), "problems": problems},
             )
         return verified
+
+    @staticmethod
+    async def _workspace_state_since(session: AsyncSession, workspace_id: uuid.UUID) -> datetime | None:
+        """When the runtime last replaced the workspace content wholesale (creation or a base update)."""
+        row = await session.get(Workspace, workspace_id)
+        created = row.created_at if row is not None else None
+        updated = (
+            await session.execute(
+                select(func.max(GitOperation.created_at)).where(
+                    GitOperation.workspace_id == workspace_id,
+                    GitOperation.operation.in_(("base.rebase", "base.merge")),
+                    GitOperation.status == "ok",
+                )
+            )
+        ).scalar_one_or_none()
+        candidates = [t for t in (created, updated) if t is not None]
+        return max(candidates) if candidates else None
 
     async def _staged_changes(self, path: Path) -> dict[str, Operation]:
         res = await self.runner.run(["diff", "--cached", "--name-status", "--no-renames", "-z", "HEAD"], cwd=path)
@@ -817,22 +900,24 @@ class GitEngine:
         """Push the workspace's job branch (and nothing else) to the upstream; optionally open a GitLab MR.
 
         Protected branches (repository row, default branch, ``policies.git.protected_branches`` – fnmatch
-        globs) are refused locally before any network access (``PROTECTED_BRANCH``). Updates use
-        ``--force-with-lease`` against the remote SHA seen just before the push, so a rebased job branch can be
-        updated but foreign updates are never overwritten.
+        globs) are refused locally before any network access (``PROTECTED_BRANCH``). The push goes to the
+        registered repository URL (never a workspace-configured remote) with ``--force-with-lease`` pinned to
+        the remote SHA seen just before the push. A non-fast-forward update (rebased job branch) is only
+        allowed when that remote SHA is one the runtime itself pushed for this job or saw when it created the
+        workspace – commits someone else added to the job branch are never overwritten (``PUSH_REJECTED``).
         """
-        info, repo, path = await self._load(ws)
-        if repo is None:
-            raise WorkspaceStateError("workspace has no repository", details={"workspace_id": str(info.id)})
-        ref = f"refs/heads/{info.branch}"
-        async with self._workspace_lock(info.id):
+        async with self._locked(ws) as (info, repo, path):
+            if repo is None:
+                raise WorkspaceStateError("workspace has no repository", details={"workspace_id": str(info.id)})
+            ref = f"refs/heads/{info.branch}"
+            url = repo.url
             rec = OpRecord(
                 operation="push",
                 job_id=info.job_id,
                 workspace_id=info.id,
                 ref=ref,
                 event_type=EventType.GIT_PUSHED,
-                details={"repository": repo.name, "branch": info.branch, "url": strip_userinfo(repo.url)},
+                details={"repository": repo.name, "branch": info.branch, "url": strip_userinfo(url)},
             )
             async with self._audited(rec):
                 self.assert_pushable(repo, info.branch, base_branch=info.base_branch)
@@ -845,14 +930,19 @@ class GitEngine:
                     bs = await self._check_base_locked(info, repo, path, fetch=True)
                     if bs.stale:
                         raise self._stale_error(info, bs)
-                remote_before = await ops.ls_remote_head(self.runner, path, "origin", info.branch)
+                remote_before = await ops.ls_remote_head(self.runner, path, url, info.branch, timeout_s=self.timeouts.network)
                 rec.sha_before = remote_before
                 up_to_date = remote_before == head
                 forced = False
                 if not up_to_date:
+                    if remote_before is not None and not await self._may_replace(info, path, remote_before, head):
+                        raise PushRejectedError(
+                            f"remote job branch '{info.branch}' has commits the runtime did not push; refusing to overwrite them",
+                            details={"branch": info.branch, "reason": "foreign_commits", "remote_sha": remote_before, "head_sha": head},
+                        )
                     lease = f"--force-with-lease={ref}:{remote_before or ''}"
                     res = await self.runner.run(
-                        ["push", "--porcelain", "--no-verify", lease, "origin", f"{ref}:{ref}"],
+                        ["push", "--porcelain", "--no-verify", lease, url, f"{ref}:{ref}"],
                         cwd=path,
                         check=False,
                         timeout_s=self.timeouts.network,
@@ -895,6 +985,43 @@ class GitEngine:
             merge_request_error=mr_error,
         )
 
+    async def _known_remote_shas(self, info: WorkspaceInfo) -> set[str]:
+        """Remote job-branch SHAs the runtime is entitled to replace: its own pushes of this ref for this job
+        (any workspace of the job) and the remote tip it saw when this workspace was created."""
+        ref = f"refs/heads/{info.branch}"
+        async with self._sm() as session:
+            pushed = (
+                await session.execute(
+                    select(GitOperation.sha_after).where(
+                        GitOperation.job_id == info.job_id,
+                        GitOperation.operation == "push",
+                        GitOperation.status == "ok",
+                        GitOperation.ref == ref,
+                    )
+                )
+            ).scalars()
+            known = {sha for sha in pushed if sha}
+            created = (
+                await session.execute(
+                    select(GitOperation.details).where(
+                        GitOperation.workspace_id == info.id,
+                        GitOperation.operation == "workspace.create",
+                        GitOperation.status == "ok",
+                    )
+                )
+            ).scalars()
+            for details in created:
+                seen = (details or {}).get("remote_job_sha")
+                if isinstance(seen, str) and ops.is_sha(seen):
+                    known.add(seen)
+        return known
+
+    async def _may_replace(self, info: WorkspaceInfo, path: Path, remote_sha: str, head: str) -> bool:
+        """True if updating the remote job branch from ``remote_sha`` to ``head`` loses no foreign commits."""
+        if await ops.has_commit(self.runner, path, remote_sha) and await ops.is_ancestor(self.runner, path, remote_sha, head):
+            return True  # fast-forward
+        return remote_sha in await self._known_remote_shas(info)
+
     def assert_pushable(self, repo: RepositoryInfo, branch: str, *, base_branch: str | None = None) -> None:
         """Local push policy: never a protected branch, never the base branch, only ``branch_prefix`` branches."""
         validate_branch_name(branch)
@@ -910,6 +1037,25 @@ class GitEngine:
             raise NotJobBranchError(
                 f"only job branches ('{prefix}*') may be pushed, not '{branch}'", details={"branch": branch, "prefix": prefix}
             )
+
+    async def create_merge_request(self, ws: WorkspaceRef, *, title: str | None = None, description: str | None = None) -> MergeRequestInfo:
+        """Open (or reuse – duplicate detection) the GitLab merge request job branch -> base branch.
+
+        Only for a pushed workspace; :meth:`push_job_branch` does this automatically when
+        ``policies.git.create_merge_request`` (or its ``create_merge_request`` argument) is set.
+        """
+        info, repo, _path = await self._load(ws)
+        if repo is None:
+            raise WorkspaceStateError("workspace has no repository", details={"workspace_id": str(info.id)})
+        if info.status != "pushed" or not info.head_sha:
+            raise WorkspaceStateError(
+                "push the job branch before opening a merge request", details={"workspace_id": str(info.id), "status": info.status}
+            )
+        self.assert_pushable(repo, info.branch, base_branch=info.base_branch)
+        mr, error = await self._ensure_merge_request(info, repo, info.head_sha, title=title, description=description)
+        if mr is None:
+            raise GitLabError(f"merge request not created: {error}", details={"workspace_id": str(info.id), "reason": error})
+        return mr
 
     async def _ensure_merge_request(
         self, info: WorkspaceInfo, repo: RepositoryInfo, head: str, *, title: str | None, description: str | None
@@ -964,17 +1110,17 @@ class GitEngine:
     # ================================================================================== 6.11 stale base detection
     async def check_base(self, ws: WorkspaceRef, *, fetch: bool = True) -> BaseStatus:
         """Compare the workspace's ``base_sha`` with the upstream base branch (fetching the mirror first)."""
-        info, repo, path = await self._load(ws)
-        if repo is None:
-            raise WorkspaceStateError("workspace has no repository", details={"workspace_id": str(info.id)})
-        async with self._workspace_lock(info.id):
+        async with self._locked(ws) as (info, repo, path):
+            if repo is None:
+                raise WorkspaceStateError("workspace has no repository", details={"workspace_id": str(info.id)})
             return await self._check_base_locked(info, repo, path, fetch=fetch)
+        raise AssertionError("unreachable")  # pragma: no cover
 
     async def ensure_base_current(self, ws: WorkspaceRef, *, fetch: bool = True) -> BaseStatus:
         """Raise :class:`StaleBaseError` (recorded as refused ``base.check``) if the upstream base moved."""
         bs = await self.check_base(ws, fetch=fetch)
         if bs.stale:
-            info, _repo, _path = await self._load(ws)
+            info, _repo, _path = await self._load(ws, require_active=False)
             err = self._stale_error(info, bs)
             rec = OpRecord(
                 operation="base.check",
@@ -1058,10 +1204,9 @@ class GitEngine:
         """
         if strategy not in ("rebase", "merge"):
             raise ValidationFailed(f"unknown update strategy {strategy!r}")
-        info, repo, path = await self._load(ws)
-        if repo is None:
-            raise WorkspaceStateError("workspace has no repository", details={"workspace_id": str(info.id)})
-        async with self._workspace_lock(info.id):
+        async with self._locked(ws) as (info, repo, path):
+            if repo is None:
+                raise WorkspaceStateError("workspace has no repository", details={"workspace_id": str(info.id)})
             bs = await self._check_base_locked(info, repo, path, fetch=fetch)
             head = await ops.head_sha(self.runner, path)
             if not bs.stale:
@@ -1121,6 +1266,8 @@ class GitEngine:
                         raise WorkspaceNotFound(f"workspace {info.id} vanished")
                     row.base_sha = bs.remote_sha
                     row.head_sha = new_head
+                    if row.status == "pushed" and new_head != head:
+                        row.status = "committed"  # the rewritten job branch is not on the remote yet
                     op_row = await write_audit(session, rec, status="ok")
                     await session.commit()
                 return UpdateResult(
@@ -1195,8 +1342,7 @@ class GitEngine:
 
     async def recover(self, ws: WorkspaceRef) -> RecoveryResult:
         """Crash recovery: abort interrupted rebase/merge/cherry-pick, back to the job branch tip."""
-        info, _repo, path = await self._load(ws)
-        async with self._workspace_lock(info.id):
+        async with self._locked(ws) as (info, _repo, path):
             rec = OpRecord(operation="workspace.recover", job_id=info.job_id, workspace_id=info.id, ref=info.branch)
             async with self._audited(rec):
                 actions: list[str] = []
@@ -1225,12 +1371,12 @@ class GitEngine:
     async def cleanup(self, ws: WorkspaceRef, *, force: bool = False) -> WorkspaceInfo:
         """Remove the workspace directory and mark the row ``cleaned`` (idempotent).
 
-        Refuses (``WORKSPACE_STATE``) if the job branch has commits that were never pushed, unless ``force``.
+        Refuses (``WORKSPACE_STATE``) if the job branch has verified commits that were never pushed, unless
+        ``force``. A workspace whose git metadata was tampered with is removed without running git in it.
         """
-        info, _repo, path = await self._load(ws, require_active=False)
-        if info.status == "cleaned":
-            return info
-        async with self._workspace_lock(info.id):
+        async with self._locked(ws, require_active=False) as (info, _repo, path):
+            if info.status == "cleaned":
+                return info
             rec = OpRecord(
                 operation="workspace.cleanup",
                 job_id=info.job_id,
@@ -1241,15 +1387,18 @@ class GitEngine:
             )
             async with self._audited(rec):
                 present = await ops.is_work_tree(self.runner, path)
+                if present and info.status == "committed" and not force:
+                    raise WorkspaceStateError(
+                        "workspace has verified commits that were never pushed (use force=True to discard)",
+                        details={"workspace_id": str(info.id), "head_sha": info.head_sha},
+                    )
                 if present:
-                    head = await ops.head_sha(self.runner, path)
-                    entries = await ops.read_status(self.runner, path)
-                    rec.details.update({"head_sha": head, "uncommitted_changes": len(entries)})
-                    if info.status == "committed" and not force:
-                        raise WorkspaceStateError(
-                            "workspace has verified commits that were never pushed (use force=True to discard)",
-                            details={"workspace_id": str(info.id), "head_sha": head},
-                        )
+                    problems = await ops.integrity_problems(self.runner, path)
+                    if problems:
+                        rec.details["integrity_problems"] = _cap(problems, 20)
+                    else:
+                        entries = await ops.read_status(self.runner, path)
+                        rec.details.update({"head_sha": await ops.head_sha(self.runner, path), "uncommitted_changes": len(entries)})
                 await asyncio.to_thread(_fs.remove_tree, path)
                 await asyncio.to_thread(_fs.remove_dir_if_empty, path.parent)
                 async with self._sm() as session:
@@ -1260,6 +1409,7 @@ class GitEngine:
                     await write_audit(session, rec, status="ok")
                     await session.commit()
                     cleaned = WorkspaceInfo.from_row(row, repository_name=info.repository_name)
+        # safe to drop: every operation re-reads the row inside the lock and refuses a cleaned workspace
         await asyncio.to_thread(_fs.remove_file, self._lock_dir() / f"ws-{info.id}.lock")
         return cleaned
 

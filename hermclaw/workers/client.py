@@ -18,13 +18,22 @@ from __future__ import annotations
 
 import asyncio
 import json
+import re
 from collections.abc import Callable, Mapping, Sequence
 from typing import Any, Self, TypeVar
 
 import httpx
 from pydantic import BaseModel, ValidationError
 
-from hermclaw.contracts.worker import CommandRequest, CommandResult, GpuInfo, LoadedModel, ModelLoadRequest, WorkspaceSyncManifest
+from hermclaw.contracts.worker import (
+    WORKER_PROTOCOL_VERSION,
+    CommandRequest,
+    CommandResult,
+    GpuInfo,
+    LoadedModel,
+    ModelLoadRequest,
+    WorkspaceSyncManifest,
+)
 from hermclaw.core.errors import HermclawError
 from hermclaw.workers.auth import TokenStore, WorkerRequestSigner
 from hermclaw.workers.errors import (
@@ -36,6 +45,7 @@ from hermclaw.workers.errors import (
     WorkerUnreachable,
 )
 from hermclaw.workers.schemas import (
+    WORKSPACE_ID_PATTERN,
     CommandStatus,
     DaemonHealth,
     DeletePathsRequest,
@@ -56,6 +66,21 @@ M = TypeVar("M", bound=BaseModel)
 RETRY_STATUSES = frozenset({502, 503, 504})
 COMMAND_TIMEOUT_MARGIN_SECONDS = 30.0
 TAR_CONTENT_TYPE = "application/x-tar"
+_WORKSPACE_ID_RE = re.compile(WORKSPACE_ID_PATTERN)
+_REQUEST_ID_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._:-]{0,199}$")
+
+
+def _workspace_segment(workspace: str) -> str:
+    """Validate a workspace id before it becomes a URL path segment (httpx would normalize ``..``)."""
+    if not _WORKSPACE_ID_RE.fullmatch(workspace):
+        raise ValueError(f"invalid workspace id {workspace[:80]!r} (expected {WORKSPACE_ID_PATTERN})")
+    return workspace
+
+
+def _request_id_segment(request_id: str) -> str:
+    if not _REQUEST_ID_RE.fullmatch(request_id):
+        raise ValueError(f"request_id {request_id[:80]!r} cannot be addressed in a URL path")
+    return request_id
 
 
 class WorkerClient:
@@ -72,7 +97,7 @@ class WorkerClient:
         get_retries: int = 2,
         retry_backoff_seconds: float = 0.5,
         transport: httpx.AsyncBaseTransport | None = None,
-        include_bearer: bool = True,
+        include_bearer: bool | None = None,
     ) -> None:
         self.base_url = base_url.rstrip("/")
         self.worker_id = worker_id
@@ -197,6 +222,24 @@ class WorkerClient:
     async def health(self) -> DaemonHealth:
         return self._parse(await self._request("GET", "/health"), DaemonHealth)
 
+    async def ensure_compatible(self) -> DaemonHealth:
+        """Version compatibility in the orchestrator -> daemon direction (7.9): the daemon must speak
+        :data:`WORKER_PROTOCOL_VERSION` and identify as the worker this client is bound to."""
+        h = await self.health()
+        if h.protocol_version != WORKER_PROTOCOL_VERSION:
+            raise WorkerProtocolError(
+                f"worker {self.worker_id} speaks protocol_version {h.protocol_version}, expected {WORKER_PROTOCOL_VERSION}",
+                code="WORKER_INCOMPATIBLE",
+                details={"expected": WORKER_PROTOCOL_VERSION, "got": h.protocol_version, "worker_version": h.worker_version},
+            )
+        if h.worker_id != self.worker_id:
+            raise WorkerProtocolError(
+                f"daemon at {self.base_url} identifies as '{h.worker_id}', expected '{self.worker_id}'",
+                code="WORKER_IDENTITY_MISMATCH",
+                details={"expected": self.worker_id, "got": h.worker_id},
+            )
+        return h
+
     async def selftest(self, request: SelftestRequest | None = None, *, timeout_seconds: float | None = 300.0) -> SelftestResult:
         body = (request or SelftestRequest()).model_dump(mode="json")
         return self._parse(await self._request("POST", "/v1/selftest", json_body=body, timeout_seconds=timeout_seconds), SelftestResult)
@@ -212,7 +255,7 @@ class ExecutionWorkerClient(WorkerClient):
             raise ValueError("mode must be 'replace' or 'merge'")
         resp = await self._request(
             "PUT",
-            f"/v1/workspaces/{workspace}",
+            f"/v1/workspaces/{_workspace_segment(workspace)}",
             content=tar_bytes,
             params={"mode": mode},
             headers={"Content-Type": TAR_CONTENT_TYPE},
@@ -224,27 +267,30 @@ class ExecutionWorkerClient(WorkerClient):
         self, workspace: str, *, paths: Sequence[str] | None = None, timeout_seconds: float | None = 600.0
     ) -> bytes:
         params = [("paths", p) for p in paths] if paths else None
-        resp = await self._request("GET", f"/v1/workspaces/{workspace}/archive", params=params, timeout_seconds=timeout_seconds)
+        path = f"/v1/workspaces/{_workspace_segment(workspace)}/archive"
+        resp = await self._request("GET", path, params=params, timeout_seconds=timeout_seconds)
         ctype = resp.headers.get("content-type", "")
         if not ctype.startswith(TAR_CONTENT_TYPE):
             raise WorkerProtocolError(f"worker {self.worker_id}: expected a tar archive, got '{ctype}'")
         return resp.content
 
     async def workspace_manifest(self, workspace: str) -> WorkspaceSyncManifest:
-        return self._parse(await self._request("GET", f"/v1/workspaces/{workspace}/manifest"), WorkspaceSyncManifest)
+        return self._parse(await self._request("GET", f"/v1/workspaces/{_workspace_segment(workspace)}/manifest"), WorkspaceSyncManifest)
 
     async def workspace_info(self, workspace: str) -> WorkspaceInfo:
-        return self._parse(await self._request("GET", f"/v1/workspaces/{workspace}"), WorkspaceInfo)
+        return self._parse(await self._request("GET", f"/v1/workspaces/{_workspace_segment(workspace)}"), WorkspaceInfo)
 
     async def delete_paths(self, workspace: str, paths: Sequence[str]) -> DeletePathsResult:
         body = DeletePathsRequest(paths=list(paths)).model_dump(mode="json")
-        return self._parse(await self._request("POST", f"/v1/workspaces/{workspace}/delete", json_body=body), DeletePathsResult)
+        path = f"/v1/workspaces/{_workspace_segment(workspace)}/delete"
+        return self._parse(await self._request("POST", path, json_body=body), DeletePathsResult)
 
     async def delete_workspace(self, workspace: str) -> WorkspaceInfo:
-        return self._parse(await self._request("DELETE", f"/v1/workspaces/{workspace}"), WorkspaceInfo)
+        return self._parse(await self._request("DELETE", f"/v1/workspaces/{_workspace_segment(workspace)}"), WorkspaceInfo)
 
     async def run_command(self, request: CommandRequest) -> CommandResult:
         """Run a sandboxed command; the HTTP timeout is the command timeout plus a safety margin."""
+        _workspace_segment(request.workspace)
         http_timeout = float(request.timeout_seconds) + COMMAND_TIMEOUT_MARGIN_SECONDS
         body = request.model_dump(mode="json")
         resp = await self._request("POST", "/v1/commands", json_body=body, timeout_seconds=http_timeout)
@@ -255,7 +301,7 @@ class ExecutionWorkerClient(WorkerClient):
 
     async def command_status(self, request_id: str) -> CommandStatus | None:
         """Status of an earlier command (e.g. after a dropped connection). ``None`` if unknown."""
-        resp = await self._request("GET", f"/v1/commands/{request_id}", accept_statuses=(404,))
+        resp = await self._request("GET", f"/v1/commands/{_request_id_segment(request_id)}", accept_statuses=(404,))
         if resp.status_code == 404:
             return None
         return self._parse(resp, CommandStatus)

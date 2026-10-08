@@ -123,6 +123,69 @@ def detect_test_command(inputs: PlannerInput) -> tuple[str | None, TestFramework
     return None, "generic"
 
 
+_FILE_EXTENSIONS_TEXT = """py pyi pyx ipynb js mjs cjs jsx ts tsx mts cts vue svelte astro php phtml inc rb erb go rs java
+    kt kts scala groovy
+    c h cc cpp cxx hpp hh cs fs swift m mm sh bash zsh fish ps1 bat cmd sql psql html htm css scss sass less styl
+    json jsonc json5 yaml yml toml ini cfg conf env xml xsd md mdx rst txt adoc lock gradle properties tf tfvars hcl
+    j2 jinja jinja2 twig blade tpl mustache hbs service timer socket mount target dockerfile containerfile csv tsv
+    svg png jpg jpeg gif webp ico mp4 webm proto graphql gql mod sum neon dist pem crt key pub log patch diff
+"""
+FILE_EXTENSIONS = frozenset(_FILE_EXTENSIONS_TEXT.split())
+# Conventional file names without extension (generic tooling conventions, not repository-specific).
+WELL_KNOWN_FILENAMES = frozenset(
+    {
+        "Makefile",
+        "GNUmakefile",
+        "Dockerfile",
+        "Containerfile",
+        "Jenkinsfile",
+        "Vagrantfile",
+        "Procfile",
+        "Gemfile",
+        "Rakefile",
+        "Brewfile",
+        "Justfile",
+        "Caddyfile",
+        "LICENSE",
+        "README",
+        "CHANGELOG",
+        "CODEOWNERS",
+    }
+)
+GLOB_CHARS = frozenset("*?[")
+MAX_KNOWN_PATHS = 50_000
+_MAX_HARVEST_DEPTH = 12
+
+
+def has_file_shape(name: str) -> bool:
+    """``name`` (last path segment) looks like a file: known extension, dotfile or conventional file name."""
+    if not name:
+        return False
+    if name in WELL_KNOWN_FILENAMES or (name.startswith(".") and len(name) > 1):
+        return True
+    return "." in name and name.rsplit(".", 1)[-1].lower() in FILE_EXTENSIONS
+
+
+def clean_repo_path(raw: str) -> str | None:
+    """Normalised repository-relative path, or ``None`` if ``raw`` cannot be one (absolute, '..', blanks, URL)."""
+    p = raw.strip().replace("\\", "/")
+    while p.startswith("./"):
+        p = p[2:]
+    if not p or p.startswith(("/", "~")) or "://" in p or len(p) > 400 or any(c.isspace() for c in p):
+        return None
+    if ".." in p.split("/"):
+        return None
+    return p
+
+
+def looks_like_repo_path(raw: str) -> bool:
+    """Shape test for path-like strings found anywhere in the inventory (no globs, no prose, no URLs)."""
+    p = clean_repo_path(raw)
+    if p is None or any(c in GLOB_CHARS for c in p):
+        return False
+    return "/" in p or has_file_shape(p)
+
+
 def _paths_from(value: Any) -> list[str]:
     out: list[str] = []
     if isinstance(value, list):
@@ -134,22 +197,48 @@ def _paths_from(value: Any) -> list[str]:
     return out
 
 
+def _harvest(value: Any, out: list[str], depth: int = 0) -> None:
+    """Every path-shaped string (values and keys) of a JSON-like value, depth- and size-bounded."""
+    if len(out) >= MAX_KNOWN_PATHS or depth > _MAX_HARVEST_DEPTH:
+        return
+    if isinstance(value, str):
+        if looks_like_repo_path(value):
+            out.append(value)
+    elif isinstance(value, dict):
+        for key, item in value.items():
+            if isinstance(key, str) and looks_like_repo_path(key):
+                out.append(key)
+            _harvest(item, out, depth + 1)
+    elif isinstance(value, list | tuple):
+        for item in value:
+            _harvest(item, out, depth + 1)
+
+
 def collect_known_paths(inputs: PlannerInput) -> list[str]:
-    """All repository paths the planner may legitimately reference (inventory + context + explicit list)."""
-    seen: dict[str, None] = {}
+    """All repository paths the planner may legitimately reference.
+
+    The prompt allows paths that appear in ``repository_inventory``, ``retrieved_context`` or ``existing_tests``,
+    so the same sources ground ``repo_hints``: the explicit list, the inventory's ``files``/``paths`` lists
+    (taken as-is), every other path-shaped string of the inventory, context snippet paths and test files
+    (``tests/test_x.py::test_y`` counts as ``tests/test_x.py``).
+    """
+    harvested: list[str] = []
+    _harvest({k: v for k, v in inputs.repository_inventory.items() if k not in ("files", "paths")}, harvested)
     candidates = [
         *inputs.known_paths,
         *_paths_from(inputs.repository_inventory.get("files")),
         *_paths_from(inputs.repository_inventory.get("paths")),
+        *harvested,
         *(s.path for s in inputs.retrieved_context),
-        *(t for t in inputs.existing_tests if "/" in t or "." in t),
+        *(t.split("::", 1)[0] for t in inputs.existing_tests if "/" in t or "." in t),
     ]
+    seen: dict[str, None] = {}
     for raw in candidates:
-        p = raw.strip().replace("\\", "/")
-        while p.startswith("./"):
-            p = p[2:]
-        if p and not p.startswith("/") and ".." not in p.split("/") and " " not in p:
+        p = clean_repo_path(raw)
+        if p is not None:
             seen.setdefault(p, None)
+            if len(seen) >= MAX_KNOWN_PATHS:
+                break
     return list(seen)
 
 

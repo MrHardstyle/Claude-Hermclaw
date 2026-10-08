@@ -14,10 +14,11 @@ from hermclaw.gitops.errors import GitLockTimeout
 
 
 class KeyedLocks:
-    """One :class:`asyncio.Lock` per key (mirror path, workspace id)."""
+    """One :class:`asyncio.Lock` per key (mirror path, workspace id); entries are dropped when nobody uses them."""
 
     def __init__(self) -> None:
         self._locks: dict[str, asyncio.Lock] = {}
+        self._users: dict[str, int] = {}
 
     def get(self, key: str) -> asyncio.Lock:
         lock = self._locks.get(key)
@@ -25,6 +26,32 @@ class KeyedLocks:
             lock = asyncio.Lock()
             self._locks[key] = lock
         return lock
+
+    def __len__(self) -> int:
+        return len(self._locks)
+
+    @contextlib.asynccontextmanager
+    async def hold(self, key: str, *, wait_seconds: float) -> AsyncIterator[None]:
+        lock = self.get(key)
+        self._users[key] = self._users.get(key, 0) + 1
+        try:
+            try:
+                await asyncio.wait_for(lock.acquire(), timeout=wait_seconds)
+            except TimeoutError as exc:
+                raise GitLockTimeout(
+                    f"timed out waiting for in-process lock {key}", details={"lock": key, "timeout": wait_seconds}
+                ) from exc
+            try:
+                yield
+            finally:
+                lock.release()
+        finally:
+            remaining = self._users[key] - 1
+            if remaining:
+                self._users[key] = remaining
+            else:
+                del self._users[key]
+                self._locks.pop(key, None)
 
 
 def _open_lock_file(path: Path) -> int:
@@ -60,13 +87,6 @@ async def file_lock(path: Path, *, wait_seconds: float = 300.0, poll: float = 0.
 
 @contextlib.asynccontextmanager
 async def combined_lock(locks: KeyedLocks, key: str, lock_file: Path, *, wait_seconds: float = 300.0) -> AsyncIterator[None]:
-    lock = locks.get(key)
-    try:
-        await asyncio.wait_for(lock.acquire(), timeout=wait_seconds)
-    except TimeoutError as exc:
-        raise GitLockTimeout(f"timed out waiting for in-process lock {key}", details={"lock": key, "timeout": wait_seconds}) from exc
-    try:
-        async with file_lock(lock_file, wait_seconds=wait_seconds):
-            yield
-    finally:
-        lock.release()
+    """In-process lock first (cheap, fair), then the cross-process ``flock``."""
+    async with locks.hold(key, wait_seconds=wait_seconds), file_lock(lock_file, wait_seconds=wait_seconds):
+        yield

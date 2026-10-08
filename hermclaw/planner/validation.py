@@ -19,6 +19,7 @@ from hermclaw.contracts.acceptance import (
     AbsenceEvidence,
     AcceptanceCriterion,
     CommandEvidence,
+    DiffEvidence,
     PresenceEvidence,
     SchemaEvidence,
     TestEvidence,
@@ -28,12 +29,14 @@ from hermclaw.contracts.plan import PlanContract, PlanStep, ResearchRequest
 from hermclaw.contracts.scope import normalise_path
 from hermclaw.core.config import HermclawConfig
 from hermclaw.planner.inputs import (
+    GLOB_CHARS,
     PlannerInput,
     PlannerSettings,
     TestFramework,
     collect_known_paths,
     collect_known_symbols,
     detect_test_command,
+    has_file_shape,
 )
 from hermclaw.scope.guard import any_match, path_matches
 
@@ -46,15 +49,6 @@ CHECKING_KINDS = frozenset({StepKind.review.value, StepKind.verify.value})
 SUBSTANTIVE_EVIDENCE = frozenset({"presence", "absence", "command", "test", "diff", "schema", "artifact"})
 CONTRACT_MAX_STEPS = 60
 
-_GLOB_CHARS = frozenset("*?[")
-_FILE_EXTENSIONS_TEXT = """py pyi pyx ipynb js mjs cjs jsx ts tsx mts cts vue svelte astro php phtml inc rb erb go rs java
-    kt kts scala groovy
-    c h cc cpp cxx hpp hh cs fs swift m mm sh bash zsh fish ps1 bat cmd sql psql html htm css scss sass less styl
-    json jsonc json5 yaml yml toml ini cfg conf env xml xsd md mdx rst txt adoc lock gradle properties tf tfvars hcl
-    j2 jinja jinja2 twig blade tpl mustache hbs service timer socket mount target dockerfile containerfile csv tsv
-    svg png jpg jpeg gif webp ico mp4 webm proto graphql gql mod sum neon dist pem crt key pub log patch diff
-"""
-_FILE_EXTENSIONS = frozenset(_FILE_EXTENSIONS_TEXT.split())
 _SYMBOL_RE = re.compile(r"^[A-Za-z_$][\w$]*(?:(?:\.|::|#|->|\\)[A-Za-z_$][\w$]*)*(?:\(\))?$")
 _WS_RE = re.compile(r"\s+")
 _PUNCT_RE = re.compile(r"[^\w\s]")
@@ -137,15 +131,18 @@ class ValidationContext:
     def research_capability(self) -> str | None:
         return self.kind_capability.get(StepKind.research.value)
 
+    @property
+    def network_capabilities(self) -> tuple[str, ...]:
+        return tuple(c for c in self.available_capabilities if self.capability_network.get(c, False))
+
     # ------------------------------------------------------------------ hint helpers
     def classify_hint(self, hint: str) -> HintKind:
         h = hint.strip()
         if not h:
             return "invalid"
-        if "/" in h or "\\" in h or any(c in _GLOB_CHARS for c in h) or h in self._known_set or h in self._known_dirs:
+        if "/" in h or "\\" in h or any(c in GLOB_CHARS for c in h) or h in self._known_set or h in self._known_dirs:
             return "path"
-        ext = h.rsplit(".", 1)[-1].lower() if "." in h else ""
-        if ext in _FILE_EXTENSIONS or h.startswith("."):
+        if has_file_shape(h):
             return "path"
         if _SYMBOL_RE.match(h):
             return "symbol"
@@ -153,7 +150,7 @@ class ValidationContext:
 
     def path_exists(self, path: str) -> bool:
         """True when ``path`` (file, directory or glob) matches at least one known repository path."""
-        if any(c in _GLOB_CHARS for c in path):
+        if any(c in GLOB_CHARS for c in path):
             return any(path_matches(k, path) for k in self.known_paths)
         if path.endswith("/"):
             return path.rstrip("/") in self._known_dirs
@@ -161,6 +158,16 @@ class ValidationContext:
 
     def is_known_dir(self, path: str) -> bool:
         return path.rstrip("/") in self._known_dirs
+
+    def matching_known_paths(self, pattern: str, *, limit: int) -> set[str]:
+        """Known repository paths matched by a glob or directory pattern (at most ``limit``)."""
+        out: set[str] = set()
+        for known in self.known_paths:
+            if path_matches(known, pattern):
+                out.add(known)
+                if len(out) >= limit:
+                    break
+        return out
 
     def symbol_known(self, symbol: str) -> bool:
         """A symbol hint is grounded when it is a known symbol or occurs as a whole word in the provided context."""
@@ -196,11 +203,17 @@ def path_like_hints(step: PlanStep, ctx: ValidationContext) -> list[str]:
             p = normalise_path(hint)
         except ValueError:
             continue
-        if not any(c in _GLOB_CHARS for c in p) and not p.endswith("/") and ctx.is_known_dir(p) and p not in ctx.known_paths:
+        if not any(c in GLOB_CHARS for c in p) and not p.endswith("/") and ctx.is_known_dir(p) and p not in ctx.known_paths:
             p += "/"
         if p not in out:
             out.append(p)
     return out
+
+
+def is_catch_all(pattern: str) -> bool:
+    """A pattern made only of wildcards and slashes (``*``, ``**``, ``**/*``) names no concrete location."""
+    p = pattern.strip()
+    return bool(p) and all(c in "*?/" for c in p)
 
 
 def has_substantive_acceptance(acceptance: Sequence[AcceptanceCriterion]) -> bool:
@@ -250,7 +263,10 @@ def _hint_errors(step: PlanStep, ctx: ValidationContext) -> list[str]:
                 "(absolute host paths belong in goal or constraints)"
             )
             continue
-        if not any(c in _GLOB_CHARS for c in p) and any_match(p, list(ctx.always_forbidden)):
+        if is_catch_all(p):
+            errors.append(f"step {step.id}: repo_hint '{p}' matches everything; name the concrete files, directories or globs")
+            continue
+        if not any(c in GLOB_CHARS for c in p) and any_match(p, list(ctx.always_forbidden)):
             errors.append(f"step {step.id}: repo_hint '{p}' is a forbidden path (runtime policy)")
             continue
         if ctx.known_paths and not ctx.path_exists(p):
@@ -265,6 +281,12 @@ def _hint_errors(step: PlanStep, ctx: ValidationContext) -> list[str]:
             except ValueError:
                 errors.append(f"step {step.id}: {field_name} entry '{raw[:120]}' must be repository-relative without '..'")
                 continue
+            if field_name == "allowed_new_paths" and is_catch_all(p):
+                errors.append(
+                    f"step {step.id}: allowed_new_paths entry '{p}' matches everything; scope stays explicit - name the "
+                    "directory or file pattern where new files are created"
+                )
+                continue
             if field_name == "allowed_new_paths" and any_match(p, list(ctx.always_forbidden)):
                 errors.append(f"step {step.id}: allowed_new_paths entry '{p}' is a forbidden path (runtime policy)")
     return errors
@@ -278,8 +300,24 @@ def _acceptance_errors(step: PlanStep, ctx: ValidationContext) -> list[str]:
             f"step {step.id}: mutating step of kind '{kind}' needs machine-checkable acceptance "
             "(e.g. command evidence with a read-only check, or artifact evidence)"
         )
+    network_allowed = ctx.capability_network.get(step.capability, False)
+    if step.network and not network_allowed and step.capability in ctx.config_capabilities:
+        errors.append(
+            f"step {step.id}: network access is not allowed for capability '{step.capability}' (network is off by "
+            f"default; only capabilities with network=true may use it: {', '.join(ctx.network_capabilities) or 'none'})"
+        )
     for idx, crit in enumerate(step.acceptance):
         where = f"step {step.id}: acceptance[{idx}] ({crit.type})"
+        if isinstance(crit, CommandEvidence) and crit.network and not network_allowed:
+            errors.append(f"{where}: requests network access, which capability '{step.capability}' does not allow")
+        if isinstance(crit, DiffEvidence):
+            for field_name, globs in (("must_change", crit.must_change), ("must_not_change", crit.must_not_change)):
+                for glob in globs:
+                    try:
+                        normalise_path(glob)
+                    except ValueError:
+                        errors.append(f"{where}: {field_name} entry '{glob[:120]}' must be repository-relative without '..'")
+            continue
         if isinstance(crit, PresenceEvidence | AbsenceEvidence):
             try:
                 normalise_path(crit.path_glob)

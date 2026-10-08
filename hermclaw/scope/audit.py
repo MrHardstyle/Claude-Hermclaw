@@ -7,7 +7,12 @@ After (or during) an attempt the runtime checks every real change against the st
 contract, so no change can pass silently.
 
 :func:`derive_changes_from_status` maps ``git status --porcelain`` XY codes (``GitReader.status``) to
-create / modify / delete operations.
+create / modify / delete operations. A staged rename whose origin the status entry does not carry is reported by
+:func:`unresolved_renames`; :meth:`ScopeAuditor.audit_status` treats it as a violation (the deletion of the source
+cannot be audited – fail closed).
+
+A contract-level ``delete`` operation only covers the paths the scope version designates for deletion
+(:func:`~hermclaw.scope.engine.designated_deletes`): deleting any other target is a violation.
 """
 
 from __future__ import annotations
@@ -21,7 +26,7 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from hermclaw.contracts.common import Severity
 from hermclaw.contracts.events import EventType
-from hermclaw.contracts.scope import Operation, normalise_path
+from hermclaw.contracts.scope import Operation, ScopeContract, normalise_path
 from hermclaw.core.config import HermclawConfig, ScopePolicy
 from hermclaw.core.interfaces import GitStatusEntry
 from hermclaw.core.logging import get_logger
@@ -31,6 +36,8 @@ from hermclaw.scope.engine import (
     contract_from_row,
     current_scope_row,
     deny_all_contract,
+    designated_deletes,
+    glob_escape,
     load_step,
     merged_forbidden,
     now_iso,
@@ -59,9 +66,10 @@ def _unquote(path: str) -> str:
 def derive_changes_from_status(entries: Iterable[GitStatusEntry]) -> list[tuple[str, Operation]]:
     """Map porcelain XY status entries to ``(path, operation)`` changes.
 
-    ``??`` -> create; ``!!`` (ignored) -> skipped; ``R``/``C`` with ``old -> new`` -> delete old (rename only) +
-    create new; any ``A`` -> create; any ``D`` -> delete; everything else (``M``, ``T``, unmerged ``U``…) -> modify.
-    Paths are unquoted and de-duplicated; order is preserved.
+    ``??`` -> create; ``!!`` (ignored) -> skipped; ``R``/``C`` -> create new plus, for renames, delete of the origin
+    (``entry.orig_path`` when the producer provides it, or the ``old -> new`` text form); any ``A`` -> create; any
+    ``D`` -> delete; everything else (``M``, ``T``, unmerged ``U``…) -> modify. Paths are unquoted and
+    de-duplicated; order is preserved. Renames without a known origin are listed by :func:`unresolved_renames`.
     """
     out: list[tuple[str, Operation]] = []
 
@@ -80,13 +88,10 @@ def derive_changes_from_status(entries: Iterable[GitStatusEntry]) -> list[tuple[
             add(path, "create")
             continue
         if x in "RC" or y in "RC":
-            if " -> " in path:
-                old, new = path.split(" -> ", 1)
-                if "R" in (x, y):
-                    add(old, "delete")
-                add(new, "create")
-            else:
-                add(path, "create")
+            old, new = _rename_parts(entry)
+            if old is not None and "R" in (x, y):
+                add(old, "delete")
+            add(new, "create")
             continue
         if "A" in (x, y):
             add(path, "create")
@@ -94,6 +99,28 @@ def derive_changes_from_status(entries: Iterable[GitStatusEntry]) -> list[tuple[
             add(path, "delete")
         else:
             add(path, "modify")
+    return out
+
+
+def _rename_parts(entry: GitStatusEntry) -> tuple[str | None, str]:
+    orig = getattr(entry, "orig_path", None)  # forward compatible with producers that keep the origin
+    if isinstance(orig, str) and orig:
+        return orig, entry.path
+    if " -> " in entry.path:
+        old, new = entry.path.split(" -> ", 1)
+        return old, new
+    return None, entry.path
+
+
+def unresolved_renames(entries: Iterable[GitStatusEntry]) -> list[str]:
+    """New paths of staged renames whose origin is unknown – their source deletion cannot be audited."""
+    out: list[str] = []
+    for entry in entries:
+        code = (entry.status or "").ljust(2)[:2]
+        if "R" in code and _rename_parts(entry)[0] is None:
+            path = _unquote(entry.path)
+            if path and path not in out:
+                out.append(path)
     return out
 
 
@@ -144,8 +171,14 @@ class ScopeAuditor:
         *,
         attempt_id: uuid.UUID | None = None,
         phase: str = "attempt",
+        unauditable: Iterable[tuple[str, str]] = (),
     ) -> ScopeAuditReport:
-        """Check ``changes`` with ScopeGuard, persist the audit into the scope evidence, emit ``scope.violation``."""
+        """Check ``changes`` with ScopeGuard, persist the audit into the scope evidence, emit ``scope.violation``.
+
+        ``unauditable`` lists ``(path, reason)`` changes the caller could not map to a checkable operation; each is
+        a violation (fail closed).
+        """
+        unaudited = list(dict.fromkeys(unauditable))
         unique: list[tuple[str, Operation]] = []
         for path, op in changes:
             if (path, op) not in unique:
@@ -166,22 +199,31 @@ class ScopeAuditor:
                     reason=f"no active scope (status: {status})",
                 )
             guard = ScopeGuard(contract, self.policy)
+            delete_guard = self._delete_guard(contract, row.evidence if row is not None and row.status == "active" else None)
             allowed: list[tuple[str, Operation]] = []
             violations: list[dict[str, str]] = []
             for path, op in unique:
                 ok, reason = guard.decide(path, op)
+                if ok and op == "delete" and delete_guard is not None and not delete_guard.allowed(path, "delete"):
+                    ok = False
+                    reason = (
+                        f"deleting '{_display(path)}' is not designated by scope v{contract.version} "
+                        "(only acceptance absence evidence or an explicit delete constraint designates deletions)"
+                    )
                 if ok:
                     allowed.append((_display(path), op))
                 else:
                     if row is None or row.status != "active":
                         reason = f"{reason} (step has no active scope)"
                     violations.append({"path": _display(path), "operation": op, "reason": reason})
+            for path, why in unaudited:
+                violations.append({"path": _display(path), "operation": "delete", "reason": why[:500]})
 
             report = ScopeAuditReport(
                 step_id=step_id,
                 scope_version=row.version if row is not None else None,
                 scope_status=row.status if row is not None else None,
-                checked=len(unique),
+                checked=len(unique) + len(unaudited),
                 allowed=allowed,
                 violations=violations,
                 phase=phase,
@@ -238,8 +280,30 @@ class ScopeAuditor:
         attempt_id: uuid.UUID | None = None,
         phase: str = "attempt",
     ) -> ScopeAuditReport:
-        """Convenience: audit ``GitReader.status`` entries directly."""
-        return await self.audit_changes(step_id, derive_changes_from_status(entries), attempt_id=attempt_id, phase=phase)
+        """Audit ``GitReader.status`` entries; renames with an unknown origin are violations (fail closed)."""
+        listed = list(entries)
+        unknown = [
+            (p, "staged rename without a known origin: the deletion of its source path cannot be audited")
+            for p in unresolved_renames(listed)
+        ]
+        return await self.audit_changes(
+            step_id, derive_changes_from_status(listed), attempt_id=attempt_id, phase=phase, unauditable=unknown
+        )
+
+    def _delete_guard(self, contract: ScopeContract, evidence: dict[str, Any] | None) -> ScopeGuard | None:
+        if "delete" not in contract.allowed_operations:
+            return None
+        deletes = designated_deletes(evidence)
+        if deletes is None:
+            return None  # versions without a designation (e.g. written by other components): ScopeGuard alone decides
+        designated = ScopeContract(
+            source=contract.source,
+            version=contract.version,
+            target_paths=[glob_escape(p) for p in deletes],
+            forbidden_paths=contract.forbidden_paths,
+            allowed_operations=["delete"],
+        )
+        return ScopeGuard(designated, self.policy)
 
 
 def _display(path: str) -> str:

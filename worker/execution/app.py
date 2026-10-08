@@ -31,6 +31,7 @@ import contextlib
 import hashlib
 import json
 import os
+import re
 import shutil
 import uuid
 from collections import OrderedDict
@@ -73,6 +74,7 @@ MAX_FINISHED_COMMANDS = 1000
 MIN_FREE_DISK_MB = 1024
 SELFTEST_MARKER = "hermclaw-selftest-ok"
 WorkspaceParam = Annotated[str, PathParam(pattern=WORKSPACE_ID_PATTERN, max_length=128)]
+_WORKSPACE_ID_RE = re.compile(WORKSPACE_ID_PATTERN)
 RequestIdParam = Annotated[str, PathParam(min_length=1, max_length=200)]
 
 
@@ -113,38 +115,51 @@ class RWLock:
         self._readers = 0
         self._writer = False
         self._waiting_writers = 0
+        # every holder *and* waiter; counted synchronously on entry (before the first await), so a lock
+        # that is merely waited on is never considered idle and dropped from the registry
+        self._users = 0
 
     @property
     def idle(self) -> bool:
-        return not self._writer and self._readers == 0 and self._waiting_writers == 0
+        return self._users == 0
 
     @asynccontextmanager
     async def read(self) -> AsyncIterator[None]:
-        async with self._cond:
-            await self._cond.wait_for(lambda: not self._writer and self._waiting_writers == 0)
-            self._readers += 1
+        self._users += 1
         try:
-            yield
-        finally:
             async with self._cond:
-                self._readers -= 1
-                self._cond.notify_all()
+                await self._cond.wait_for(lambda: not self._writer and self._waiting_writers == 0)
+                self._readers += 1
+            try:
+                yield
+            finally:
+                async with self._cond:
+                    self._readers -= 1
+                    self._cond.notify_all()
+        finally:
+            self._users -= 1
 
     @asynccontextmanager
     async def write(self) -> AsyncIterator[None]:
-        async with self._cond:
-            self._waiting_writers += 1
-            try:
-                await self._cond.wait_for(lambda: not self._writer and self._readers == 0)
-            finally:
-                self._waiting_writers -= 1
-            self._writer = True
+        self._users += 1
         try:
-            yield
-        finally:
             async with self._cond:
-                self._writer = False
-                self._cond.notify_all()
+                self._waiting_writers += 1
+                try:
+                    await self._cond.wait_for(lambda: not self._writer and self._readers == 0)
+                finally:
+                    self._waiting_writers -= 1
+                    if self._waiting_writers == 0:
+                        self._cond.notify_all()  # a cancelled waiting writer must release blocked readers
+                self._writer = True
+            try:
+                yield
+            finally:
+                async with self._cond:
+                    self._writer = False
+                    self._cond.notify_all()
+        finally:
+            self._users -= 1
 
 
 # ---------------------------------------------------------------------------------------------- helpers
@@ -233,9 +248,15 @@ class ExecutionService:
         return self.settings.sandbox.engine
 
     def workspace_dir(self, ws: str) -> Path:
+        """Directory of workspace ``ws``. Every entry point (path parameter *and* ``CommandRequest.workspace``
+        from a JSON body) goes through here, so an id like ``/`` or ``..`` can never address a directory
+        outside ``WORKER_DATA_DIR/workspaces``."""
+        if not _WORKSPACE_ID_RE.fullmatch(ws):
+            raise bad_request("invalid workspace id", "WORKSPACE_ID_INVALID", workspace=ws[:200])
         return self.root / ws
 
     def lock(self, ws: str) -> RWLock:
+        self.workspace_dir(ws)  # validates the id
         lk = self.locks.get(ws)
         if lk is None:
             lk = self.locks[ws] = RWLock()

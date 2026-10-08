@@ -19,6 +19,7 @@ from hermclaw.core.config import HermclawConfig, ScopePolicy, load_config
 from hermclaw.core.interfaces import RepoHit, WorkspaceHandle
 from hermclaw.persistence.models import Event, Job, ScopeContractRow, Step
 
+SM = async_sessionmaker[AsyncSession]  # fixture type of ``sessionmaker``
 ROOT = Path(__file__).resolve().parents[2]
 GIT_ENV = {
     **os.environ,

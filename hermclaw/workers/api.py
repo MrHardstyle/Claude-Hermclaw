@@ -31,7 +31,15 @@ from hermclaw.contracts.common import WorkerKind, WorkerState
 from hermclaw.contracts.worker import WORKER_PROTOCOL_VERSION, WorkerHeartbeat
 from hermclaw.core.errors import HermclawError
 from hermclaw.core.logging import get_logger
-from hermclaw.workers.auth import MAX_CLOCK_SKEW_SECONDS, RefTokenStore, ReplayCache, TokenStore, verify_signed_request
+from hermclaw.workers.auth import (
+    MAX_CLOCK_SKEW_SECONDS,
+    RefTokenStore,
+    ReplayCache,
+    TokenStore,
+    body_sha256,
+    precheck_signed_request,
+    verify_prechecked,
+)
 from hermclaw.workers.errors import WorkerAuthError
 from hermclaw.workers.registry import WorkerRegistry
 from hermclaw.workers.schemas import WORKER_ID_PATTERN, DrainRequest, HeartbeatAck, WorkerDetail, WorkerInfo
@@ -90,23 +98,27 @@ def create_workers_router(*, admin_dependencies: Sequence[DependsParam] = ()) ->
 
     @router.post("/heartbeat", response_model=HeartbeatAck, responses={401: {}, 403: {}, 413: {}, 422: {}})
     async def heartbeat(request: Request, ctx: WorkerApiContext = Depends(get_worker_api_context)) -> Any:
+        client = request.client.host if request.client else None
         try:
-            body = await _read_limited(request, ctx.max_body_bytes)
-        except HermclawError as exc:
-            return _error(exc, 413)
-        try:
-            verified = verify_signed_request(
+            # header-only checks first: unauthenticated senders are rejected before their body is read
+            pre = precheck_signed_request(
+                headers=dict(request.headers),
+                tokens_for=ctx.token_store.tokens_for,
+                max_skew_seconds=ctx.max_skew_seconds,
+            )
+            try:
+                body = await _read_limited(request, ctx.max_body_bytes)
+            except HermclawError as exc:
+                return _error(exc, 413)
+            verified = verify_prechecked(
+                pre,
                 method=request.method,
                 path=request.scope["path"],
                 query=request.scope.get("query_string", b""),
-                headers=dict(request.headers),
-                body=body,
-                tokens_for=ctx.token_store.tokens_for,
-                max_skew_seconds=ctx.max_skew_seconds,
+                body_digest=body_sha256(body),
                 replay_cache=ctx.replay_cache,
             )
         except WorkerAuthError as exc:
-            client = request.client.host if request.client else None
             log.warning("worker heartbeat rejected", extra={"code": exc.code, "remote": client})
             return _error(WorkerAuthError("worker authentication failed", code=exc.code, details=exc.details), 401)
         try:
@@ -116,10 +128,9 @@ def create_workers_router(*, admin_dependencies: Sequence[DependsParam] = ()) ->
             return _error(HermclawError("invalid heartbeat", code="VALIDATION_FAILED", details={"errors": errs}), 422)
         if hb.worker_id != verified.worker_id:
             return _error(HermclawError("heartbeat worker_id does not match the credential", code="WORKER_ID_MISMATCH"), 403)
-        remote = request.client.host if request.client else None
         try:
             async with ctx.sessionmaker() as session, session.begin():
-                outcome = await ctx.registry.ingest_heartbeat(session, hb, remote_addr=remote)
+                outcome = await ctx.registry.ingest_heartbeat(session, hb, remote_addr=client)
         except HermclawError as exc:
             return _error(exc)
         if not outcome.compatible:

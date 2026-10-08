@@ -39,6 +39,7 @@ __all__ = [
     "WorkspaceNotFound",
     "WorkspacePathViolation",
     "WorkspaceStateError",
+    "WorkspaceTamperedError",
 ]
 
 
@@ -82,6 +83,12 @@ class WorkspacePathViolation(PolicyViolation):
     """A workspace path points outside the configured workspace root (tampered row)."""
 
     code = "WORKSPACE_PATH_VIOLATION"
+
+
+class WorkspaceTamperedError(PolicyViolation):
+    """The workspace's git dir/config was modified outside the runtime (e.g. from the sandbox); git is not run there."""
+
+    code = "WORKSPACE_TAMPERED"
 
 
 class CommitNotVerifiedError(GitError):

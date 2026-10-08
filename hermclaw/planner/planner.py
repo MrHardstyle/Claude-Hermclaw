@@ -176,6 +176,10 @@ class PlannerBase:
     async def record_fallback(self, session: AsyncSession, job: Job, outcome: LoopOutcome[Any], *, mode: str) -> None:
         aliases = sorted({a.alias for a in outcome.attempts if a.fallback_used})
         merge_job_metadata(job, {FALLBACK_METADATA_KEY: True, "planner_fallback_alias": aliases[-1] if aliases else None})
+        log.warning(
+            "planner served by the technical fallback model",
+            extra={"job_id": str(job.id), "mode": mode, "requested_alias": self.profile.alias, "served_aliases": aliases},
+        )
         await self.emit(
             EventType.PLANNER_FALLBACK_USED,
             job.id,

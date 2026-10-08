@@ -299,3 +299,76 @@ def test_error_limit_is_applied() -> None:
     steps = [_impl(f"S{i:03d}", capability="nope", title=f"impl {i}", goal=f"Implement distinct thing number {i}.") for i in range(1, 25)]
     errors = _errors(plan("goal", steps), limit=5)
     assert len(errors) == 5
+
+
+# --------------------------------------------------------------------------------------------- grounding sources
+def test_paths_anywhere_in_the_inventory_ground_hints() -> None:
+    """Regression: the prompt allows paths that appear in repository_inventory, so every inventory section counts
+    (not only ``files``/``paths``); prose, URLs, commands, absolute paths and versions do not."""
+    inputs = PlannerInput(
+        repository_inventory={
+            "entrypoints": ["app/main.py"],
+            "manifests": {"pyproject.toml": {"tool": "poetry"}},
+            "config": [{"path": "config/settings.toml"}],
+            "test_command": "pytest -q",
+            "homepage": "https://example.org/docs/index.html",
+            "notes": "uses the src layout",
+            "python": "3.12",
+            "system": "/etc/hosts",
+            "parent": "../other/repo.py",
+        },
+        existing_tests=["tests/test_users.py::test_page", "test_users_suite"],
+    )
+    known = set(collect_known_paths(inputs))
+    assert {"app/main.py", "pyproject.toml", "config/settings.toml", "tests/test_users.py"} <= known
+    assert not known & {"pytest -q", "3.12", "/etc/hosts", "../other/repo.py", "uses the src layout", "test_users_suite"}
+    assert not any("://" in k or "example.org" in k for k in known)
+
+    ctx = _ctx(inputs)
+    data = plan(
+        "Settings",
+        [_impl(repo_hints=["config/settings.toml", "pyproject.toml", "app/main.py", "tests/test_users.py"])],
+    )
+    assert _errors(data, ctx) == []
+    invented = plan("Settings", [_impl(repo_hints=["config/other.toml"])])
+    assert any("repo_hint 'config/other.toml' does not exist" in e for e in _errors(invented, ctx))
+
+
+def test_conventional_extensionless_files_are_paths() -> None:
+    ctx = _ctx(PlannerInput(repository_inventory={"files": ["Makefile", "docker/Dockerfile"]}))
+    assert ctx.classify_hint("Makefile") == "path" and ctx.classify_hint("Dockerfile") == "path"
+    assert ctx.classify_hint("list_users") == "symbol"
+    errors = _errors(plan("Build", [_impl(repo_hints=["Makefile", "Jenkinsfile"])]), ctx)
+    assert errors == [
+        "step S001: repo_hint 'Jenkinsfile' does not exist in repository_inventory/retrieved_context "
+        "(never invent paths; files to be created belong in allowed_new_paths)"
+    ]
+
+
+@pytest.mark.parametrize("pattern", ["**", "*", "**/*", "*/**", "./**"])
+def test_catch_all_patterns_are_rejected(pattern: str) -> None:
+    """Scope stays explicit: hints and new-path patterns must name a concrete location."""
+    errors = _errors(plan("Wide", [_impl(repo_hints=[pattern])]))
+    assert any("matches everything" in e and "repo_hint" in e for e in errors)
+    errors = _errors(plan("Wide", [_impl(allowed_new_paths=[pattern])]))
+    assert any("allowed_new_paths entry" in e and "matches everything" in e for e in errors)
+    assert _errors(plan("Narrow", [_impl(repo_hints=["app/**/*.py"], allowed_new_paths=["app/routers/*.py"])])) == []
+
+
+def test_network_only_for_capabilities_that_allow_it() -> None:
+    """Bauplan §30: network is off by default and only granted through the step capability."""
+    errors = _errors(plan("Net", [_impl(network=True)]))
+    assert any("S001: network access is not allowed for capability 'coding'" in e and "research" in e for e in errors)
+    cmd = {"type": "command", "command": "curl -fsS https://example.org/health", "network": True}
+    errors = _errors(plan("Net", [_impl(acceptance=[cmd])]))
+    assert any("acceptance[0] (command): requests network access" in e for e in errors)
+    research = step("S001", "research", "research", "Look up the pagination conventions of the framework.", network=True)
+    work = _impl("S002", depends_on=["S001"])
+    assert _errors(plan("Net", [research, work])) == []
+
+
+def test_diff_globs_must_be_repository_relative() -> None:
+    diff = {"type": "diff", "must_change": ["../outside.py"], "must_not_change": ["/etc/passwd"]}
+    errors = _errors(plan("Diff", [_impl(acceptance=[diff])]))
+    assert any("must_change entry '../outside.py' must be repository-relative" in e for e in errors)
+    assert any("must_not_change entry '/etc/passwd' must be repository-relative" in e for e in errors)

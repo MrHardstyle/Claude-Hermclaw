@@ -196,7 +196,7 @@ def test_daemon_state_effective_state() -> None:
     st = DaemonState("w", WorkerKind.execution)
     assert st.state == WorkerState.starting
     st.starting = False
-    assert st.state == WorkerState.ready
+    assert st.state == WorkerState.ready  # type: ignore[comparison-overlap]  # property re-evaluated
     with st.work("r1", kind="command", job_id="j1", step_id="s1"):
         assert st.state == WorkerState.busy and st.active_job == "j1" and st.active_step == "s1"
     assert st.state == WorkerState.ready and st.active_job is None
@@ -342,3 +342,35 @@ async def test_middleware_token_unavailable_rejects() -> None:
     ) as c:
         r = await c.post("/x", content=b"1")
     assert r.status_code == 401 and r.json()["error"]["code"] == "WORKER_AUTH_UNKNOWN"
+
+
+async def test_middleware_refuses_websocket_handshakes() -> None:
+    """Regression: non-http scopes were passed through untouched, so a websocket route added by an
+    extension router would have been reachable without any signature."""
+    reached: list[str] = []
+
+    async def ws_app(scope: Scope, receive: Receive, send: Send) -> None:
+        reached.append(scope["type"])
+        await send({"type": "websocket.accept"})
+
+    mw = SignedRequestMiddleware(ws_app, worker_id="exec-1", tokens=lambda: [TOKEN], replay_cache=ReplayCache())
+    sent: list[Message] = []
+
+    async def receive() -> Message:
+        return {"type": "websocket.connect"}
+
+    async def send(message: Message) -> None:
+        sent.append(message)
+
+    signed = sign_headers(worker_id="exec-1", token=TOKEN, method="GET", path="/v1/media/progress")
+    scope: Scope = {
+        "type": "websocket",
+        "path": "/v1/media/progress",
+        "query_string": b"",
+        "headers": [(k.lower().encode(), v.encode()) for k, v in signed.items()],
+    }
+    await mw(scope, receive, send)
+    assert reached == [] and sent == [{"type": "websocket.close", "code": 1008}]
+    # lifespan scopes still reach the app (startup/shutdown hooks)
+    await mw({"type": "lifespan"}, receive, send)
+    assert reached == ["lifespan"]

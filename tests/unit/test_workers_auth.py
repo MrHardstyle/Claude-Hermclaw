@@ -50,7 +50,7 @@ def _verify(headers: dict[str, str], *, method: str = "POST", path: str = "/api/
         query=kw.pop("query", ""),  # type: ignore[arg-type]
         headers=headers,
         body=body,
-        tokens_for=lambda wid: tokens.get(wid, []),  # type: ignore[union-attr]
+        tokens_for=lambda wid: tokens.get(wid, []),  # type: ignore[union-attr,attr-defined]
         now=kw.pop("now", NOW),  # type: ignore[arg-type]
         **kw,  # type: ignore[arg-type]
     )
@@ -86,7 +86,7 @@ def test_canonical_string_covers_method_path_timestamp_nonce_body_hash() -> None
 def test_tampered_request_is_rejected(mutation: dict[str, object]) -> None:
     headers = _sign()
     with pytest.raises(WorkerAuthError) as exc:
-        _verify(headers, **mutation)
+        _verify(headers, **mutation)  # type: ignore[arg-type]
     assert _code(exc) == "WORKER_AUTH_BAD_SIGNATURE"
 
 
@@ -348,3 +348,38 @@ async def test_request_signer_signs_each_request_and_server_verifies() -> None:
         r2 = await client.get("/v1/models")
     assert r1.status_code == r2.status_code == 200
     assert seen[0].headers[HEADER_NONCE] != seen[1].headers[HEADER_NONCE]
+
+
+@pytest.mark.parametrize(
+    ("base_url", "include_bearer", "expect_bearer"),
+    [
+        ("http://192.168.178.222:8787", None, False),  # default: never put the secret on a plaintext link
+        ("https://exec.lan", None, True),
+        ("http://w", True, True),
+        ("https://w", False, False),
+    ],
+)
+async def test_request_signer_sends_bearer_only_over_https_by_default(
+    base_url: str, include_bearer: bool | None, expect_bearer: bool
+) -> None:
+    seen: list[httpx.Request] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        seen.append(request)
+        verify_signed_request(
+            method=request.method,
+            path=request.url.path,
+            query=request.url.query,
+            headers=dict(request.headers),
+            body=request.content,
+            tokens_for=lambda _w: [TOKEN],
+            expected_worker_id="exec-1",
+        )
+        return httpx.Response(200, json={})
+
+    signer = WorkerRequestSigner("exec-1", TOKEN, include_bearer=include_bearer)
+    async with httpx.AsyncClient(transport=httpx.MockTransport(handler), base_url=base_url, auth=signer) as client:
+        assert (await client.post("/v1/commands", content=b"{}")).status_code == 200
+    assert (HEADER_AUTHORIZATION in seen[0].headers) is expect_bearer
+    raw = b"".join(f"{k}: {v}".encode() for k, v in seen[0].headers.items())
+    assert (TOKEN.encode() in raw) is expect_bearer

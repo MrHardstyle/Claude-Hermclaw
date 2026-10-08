@@ -288,7 +288,17 @@ async def test_completed_step_needs_rerun_reason(sessionmaker: object) -> None:
     old = next(r for r in rows if r.id == ids["S001"])
     new = next(r for r in rows if r.id != ids["S001"])
     assert old.superseded and old.status == "completed"  # history stays completed
-    assert not new.superseded and new.status == "pending"
+    assert not new.superseded and new.status == "pending" and new.current_scope_version is None
+    async with sm() as s:
+        scope = (await s.execute(select(ScopeContractRow).where(ScopeContractRow.step_id == ids["S001"]))).scalar_one()
+        new_s002 = (
+            await s.execute(select(Step).where(Step.job_id == job_id, Step.step_key == "S002", Step.superseded.is_(False)))
+        ).scalar_one()
+        s002_deps = [
+            d.depends_on_step_id for d in (await s.execute(select(StepDependency).where(StepDependency.step_id == new_s002.id))).scalars()
+        ]
+    assert scope.status == "superseded"  # 24.6: the re-run step needs a fresh scope
+    assert s002_deps == [new.id]  # 24.5: dependants of a re-run step wait for the new row, not the old completed one
     async with sm() as s:
         version = (await s.execute(select(PlanVersion).where(PlanVersion.job_id == job_id, PlanVersion.version == 2))).scalar_one()
     assert "rerun S001: app/routers/users.py was rewritten upstream" in (version.reason or "")
@@ -408,3 +418,25 @@ async def test_replan_fallback_and_invalid_output(sessionmaker: object) -> None:
     assert job is not None and job.metadata_["planner_model_fallback"] is True and job.replan_count == 1
     types = [t for t, _ in await _events(sm, job_id)]
     assert EventType.PLANNER_FALLBACK_USED in types and EventType.PLANNER_FAILED in types
+
+
+async def test_concurrent_replans_apply_only_once(sessionmaker: object) -> None:
+    """Two replans computed against the same version: the second must not stack a version on stale state."""
+    sm = _sm(sessionmaker)
+    job_id, ids = await _planned_fastapi(sm)
+
+    async def other_replan_wins() -> None:
+        await Replanner(ScriptedChat([_replan_answer()]), sm, get_config()).replan(job_id, _trigger(ids), FASTAPI.inputs)
+
+    chat = ScriptedChat([Answer(content=_replan_answer(), before=other_replan_wins)])
+    with pytest.raises(PlanConflict) as info:
+        await Replanner(chat, sm, get_config()).replan(job_id, _trigger(ids), FASTAPI.inputs)
+    assert info.value.code == "PLAN_CHANGED"
+    async with sm() as s:
+        job = await s.get(Job, job_id)
+        versions = list((await s.execute(select(PlanVersion).where(PlanVersion.job_id == job_id))).scalars())
+    assert job is not None and job.replan_count == 1 and job.current_plan_version == 2 and len(versions) == 2
+    active = [r for r in await _rows(sm, job_id) if not r.superseded]
+    assert sorted(r.step_key for r in active) == ["S001", "S002", "S004"]
+    created = [p for t, p in await _events(sm, job_id) if t == EventType.REPLAN_CREATED]
+    assert len(created) == 1

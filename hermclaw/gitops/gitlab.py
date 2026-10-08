@@ -141,9 +141,9 @@ class GitLabClient:
             if not isinstance(data, list):
                 raise GitLabError(f"GitLab {what} returned unexpected payload", details={"status": resp.status_code})
             out.extend(d for d in data if isinstance(d, dict))
-            nxt = resp.headers.get("X-Next-Page", "")
-            if not nxt.strip():
-                break
+            nxt = resp.headers.get("X-Next-Page", "").strip()
+            if not nxt.isdigit() or int(nxt) <= page:
+                break  # last page (or a malformed/looping header)
             page = int(nxt)
         return out
 

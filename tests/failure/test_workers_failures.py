@@ -24,7 +24,7 @@ import httpx
 import pytest
 import uvicorn
 from fastapi import FastAPI
-from sqlalchemy import select
+from sqlalchemy import delete, select
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from hermclaw.contracts.common import WorkerKind
@@ -72,7 +72,7 @@ async def orchestrator(sessionmaker: async_sessionmaker[AsyncSession]) -> AsyncI
         await task
         async with sessionmaker() as s:
             for wid in ids:
-                await s.execute(Worker.__table__.delete().where(Worker.id == wid))
+                await s.execute(delete(Worker).where(Worker.id == wid))
             await s.commit()
 
 

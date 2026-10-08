@@ -7,7 +7,8 @@ Every observable change is written to the event store in the caller's transactio
   its configuration (address, api_url, kind, WOL) changed
 - ``worker.state``      – the effective state changed (payload ``from``/``to``/``reason``) or the reported
   capability set changed (``reason=capabilities_changed``, ``from == to``)
-- ``worker.offline``    – the offline sweep declared a worker offline (missed heartbeats / wake timeout)
+- ``worker.offline``    – the offline sweep declared a worker offline (missed heartbeats / wake timeout) or
+  the worker announced its shutdown with a final ``offline`` heartbeat (``reason=worker_shutdown``)
 
 State ownership: a live worker *reports* ``starting|ready|busy|draining|error|offline`` in its heartbeat.
 The orchestrator owns ``offline`` (sweep), ``sleeping``/``waking`` (Wake-on-LAN controller via
@@ -22,9 +23,9 @@ from __future__ import annotations
 from collections.abc import Callable, Iterable, Sequence
 from dataclasses import dataclass, field
 from datetime import UTC, datetime, timedelta
-from typing import Any
+from typing import Any, cast
 
-from sqlalchemy import delete, func, or_, select
+from sqlalchemy import Table, delete, func, or_, select
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -233,8 +234,7 @@ class WorkerRegistry:
         if row is None:
             if not self.settings.auto_register:
                 raise WorkerNotFound(f"worker '{hb.worker_id}' is not registered", details={"worker_id": hb.worker_id})
-            row = await self._register_from_heartbeat(session, hb, remote_addr, now)
-            created = True
+            row, created = await self._register_from_heartbeat(session, hb, remote_addr, now)
 
         meta: dict[str, Any] = dict(row.metadata_ or {})
         previous = WorkerState(row.state)
@@ -320,6 +320,24 @@ class WorkerRegistry:
                 extra["incompatibility"] = incompat
             meta = self._apply_state(row, meta, new_state, reason, now)
             await self._state_event(session, row.id, previous, new_state, reason=reason, extra=extra)
+            if new_state == WorkerState.offline:
+                # graceful shutdown (final heartbeat): same downstream signal as a missed-heartbeat timeout,
+                # so the scheduler can requeue the worker's active step without waiting for the sweep
+                await append_event(
+                    session,
+                    EventType.WORKER_OFFLINE,
+                    source_type=SOURCE_TYPE,
+                    source_id=row.id,
+                    severity=Severity.warning,
+                    payload={
+                        "worker_id": row.id,
+                        "reason": "worker_shutdown",
+                        "previous_state": previous.value,
+                        "last_heartbeat_at": _iso(now),
+                        "active_job": row.active_job_id,
+                        "active_step": row.active_step_id,
+                    },
+                )
         else:
             meta["state_reason"] = reason
         if added or removed:
@@ -353,28 +371,42 @@ class WorkerRegistry:
             capabilities_removed=removed,
         )
 
-    async def _register_from_heartbeat(self, session: AsyncSession, hb: WorkerHeartbeat, remote_addr: str | None, now: datetime) -> Worker:
-        row = Worker(
-            id=hb.worker_id,
-            hostname=hb.hostname[:200],
-            address=(remote_addr or hb.hostname)[:200],
-            kind=hb.kind.value,
-            state=WorkerState.offline.value,
-            api_url=None,
-            wol={},
-            metadata_={"source": "heartbeat", "in_config": False, "state_reason": "registered", "state_changed_at": _iso(now)},
+    async def _register_from_heartbeat(
+        self, session: AsyncSession, hb: WorkerHeartbeat, remote_addr: str | None, now: datetime
+    ) -> tuple[Worker, bool]:
+        """Insert the row unless a concurrent first heartbeat (or config registration) won the race;
+        either way return the row locked ``FOR UPDATE`` plus whether *this* call created it."""
+        address = (remote_addr or hb.hostname)[:200]
+        table = cast(Table, Worker.__table__)
+        insert_stmt = (
+            pg_insert(table)
+            .values(
+                id=hb.worker_id,
+                hostname=hb.hostname[:200],
+                address=address,
+                kind=hb.kind.value,
+                state=WorkerState.offline.value,
+                api_url=None,
+                wol={},
+                metadata={"source": "heartbeat", "in_config": False, "state_reason": "registered", "state_changed_at": _iso(now)},
+            )
+            .on_conflict_do_nothing(index_elements=["id"])
+            .returning(table.c.id)
         )
-        session.add(row)
-        await session.flush()
+        inserted = (await session.execute(insert_stmt)).scalar_one_or_none() is not None
+        locked = select(Worker).where(Worker.id == hb.worker_id).with_for_update().execution_options(populate_existing=True)
+        row = (await session.execute(locked)).scalar_one()
+        if not inserted:
+            return row, False
         await append_event(
             session,
             EventType.WORKER_REGISTERED,
             source_type=SOURCE_TYPE,
             source_id=hb.worker_id,
             severity=Severity.warning,
-            payload={"worker_id": hb.worker_id, "kind": hb.kind.value, "address": row.address, "source": "heartbeat"},
+            payload={"worker_id": hb.worker_id, "kind": hb.kind.value, "address": address, "source": "heartbeat"},
         )
-        return row
+        return row, True
 
     async def _sync_capabilities(
         self, session: AsyncSession, worker_id: str, capabilities: Iterable[str], version: str
@@ -644,7 +676,8 @@ class WorkerRegistry:
         now: datetime | None = None,
     ) -> WorkerInfo | None:
         """A dispatchable worker that *reported* ``capability``: state ``ready`` (or ``busy`` if allowed),
-        fresh heartbeat, compatible protocol, not drained. Prefers idle, then most recently seen."""
+        fresh heartbeat, compatible protocol, known ``api_url``, not drained. Prefers idle, then most
+        recently seen."""
         t = _aware(now) if now else self.now()
         states = [WorkerState.ready.value] + ([WorkerState.busy.value] if include_busy else [])
         stmt = (
@@ -653,6 +686,7 @@ class WorkerRegistry:
             .where(WorkerCapability.capability == capability)
             .where(Worker.state.in_(states))
             .where(Worker.protocol_version == WORKER_PROTOCOL_VERSION)
+            .where(Worker.api_url.is_not(None))  # heartbeat-only registrations have no dispatch address
             .where(Worker.last_heartbeat_at >= t - self.settings.offline_after)
             .order_by(
                 (Worker.state == WorkerState.ready.value).desc(),

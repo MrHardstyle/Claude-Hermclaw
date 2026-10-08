@@ -34,7 +34,7 @@ from hermclaw.contracts.plan import PlanContract, PlanStep
 from hermclaw.contracts.scope import normalise_path
 from hermclaw.core.errors import ValidationFailed
 from hermclaw.planner.errors import PlanInvalid
-from hermclaw.planner.inputs import PlannerSettings
+from hermclaw.planner.inputs import GLOB_CHARS, PlannerSettings
 from hermclaw.planner.parsing import format_validation_errors
 from hermclaw.planner.validation import (
     INFO_KINDS,
@@ -78,6 +78,9 @@ class RiskPolicy(BaseModel):
             extra = cls.model_validate(overrides)
         except ValidationError as exc:
             raise ValidationFailed("invalid risk_policy override", details={"errors": format_validation_errors(exc, overrides)}) from exc
+        unknown = sorted(set(extra.min_risk_by_kind) - {k.value for k in StepKind})
+        if unknown:
+            raise ValidationFailed("invalid risk_policy override", details={"errors": [f"unknown step kind(s): {', '.join(unknown)}"]})
         floors = dict(base.min_risk_by_kind)
         for kind, risk in extra.min_risk_by_kind.items():
             floors[kind] = max_risk(floors.get(kind, Risk.low), risk)
@@ -229,8 +232,22 @@ def _normalised(paths: Sequence[str]) -> list[str]:
 
 
 # --------------------------------------------------------------------------------------------- risk (14.7)
-def touched_paths(step: PlanStep, ctx: ValidationContext) -> int:
-    return len(set(path_like_hints(step, ctx)) | set(_normalised(step.allowed_new_paths)))
+def touched_paths(step: PlanStep, ctx: ValidationContext, *, limit: int) -> int:
+    """How many paths a step may touch (capped at ``limit``).
+
+    A glob or directory hint counts every known repository path it matches (at least one), an exact hint and
+    every ``allowed_new_paths`` entry count once.
+    """
+    touched: set[str] = set()
+    for hint in path_like_hints(step, ctx):
+        if hint.endswith("/") or any(c in GLOB_CHARS for c in hint):
+            touched |= ctx.matching_known_paths(hint, limit=limit) or {hint}
+        else:
+            touched.add(hint)
+        if len(touched) >= limit:
+            return limit
+    touched |= set(_normalised(step.allowed_new_paths))
+    return min(len(touched), limit)
 
 
 def assign_risk(step: PlanStep, ctx: ValidationContext, policy: RiskPolicy) -> tuple[Risk, str | None]:
@@ -239,11 +256,11 @@ def assign_risk(step: PlanStep, ctx: ValidationContext, policy: RiskPolicy) -> t
     if (
         step.kind.value == StepKind.implement.value
         and policy.high_if_untested_many_paths
-        and touched_paths(step, ctx) >= policy.many_paths_threshold
         and not any(a.type == "test" for a in step.acceptance)
+        and touched_paths(step, ctx, limit=policy.many_paths_threshold) >= policy.many_paths_threshold
     ):
         floor = Risk.high
-        reason = f"implement step touches {touched_paths(step, ctx)} paths without test evidence"
+        reason = f"implement step touches at least {policy.many_paths_threshold} paths without test evidence"
     final = max_risk(step.risk, floor)
     return final, (reason if final != step.risk else None)
 

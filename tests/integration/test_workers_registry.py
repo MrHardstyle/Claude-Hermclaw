@@ -11,7 +11,7 @@ from typing import Any
 
 import pytest
 import yaml
-from sqlalchemy import func, select
+from sqlalchemy import delete, func, select
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from hermclaw.contracts.common import WorkerKind, WorkerState
@@ -256,6 +256,8 @@ async def test_select_worker_by_capability(session: AsyncSession) -> None:
     cap = f"cap-{uuid.uuid4().hex[:8]}"
     idle, busy, drained, stale = _wid("exec"), _wid("exec"), _wid("exec"), _wid("exec")
     now = datetime.now(UTC)
+    # dispatchable workers come from hosts.yaml (they need an api_url)
+    await reg.register_from_config(session, hosts(*((w, "execution_worker") for w in (idle, busy, drained, stale))))
     await reg.ingest_heartbeat(session, hb(idle, capabilities=[cap]))
     await reg.ingest_heartbeat(session, hb(busy, capabilities=[cap], state=WorkerState.busy, active_job="j"))
     await reg.ingest_heartbeat(session, hb(drained, capabilities=[cap]))
@@ -310,5 +312,77 @@ async def test_offline_monitor_loop(sessionmaker: async_sessionmaker[AsyncSessio
     async with sessionmaker() as s:
         assert (await s.get(Worker, wid)).state == "offline"  # type: ignore[union-attr]
         assert len(await events(s, wid, EventType.WORKER_OFFLINE)) == 1
-        await s.execute(Worker.__table__.delete().where(Worker.id == wid))
+        await s.execute(delete(Worker).where(Worker.id == wid))
         await s.commit()
+
+
+async def test_graceful_offline_heartbeat_emits_worker_offline(session: AsyncSession) -> None:
+    """A final ``offline`` heartbeat (daemon shutdown) gives the same ``worker.offline`` signal as the
+    sweep, so the scheduler does not have to wait ``offline_after`` to requeue the active step."""
+    reg = WorkerRegistry()
+    wid = _wid("exec")
+    await reg.ingest_heartbeat(session, hb(wid, state=WorkerState.busy, active_job="job-9", active_step="step-3"))
+    out = await reg.ingest_heartbeat(
+        session,
+        hb(wid, state=WorkerState.offline, active_job="job-9", active_step="step-3", sent_at=datetime.now(UTC) + timedelta(seconds=1)),
+    )
+    await session.commit()
+    assert out.state == WorkerState.offline and out.previous_state == WorkerState.busy
+    offline = await events(session, wid, EventType.WORKER_OFFLINE)
+    assert len(offline) == 1
+    assert offline[0].payload["reason"] == "worker_shutdown"
+    assert offline[0].payload["active_job"] == "job-9" and offline[0].payload["active_step"] == "step-3"
+    # a repeated offline heartbeat is not a new transition
+    await reg.ingest_heartbeat(session, hb(wid, state=WorkerState.offline, sent_at=datetime.now(UTC) + timedelta(seconds=2)))
+    await session.commit()
+    assert len(await events(session, wid, EventType.WORKER_OFFLINE)) == 1
+    # the sweep does not declare an already-offline worker offline again
+    assert wid not in await WorkerRegistry(RegistrySettings(heartbeat_interval_seconds=1, offline_after_missed=1)).sweep_offline(
+        session, now=datetime.now(UTC) + timedelta(hours=1)
+    )
+
+
+async def test_concurrent_first_heartbeats_register_once(sessionmaker: async_sessionmaker[AsyncSession]) -> None:
+    """Regression: two first heartbeats of an unknown worker racing in separate transactions used to
+    both INSERT the row (IntegrityError -> HTTP 500). Now one registers, the other updates."""
+    reg = WorkerRegistry()
+    wid = _wid("exec")
+    start = datetime.now(UTC)
+
+    async def one(offset: int) -> Any:
+        async with sessionmaker() as s, s.begin():
+            return await reg.ingest_heartbeat(s, hb(wid, sent_at=start + timedelta(milliseconds=offset)))
+
+    outcomes = await asyncio.gather(*(one(i) for i in range(4)))
+    assert sum(1 for o in outcomes if o.created) == 1
+    assert all(o.worker_id == wid for o in outcomes)
+    async with sessionmaker() as s:
+        registered = await events(s, wid, EventType.WORKER_REGISTERED)
+        assert len(registered) == 1 and registered[0].payload["source"] == "heartbeat"
+        row = await s.get(Worker, wid)
+        assert row is not None and row.state == WorkerState.ready.value
+        n_rows = (await s.execute(select(func.count()).select_from(Worker).where(Worker.id == wid))).scalar_one()
+        assert n_rows == 1
+        await s.execute(delete(Worker).where(Worker.id == wid))
+        await s.commit()
+
+
+async def test_select_worker_skips_heartbeat_only_registrations_without_api_url(session: AsyncSession) -> None:
+    """Regression: a worker known only from an (authenticated) heartbeat has no ``api_url``; selecting it
+    made ``WorkerClient.for_worker`` fail with WORKER_UNREACHABLE at dispatch time."""
+    reg = WorkerRegistry()
+    cap = f"cap-{uuid.uuid4().hex[:8]}"
+    orphan = _wid("exec")
+    await reg.ingest_heartbeat(session, hb(orphan, capabilities=[cap]))
+    await session.commit()
+    assert (await reg.get_worker(session, orphan)).api_url is None
+    assert await reg.select_worker(session, cap) is None
+    configured = _wid("exec")
+    await reg.register_from_config(session, hosts((configured, "execution_worker")))
+    await reg.ingest_heartbeat(session, hb(configured, capabilities=[cap]))
+    await session.commit()
+    picked = await reg.select_worker(session, cap)
+    assert picked is not None and picked.id == configured and picked.api_url == "http://192.168.178.222:8787"
+    for wid in (orphan, configured):
+        await session.execute(delete(Worker).where(Worker.id == wid))
+    await session.commit()

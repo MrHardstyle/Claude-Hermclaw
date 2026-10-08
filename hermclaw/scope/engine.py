@@ -11,14 +11,16 @@ The runtime – never a worker – turns planner hints plus repository-intellige
    text are located through :class:`~hermclaw.core.interfaces.RepoContextProvider`; only high-confidence hits
    become targets and every score is kept as evidence.
 3. **policy merge (15.3) / forbidden paths (15.5)** – ``policies.scope.always_forbidden`` + step forbidden paths
-   are merged into the contract; forbidden candidates are excluded *with evidence*. The caps
+   are merged into the contract; forbidden candidates, unbounded creation globs (``**``, ``**/*.py`` …) and
+   implausible creation paths (``a.py::X``, control characters) are excluded *with evidence*. The caps
    ``max_target_paths`` / ``max_new_paths`` are never truncated silently: exceeding them makes the scope
    unavailable.
 4. **generation (15.4)** – strict contract (``source=planner_and_repo_intelligence``) whose operations are derived
    from the step: ``create`` iff new paths exist, ``modify`` iff targets exist, ``delete`` only when acceptance
    demands the absence of an existing path or a constraint explicitly asks to delete it.
-5. **versioning (15.6)** – ``scope_contracts`` rows ``1..n`` per step, the previous active version becomes
-   ``superseded``, ``steps.current_scope_version`` points at the newest version.
+5. **versioning (15.6)** – ``scope_contracts`` rows ``1..n`` per step; every previous non-superseded version
+   (active or unavailable) becomes ``superseded`` with ``evidence["superseded"]`` provenance,
+   ``steps.current_scope_version`` points at the newest version.
 6. **unavailable (15.8)** – nothing resolvable (or a cap exceeded) yields a persisted ``unavailable`` row with a
    deny-all contract and full evidence plus ``scope.unavailable``; the caller must block or replan. Nothing is
    restored, committed or pushed here.
@@ -35,14 +37,14 @@ import contextlib
 import os
 import re
 import uuid
-from collections.abc import Iterable, Sequence
+from collections.abc import Iterable, Mapping, Sequence
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from pathlib import Path, PurePosixPath
 from typing import Any, Literal
 
 from pydantic import TypeAdapter, ValidationError
-from sqlalchemy import func, select, update
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from hermclaw.contracts.acceptance import AbsenceEvidence, AcceptanceCriterion, PresenceEvidence
@@ -72,7 +74,7 @@ HintStatus = Literal["resolved", "new_path", "unresolved", "ambiguous", "invalid
 WORKSPACE_WRITE_KINDS = frozenset(k.value for k in MUTATING_STEP_KINDS) - {StepKind.ssh.value, StepKind.deploy.value}
 #: kinds that may create new files (hinted paths that do not exist yet become allowed new paths)
 CREATING_KINDS = WORKSPACE_WRITE_KINDS
-_CLOSED_STEP_STATUSES = frozenset({StepStatus.completed.value, StepStatus.cancelled.value})
+CLOSED_STEP_STATUSES = frozenset({StepStatus.completed.value, StepStatus.cancelled.value})
 
 GLOB_CHARS = frozenset("*?[")
 _SYMBOL_RE = re.compile(r"^[A-Za-z_$][\w$]*(?:(?:\.|::|#|->|\\)[A-Za-z_$][\w$]*)*(?:\(\))?$")
@@ -94,10 +96,23 @@ _DELETE_BEFORE_RE = re.compile(
     r"(?i)\b(?:delete|remove|rm|unlink|lösche|loesche|entferne)\s+"
     r"(?:(?:the|die|das|den)\s+)?(?:(?:file|files|datei|dateien|directory|dir|folder|ordner|verzeichnis)\s+)?" + _PATH_PART
 )
-_DELETE_AFTER_RE = re.compile(r"(?i)" + _PATH_PART + r"\s+(?:löschen|loeschen|entfernen)\b")
+_DELETE_AFTER_RE = re.compile(
+    r"(?i)" + _PATH_PART + r"(?:\s+aus\s+(?:dem\s+)?(?:repo|repository|projekt|codebase|workspace))?\s+(?:löschen|loeschen|entfernen)\b"
+)
+# "remove X from Y" edits Y; only "from the repository/codebase/disk…" means deleting the file X
+_FROM_AFTER_RE = re.compile(r"(?i)^\s*(?:from|out\s+of|in|inside|within|aus|von|vom|im)\s+(?P<obj>.*)$")
+_REPO_OBJECT_RE = re.compile(
+    r"(?i)^(?:the\s+|dem\s+|der\s+|das\s+)?(?:repo|repository|codebase|project|projekt|workspace|working\s+tree|tree|disk|"
+    r"file\s*system|git)\b"
+)
+# "die Zeile aus config.py entfernen" edits config.py – a preceding "aus/from/in" makes it the container, not the target
+_FROM_BEFORE_RE = re.compile(r"(?i)\b(?:aus|von|vom|in|im|from|of)\s+(?:(?:der|dem|den|die|das|the)\s+)?(?:(?:datei|file)\s+)?$")
 _NEGATION_RE = re.compile(r"(?i)\b(?:not|never|no|don'?t|without|nicht|niemals|keine?n?)\b")
 _CLAUSE_SPLIT_RE = re.compile(r"(?:[;\n]|\.(?=\s|$))+\s*")
-_LINE_SUFFIX_RE = re.compile(r"^(?P<path>.+?):\d+(?:-\d+)?$")
+# location suffixes planners append to file hints: "a.py:12", "a.py:12-40", "a.py:12:5", "a.py#L3-L9", "t.py::test_x"
+_LOCATION_SUFFIX_RE = re.compile(r"^(?P<path>.+?)(?::\d+(?:[-:]\d+)?|#L\d+(?:-L?\d+)?|(?:::[\w$.]+(?:\(\))?)+)$")
+# characters that never belong to a file the runtime lets a step create (location suffixes, drive letters, controls)
+_IMPLAUSIBLE_NEW_PATH_RE = re.compile(r"[:\x00-\x1f\x7f]")
 
 
 class ScopeEngineError(HermclawError):
@@ -117,6 +132,7 @@ class ScopeEngineSettings:
     max_expansions_per_step: int = 3
     read_max_chars: int = 40_000
     list_timeout_seconds: float = 30.0
+    repo_timeout_seconds: float = 60.0  # per RepoContextProvider call; a hung index is evidence, never a hang
 
 
 # ============================================================================================= workspace files
@@ -168,6 +184,9 @@ async def _git_ls_files(root: Path, limit_seconds: float) -> list[str] | None:
             "git",
             "-C",
             str(root),
+            # never execute repository-configured helpers while listing an untrusted work tree
+            "-c",
+            "core.fsmonitor=false",
             "ls-files",
             "-z",
             "--cached",
@@ -203,6 +222,17 @@ def _walk_files(root: Path) -> list[str]:
 
 def _filter_existing(root: Path, raw: Iterable[str]) -> tuple[frozenset[str], frozenset[str]]:
     resolved_root = root.resolve()
+    parent_inside: dict[str, bool] = {"": True}
+
+    def inside(parent: str) -> bool:
+        # a symlinked parent directory must not smuggle files from outside the workspace into the scope
+        if parent not in parent_inside:
+            try:
+                parent_inside[parent] = (root / parent).resolve().is_relative_to(resolved_root)
+            except OSError:
+                parent_inside[parent] = False
+        return parent_inside[parent]
+
     files: set[str] = set()
     for rel in raw:
         try:
@@ -212,7 +242,10 @@ def _filter_existing(root: Path, raw: Iterable[str]) -> tuple[frozenset[str], fr
         if p == ".git" or p.startswith(".git/") or "/.git/" in f"/{p}":
             continue
         candidate = root / p
+        parent = str(PurePosixPath(p).parent)
         try:
+            if not inside("" if parent == "." else parent):
+                continue
             if candidate.is_symlink():
                 target = candidate.resolve()
                 if not target.is_relative_to(resolved_root) or not target.is_file():
@@ -247,6 +280,42 @@ async def list_workspace_files(root: Path, *, limit_seconds: float = 30.0) -> Wo
 _ESCAPED_CHAR_RE = re.compile(r"\[([\[*?])\]")
 
 
+def canonical_path(path: str) -> str:
+    """:func:`normalise_path` plus collapsing of empty and ``.`` segments (``src//./a.py`` -> ``src/a.py``).
+
+    A trailing ``/`` (directory pattern) is kept. The repository root itself (``.``) is rejected: it is never an
+    explicit scope.
+    """
+    p = normalise_path(path)
+    parts = [seg for seg in p.split("/") if seg not in ("", ".")]
+    if not parts:
+        raise ValueError(f"the repository root is not an explicit scope path: {path!r}")
+    out = "/".join(parts)
+    return out + "/" if p.endswith("/") else out
+
+
+def is_unbounded_pattern(pattern: str) -> bool:
+    """A creation pattern is unbounded when it is not anchored at a literal directory or a root file name.
+
+    ``**``, ``*``, ``**/x.py``, ``**.md`` or ``*/tests/`` would let a step create files anywhere in the repository,
+    which is never an explicit scope; ``src/**``, ``tests/`` and ``*.md`` (root files only) are bounded.
+    """
+    parts = pattern.rstrip("/").split("/")
+    first = parts[0]
+    if "**" in first:
+        return True
+    if any(c in GLOB_CHARS for c in first):
+        if len(parts) > 1 or pattern.endswith("/"):
+            return True
+        return not any(c.isalnum() for c in first)
+    return False
+
+
+def implausible_new_path(path: str) -> bool:
+    """Concrete creation paths with location suffixes / drive letters / control characters are planner noise."""
+    return _IMPLAUSIBLE_NEW_PATH_RE.search(path) is not None
+
+
 def glob_escape(path: str) -> str:
     """Escape glob characters of a literal file name so ScopeGuard matches exactly that file (``[`` -> ``[[]``)."""
     return re.sub(r"[\[*?]", lambda m: f"[{m.group(0)}]", path)
@@ -260,13 +329,13 @@ def literal_path(pattern: str) -> str | None:
 
 
 # ============================================================================================= hint classification
-def _strip_line_suffix(hint: str, files: WorkspaceFiles) -> str:
-    """``src/app.py:12`` / ``src/app.py:12-40`` -> ``src/app.py`` when that file exists."""
-    m = _LINE_SUFFIX_RE.match(hint)
+def strip_location_suffix(hint: str, files: WorkspaceFiles) -> str:
+    """``a.py:12`` / ``a.py:12-40`` / ``a.py#L3`` / ``t.py::test_x`` -> the file, when that file exists."""
+    m = _LOCATION_SUFFIX_RE.match(hint)
     if m is None:
         return hint
     try:
-        base = normalise_path(m.group("path"))
+        base = canonical_path(m.group("path"))
     except ValueError:
         return hint
     return base if files.exists(base) else hint
@@ -285,7 +354,7 @@ def classify_hint(hint: str, files: WorkspaceFiles) -> HintKind:
     if not h:
         return "invalid"
     try:
-        p: str | None = normalise_path(h)
+        p: str | None = canonical_path(h)
     except ValueError:
         p = None
     if p is not None:  # an existing literal path wins (file names may contain "[", e.g. "routes/[id].tsx")
@@ -295,18 +364,20 @@ def classify_hint(hint: str, files: WorkspaceFiles) -> HintKind:
             return "directory"
     if any(ch.isspace() for ch in h):
         return "text"  # paths/globs/symbols never contain whitespace; free text goes to repository search
+    if p is None:
+        return "invalid"  # absolute, '..'-escaping or repository-root "paths" are never scope
     if any(c in GLOB_CHARS for c in h):
-        return "glob" if p is not None else "invalid"
+        return "glob"
     if h.endswith("/"):
-        return "directory" if p is not None else "invalid"
+        return "directory"
     if "/" in h:
-        return "path" if p is not None else "invalid"
-    if p is not None and (_has_file_extension(p) or h.startswith(".")):
+        return "path"
+    if _has_file_extension(p) or h.startswith("."):
         return "path"
     if _SYMBOL_RE.match(h):
         return "symbol"
     if "\\" in h:
-        return "path" if p is not None else "invalid"
+        return "path"
     return "text"
 
 
@@ -348,7 +419,7 @@ def select_confident_hits(
     records: list[dict[str, Any]] = []
     for hit in hits:
         try:
-            p = normalise_path(hit.path)
+            p = canonical_path(hit.path)
         except ValueError:
             records.append({"path": hit.path[:300], "score": round(_clamp(hit.score), 4), "accepted": False, "note": "invalid path"})
             continue
@@ -404,11 +475,17 @@ def constraint_delete_tokens(constraints: Iterable[Any]) -> list[str]:
                     prefix = clause[max(0, m.start() - 30) : m.start()]
                     if _NEGATION_RE.search(prefix):
                         continue
+                    if regex is _DELETE_BEFORE_RE:
+                        after = _FROM_AFTER_RE.match(clause[m.end() :])
+                        if after is not None and _REPO_OBJECT_RE.match(after.group("obj")) is None:
+                            continue  # "remove X from Y": Y is edited, X is not a file to delete
+                    elif _FROM_BEFORE_RE.search(clause[: m.start()]):
+                        continue  # "die Zeile aus X entfernen": X is edited, not deleted
                     tokens.append(m.group("path"))
     out: list[str] = []
     for t in tokens:
         try:
-            p = normalise_path(t.rstrip(".,:"))
+            p = canonical_path(t.rstrip(".,:"))
         except ValueError:
             continue
         if p not in out:
@@ -435,15 +512,18 @@ class ScopeDecision:
 
 
 # ============================================================================================= persistence helpers
-def merged_forbidden(policy: ScopePolicy, step_forbidden: Iterable[str]) -> tuple[list[str], list[dict[str, str]]]:
-    """Merge ``always_forbidden`` with step forbidden paths (normalised, de-duplicated); returns (merged, rejected)."""
+def merged_forbidden(policy: ScopePolicy, step_forbidden: Iterable[Any]) -> tuple[list[str], list[dict[str, str]]]:
+    """Merge ``always_forbidden`` with step forbidden paths (normalised, de-duplicated); returns (merged, rejected).
+
+    ``step_forbidden`` is raw JSONB content: non-string entries are ignored.
+    """
     merged: list[str] = []
     rejected: list[dict[str, str]] = []
     for raw in [*policy.always_forbidden, *step_forbidden]:
         if not isinstance(raw, str):
             continue
         try:
-            p = normalise_path(raw)
+            p = canonical_path(raw)
         except ValueError as exc:
             rejected.append({"path": str(raw)[:300], "reason": str(exc)})
             continue
@@ -511,15 +591,25 @@ async def persist_scope_version(
 ) -> tuple[ScopeContractRow, ScopeContract, int | None]:
     """Insert the next scope version for ``step`` (caller holds the step row lock).
 
-    Supersedes the previous *active* version and moves ``steps.current_scope_version``. Returns the row, the
-    contract with its final version number and the previous current version.
+    Every previous version that is not yet superseded (the active one, or an ``unavailable`` one) becomes
+    ``superseded``; its evidence keeps the former status and the superseding version. ``steps.current_scope_version``
+    moves to the new version. Returns the row, the contract with its final version number and the previous current
+    version. Invariant: at most one non-superseded row per step, and it is the current version.
     """
     max_version = (await session.execute(select(func.max(ScopeContractRow.version)).where(ScopeContractRow.step_id == step.id))).scalar()
     version = int(max_version or 0) + 1
     final = ScopeContract.model_validate({**contract.model_dump(mode="json"), "version": version})
-    await session.execute(
-        update(ScopeContractRow).where(ScopeContractRow.step_id == step.id, ScopeContractRow.status == "active").values(status="superseded")
-    )
+    open_rows = (
+        await session.execute(
+            select(ScopeContractRow).where(ScopeContractRow.step_id == step.id, ScopeContractRow.status != "superseded").with_for_update()
+        )
+    ).scalars()
+    for old in open_rows:
+        old.evidence = {
+            **(old.evidence or {}),
+            "superseded": {"by_version": version, "previous_status": old.status, "at": now_iso()},
+        }  # reassign: JSONB columns are not mutation-tracked
+        old.status = "superseded"
     row = ScopeContractRow(
         job_id=step.job_id,
         step_id=step.id,
@@ -534,6 +624,23 @@ async def persist_scope_version(
     step.current_scope_version = version
     await session.flush()
     return row, final, previous
+
+
+def designated_deletes(evidence: Mapping[str, Any] | None) -> list[str] | None:
+    """Literal paths a scope version designates for deletion; ``None`` when the version carries no designation.
+
+    The engine records ``evidence["delete_paths"]`` for every generated version (acceptance absence evidence or an
+    explicit delete constraint) and expansions carry it forward. A contract-level ``delete`` operation therefore
+    only covers these paths (enforced by :mod:`hermclaw.scope.audit`).
+    """
+    if not evidence or "delete_paths" not in evidence:
+        return None
+    out: list[str] = []
+    for item in evidence.get("delete_paths") or []:
+        path = item.get("path") if isinstance(item, Mapping) else item
+        if isinstance(path, str) and path and path not in out:
+            out.append(path)
+    return out
 
 
 def contract_event_payload(contract: ScopeContract, *, status: str, previous_version: int | None) -> dict[str, Any]:
@@ -616,7 +723,7 @@ class ScopeEngine:
         async with self.sessionmaker() as session:
             step = await load_step(session, step_id)
             snapshot = _StepSnapshot.of(step)
-        if snapshot.superseded or snapshot.status in _CLOSED_STEP_STATUSES:
+        if snapshot.superseded or snapshot.status in CLOSED_STEP_STATUSES:
             raise ConflictError(
                 f"step {snapshot.step_key} is {'superseded' if snapshot.superseded else snapshot.status}; no new scope",
                 code="scope_step_closed",
@@ -629,6 +736,11 @@ class ScopeEngine:
 
         async with self.sessionmaker() as session, session.begin():
             step = await load_step(session, step_id, for_update=True)
+            if step.superseded or str(step.status) in CLOSED_STEP_STATUSES:
+                raise ConflictError(
+                    f"step {step.step_key} was closed while its scope was generated; no new scope",
+                    code="scope_step_closed",
+                )
             row, final, previous = await persist_scope_version(session, step, contract, status=status, evidence=evidence, reason=reason)
             payload = contract_event_payload(final, status=status, previous_version=previous)
             if status == "active":
@@ -658,7 +770,7 @@ class ScopeEngine:
                         "unresolved_hints": [h["hint"] for h in evidence.get("hints", []) if h.get("status") != "resolved"][:20],
                     },
                 )
-            scope_id = row.id
+            scope_id, stored_evidence = row.id, row.evidence  # read inside the transaction (any expire policy)
         log.info(
             "scope generated",
             extra={"step_id": str(step_id), "scope_version": final.version, "scope_status": status, "reason_code": reason_code},
@@ -670,7 +782,7 @@ class ScopeEngine:
             scope_id=scope_id,
             reason=reason,
             reason_code=reason_code,
-            evidence=row.evidence,
+            evidence=stored_evidence,
         )
 
     async def current_contract(self, step_id: uuid.UUID) -> ScopeContract | None:
@@ -736,7 +848,7 @@ class ScopeEngine:
         invalid_new: list[dict[str, str]] = []
         for raw in step.allowed_new_paths:
             try:
-                p = normalise_path(str(raw))
+                p = canonical_path(str(raw))
             except ValueError as exc:
                 invalid_new.append({"path": str(raw)[:300], "reason": str(exc)})
                 continue
@@ -752,7 +864,7 @@ class ScopeEngine:
         evidence["constraint_delete_tokens"] = constraint_tokens
 
         # ---- policy merge + forbidden paths (15.3 / 15.5)
-        targets, new_paths, delete_paths = self._apply_forbidden(draft, forbidden, files)
+        targets, new_paths, delete_paths = self._apply_policy(draft, forbidden, files)
         evidence["targets"] = [{"path": p, "sources": draft.targets[p]} for p in targets]
         evidence["allowed_new_paths"] = [{"path": p, "sources": draft.new_paths[p]} for p in new_paths]
         evidence["delete_paths"] = [{"path": p, "sources": draft.delete_paths[p]} for p in delete_paths]
@@ -787,7 +899,7 @@ class ScopeEngine:
         elif not targets and not new_paths:
             unavailable = (
                 "no_resolvable_scope",
-                "no repo hint resolved to an existing, permitted file and the step declares no allowed new paths",
+                "no repo hint resolved to an existing, permitted file and no permitted allowed new path remains",
             )
         if unavailable is not None:
             code, reason = unavailable
@@ -815,7 +927,7 @@ class ScopeEngine:
                     draft.delete(p, "acceptance:absence")
             elif isinstance(crit, PresenceEvidence) and may_create:
                 try:
-                    p = normalise_path(crit.path_glob)
+                    p = canonical_path(crit.path_glob)
                 except ValueError:
                     continue
                 if any(c in GLOB_CHARS for c in p) or files.exists(p):
@@ -827,7 +939,7 @@ class ScopeEngine:
     @staticmethod
     def _existing_for(pattern: str, files: WorkspaceFiles) -> list[str]:
         try:
-            p = normalise_path(pattern)
+            p = canonical_path(pattern)
         except ValueError:
             return []
         if any(c in GLOB_CHARS for c in p) or p.endswith("/"):
@@ -836,11 +948,15 @@ class ScopeEngine:
             return [p]
         return []
 
-    def _apply_forbidden(self, draft: _Draft, forbidden: list[str], files: WorkspaceFiles) -> tuple[list[str], list[str], list[str]]:
+    def _apply_policy(self, draft: _Draft, forbidden: list[str], files: WorkspaceFiles) -> tuple[list[str], list[str], list[str]]:
         new_paths: list[str] = []
         for p, sources in list(draft.new_paths.items()):
             concrete = not any(c in GLOB_CHARS for c in p) and not p.endswith("/")
-            if concrete and any_match(p, forbidden):
+            if not concrete and is_unbounded_pattern(p):
+                draft.exclude(p, "unbounded pattern: creation scope must be anchored at a literal directory", bucket="allowed_new_paths")
+            elif concrete and implausible_new_path(p):
+                draft.exclude(p, "not a plausible file path (location suffix or control characters)", bucket="allowed_new_paths")
+            elif concrete and any_match(p, forbidden):
                 draft.exclude(p, "forbidden", bucket="allowed_new_paths")
             elif concrete and files.exists(p):
                 # an explicitly declared, exact path that already exists can only be written as a modification
@@ -859,7 +975,7 @@ class ScopeEngine:
         return targets, new_paths, deletes
 
     async def _resolve_hint(self, hint: str, workspace: WorkspaceHandle, files: WorkspaceFiles, *, may_create: bool) -> HintEvidence:
-        hint = _strip_line_suffix(hint.strip(), files)
+        hint = strip_location_suffix(hint.strip(), files)
         kind = classify_hint(hint, files)
         record = HintEvidence(hint=hint, kind=kind)
         if kind == "invalid":
@@ -867,7 +983,7 @@ class ScopeEngine:
             record.reason = "neither a repository-relative path/glob nor a symbol or search text"
             return record
         if kind in ("glob", "directory", "path"):
-            p = normalise_path(hint)
+            p = canonical_path(hint)
             if kind == "glob":
                 matches = files.match(p)
             elif kind == "directory":
@@ -924,20 +1040,25 @@ class ScopeEngine:
         s = self.settings
         query = record.hint
         try:
+            timeout = s.repo_timeout_seconds
             if record.kind == "symbol":
                 name = query.removesuffix("()")
-                hits = await self.repo.find_symbol(workspace, name, k=s.search_k)
+                hits = await asyncio.wait_for(self.repo.find_symbol(workspace, name, k=s.search_k), timeout)
                 threshold = s.min_symbol_score
                 if not hits:
                     last = _SYMBOL_SPLIT_RE.split(name)[-1]
                     if last != name:
-                        hits = await self.repo.find_symbol(workspace, last, k=s.search_k)
+                        hits = await asyncio.wait_for(self.repo.find_symbol(workspace, last, k=s.search_k), timeout)
                 if not hits:
-                    hits = await self.repo.search(workspace, name, k=s.search_k)
+                    hits = await asyncio.wait_for(self.repo.search(workspace, name, k=s.search_k), timeout)
                     threshold = s.min_search_score
             else:
-                hits = await self.repo.search(workspace, query, k=s.search_k)
+                hits = await asyncio.wait_for(self.repo.search(workspace, query, k=s.search_k), timeout)
                 threshold = s.min_search_score
+        except TimeoutError:
+            record.status = "error"
+            record.reason = f"repository intelligence timed out after {s.repo_timeout_seconds:.0f}s"
+            return record
         except Exception as exc:  # provider failure is recorded evidence, never a crash of scope generation
             record.status = "error"
             record.reason = f"repository intelligence failed: {type(exc).__name__}: {str(exc)[:200]}"

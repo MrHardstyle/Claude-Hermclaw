@@ -188,3 +188,46 @@ async def test_probe_health_errors() -> None:
 
     with pytest.raises(WorkerProtocolError):
         await probe_health("http://w", transport=httpx.MockTransport(garbage))
+
+
+@pytest.mark.parametrize(
+    ("health", "code"),
+    [
+        ({**HEALTH, "protocol_version": 999}, "WORKER_INCOMPATIBLE"),
+        ({**HEALTH, "worker_id": "exec-other"}, "WORKER_IDENTITY_MISMATCH"),
+    ],
+)
+async def test_ensure_compatible_rejects_wrong_protocol_or_identity(health: dict[str, object], code: str) -> None:
+    async with _client(httpx.MockTransport(lambda _r: httpx.Response(200, json=health))) as c:
+        with pytest.raises(WorkerProtocolError) as exc:
+            await c.ensure_compatible()
+    assert exc.value.code == code
+
+
+async def test_ensure_compatible_accepts_matching_daemon() -> None:
+    async with _client(httpx.MockTransport(lambda _r: httpx.Response(200, json=HEALTH))) as c:
+        assert (await c.ensure_compatible()).worker_id == "exec-1"
+
+
+@pytest.mark.parametrize("workspace", ["..", ".", "a/b", "../commands", "", "-x", "x" * 129])
+async def test_client_rejects_unsafe_workspace_ids_without_sending(workspace: str) -> None:
+    sent: list[httpx.Request] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        sent.append(request)
+        return httpx.Response(200, json={})
+
+    async with _client(httpx.MockTransport(handler)) as c:
+        assert isinstance(c, ExecutionWorkerClient)
+        for call in (
+            c.upload_workspace(workspace, b"tar"),
+            c.download_workspace(workspace),
+            c.workspace_manifest(workspace),
+            c.workspace_info(workspace),
+            c.delete_paths(workspace, ["a"]),
+            c.delete_workspace(workspace),
+            c.run_command(CommandRequest(request_id="r1", job_id="j", step_id="s", workspace=workspace, command="true")),
+        ):
+            with pytest.raises(ValueError):
+                await call
+    assert sent == []

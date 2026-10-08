@@ -4,14 +4,19 @@ from __future__ import annotations
 
 import uuid
 from pathlib import Path
+from typing import Any
 
 import pytest
 
 from hermclaw.contracts.events import EventType
 from hermclaw.contracts.scope import ScopeExpansionRequest
-from hermclaw.scope.engine import ScopeEngine, ScopeEngineSettings
+from hermclaw.core.config import HermclawConfig
+from hermclaw.core.interfaces import WorkspaceHandle
+from hermclaw.persistence.models import Step
+from hermclaw.scope.engine import ScopeDecision, ScopeEngine, ScopeEngineSettings
 from hermclaw.scope.expansion import ScopeExpansionHandler
 from tests.integration.test_scope_support import (
+    SM,
     FakeRepo,
     build_repo,
     events_for,
@@ -32,7 +37,9 @@ def repo(tmp_repo: Path) -> Path:
     return build_repo(tmp_repo)
 
 
-async def _scoped_step(sessionmaker, repo: Path, *, cfg=None, **fields):
+async def _scoped_step(
+    sessionmaker: SM, repo: Path, *, cfg: HermclawConfig | None = None, **fields: Any
+) -> tuple[Step, WorkspaceHandle, ScopeDecision]:
     cfg = cfg or make_config()
     fields.setdefault("repo_hints", ["src/app/core.py"])
     step = await make_step(sessionmaker, **fields)
@@ -45,7 +52,7 @@ def _req(*paths: str, ops: list[str] | None = None) -> ScopeExpansionRequest:
     return ScopeExpansionRequest(paths=list(paths), operations=ops or ["modify"], justification=WHY)
 
 
-async def test_mechanical_test_of_target_is_granted(sessionmaker, repo: Path) -> None:
+async def test_mechanical_test_of_target_is_granted(sessionmaker: SM, repo: Path) -> None:
     step, ws, d = await _scoped_step(sessionmaker, repo)
     assert d.version == 1
     attempt = uuid.uuid4()
@@ -77,7 +84,7 @@ async def test_mechanical_test_of_target_is_granted(sessionmaker, repo: Path) ->
     assert guard.allowed("tests/test_core.py", "modify")
 
 
-async def test_mechanical_import_dependency_is_granted(sessionmaker, repo: Path) -> None:
+async def test_mechanical_import_dependency_is_granted(sessionmaker: SM, repo: Path) -> None:
     step, ws, _ = await _scoped_step(sessionmaker, repo, repo_hints=["tests/test_core.py"])
     fake = FakeRepo()
     decision = await ScopeExpansionHandler(sessionmaker, make_config(), fake).handle(step.id, _req("src/app/core.py"), ws)
@@ -87,7 +94,7 @@ async def test_mechanical_import_dependency_is_granted(sessionmaker, repo: Path)
     assert ("read", "tests/test_core.py") in fake.calls  # evidence comes from the RepoContextProvider
 
 
-async def test_mechanical_same_directory_create(sessionmaker, repo: Path) -> None:
+async def test_mechanical_same_directory_create(sessionmaker: SM, repo: Path) -> None:
     step, ws, _ = await _scoped_step(sessionmaker, repo)
     decision = await ScopeExpansionHandler(sessionmaker, make_config(), FakeRepo()).handle(step.id, _req("src/app/extra.py"), ws)
     assert decision.granted and decision.contract is not None
@@ -97,7 +104,7 @@ async def test_mechanical_same_directory_create(sessionmaker, repo: Path) -> Non
     assert decision.contract.allowed_operations == ["create", "modify"]
 
 
-async def test_semantic_expansion_needs_replan(sessionmaker, repo: Path) -> None:
+async def test_semantic_expansion_needs_replan(sessionmaker: SM, repo: Path) -> None:
     step, ws, _ = await _scoped_step(sessionmaker, repo)
     handler = ScopeExpansionHandler(sessionmaker, make_config(), FakeRepo())
     for paths in (("src/lib/util.py",), ("tests/test_misc.py",), ("src/app/helpers.py", "src/lib/util.py")):
@@ -112,7 +119,7 @@ async def test_semantic_expansion_needs_replan(sessionmaker, repo: Path) -> None
     assert await events_for(sessionmaker, step.id, EventType.SCOPE_EXPANDED) == []
 
 
-async def test_delete_is_always_semantic(sessionmaker, repo: Path) -> None:
+async def test_delete_is_always_semantic(sessionmaker: SM, repo: Path) -> None:
     step, ws, _ = await _scoped_step(sessionmaker, repo)
     decision = await ScopeExpansionHandler(sessionmaker, make_config(), FakeRepo()).handle(
         step.id, _req("src/app/helpers.py", ops=["delete"]), ws
@@ -132,7 +139,7 @@ async def test_delete_is_always_semantic(sessionmaker, repo: Path) -> None:
         ("src/app/core.py/inner.py", "invalid_paths"),
     ],
 )
-async def test_invalid_or_forbidden_paths_are_rejected(sessionmaker, repo: Path, path: str, code: str) -> None:
+async def test_invalid_or_forbidden_paths_are_rejected(sessionmaker: SM, repo: Path, path: str, code: str) -> None:
     step, ws, _ = await _scoped_step(sessionmaker, repo)
     decision = await ScopeExpansionHandler(sessionmaker, make_config(), FakeRepo()).handle(step.id, _req(path, "src/app/x.py"), ws)
     assert decision.outcome == "rejected" and decision.reason_code == code
@@ -141,13 +148,13 @@ async def test_invalid_or_forbidden_paths_are_rejected(sessionmaker, repo: Path,
     assert len(ev) == 1 and ev[0].severity == "warning" and ev[0].payload["outcome"] == "rejected"
 
 
-async def test_step_forbidden_path_is_rejected(sessionmaker, repo: Path) -> None:
+async def test_step_forbidden_path_is_rejected(sessionmaker: SM, repo: Path) -> None:
     step, ws, _ = await _scoped_step(sessionmaker, repo, forbidden_paths=["src/app/helpers.py"])
     decision = await ScopeExpansionHandler(sessionmaker, make_config(), FakeRepo()).handle(step.id, _req("src/app/helpers.py"), ws)
     assert decision.outcome == "rejected" and decision.reason_code == "forbidden_paths"
 
 
-async def test_already_in_scope_is_a_noop_grant(sessionmaker, repo: Path) -> None:
+async def test_already_in_scope_is_a_noop_grant(sessionmaker: SM, repo: Path) -> None:
     step, ws, _ = await _scoped_step(sessionmaker, repo)
     decision = await ScopeExpansionHandler(sessionmaker, make_config(), FakeRepo()).handle(step.id, _req("src/app/core.py"), ws)
     assert decision.granted and not decision.changed and decision.reason_code == "already_in_scope" and decision.version == 1
@@ -155,7 +162,7 @@ async def test_already_in_scope_is_a_noop_grant(sessionmaker, repo: Path) -> Non
     assert len(await events_for(sessionmaker, step.id, EventType.SCOPE_EXPANSION_REQUESTED)) == 1
 
 
-async def test_expansion_limit_per_step(sessionmaker, repo: Path) -> None:
+async def test_expansion_limit_per_step(sessionmaker: SM, repo: Path) -> None:
     step, ws, _ = await _scoped_step(sessionmaker, repo)
     handler = ScopeExpansionHandler(sessionmaker, make_config(), FakeRepo(), settings=ScopeEngineSettings(max_expansions_per_step=3))
     for i in range(3):
@@ -170,14 +177,14 @@ async def test_expansion_limit_per_step(sessionmaker, repo: Path) -> None:
     assert len(await events_for(sessionmaker, step.id, EventType.SCOPE_EXPANSION_REQUESTED)) == 4
 
 
-async def test_expansion_respects_policy_caps(sessionmaker, repo: Path) -> None:
+async def test_expansion_respects_policy_caps(sessionmaker: SM, repo: Path) -> None:
     cfg = make_config(max_new_paths=1)
     step, ws, _ = await _scoped_step(sessionmaker, repo, cfg=cfg, allowed_new_paths=["src/app/one.py"])
     decision = await ScopeExpansionHandler(sessionmaker, cfg, FakeRepo()).handle(step.id, _req("src/app/two.py"), ws)
     assert decision.needs_replan and decision.reason_code == "scope_caps_exceeded"
 
 
-async def test_no_active_scope_is_rejected(sessionmaker, repo: Path) -> None:
+async def test_no_active_scope_is_rejected(sessionmaker: SM, repo: Path) -> None:
     handler = ScopeExpansionHandler(sessionmaker, make_config(), FakeRepo())
     bare = await make_step(sessionmaker, repo_hints=["README.md"])
     d = await handler.handle(bare.id, _req("src/app/core.py"), workspace_for(bare.job_id, repo))
@@ -193,7 +200,7 @@ async def test_no_active_scope_is_rejected(sessionmaker, repo: Path) -> None:
     assert rows[0].evidence["expansion_requests"][0]["outcome"] == "rejected"
 
 
-async def test_test_importing_target_is_mechanical(sessionmaker, repo: Path) -> None:
+async def test_test_importing_target_is_mechanical(sessionmaker: SM, repo: Path) -> None:
     write(repo, "tests/integration/check_flow.py", "from app.core import run\n")
     step, ws, _ = await _scoped_step(sessionmaker, repo)
     decision = await ScopeExpansionHandler(sessionmaker, make_config(), FakeRepo()).handle(
@@ -202,7 +209,7 @@ async def test_test_importing_target_is_mechanical(sessionmaker, repo: Path) -> 
     assert decision.granted and decision.paths[0].signals["test_imports"] == "src/app/core.py"
 
 
-async def test_justification_secrets_are_redacted(sessionmaker, repo: Path) -> None:
+async def test_justification_secrets_are_redacted(sessionmaker: SM, repo: Path) -> None:
     step, ws, _ = await _scoped_step(sessionmaker, repo)
     req = ScopeExpansionRequest(paths=["src/lib/util.py"], justification="needs token=supersecretvalue123 to call api")
     await ScopeExpansionHandler(sessionmaker, make_config(), FakeRepo()).handle(step.id, req, ws)

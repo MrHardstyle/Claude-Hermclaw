@@ -38,6 +38,7 @@ class Answer:
     fallback_used: bool = False
     reasoning_chars: int = 0
     before: Hook | None = None  # awaited before answering (simulates concurrent activity during a model call)
+    finish_reason: str = "stop"
 
 
 @dataclass
@@ -96,7 +97,7 @@ class ScriptedChat:
             prompt_tokens=100,
             completion_tokens=50,
             latency_ms=5,
-            finish_reason="stop",
+            finish_reason=answer.finish_reason,
             reasoning_chars=answer.reasoning_chars,
             invocation_id=uuid.uuid4(),
             fallback_used=answer.fallback_used,

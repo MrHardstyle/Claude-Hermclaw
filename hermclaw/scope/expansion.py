@@ -32,7 +32,7 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from hermclaw.contracts.common import Severity
 from hermclaw.contracts.events import EventType
-from hermclaw.contracts.scope import Operation, ScopeContract, ScopeExpansionRequest, normalise_path
+from hermclaw.contracts.scope import Operation, ScopeContract, ScopeExpansionRequest
 from hermclaw.core.config import HermclawConfig, ScopePolicy
 from hermclaw.core.errors import ConflictError
 from hermclaw.core.interfaces import RepoContextProvider, WorkspaceHandle
@@ -41,16 +41,21 @@ from hermclaw.core.redaction import redact
 from hermclaw.events.store import append_event
 from hermclaw.persistence.models import ScopeContractRow
 from hermclaw.scope.engine import (
-    GLOB_CHARS,
+    CLOSED_STEP_STATUSES,
     SOURCE_TYPE,
     ScopeEngineSettings,
     WorkspaceFiles,
+    canonical_path,
     contract_event_payload,
     contract_from_row,
     count_runtime_expansions,
     current_scope_row,
     deny_all_contract,
+    designated_deletes,
+    glob_escape,
+    implausible_new_path,
     list_workspace_files,
+    literal_path,
     load_step,
     merged_forbidden,
     now_iso,
@@ -66,6 +71,9 @@ Classification = Literal["mechanical", "semantic"]
 PathStatus = Literal["pending", "already_allowed", "invalid", "forbidden"]
 
 _OPERATION_ORDER: tuple[Operation, ...] = ("create", "modify", "delete")
+#: requested paths are literal files; "[" / "]" are legal file-name characters (escaped into the contract), but
+#: "*" and "?" only ever mean globs, which an expansion request must not carry
+_WILDCARDS = frozenset("*?")
 _MAX_REQUEST_RECORDS = 20
 _LANGUAGE_BY_EXTENSION: dict[str, str] = {
     **dict.fromkeys(("py", "pyi", "pyx"), "python"),
@@ -304,6 +312,8 @@ class _Snapshot:
     version: int | None
     status: str | None
     granted_expansions: int
+    step_closed: str | None = None  # "superseded" / "completed" / "cancelled" when the step can no longer run
+    evidence: dict[str, Any] = field(default_factory=dict)
 
 
 # ---------------------------------------------------------------------------------------------- handler
@@ -365,6 +375,7 @@ class ScopeExpansionHandler:
             row = await current_scope_row(session, step)
             granted = await count_runtime_expansions(session, step_id)
             contract = contract_from_row(row) if row is not None and row.status == "active" else None
+            closed = "superseded" if step.superseded else (str(step.status) if str(step.status) in CLOSED_STEP_STATUSES else None)
             return _Snapshot(
                 job_id=step.job_id,
                 step_key=step.step_key,
@@ -372,6 +383,8 @@ class ScopeExpansionHandler:
                 version=row.version if row is not None else None,
                 status=row.status if row is not None else None,
                 granted_expansions=granted,
+                step_closed=closed,
+                evidence=dict(row.evidence or {}) if row is not None else {},
             )
 
     def assess_paths(
@@ -384,11 +397,11 @@ class ScopeExpansionHandler:
         disk = on_disk or set()
         for raw in request.paths:
             try:
-                p = normalise_path(raw)
+                p = canonical_path(raw)
             except ValueError as exc:
                 out.append(PathAssessment(path=str(raw)[:300], operation=None, status="invalid", reason=str(exc)))
                 continue
-            if any(c in GLOB_CHARS for c in p) or p.endswith("/"):
+            if any(c in _WILDCARDS for c in p) or p.endswith("/"):
                 out.append(PathAssessment(p, None, "invalid", "expansion requests need explicit file paths (no globs/directories)"))
                 continue
             if guard.is_forbidden(p):
@@ -405,7 +418,7 @@ class ScopeExpansionHandler:
                 if (p, op) in seen:
                     continue
                 seen.add((p, op))
-                ok, why = guard.decide(p, op)
+                ok, why = guard.decide(p, op)  # the literal file path; contract entries are (escaped) patterns
                 if ok:
                     out.append(PathAssessment(p, op, "already_allowed", f"already allowed ({why})"))
                 else:
@@ -422,6 +435,8 @@ class ScopeExpansionHandler:
             return [], "path exists on disk but is ignored or not a regular workspace file"
         if set(requested) == {"delete"}:
             return [], "cannot delete a path that does not exist"
+        if implausible_new_path(path):
+            return [], "not a plausible file path (location suffix or control characters)"
         ok, why = files.creatable(path)
         if not ok:
             return [], f"cannot be created: {why}"
@@ -456,6 +471,9 @@ class ScopeExpansionHandler:
                 paths=paths,
             )
 
+        if snapshot.step_closed is not None:
+            why = f"step {snapshot.step_key} is {snapshot.step_closed}; its scope can no longer change"
+            return decide("rejected", "step_closed", why, None, assessments), None, no_added
         if snapshot.contract is None:
             why = f"step has no active scope (current status: {snapshot.status or 'none'}); a worker cannot create scope"
             return decide("rejected", "no_active_scope", why, None, assessments), None, no_added
@@ -480,8 +498,13 @@ class ScopeExpansionHandler:
             return decide("needs_replan", "semantic_expansion", why, "semantic", assessments), None, no_added
 
         contract = snapshot.contract
-        add_targets = [a.path for a in pending if a.operation in ("modify", "delete") and a.path not in contract.target_paths]
-        add_new = [a.path for a in pending if a.operation == "create" and a.path not in contract.allowed_new_paths]
+        # requested paths are literal files: escape "[" so ScopeGuard matches exactly that file
+        add_targets = [
+            glob_escape(a.path) for a in pending if a.operation in ("modify", "delete") and glob_escape(a.path) not in contract.target_paths
+        ]
+        add_new = [
+            glob_escape(a.path) for a in pending if a.operation == "create" and glob_escape(a.path) not in contract.allowed_new_paths
+        ]
         ops = set(contract.allowed_operations) | {a.operation for a in pending if a.operation is not None}
         targets = [*contract.target_paths, *dict.fromkeys(add_targets)]
         new_paths = [*contract.allowed_new_paths, *dict.fromkeys(add_new)]
@@ -523,11 +546,10 @@ class ScopeExpansionHandler:
     async def _classify(
         self, pending: list[PathAssessment], contract: ScopeContract, workspace: WorkspaceHandle, files: WorkspaceFiles
     ) -> dict[tuple[str, Operation | None], PathAssessment]:
-        scope_files = [
-            p for p in dict.fromkeys([*contract.target_paths, *contract.allowed_new_paths]) if not any(c in GLOB_CHARS for c in p)
-        ]
-        scope_files = [p for p in scope_files if not p.endswith("/")]
-        contents = _ContentCache(self.repo, workspace, files, self.settings.read_max_chars)
+        # concrete files of the current scope (escaped literals are unescaped, globs/directories are skipped)
+        literals = (literal_path(p) for p in dict.fromkeys([*contract.target_paths, *contract.allowed_new_paths]))
+        scope_files = [p for p in dict.fromkeys(literals) if p is not None]
+        contents = _ContentCache(self.repo, workspace, files, self.settings.read_max_chars, self.settings.repo_timeout_seconds)
         out: dict[tuple[str, Operation | None], PathAssessment] = {}
         for a in pending:
             signals: dict[str, str] = {}
@@ -612,7 +634,7 @@ class ScopeExpansionHandler:
                     step,
                     new_contract,
                     status="active",
-                    evidence={"expanded_from": snapshot.version, "request": record, "added": added},
+                    evidence=_expansion_evidence(snapshot, record, added),
                     reason=new_contract.reason,
                 )
                 record["granted_version"] = final.version
@@ -665,6 +687,14 @@ class ScopeExpansionHandler:
         return final_decision
 
 
+def _expansion_evidence(snapshot: _Snapshot, record: dict[str, Any], added: dict[str, list[str]]) -> dict[str, Any]:
+    evidence: dict[str, Any] = {"expanded_from": snapshot.version, "request": record, "added": added}
+    deletes = designated_deletes(snapshot.evidence)
+    if deletes is not None:  # expansions never grant deletions (always semantic): keep the generated designation
+        evidence["delete_paths"] = [{"path": p, "sources": [f"carried_from:v{snapshot.version}"]} for p in deletes]
+    return evidence
+
+
 def _request_record(
     request: ScopeExpansionRequest, decision: ExpansionDecision, attempt_id: uuid.UUID | None, requested_by: str
 ) -> dict[str, Any]:
@@ -695,10 +725,10 @@ def _paths_on_disk(root: Path, raw_paths: Iterable[str]) -> set[str]:
     out: set[str] = set()
     for raw in raw_paths:
         try:
-            p = normalise_path(raw)
+            p = canonical_path(raw)
         except ValueError:
             continue
-        if any(c in GLOB_CHARS for c in p):
+        if any(c in _WILDCARDS for c in p):
             continue
         try:
             if (root / p).exists() or (root / p).is_symlink():
@@ -711,7 +741,10 @@ def _paths_on_disk(root: Path, raw_paths: Iterable[str]) -> set[str]:
 class _ContentCache:
     """Reads scope files through the RepoContextProvider once per request (missing/unreadable -> empty)."""
 
-    def __init__(self, repo: RepoContextProvider, workspace: WorkspaceHandle, files: WorkspaceFiles, max_chars: int) -> None:
+    def __init__(
+        self, repo: RepoContextProvider, workspace: WorkspaceHandle, files: WorkspaceFiles, max_chars: int, timeout: float
+    ) -> None:
+        self._timeout = timeout
         self._repo = repo
         self._workspace = workspace
         self._files = files
@@ -724,7 +757,7 @@ class _ContentCache:
         content = ""
         if self._files.exists(path):
             try:
-                content = await self._repo.read(self._workspace, path, 1, None, max_chars=self._max_chars)
+                content = await asyncio.wait_for(self._repo.read(self._workspace, path, 1, None, max_chars=self._max_chars), self._timeout)
             except Exception as exc:  # unreadable file = no evidence, never a crash
                 log.debug("scope expansion could not read %s: %s", path, type(exc).__name__)
                 content = ""

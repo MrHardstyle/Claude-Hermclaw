@@ -13,6 +13,7 @@ from hermclaw.core.interfaces import WorkspaceHandle
 from hermclaw.scope.engine import ScopeEngine, ScopeEngineError, ScopeEngineSettings
 from hermclaw.scope.expansion import ScopeExpansionHandler
 from tests.integration.test_scope_support import (
+    SM,
     FakeRepo,
     build_repo,
     events_for,
@@ -37,7 +38,7 @@ class UnreadableRepo(FakeRepo):
         raise OSError("index unavailable")
 
 
-async def test_repo_intelligence_outage_is_evidence_not_a_crash(sessionmaker, repo: Path) -> None:
+async def test_repo_intelligence_outage_is_evidence_not_a_crash(sessionmaker: SM, repo: Path) -> None:
     engine = ScopeEngine(sessionmaker, make_config(), FakeRepo(fail=True))
     only_symbols = await make_step(sessionmaker, repo_hints=["slug", "user model definition"])
     d = await engine.create_scope(only_symbols.id, workspace_for(only_symbols.job_id, repo))
@@ -50,7 +51,7 @@ async def test_repo_intelligence_outage_is_evidence_not_a_crash(sessionmaker, re
     assert d2.status == "active" and d2.contract is not None and d2.contract.target_paths == ["src/app/core.py"]
 
 
-async def test_missing_workspace_raises_and_writes_nothing(sessionmaker, repo: Path, tmp_path: Path) -> None:
+async def test_missing_workspace_raises_and_writes_nothing(sessionmaker: SM, repo: Path, tmp_path: Path) -> None:
     step = await make_step(sessionmaker, repo_hints=["README.md"])
     ws = workspace_for(step.job_id, repo)
     gone = WorkspaceHandle(
@@ -69,7 +70,7 @@ async def test_missing_workspace_raises_and_writes_nothing(sessionmaker, repo: P
     assert (await reload_step(sessionmaker, step.id)).current_scope_version is None
 
 
-async def test_listing_timeout_raises(sessionmaker, repo: Path) -> None:
+async def test_listing_timeout_raises(sessionmaker: SM, repo: Path) -> None:
     step = await make_step(sessionmaker, repo_hints=["README.md"])
     engine = ScopeEngine(sessionmaker, make_config(), FakeRepo(), settings=ScopeEngineSettings(list_timeout_seconds=0))
     with pytest.raises(ScopeEngineError) as exc:
@@ -78,7 +79,7 @@ async def test_listing_timeout_raises(sessionmaker, repo: Path) -> None:
     assert await scope_rows(sessionmaker, step.id) == []
 
 
-async def test_concurrent_scope_generation_allocates_unique_versions(sessionmaker, repo: Path) -> None:
+async def test_concurrent_scope_generation_allocates_unique_versions(sessionmaker: SM, repo: Path) -> None:
     step = await make_step(sessionmaker, repo_hints=["src/app/core.py"])
     engine = ScopeEngine(sessionmaker, make_config(), FakeRepo())
     ws = workspace_for(step.job_id, repo)
@@ -90,7 +91,7 @@ async def test_concurrent_scope_generation_allocates_unique_versions(sessionmake
     assert len(await events_for(sessionmaker, step.id, EventType.SCOPE_CREATED)) == 5
 
 
-async def test_concurrent_expansions_build_on_each_other(sessionmaker, repo: Path) -> None:
+async def test_concurrent_expansions_build_on_each_other(sessionmaker: SM, repo: Path) -> None:
     step = await make_step(sessionmaker, repo_hints=["src/app/core.py"])
     ws = workspace_for(step.job_id, repo)
     await ScopeEngine(sessionmaker, make_config(), FakeRepo()).create_scope(step.id, ws)
@@ -104,7 +105,7 @@ async def test_concurrent_expansions_build_on_each_other(sessionmaker, repo: Pat
     assert sorted(rows[-1].contract["allowed_new_paths"]) == ["src/app/a.py", "src/app/b.py"]
 
 
-async def test_unreadable_files_mean_no_import_evidence(sessionmaker, repo: Path) -> None:
+async def test_unreadable_files_mean_no_import_evidence(sessionmaker: SM, repo: Path) -> None:
     step = await make_step(sessionmaker, repo_hints=["tests/test_core.py"])
     ws = workspace_for(step.job_id, repo)
     await ScopeEngine(sessionmaker, make_config(), FakeRepo()).create_scope(step.id, ws)
@@ -113,7 +114,7 @@ async def test_unreadable_files_mean_no_import_evidence(sessionmaker, repo: Path
     assert decision.needs_replan and decision.reason_code == "semantic_expansion"
 
 
-async def test_corrupt_step_fields_are_ignored(sessionmaker, repo: Path) -> None:
+async def test_corrupt_step_fields_are_ignored(sessionmaker: SM, repo: Path) -> None:
     step = await make_step(
         sessionmaker,
         repo_hints=[42, None, "src/app/core.py", {"x": 1}],
@@ -129,7 +130,7 @@ async def test_corrupt_step_fields_are_ignored(sessionmaker, repo: Path) -> None
     assert d.evidence["forbidden"]["invalid"][0]["path"] == "../../etc"
 
 
-async def test_symbol_hits_outside_workspace_are_dropped(sessionmaker, repo: Path) -> None:
+async def test_symbol_hits_outside_workspace_are_dropped(sessionmaker: SM, repo: Path) -> None:
     fake = FakeRepo(symbols={"slug": [hit("/etc/passwd", 0.99), hit("vendor/lib.py", 0.99), hit("build/out.js", 0.99)]})
     step = await make_step(sessionmaker, repo_hints=["slug"])
     d = await ScopeEngine(sessionmaker, make_config(), fake).create_scope(step.id, workspace_for(step.job_id, repo))

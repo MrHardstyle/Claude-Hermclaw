@@ -92,30 +92,30 @@ Legende: `[x]` erledigt mit Evidence · `[~]` erledigt, Live-Verifikation auf Zi
 
 ## P06 – Git Engine
 
-- [ ] 6.1 repository registry. — Evidence: –
-- [ ] 6.2 clone/fetch. — Evidence: –
-- [ ] 6.3 base SHA. — Evidence: –
-- [ ] 6.4 isolated workspaces. — Evidence: –
-- [ ] 6.5 job branches. — Evidence: –
-- [ ] 6.6 status/diff. — Evidence: –
-- [ ] 6.7 safe staging. — Evidence: –
-- [ ] 6.8 Runtime commit. — Evidence: –
-- [ ] 6.9 Runtime push. — Evidence: –
-- [ ] 6.10 protected branch tests. — Evidence: –
-- [ ] 6.11 stale base detection. — Evidence: –
-- [ ] 6.12 conflict handling. — Evidence: –
+- [x] 6.1 repository registry. — Evidence: hermclaw/gitops/registry.py RepositoryRegistry.register/get/get_by_name/resolve/list_repositories/set_protected_branches/sync_protected_branches/protected_patterns (repo row + default branch + policies.git.protected_branches globs); tests/integration/test_gitops_engine.py::test_registry_register_get
+- [x] 6.2 clone/fetch. — Evidence: engine.GitEngine.sync_mirror (aliases clone/fetch), _init_mirror (atomic tmp+rename bare mirror), fetch --prune; tests/integration/test_gitops_engine.py::test_mirror_clone_then_fetch_and_resolve_base_sha, ::test_mirror_fetch_prunes_deleted_branches, ::test_unreachable_remote_is_recorded_as_failed; t
+- [x] 6.3 base SHA. — Evidence: engine.GitEngine.resolve_base_sha(repo, branch, fetch=True) raising BaseBranchNotFound; tests/integration/test_gitops_engine.py::test_mirror_clone_then_fetch_and_resolve_base_sha, ::test_create_workspace_unknown_job_and_base_branch
+- [x] 6.4 isolated workspaces. — Evidence: engine.GitEngine.create_workspace/_create_workspace_locked (settings.workspaces_dir/<job_id>/<repo>, full clone --no-hardlinks from mirror, Workspace row base_sha/branch/head_sha/status, idempotent, archive of vanished dirs, path-root checks, integrity check of .git before any git run); tests/integr
+- [x] 6.5 job branches. — Evidence: naming.job_branch_name('<branch_prefix><job.id.hex[:8]>-<slug>') + validate_branch_name; engine.job_branch, resume from own remote job branch; tests/unit/test_gitops_units.py::test_slug_and_job_branch_name, ::test_invalid_branch_names; tests/integration/test_gitops_engine.py::test_create_workspace_r
+- [x] 6.6 status/diff. — Evidence: engine.status/diff/changed_files + ops.read_status/read_diff (name-status, numstat, unified diff with byte/file limits, untracked via intent-to-add in a scratch index, -diff attributes for always_forbidden), reader.WorkspaceGitReader (GitReader protocol); tests/integration/test_gitops_engine.py::tes
+- [x] 6.7 safe staging. — Evidence: engine.stage_allowed + scope_guard.StagingGuard (on hermclaw.scope.guard.ScopeGuard: target_paths/allowed_new_paths/forbidden/always_forbidden/allowed_operations incl. delete, symlink escape, embedded repos, index re-check); tests/integration/test_gitops_engine.py::test_stage_allowed_only_stages_sco
+- [x] 6.8 Runtime commit. — Evidence: engine.commit_verified/_check_verification (passed run of same job/step, unused, created after workspace creation/last base update, covers staged paths, serialized per run), git_operations + EventType.GIT_COMMIT_CREATED; tests/integration/test_gitops_engine.py::test_commit_verified_happy_path, ::tes
+- [~] 6.9 Runtime push. — Evidence: engine.push_job_branch (job branch only, to registered URL, force-with-lease, foreign-commit guard _may_replace/_known_remote_shas, EventType.GIT_PUSHED), create_merge_request + gitlab.GitLabClient (PRIVATE-TOKEN from secret ref, duplicate detection, EventType.MERGE_REQUEST_CREATED); tests/integrati
+- [x] 6.10 protected branch tests. — Evidence: engine.assert_pushable + registry.protected_match (fnmatch globs from repo row, default branch, policies.git.protected_branches; refused locally before network, also at workspace creation and commit; only branch_prefix branches); tests/integration/test_gitops_push.py::test_push_refuses_protected_bra
+- [x] 6.11 stale base detection. — Evidence: engine.check_base/ensure_base_current/_check_base_locked (mirror fetch, tracking-ref refresh, commits_behind, rewritten history, StaleBaseError details, refused base.check op), push require_current_base; tests/failure/test_gitops_failures.py::test_stale_base_detected_with_details, ::test_stale_base_
+- [x] 6.12 conflict handling. — Evidence: engine.update_to_base (rebase --onto / --no-ff merge, autostash incl. untracked, abort + reset + stash restore on conflict, MergeConflictError with files/phase, pushed->committed after rewrite), recover(); tests/failure/test_gitops_failures.py::test_update_to_base_without_conflict[rebase|merge], ::t
 
 ## P07 – Worker Protocol
 
-- [ ] 7.1 Worker API schema. — Evidence: –
-- [ ] 7.2 heartbeat. — Evidence: –
-- [ ] 7.3 capability registry. — Evidence: –
-- [ ] 7.4 health. — Evidence: –
-- [ ] 7.5 worker auth. — Evidence: –
-- [ ] 7.6 `.222` daemon. — Evidence: –
-- [ ] 7.7 `.224` daemon. — Evidence: –
-- [ ] 7.8 offline detection. — Evidence: –
-- [ ] 7.9 version compatibility. — Evidence: –
+- [x] 7.1 Worker API schema. — Evidence: Request contracts are in hermclaw/contracts/worker.py. Response and registry schemas are in hermclaw/workers/schemas.py (HeartbeatAck, WorkerInfo/Detail, DaemonHealth, WorkspaceInfo, CommandStatus, Models*/Gpu*/Selftest*, ErrorResponse) plus worker_api_schemas(). Tests: tests/integration/test_worker
+- [x] 7.2 heartbeat. — Evidence: Sender: worker/common/heartbeat.py HeartbeatSender (signed POST, ack-driven interval, backoff, final offline heartbeat). Endpoint: hermclaw/workers/api.py POST /api/workers/heartbeat (header precheck before the body is read). Ingest: WorkerRegistry.ingest_heartbeat updates the workers row, worker_ca
+- [x] 7.3 capability registry. — Evidence: registry.py: _sync_capabilities upserts reported capabilities and deletes vanished ones (worker.state reason=capabilities_changed); register_from_config stores the declared capabilities from capabilities.yaml; select_worker(capability, kind, include_busy, exclude) requires ready, fresh, compatible, 
+- [x] 7.4 health. — Evidence: Orchestrator: one worker_health row per heartbeat, get_worker(health_limit), prune_health, GET /api/workers/{id}. Daemons: GET /health (unauthenticated, checks plus degraded status), worker/common/system.py (/proc cpu/ram/load/uptime, shutil disk), worker/common/gpu.py (nvidia-smi CSV). Tests: test_
+- [x] 7.5 worker auth. — Evidence: hermclaw/workers/auth.py: per-worker tokens via cred:/file:/env: refs, rotation (current + previous), HMAC-SHA256 over hermclaw-worker-v1|METHOD|path?query|ts|nonce|sha256(body), 120 s skew, constant-time compares, replay cache that only stores a nonce after the signature verifies, bearer header onl
+- [~] 7.6 `.222` daemon. — Evidence: worker/execution/app.py: create_app with workspace upload (replace/merge, atomic swap), info, manifest, archive, delete-paths, delete, POST /v1/commands (idempotent per request_id, concurrency slots, draining, redaction, workspace RW locks), command status, container recovery, selftest. worker/execu
+- [~] 7.7 `.224` daemon. — Evidence: worker/model/app.py and ollama.py: GET /v1/models (/api/ps + /api/tags), POST /v1/models/load (empty prompt, options.num_ctx, keep_alive, exclusive/keep), POST /v1/models/unload (keep_alive 0, then polls /api/ps), GET /v1/gpu (nvidia-smi CSV), POST /v1/selftest (counters only, no generated text). Th
+- [x] 7.8 offline detection. — Evidence: WorkerRegistry.sweep_offline: heartbeat older than offline_after_missed x interval or a wake timeout leads to state offline, worker.state and worker.offline (SKIP LOCKED). A graceful final offline heartbeat now also emits worker.offline (reason=worker_shutdown). OfflineMonitor runs a background loop
+- [x] 7.9 version compatibility. — Evidence: In ingest_heartbeat, a protocol_version that differs from WORKER_PROTOCOL_VERSION, or a kind that differs from the registration, forces state error and writes an event with the incompatibility. select_worker filters on protocol_version. The ack carries compatible and expected_protocol_version, and t
 
 ## P08 – Model Gateway
 
@@ -203,28 +203,28 @@ Legende: `[x]` erledigt mit Evidence · `[~]` erledigt, Live-Verifikation auf Zi
 
 ## P14 – Gemma Planner
 
-- [ ] 14.1 planner prompt contract. — Evidence: –
-- [ ] 14.2 structured output. — Evidence: –
-- [ ] 14.3 schema validation. — Evidence: –
-- [ ] 14.4 plan repair. — Evidence: –
-- [ ] 14.5 DAG validation. — Evidence: –
-- [ ] 14.6 dependency validation. — Evidence: –
-- [ ] 14.7 risk assignment. — Evidence: –
-- [ ] 14.8 acceptance generation. — Evidence: –
-- [ ] 14.9 research request generation. — Evidence: –
-- [ ] 14.10 planner tests across unrelated repos. — Evidence: –
+- [x] 14.1 planner prompt contract. — Evidence: hermclaw/planner/prompt.py: planner_system_prompt/_base_rules cover planner role, JSON only, no code, listed kinds and capabilities, acceptance with evidence types, grounded repo_hints and the new network rule; planner_user_payload has the Bauplan §15 keys with budgets, deterministic line-safe trunc
+- [~] 14.2 structured output. — Evidence: hermclaw/planner/loop.py run_structured_loop calls ChatModel.chat(alias of role 'planner', json_schema=PlanContract schema, profile max_tokens/temperature/timeout). Tests: tests/unit/test_planner_loop.py::test_valid_first_answer_uses_schema_constrained_call, tests/integration/test_planner_repos.py::
+- [x] 14.3 schema validation. — Evidence: hermclaw/planner/parsing.py extract_json_object/validate_schema/format_validation_errors produce located errors. Tests: tests/unit/test_planner_validation.py::test_extract_json_object_variants, ::test_validate_schema_reports_located_errors, ::test_validate_schema_dag_errors; tests/integration/test_p
+- [x] 14.4 plan repair. — Evidence: loop.py: at most 2 repairs, exact redacted error list, only a parsed JSON object is echoed (redacted, canonical), truncation hint, then PlannerError PLANNER_INVALID_OUTPUT plus planner.failed. Tests: tests/unit/test_planner_loop.py::test_prose_or_reasoning_inside_a_broken_answer_is_never_echoed, ::t
+- [x] 14.5 DAG validation. — Evidence: PlanContract rejects cycles, unknown deps and duplicate ids. validation.py semantic_errors adds max steps (including open research requests), duplicate work and unreachable info steps. Tests: tests/unit/test_planner_validation.py::test_validate_schema_dag_errors, ::test_duplicate_work_and_unreachabl
+- [x] 14.6 dependency validation. — Evidence: validation.py checks: checking steps need dependencies, research must not depend on mutating steps, capability and step_kind_capability consistency, grounding (now from all inventory sections), catch-all rejection, network only via capability, diff glob hygiene. Tests: tests/unit/test_planner_valida
+- [x] 14.7 risk assignment. — Evidence: enrich.py assign_risk/RiskPolicy: deploy/ssh/database are at least medium, never lowered, implement steps without tests touching at least 6 paths become high (glob/directory hints now count the known paths they match), overrides only stricter, unknown kinds rejected. Tests: tests/unit/test_planner_e
+- [x] 14.8 acceptance generation. — Evidence: enrich.py generate_acceptance adds Diff (path-like hints, allow_empty false) and Test (detected command) when no substantive criterion exists, and always adds Scope and Security. Tests: tests/unit/test_planner_enrich.py::test_mutating_step_without_acceptance_gets_diff_test_scope_security, ::test_sub
+- [x] 14.9 research request generation. — Evidence: enrich.py add_research_steps: uncovered research_needed entries become research steps that the first work steps depend on; no duplicates; preserved and reserved ids respected. Tests: tests/unit/test_planner_enrich.py::test_research_requests_become_research_steps_before_all_work, ::test_research_step
+- [x] 14.10 planner tests across unrelated repos. — Evidence: Five unrelated fixtures (FastAPI, PHP, React/TS, YAML config, Linux admin) in tests/unit/test_planner_support.py. Tests: tests/integration/test_planner_repos.py::test_plan_created_for_unrelated_repositories[5 params] (DB rows plans/plan_versions/steps/deps and events), plus the repair, failure, fall
 
 ## P15 – Scope Engine
 
-- [ ] 15.1 planner hints intake. — Evidence: –
-- [ ] 15.2 repo intelligence evidence. — Evidence: –
-- [ ] 15.3 policy merge. — Evidence: –
-- [ ] 15.4 scope generation. — Evidence: –
-- [ ] 15.5 forbidden paths. — Evidence: –
-- [ ] 15.6 scope versioning. — Evidence: –
-- [ ] 15.7 expansion request. — Evidence: –
-- [ ] 15.8 unavailable handling. — Evidence: –
-- [ ] 15.9 scope audit. — Evidence: –
+- [x] 15.1 planner hints intake. — Evidence: engine.py _StepSnapshot.of / ScopeEngine.create_scope / _generate (repo_hints, allowed_new_paths, forbidden_paths, acceptance, constraints) + canonical_path / strip_location_suffix / classify_hint; tests: test_scope_engine.py::test_paths_globs_directories_and_symbols_resolve, test_scope_failures.py:
+- [x] 15.2 repo intelligence evidence. — Evidence: engine.py list_workspace_files (git ls-files --cached --others --exclude-standard + existence, symlink and symlinked-parent containment, core.fsmonitor=false), _resolve_hint, _resolve_by_repo (find_symbol/search with per-call timeout), select_confident_hits (score thresholds, relative floor, ambigui
+- [x] 15.3 policy merge. — Evidence: engine.py merged_forbidden (always_forbidden + step forbidden, canonical, invalid recorded), _apply_policy (forbidden, unbounded creation globs, implausible paths excluded with evidence), caps -> unavailable never truncated; tests: test_scope_engine_units.py::test_merged_forbidden_normalises_dedupes
+- [x] 15.4 scope generation. — Evidence: engine.py _generate: ScopeContract(source=planner_and_repo_intelligence, strict_target_paths=True, glob-escaped existing targets, allowed_new_paths incl. hinted missing paths for writing kinds, operations from new paths/targets/delete designation via AbsenceEvidence or non-negated delete constraints
+- [x] 15.5 forbidden paths. — Evidence: engine.py merged forbidden_paths in contract + exclusion evidence; expansion.py assess_paths rejects forbidden; ScopeGuard enforces at audit; tests: test_scope_engine.py::test_forbidden_paths_are_excluded_with_evidence, test_scope_expansion.py::test_invalid_or_forbidden_paths_are_rejected / test_ste
+- [x] 15.6 scope versioning. — Evidence: engine.py persist_scope_version (step row FOR UPDATE, version max+1, every non-superseded prior version -> superseded with evidence.superseded provenance, steps.current_scope_version), closed/superseded re-check under lock; tests: test_scope_engine.py::test_versioning_supersedes_previous_active, tes
+- [x] 15.7 expansion request. — Evidence: expansion.py ScopeExpansionHandler.handle (validation, mechanical = test-of/test-imports/imported-by/same-dir+language via RepoContextProvider.read, semantic -> needs_replan, deletes always semantic, max 3 expansions, caps, closed-step rejection, literal bracket file names escaped, delete designatio
+- [x] 15.8 unavailable handling. — Evidence: engine.py _generate unavailable branch (no_resolvable_scope / too_many_target_paths / too_many_new_paths): persisted unavailable row with deny-all contract + full evidence, SCOPE_UNAVAILABLE, decision.contract=None/runnable=False, guard_for deny-all, workspace untouched; tests: test_scope_engine.py:
+- [x] 15.9 scope audit. — Evidence: audit.py ScopeAuditor.audit_changes/audit_status (ScopeGuard on active version, deny-all without scope, designated-delete restriction, unauditable entries fail closed, evidence.audits bounded, SCOPE_VIOLATION), derive_changes_from_status (orig_path / arrow form), unresolved_renames; tests: test_scop
 
 ## P16 – Context Builder
 
@@ -325,12 +325,12 @@ Legende: `[x]` erledigt mit Evidence · `[~]` erledigt, Live-Verifikation auf Zi
 
 ## P24 – Replanning
 
-- [ ] 24.1 failure package. — Evidence: –
-- [ ] 24.2 Gemma replan. — Evidence: –
-- [ ] 24.3 plan versioning. — Evidence: –
-- [ ] 24.4 completed-step preservation. — Evidence: –
-- [ ] 24.5 new dependencies. — Evidence: –
-- [ ] 24.6 scope refresh. — Evidence: –
+- [x] 24.1 failure package. — Evidence: failure_package.py build_failure_package collects goal, current plan, completed steps with summaries, failed step with attempts, verifier failed checks, test output tails, failing commands, scope decision, review findings, open steps and research evidence; redacted and bounded. Test: tests/integrati
+- [~] 24.2 Gemma replan. — Evidence: replanner.py: the planner alias with the ReplanContract schema, the same 2-repair budget, the rerun_reason rule, merged-DAG and semantic validation, enrichment and the no-blind-repeat rule. Tests: tests/integration/test_planner_replan.py::test_replan_preserves_completed_steps_and_supersedes_the_rest
+- [x] 24.3 plan versioning. — Evidence: replanner._persist writes the next plan_versions row (source replanner|fallback, reason, validation history) and updates plans.current_version, jobs.current_plan_version, replan_count += 1 and the max_replans limit; PLAN_CHANGED on stale state. Tests: tests/integration/test_planner_replan.py::test_r
+- [x] 24.4 completed-step preservation. — Evidence: Completed rows are kept. A rerun needs rerun_reason: the old row is superseded but stays completed, and a new pending row is created. Other steps are superseded: open or in-flight ones are cancelled through the state machine, failed ones keep failed. Tests: tests/integration/test_planner_replan.py::
+- [x] 24.5 new dependencies. — Evidence: materialize_steps maps dependencies to kept completed rows, or to the new row for a re-run key. Tests: tests/integration/test_planner_replan.py::test_replan_preserves_completed_steps_and_supersedes_the_rest (StepDependency rows), ::test_completed_step_needs_rerun_reason (dependants point at the new 
+- [x] 24.6 scope refresh. — Evidence: New and changed steps have current_scope_version NULL; active scope_contracts of superseded steps (including a re-run completed step) are set to superseded with a reason. Tests: tests/integration/test_planner_replan.py::test_replan_preserves_completed_steps_and_supersedes_the_rest, ::test_completed_
 
 ## P25 – Scheduler
 

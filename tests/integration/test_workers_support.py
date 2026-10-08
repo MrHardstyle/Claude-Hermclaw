@@ -246,7 +246,7 @@ class FakeOllama:
         await site.start()
         server = site._server
         assert server is not None
-        port = server.sockets[0].getsockname()[1]  # type: ignore[union-attr]
+        port = server.sockets[0].getsockname()[1]  # type: ignore[union-attr,attr-defined]
         self.url = f"http://127.0.0.1:{port}"
         return self
 

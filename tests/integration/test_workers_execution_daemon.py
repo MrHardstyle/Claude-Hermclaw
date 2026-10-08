@@ -18,6 +18,7 @@ from fastapi import FastAPI
 from hermclaw.contracts.common import WorkerKind, WorkerState
 from hermclaw.contracts.worker import CommandRequest
 from hermclaw.core.config import SandboxPolicy
+from hermclaw.workers.auth import WorkerRequestSigner
 from hermclaw.workers.client import ExecutionWorkerClient, probe_health
 from hermclaw.workers.errors import WorkerAuthFailed, WorkerBusy, WorkerRemoteError
 from tests.integration.test_workers_support import (
@@ -51,6 +52,11 @@ async def daemon(tmp_path: Path) -> AsyncIterator[tuple[FastAPI, ExecutionWorker
     app = _app(tmp_path)
     async with lifespan(app), _client(app) as c:
         yield app, c
+
+
+def _signed_raw(app: FastAPI) -> httpx.AsyncClient:
+    """A plain httpx client that signs like the orchestrator but skips the typed client's validation."""
+    return httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url="http://exec", auth=WorkerRequestSigner(WORKER, TOKEN))
 
 
 def cmd(command: str, **kw: Any) -> CommandRequest:
@@ -121,10 +127,16 @@ async def test_workspace_path_safety(daemon: tuple[FastAPI, ExecutionWorkerClien
     assert (outside / "keep.txt").exists()
     res = await c.delete_paths("ws1", ["link"])  # removes the link itself, never the target
     assert res.deleted == ["link"] and (outside / "keep.txt").exists()
-    # invalid workspace ids are rejected by the router
-    with pytest.raises(WorkerRemoteError) as exc:
-        await c.upload_workspace("..", make_tar({"a": b"1"}))
-    assert exc.value.status_code in (404, 422)
+    # invalid workspace ids are rejected by the client before they become a URL (httpx would normalize "..")
+    for bad_ws in ("..", ".", "a/b", "", "x" * 200):
+        with pytest.raises(ValueError, match="workspace id"):
+            await c.upload_workspace(bad_ws, make_tar({"a": b"1"}))
+    with pytest.raises(ValueError, match="cannot be addressed"):
+        await c.command_status("../workspaces/ws1")
+    # ... and by the router when a raw (signed) request bypasses the client
+    async with _signed_raw(_app_) as raw:
+        resp = await raw.put("/v1/workspaces/bad%20id", content=make_tar({"a": b"1"}))
+        assert resp.status_code == 422
     with pytest.raises(WorkerRemoteError) as exc:
         await c.upload_workspace("ws2", b"this is not a tar archive")
     assert exc.value.status_code == 400
@@ -343,3 +355,121 @@ async def test_real_sandbox_runner_through_daemon(tmp_path: Path) -> None:
         await c.upload_workspace("ws1", make_tar({"in.txt": b"42\n"}))
         result = await c.run_command(cmd("cat in.txt"))
     assert result.exit_code == 0 and result.stdout.strip() == "42" and result.sandbox == "podman"
+
+
+async def test_command_workspace_id_cannot_escape_workspaces_root(tmp_path: Path) -> None:
+    """Regression: ``CommandRequest.workspace`` comes from the JSON body (no path-parameter pattern), so
+    ``"/"`` used to run the command in the host root directory and ``".."`` in the data directory."""
+    runner = LocalTestRunner()
+    app = _app(tmp_path, runner=runner)
+    async with lifespan(app), _signed_raw(app) as raw:
+        (tmp_path / "data" / "workspaces").mkdir(parents=True, exist_ok=True)
+        for bad_ws in ("/", "..", ".", "../data", "/etc", "ws1/../..", ".incoming-x"):
+            body = cmd("pwd", workspace=bad_ws).model_dump(mode="json")
+            resp = await raw.post("/v1/commands", json=body)
+            assert resp.status_code == 400, (bad_ws, resp.text)
+            assert resp.json()["error"]["code"] == "WORKSPACE_ID_INVALID"
+        assert runner.calls == []
+    # the typed client refuses to send such a request at all
+    async with lifespan(app), _client(app) as c:
+        with pytest.raises(ValueError, match="workspace id"):
+            await c.run_command(cmd("pwd", workspace="/"))
+
+
+async def test_rwlock_waiting_reader_keeps_lock_registered(tmp_path: Path) -> None:
+    """Regression: ``delete_workspace`` dropped the workspace lock while a command was still *waiting*
+    for it, so a later upload got a fresh lock and could swap the tree under the running command."""
+    lk = RWLock()
+    assert lk.idle
+    writer_in = asyncio.Event()
+    release = asyncio.Event()
+
+    idle_right_after_release: list[bool] = []
+
+    async def hold_write() -> None:
+        async with lk.write():
+            writer_in.set()
+            await release.wait()
+        # same task, no await since the release: the woken reader has not run yet
+        idle_right_after_release.append(lk.idle)
+
+    holder = asyncio.create_task(hold_write())
+    await writer_in.wait()
+    reader_entered = asyncio.Event()
+
+    async def read() -> None:
+        async with lk.read():
+            reader_entered.set()
+
+    reader = asyncio.create_task(read())
+    await asyncio.sleep(0)
+    assert not lk.idle and not reader_entered.is_set()
+    release.set()
+    await holder
+    assert idle_right_after_release == [False], "a waiting reader must keep the lock in use"
+    await reader
+    assert reader_entered.is_set() and lk.idle
+
+    # service level: delete while a reader waits keeps the same lock object registered
+    app = _app(tmp_path)
+    async with lifespan(app), _client(app) as c:
+        await c.upload_workspace("ws1", make_tar({"a.txt": b"a"}))
+        svc = app.state.execution
+        lock = svc.lock("ws1")
+        gate = asyncio.Event()
+
+        async def slow_reader() -> None:
+            async with svc.lock("ws1").read():
+                await gate.wait()
+
+        first = asyncio.create_task(slow_reader())
+        await asyncio.sleep(0)
+        deleting = asyncio.create_task(svc.delete_workspace("ws1"))
+        await asyncio.sleep(0)
+        second = asyncio.create_task(slow_reader())  # queued behind the waiting writer
+        await asyncio.sleep(0)
+        gate.set()
+        await asyncio.gather(first, deleting)
+        assert svc.locks.get("ws1") is lock, "lock dropped while a reader was still waiting"
+        await second
+        await svc.delete_workspace("ws1")
+        assert "ws1" not in svc.locks
+
+
+async def test_rwlock_cancelled_writer_releases_waiting_readers() -> None:
+    """Regression: a waiting writer that is cancelled (client disconnect during upload) must wake the
+    readers it was blocking (writer preference), otherwise they hang until an unrelated notify."""
+    lk = RWLock()
+    reader_holds = asyncio.Event()
+    release_first = asyncio.Event()
+
+    async def first_reader() -> None:
+        async with lk.read():
+            reader_holds.set()
+            await release_first.wait()
+
+    r1 = asyncio.create_task(first_reader())
+    await reader_holds.wait()
+
+    async def writer() -> None:
+        async with lk.write():
+            pass
+
+    w = asyncio.create_task(writer())
+    await asyncio.sleep(0)
+    got_in = asyncio.Event()
+
+    async def second_reader() -> None:
+        async with lk.read():
+            got_in.set()
+
+    r2 = asyncio.create_task(second_reader())
+    await asyncio.sleep(0)
+    assert not got_in.is_set()  # blocked by the waiting writer
+    w.cancel()
+    with pytest.raises(asyncio.CancelledError):
+        await w
+    await asyncio.wait_for(got_in.wait(), timeout=1.0)
+    release_first.set()
+    await asyncio.gather(r1, r2)
+    assert lk.idle

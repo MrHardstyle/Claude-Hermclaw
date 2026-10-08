@@ -47,7 +47,7 @@ def _glob_regex(pattern: str) -> re.Pattern[str]:
             if j == -1:
                 out.append(re.escape(c))
             else:
-                out.append("[" + pattern[i + 1 : j].replace("\\", "\\\\") + "]")
+                out.append("[" + pattern[i + 1 : j].replace("\\", "\\\\").replace("[", "\\[") + "]")
                 i = j
         else:
             out.append(re.escape(c))

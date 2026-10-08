@@ -315,3 +315,46 @@ async def test_research_step_already_present_is_not_duplicated(sessionmaker: obj
     result = await Planner(ScriptedChat([answer]), sm, get_config()).create_plan(job_id, PHP.inputs)
     assert [s.id for s in result.plan.steps if s.kind.value == "research"] == ["S009"]
     assert set(await _steps(sm, job_id)) == {"S001", "S002", "S009"}
+
+
+async def test_concurrent_initial_planning_keeps_exactly_one_plan(sessionmaker: object) -> None:
+    """Two planners race for the same job: the one that persists second must not create a second plan."""
+    sm = _sm(sessionmaker)
+    job_id = await create_job(sm, FASTAPI)
+    winner: dict[str, Any] = {}
+
+    async def other_planner_finishes_first() -> None:
+        result = await Planner(ScriptedChat([FASTAPI.answer()]), sm, get_config()).create_plan(job_id, FASTAPI.inputs)
+        winner["result"] = result
+
+    loser = ScriptedChat([Answer(content=FASTAPI.answer(), before=other_planner_finishes_first)])
+    with pytest.raises(PlanConflict) as info:
+        await Planner(loser, sm, get_config()).create_plan(job_id, FASTAPI.inputs)
+    assert info.value.code == "PLAN_EXISTS"
+
+    plan_row, versions, job = await _plan_and_versions(sm, job_id)
+    assert plan_row is not None and plan_row.id == winner["result"].plan_id
+    assert [v.version for v in versions] == [1] and job.current_plan_version == 1
+    rows = await _steps(sm, job_id)
+    assert {k: r.id for k, r in rows.items()} == winner["result"].step_ids
+    async with sm() as s:
+        all_rows = list((await s.execute(select(Step).where(Step.job_id == job_id))).scalars())
+    assert len(all_rows) == 3
+    events = await _events(sm, job_id)
+    assert [e[0] for e in events].count(EventType.PLANNER_PLAN_CREATED) == 1
+    failed = [e for e in events if e[0] == EventType.PLANNER_FAILED]
+    assert len(failed) == 1 and failed[0][1]["error_code"] == "PLAN_EXISTS"
+
+
+async def test_inventory_paths_outside_files_ground_hints_end_to_end(sessionmaker: object) -> None:
+    """Hints to paths listed in other inventory sections are accepted without a repair turn."""
+    sm = _sm(sessionmaker)
+    job_id = await create_job(sm, YAML_CONFIG)
+    inputs = YAML_CONFIG.inputs.model_copy(
+        update={"repository_inventory": {**YAML_CONFIG.inputs.repository_inventory, "helm": {"charts": ["deploy/chart/values.yaml"]}}}
+    )
+    answer = YAML_CONFIG.answer()
+    answer["steps"][0]["repo_hints"] = ["config/app.yaml", "deploy/chart/values.yaml"]
+    chat = ScriptedChat([answer])
+    result = await Planner(chat, sm, get_config()).create_plan(job_id, inputs)
+    assert result.repair_attempts == 0 and len(chat.calls) == 1

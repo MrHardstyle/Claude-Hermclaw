@@ -58,6 +58,7 @@ class CommandExecutor(Protocol):
 class GitStatusEntry:
     path: str
     status: str  # porcelain XY code, e.g. " M", "??", "D "
+    orig_path: str | None = None  # source path of a rename/copy
 
 
 @runtime_checkable

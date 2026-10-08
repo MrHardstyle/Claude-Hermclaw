@@ -250,8 +250,8 @@ def planner_user_payload(
 ) -> tuple[dict[str, Any], dict[str, Any]]:
     """Build the budgeted planner input document (keys in the order of Bauplan §15)."""
     stats: dict[str, Any] = {}
-    job_doc = dict(job)
-    goal_text, dropped = truncate_lines(DEFAULT_REDACTOR.text(str(job_doc.get("goal", ""))), budget.job_chars)
+    job_doc = DEFAULT_REDACTOR.obj(dict(job))
+    goal_text, dropped = truncate_lines(str(job_doc.get("goal", "")), budget.job_chars)
     job_doc["goal"] = goal_text
     stats["job_goal_truncated_lines"] = dropped
 
@@ -416,6 +416,8 @@ def _base_rules(kind_capability: dict[str, str], capability_names: Sequence[str]
         "(question + reason); the runtime schedules research before the dependent work. A research step "
         "(kind research) must be a dependency of the steps that need its result.",
         "Review steps (kind review) and verify steps (kind verify) must depend on the steps they check.",
+        "Network is off by default. Set network true (on a step or on command evidence) only for steps whose "
+        "capability has network=true in capabilities.",
         "risk is low|medium|high. Deployments, SSH/server administration and database changes are at least medium.",
         "Respect every entry of constraints. Never plan git commits, pushes, merges or branch operations; "
         "the runtime performs all git mutations.",
@@ -466,15 +468,6 @@ def repair_message(errors: Sequence[str], remaining_after: int) -> str:
         f"{listed}\n"
         f"Repair attempts remaining after this one: {remaining_after}."
     )
-
-
-def json_candidate(content: str) -> str | None:
-    """The JSON-looking part of a model answer (used to echo it back in a repair turn; prose is never echoed)."""
-    start = content.find("{")
-    end = content.rfind("}")
-    if start == -1 or end <= start:
-        return None
-    return content[start : end + 1]
 
 
 def build_messages(system: str, payload: dict[str, Any], stats: dict[str, Any]) -> PromptBuild:

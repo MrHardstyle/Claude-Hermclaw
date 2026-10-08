@@ -18,3 +18,5 @@
 | R-014 | Secrets in Prompts/Logs | Leak | Redactor, Secret-Scanner im Verifier, systemd credentials | mitigiert in P21/P36 |
 | R-015 | Workspace-Sync `.225`↔`.222` inkonsistent | falsche Testergebnisse | Content-Hash-Manifest, Diff nur auf `.225` berechnet | mitigiert in P18 |
 | R-016 | Modellqualität lokaler Planner (Gemma) begrenzt | schwache Pläne | Schema-Validierung, DAG-Checks, Replanning, Stagnation, Heavy Review | akzeptiert |
+| R-017 | Sandbox kann `.git/config` im Workspace verändern (Filter/Hooks/Driver), Runtime-Git auf `.225` würde das ausführen | Code-Ausführung auf dem Orchestrator | GitOps: gehärtete Git-Umgebung (`GIT_CONFIG_NOSYSTEM`, `-c`-Overrides, kein Repo-lokales Config-Ausführen), Integritäts-Allowlist → `WORKSPACE_TAMPERED`; Sync von `.222` schließt `.git/` aus | mitigiert in P06 |
+| R-018 | Replay-Cache der Worker-HMAC-Prüfung ist pro Prozess im Speicher | Replay nach Neustart innerhalb des Zeitfensters | kurzes Zeitfenster (Timestamp-Skew), Body-Hash, Neustart leert Cache – akzeptiert für LAN | akzeptiert |

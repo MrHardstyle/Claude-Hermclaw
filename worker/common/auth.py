@@ -4,6 +4,7 @@ The orchestrator signs every request to a daemon with *that worker's* credential
 (:class:`hermclaw.workers.auth.WorkerRequestSigner`, ``X-Hermclaw-Worker`` = the daemon's own id).
 The middleware
 
+0. refuses every websocket handshake (fail closed; the scheme signs HTTP requests only),
 1. lets exempt paths (``/health``) through unauthenticated,
 2. runs the header-only checks before reading the body (missing headers, wrong worker, clock skew,
    bearer token) so unauthenticated uploads are rejected without buffering them,
@@ -76,6 +77,12 @@ class SignedRequestMiddleware:
             return []
 
     async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
+        if scope["type"] == "websocket":
+            # fail closed: the signing scheme covers plain HTTP requests only, so no websocket route (e.g.
+            # one added through an extension router) can ever be reached unauthenticated
+            log.warning("rejected websocket connection", extra={"path": scope.get("path")})
+            await send({"type": "websocket.close", "code": 1008})
+            return
         if scope["type"] != "http" or scope["path"] in self.exempt_paths:
             await self.app(scope, receive, send)
             return

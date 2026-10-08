@@ -13,9 +13,12 @@ Operation = Literal["create", "modify", "delete"]
 
 def normalise_path(path: str) -> str:
     q = path.strip().replace("\\", "/")
-    while q.startswith("./"):
-        q = q[2:]
-    if not q or q.startswith("/") or ".." in q.split("/"):
+    if q.startswith("/"):
+        raise ValueError(f"scope paths must be non-empty, repository-relative and without '..': {path!r}")
+    trailing = q.endswith("/") and q.strip("/") != ""
+    # canonical form: drop '.' and empty segments ('src/./a.py', 'src//a.py' -> 'src/a.py'); keep a directory slash
+    q = "/".join(seg for seg in q.split("/") if seg not in ("", ".")) + ("/" if trailing else "")
+    if not q or ".." in q.split("/"):
         raise ValueError(f"scope paths must be non-empty, repository-relative and without '..': {path!r}")
     return q
 

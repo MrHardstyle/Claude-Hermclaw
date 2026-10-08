@@ -15,7 +15,6 @@ from hermclaw.planner.prompt import (
     compact_json,
     context_section,
     fit_to_budget,
-    json_candidate,
     planner_system_prompt,
     planner_user_payload,
     repair_message,
@@ -94,7 +93,7 @@ def test_planner_payload_keys_redaction_and_test_command() -> None:
         }
     )
     payload, stats = planner_user_payload(
-        job={"id": "j", "title": "t", "goal": f"use password=hunter2xyz and {SECRET}"},
+        job={"id": "j", "title": f"rotate {SECRET}", "goal": f"use password=hunter2xyz and {SECRET}", "repository": SECRET},
         inputs=inputs,
         constraints=["keep API stable", f"token: {SECRET}"],
         capabilities=[{"name": "coding"}],
@@ -105,6 +104,7 @@ def test_planner_payload_keys_redaction_and_test_command() -> None:
     assert tuple(payload) == PLANNER_INPUT_KEYS
     text = compact_json(payload)
     assert SECRET not in text and "hunter2xyz" not in text and "***REDACTED***" in text
+    assert payload["job"]["title"] == "rotate ***REDACTED***"  # regression: the whole job section is redacted
     assert payload["repository_inventory"]["test_command"] == "pytest -q"
     assert payload["existing_tests"] == ["tests/test_users.py"]
     assert stats["context"]["included"] == 3
@@ -195,12 +195,10 @@ def test_replanner_system_prompt_adds_rerun_rules() -> None:
     assert "REPLANNER" in system and "rerun_reason" in system and "completed_steps are already done" in system
 
 
-def test_repair_message_and_json_candidate() -> None:
+def test_repair_message_lists_every_error() -> None:
     msg = repair_message(["steps[0].id: bad", "step S002: unknown capability 'x'"], 0)
     assert "- steps[0].id: bad\n- step S002: unknown capability 'x'" in msg
     assert msg.endswith("Repair attempts remaining after this one: 0.")
-    assert json_candidate('Sure! {"a": {"b": 1}} hope this helps') == '{"a": {"b": 1}}'
-    assert json_candidate("no json") is None
 
 
 def test_build_messages_is_deterministic() -> None:

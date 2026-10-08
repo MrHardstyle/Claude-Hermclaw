@@ -13,7 +13,7 @@ from typing import Any
 import httpx
 import pytest
 from fastapi import FastAPI
-from sqlalchemy import select
+from sqlalchemy import delete, select
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from hermclaw.contracts.common import WorkerKind, WorkerState
@@ -62,7 +62,7 @@ async def orchestrator(sessionmaker: async_sessionmaker[AsyncSession], worker_id
     install_workers_api(app, ctx)
     yield app, ctx
     async with sessionmaker() as s:
-        await s.execute(Worker.__table__.delete().where(Worker.id == worker_id))
+        await s.execute(delete(Worker).where(Worker.id == worker_id))
         await s.commit()
 
 
@@ -194,7 +194,8 @@ async def test_heartbeat_sender_reports_rejection(orchestrator: tuple[FastAPI, W
     )
     with pytest.raises(HeartbeatError) as exc:
         await sender.send_once()
-    assert exc.value.code == "WORKER_AUTH_BAD_TOKEN" and exc.value.status_code == 401
+    # over plain http no bearer is sent (HMAC only), so the wrong secret surfaces as a bad signature
+    assert exc.value.code == "WORKER_AUTH_BAD_SIGNATURE" and exc.value.status_code == 401
     assert sender.failures == 1 and sender.state.orchestrator_reachable is True
     await sender.stop(final=False)
 
@@ -203,3 +204,21 @@ def test_worker_api_schemas_cover_protocol() -> None:
     schemas = worker_api_schemas()
     for name in ("WorkerHeartbeat", "HeartbeatAck", "CommandRequest", "CommandResult", "ModelLoadRequest", "DaemonHealth", "ErrorResponse"):
         assert name in schemas and schemas[name]["type"] == "object"
+
+
+async def test_unauthenticated_heartbeat_rejected_before_body_is_read(
+    orchestrator: tuple[FastAPI, WorkerApiContext], worker_id: str
+) -> None:
+    """Header-only checks run first: an unsigned (or wrongly addressed) oversized body is answered with
+    401 instead of being buffered; a correctly signed oversized body gets 413."""
+    app, ctx = orchestrator
+    huge = b"{" + b" " * (ctx.max_body_bytes + 10) + b"}"
+    async with client(app) as c:
+        r = await c.post("/api/workers/heartbeat", content=huge)
+        assert r.status_code == 401 and r.json()["error"]["code"] == "WORKER_AUTH_MISSING"
+        stranger = sign_headers(worker_id="exec-unknown", token=TOKEN, method="POST", path="/api/workers/heartbeat", body=huge)
+        r = await c.post("/api/workers/heartbeat", content=huge, headers=stranger)
+        assert r.status_code == 401 and r.json()["error"]["code"] == "WORKER_AUTH_UNKNOWN"
+        signed = sign_headers(worker_id=worker_id, token=TOKEN, method="POST", path="/api/workers/heartbeat", body=huge)
+        r = await c.post("/api/workers/heartbeat", content=huge, headers=signed)
+        assert r.status_code == 413 and r.json()["error"]["code"] == "PAYLOAD_TOO_LARGE"

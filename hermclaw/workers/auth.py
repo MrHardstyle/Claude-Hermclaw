@@ -11,7 +11,7 @@ Headers of a signed request::
     X-Hermclaw-Timestamp: <unix seconds, integer>
     X-Hermclaw-Nonce:     <32 hex chars, random per request>
     X-Hermclaw-Signature: v1=<hex HMAC-SHA256(token, canonical)>
-    Authorization:        Bearer <token>            (optional, see below)
+    Authorization:        Bearer <token>            (optional; WorkerRequestSigner sends it only over https)
 
 Canonical string (``|`` separated, fixed field order)::
 
@@ -462,7 +462,13 @@ def verify_signed_request(
 
 
 class WorkerRequestSigner(httpx.Auth):
-    """httpx auth flow that signs every outgoing request (incl. each retry) with a fresh nonce."""
+    """httpx auth flow that signs every outgoing request (incl. each retry) with a fresh nonce.
+
+    ``include_bearer``: ``None`` (default) sends ``Authorization: Bearer`` only over ``https`` - over plain
+    HTTP the HMAC signature alone authenticates the request, so the shared secret itself never crosses
+    an unencrypted LAN link (a sniffed bearer token would let an attacker forge signatures).
+    ``True``/``False`` force it on/off.
+    """
 
     requires_request_body = True
 
@@ -471,7 +477,7 @@ class WorkerRequestSigner(httpx.Auth):
         worker_id: str,
         token: str | Callable[[], str],
         *,
-        include_bearer: bool = True,
+        include_bearer: bool | None = None,
         clock: Callable[[], float] = time.time,
     ) -> None:
         self.worker_id = worker_id
@@ -491,7 +497,7 @@ class WorkerRequestSigner(httpx.Auth):
             query=request.url.query,
             body=request.content,
             now=self._clock(),
-            include_bearer=self.include_bearer,
+            include_bearer=self.include_bearer if self.include_bearer is not None else request.url.scheme == "https",
         )
         request.headers.update(headers)
         yield request

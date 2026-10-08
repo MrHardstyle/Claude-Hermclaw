@@ -34,6 +34,34 @@ IN_PROGRESS_MARKERS: tuple[tuple[str, str], ...] = (
 )
 
 
+# Repository-local config keys a runtime-created workspace may carry. Everything else (filter/merge/diff drivers,
+# remote.*.uploadpack/receivepack, url.*.insteadOf, include.path, core.worktree, http.* …) can make the runtime's
+# own git invocations execute commands or talk to other hosts, so a workspace whose .git/config was modified from
+# inside the sandbox is refused instead of being trusted.
+ALLOWED_LOCAL_CONFIG: frozenset[str] = frozenset(
+    {
+        "core.repositoryformatversion",
+        "core.filemode",
+        "core.bare",
+        "core.logallrefupdates",
+        "core.autocrlf",
+        "core.symlinks",
+        "core.ignorecase",
+        "core.precomposeunicode",
+        "push.default",
+        "remote.origin.url",
+        "remote.origin.fetch",
+        "remote.origin.tagopt",
+        "remote.origin.prune",
+        "remote.origin.followremotehead",
+        "extensions.objectformat",
+        "extensions.refstorage",
+    }
+)
+_ALLOWED_LOCAL_CONFIG_RE = re.compile(r"^branch\.[^\n]+\.(?:remote|merge)$")
+FORBIDDEN_GIT_DIR_FILES: tuple[str, ...] = ("commondir", "objects/info/alternates", "objects/info/http-alternates", "config.worktree")
+
+
 def is_sha(value: str) -> bool:
     return bool(SHA_RE.match(value))
 
@@ -78,6 +106,47 @@ async def is_work_tree(runner: GitRunner, cwd: Path) -> bool:
     if res.returncode != 0 or not lines or lines[0] != "true":
         return False
     return len(lines) > 1 and await asyncio.to_thread(_fs.same_path, Path(lines[1]), cwd)
+
+
+async def local_config(runner: GitRunner, cwd: Path) -> list[tuple[str, str]]:
+    """Entries of the repository-local ``.git/config`` (includes are listed, never followed)."""
+    res = await runner.run(["config", "--local", "--no-includes", "--list", "-z"], cwd=cwd, check=False)
+    if res.returncode != 0:
+        raise WorkspaceStateError("cannot read the workspace git config", details={"path": str(cwd), "exit_code": res.returncode})
+    out: list[tuple[str, str]] = []
+    for record in res.stdout.split(b"\0"):
+        if not record:
+            continue
+        key, _, value = record.partition(b"\n")
+        out.append((key.decode("utf-8", "replace").lower(), value.decode("utf-8", "replace")))
+    return out
+
+
+async def integrity_problems(runner: GitRunner, cwd: Path) -> list[str]:
+    """Reasons why the runtime must not run git in ``cwd`` (empty list = the workspace's git dir is trustworthy).
+
+    Checks that ``.git`` is a real directory inside the work tree (no gitfile redirect), that no alternates /
+    commondir redirect objects or refs elsewhere, and that ``.git/config`` holds only :data:`ALLOWED_LOCAL_CONFIG`
+    keys with safe values. Only plumbing that never consults drivers/hooks (``rev-parse``, ``config``) is used.
+    """
+    problems: list[str] = []
+    expected = cwd / ".git"
+    if await asyncio.to_thread(_fs.is_symlink, expected) or not await asyncio.to_thread(_fs.is_dir, expected):
+        return [".git is not a plain directory inside the workspace"]
+    gdir = await git_dir(runner, cwd)
+    if not await asyncio.to_thread(_fs.same_path, gdir, expected):
+        return ["git dir does not belong to the workspace"]
+    for name in await asyncio.to_thread(_fs.symlinked_entries, gdir, ("info/attributes", "objects/info")):
+        problems.append(f"unexpected symlink .git/{name}")
+    for rel in FORBIDDEN_GIT_DIR_FILES:
+        if await asyncio.to_thread(_fs.exists, gdir / rel):
+            problems.append(f"unexpected {rel}")
+    for key, value in await local_config(runner, cwd):
+        if key not in ALLOWED_LOCAL_CONFIG and not _ALLOWED_LOCAL_CONFIG_RE.match(key):
+            problems.append(f"config key {key!r} is not allowed")
+        elif key == "core.bare" and value.strip().lower() not in ("false", "0", "no", "off"):
+            problems.append("core.bare must be false")
+    return problems
 
 
 async def is_ancestor(runner: GitRunner, cwd: Path, ancestor: str, descendant: str) -> bool:
@@ -228,10 +297,12 @@ async def changed_files(runner: GitRunner, cwd: Path, base: str) -> list[str]:
     return sorted(set(diff.changed_paths))
 
 
-async def ls_remote_head(runner: GitRunner, cwd: Path, remote: str, branch: str) -> str | None:
-    """SHA of ``refs/heads/<branch>`` on ``remote`` (``None`` if the branch does not exist)."""
+async def ls_remote_head(runner: GitRunner, cwd: Path, remote: str, branch: str, *, timeout_s: float | None = None) -> str | None:
+    """SHA of ``refs/heads/<branch>`` on ``remote`` (URL or remote name; ``None`` if the branch does not exist)."""
+    if remote.startswith("-"):
+        raise ValueError("remote must not start with '-'")
     ref = f"refs/heads/{branch}"
-    res = await runner.run(["ls-remote", "--refs", remote, ref], cwd=cwd, timeout_s=None)
+    res = await runner.run(["ls-remote", "--refs", remote, ref], cwd=cwd, timeout_s=timeout_s)
     for line in res.text.splitlines():
         sha, _, name = line.partition("\t")
         if name.strip() == ref and is_sha(sha.strip()):

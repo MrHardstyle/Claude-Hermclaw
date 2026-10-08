@@ -30,7 +30,8 @@ def validate_remote_url(url: str) -> str:
         scheme = parts.scheme.lower()
         if scheme not in ALLOWED_SCHEMES:
             raise InvalidRemoteUrl(f"remote URL scheme '{scheme}' is not allowed", details={"allowed": sorted(ALLOWED_SCHEMES)})
-        if parts.password:
+        if parts.password or (scheme in ("http", "https") and parts.username):
+            # a bare username on http(s) is how tokens get smuggled into URLs (https://<token>@host/…)
             raise InvalidRemoteUrl("credentials must not be embedded in remote URLs; use a secret reference")
         if scheme != "file" and not parts.hostname:
             raise InvalidRemoteUrl("remote URL has no host")

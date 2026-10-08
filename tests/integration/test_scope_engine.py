@@ -11,6 +11,7 @@ from hermclaw.contracts.events import EventType
 from hermclaw.core.errors import ConflictError, NotFoundError
 from hermclaw.scope.engine import ScopeEngine, ScopeEngineSettings
 from tests.integration.test_scope_support import (
+    SM,
     FakeRepo,
     build_repo,
     events_for,
@@ -31,7 +32,7 @@ def repo(tmp_repo: Path) -> Path:
     return build_repo(tmp_repo)
 
 
-async def test_paths_globs_directories_and_symbols_resolve(sessionmaker, repo: Path) -> None:
+async def test_paths_globs_directories_and_symbols_resolve(sessionmaker: SM, repo: Path) -> None:
     fake = FakeRepo(
         symbols={"slug": [hit("src/app/helpers.py", 0.97, symbol=1.0), hit("src/app/core.py", 0.4)]},
         texts={"user model definition": [hit("src/app/models.py", 0.93), hit("docs/guide.md", 0.5)]},
@@ -79,7 +80,7 @@ async def test_paths_globs_directories_and_symbols_resolve(sessionmaker, repo: P
     assert len(created) == 1 and created[0].payload["version"] == 1 and created[0].payload["target_count"] == 6
 
 
-async def test_low_confidence_and_ambiguous_hits_are_not_targets(sessionmaker, repo: Path) -> None:
+async def test_low_confidence_and_ambiguous_hits_are_not_targets(sessionmaker: SM, repo: Path) -> None:
     fake = FakeRepo(
         symbols={"run": [hit("src/app/core.py", 0.5)]},
         texts={
@@ -101,7 +102,7 @@ async def test_low_confidence_and_ambiguous_hits_are_not_targets(sessionmaker, r
     assert ("search", "run") not in fake.calls
 
 
-async def test_forbidden_paths_are_excluded_with_evidence(sessionmaker, repo: Path) -> None:
+async def test_forbidden_paths_are_excluded_with_evidence(sessionmaker: SM, repo: Path) -> None:
     step = await make_step(
         sessionmaker,
         repo_hints=["src/app/*.py", ".env", "config/settings.yaml"],
@@ -123,7 +124,7 @@ async def test_forbidden_paths_are_excluded_with_evidence(sessionmaker, repo: Pa
     assert decision.evidence["forbidden"]["step"] == ["src/app/models.py", "config/"]
 
 
-async def test_new_hinted_paths_only_for_creating_kinds(sessionmaker, repo: Path) -> None:
+async def test_new_hinted_paths_only_for_creating_kinds(sessionmaker: SM, repo: Path) -> None:
     hints = ["src/app/brand_new.py", "src/newpkg/", "src/app/core.py/inner.py"]
     impl = await make_step(sessionmaker, repo_hints=hints)
     engine = ScopeEngine(sessionmaker, make_config(), FakeRepo())
@@ -140,14 +141,14 @@ async def test_new_hinted_paths_only_for_creating_kinds(sessionmaker, repo: Path
     assert ro.contract.allowed_operations == [] and ro.contract.target_paths == [] and ro.evidence["read_only"] is True
 
 
-async def test_bare_file_name_resolves_unique_basename(sessionmaker, repo: Path) -> None:
+async def test_bare_file_name_resolves_unique_basename(sessionmaker: SM, repo: Path) -> None:
     step = await make_step(sessionmaker, repo_hints=["helpers.py", "test_core.py"])
     decision = await ScopeEngine(sessionmaker, make_config(), FakeRepo()).create_scope(step.id, workspace_for(step.job_id, repo))
     assert decision.contract is not None
     assert decision.contract.target_paths == ["src/app/helpers.py", "tests/test_core.py"]
 
 
-async def test_delete_only_from_absence_evidence_or_explicit_constraint(sessionmaker, repo: Path) -> None:
+async def test_delete_only_from_absence_evidence_or_explicit_constraint(sessionmaker: SM, repo: Path) -> None:
     engine = ScopeEngine(sessionmaker, make_config(), FakeRepo())
     plain = await make_step(sessionmaker, repo_hints=["legacy/old_module.py"])
     d0 = await engine.create_scope(plain.id, workspace_for(plain.job_id, repo))
@@ -185,7 +186,7 @@ async def test_delete_only_from_absence_evidence_or_explicit_constraint(sessionm
     assert d4.contract is not None and "delete" not in d4.contract.allowed_operations and ".env" not in d4.contract.target_paths
 
 
-async def test_unavailable_when_nothing_resolves(sessionmaker, repo: Path) -> None:
+async def test_unavailable_when_nothing_resolves(sessionmaker: SM, repo: Path) -> None:
     before_head = git(repo, "rev-parse", "HEAD")
     before_status = git(repo, "status", "--porcelain")
     step = await make_step(sessionmaker, repo_hints=["does/not/exist/*.py", "NoSuchSymbol"], kind="implement")
@@ -210,7 +211,7 @@ async def test_unavailable_when_nothing_resolves(sessionmaker, repo: Path) -> No
     assert git(repo, "status", "--porcelain") == before_status
 
 
-async def test_caps_are_never_truncated(sessionmaker, repo: Path) -> None:
+async def test_caps_are_never_truncated(sessionmaker: SM, repo: Path) -> None:
     engine = ScopeEngine(sessionmaker, make_config(max_target_paths=3, max_new_paths=1), FakeRepo())
     many = await make_step(sessionmaker, repo_hints=["src/**/*.py"])
     d = await engine.create_scope(many.id, workspace_for(many.job_id, repo))
@@ -222,7 +223,7 @@ async def test_caps_are_never_truncated(sessionmaker, repo: Path) -> None:
     assert d2.status == "unavailable" and d2.reason_code == "too_many_new_paths"
 
 
-async def test_versioning_supersedes_previous_active(sessionmaker, repo: Path) -> None:
+async def test_versioning_supersedes_previous_active(sessionmaker: SM, repo: Path) -> None:
     step = await make_step(sessionmaker, repo_hints=["src/app/c*.py"])
     engine = ScopeEngine(sessionmaker, make_config(), FakeRepo())
     ws = workspace_for(step.job_id, repo)
@@ -247,7 +248,7 @@ async def test_versioning_supersedes_previous_active(sessionmaker, repo: Path) -
     assert [e.payload["previous_version"] for e in created] == [None, 1]
 
 
-async def test_closed_missing_and_mismatched_steps(sessionmaker, repo: Path) -> None:
+async def test_closed_missing_and_mismatched_steps(sessionmaker: SM, repo: Path) -> None:
     engine = ScopeEngine(sessionmaker, make_config(), FakeRepo())
     with pytest.raises(NotFoundError):
         await engine.create_scope(uuid.uuid4(), workspace_for(uuid.uuid4(), repo))
@@ -263,7 +264,7 @@ async def test_closed_missing_and_mismatched_steps(sessionmaker, repo: Path) -> 
     assert await scope_rows(sessionmaker, other.id) == []
 
 
-async def test_secrets_in_hints_are_redacted_in_evidence(sessionmaker, repo: Path) -> None:
+async def test_secrets_in_hints_are_redacted_in_evidence(sessionmaker: SM, repo: Path) -> None:
     step = await make_step(sessionmaker, repo_hints=["README.md", "password=hunter2secret"])
     decision = await ScopeEngine(sessionmaker, make_config(), FakeRepo()).create_scope(step.id, workspace_for(step.job_id, repo))
     rows = await scope_rows(sessionmaker, step.id)
