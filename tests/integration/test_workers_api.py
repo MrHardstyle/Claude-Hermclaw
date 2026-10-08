@@ -129,7 +129,9 @@ async def test_incompatible_worker_gets_ack_and_error_state(
         ack = (await c.post("/api/workers/heartbeat", content=json.dumps(body).encode())).json()
     assert ack["accepted"] and not ack["compatible"] and ack["state"] == "error" and "protocol_version" in ack["message"]
     async with sessionmaker() as s:
-        evs = (await s.execute(select(Event).where(Event.source_id == worker_id, Event.event_type == EventType.WORKER_STATE))).scalars().all()
+        evs = (
+            (await s.execute(select(Event).where(Event.source_id == worker_id, Event.event_type == EventType.WORKER_STATE))).scalars().all()
+        )
         assert any(e.payload.get("reason") == "protocol_version_mismatch" for e in evs)
 
 
@@ -187,7 +189,9 @@ async def test_heartbeat_sender_end_to_end(
 async def test_heartbeat_sender_reports_rejection(orchestrator: tuple[FastAPI, WorkerApiContext], worker_id: str, tmp_path: Path) -> None:
     app, _ctx = orchestrator
     settings = make_settings(tmp_path, WorkerKind.execution, worker_id, orchestrator_url="http://orchestrator")
-    sender = HeartbeatSender(settings, DaemonState(worker_id, WorkerKind.execution), lambda: "w" * 64, transport=httpx.ASGITransport(app=app))
+    sender = HeartbeatSender(
+        settings, DaemonState(worker_id, WorkerKind.execution), lambda: "w" * 64, transport=httpx.ASGITransport(app=app)
+    )
     with pytest.raises(HeartbeatError) as exc:
         await sender.send_once()
     assert exc.value.code == "WORKER_AUTH_BAD_TOKEN" and exc.value.status_code == 401

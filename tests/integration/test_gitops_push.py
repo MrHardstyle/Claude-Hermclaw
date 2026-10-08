@@ -11,7 +11,7 @@ from hermclaw.contracts.scope import ScopeContract
 from hermclaw.core.config import GitPolicy, PoliciesConfig
 from hermclaw.core.errors import ProtectedBranchError
 from hermclaw.gitops import GitLabClient
-from hermclaw.gitops.errors import NotJobBranchError, NothingToPushError, PushRejectedError
+from hermclaw.gitops.errors import NothingToPushError, NotJobBranchError, PushRejectedError
 from hermclaw.persistence.models import Workspace
 from tests.integration.test_gitops_support import FakeGitLab, World, git, make_world, write
 

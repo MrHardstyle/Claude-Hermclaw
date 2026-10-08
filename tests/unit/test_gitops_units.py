@@ -36,7 +36,30 @@ def test_slug_and_job_branch_name():
     assert job_branch_name("", job, "a") == "12345678-a"
 
 
-@pytest.mark.parametrize("name", ["-x", "a..b", "a b", "a~b", "a^b", "a:b", "a?b", "a*b", "a[b", "a\\b", "x.lock", ".hidden", "a/", "/a", "a//b", "@", "HEAD", "refs/heads/x", "a@{b"])
+@pytest.mark.parametrize(
+    "name",
+    [
+        "-x",
+        "a..b",
+        "a b",
+        "a~b",
+        "a^b",
+        "a:b",
+        "a?b",
+        "a*b",
+        "a[b",
+        "a\\b",
+        "x.lock",
+        ".hidden",
+        "a/",
+        "/a",
+        "a//b",
+        "@",
+        "HEAD",
+        "refs/heads/x",
+        "a@{b",
+    ],
+)
 def test_invalid_branch_names(name):
     with pytest.raises(ValidationFailed):
         validate_branch_name(name)
@@ -63,7 +86,13 @@ def test_safe_dir_name():
 # ============================================================================================ urls
 @pytest.mark.parametrize(
     "url",
-    ["ssh://git@192.168.178.226:22/grp/demo.git", "git@192.168.178.226:grp/demo.git", "https://gitlab.example/grp/demo.git", "file:///srv/x.git", "/srv/x.git"],
+    [
+        "ssh://git@192.168.178.226:22/grp/demo.git",
+        "git@192.168.178.226:grp/demo.git",
+        "https://gitlab.example/grp/demo.git",
+        "file:///srv/x.git",
+        "/srv/x.git",
+    ],
 )
 def test_valid_remote_urls(url):
     assert validate_remote_url(url) == url
@@ -71,7 +100,17 @@ def test_valid_remote_urls(url):
 
 @pytest.mark.parametrize(
     "url",
-    ["ext::sh -c id", "fd::1", "-oProxyCommand=x", "https://u:p@host/x.git", "ftp://h/x", "file://relative", "rel/path", "a b", "http:///x"],
+    [
+        "ext::sh -c id",
+        "fd::1",
+        "-oProxyCommand=x",
+        "https://u:p@host/x.git",
+        "ftp://h/x",
+        "file://relative",
+        "rel/path",
+        "a b",
+        "http:///x",
+    ],
 )
 def test_invalid_remote_urls(url):
     with pytest.raises(InvalidRemoteUrl):
@@ -104,7 +143,11 @@ def test_parse_porcelain_handles_renames_and_odd_names():
 
 def test_parse_name_status_and_numstat():
     ns = parse_name_status(b"M\0a.py\0R087\0old.py\0new.py\0A\0b c.py\0")
-    assert [(n.status, n.path, n.old_path, n.score) for n in ns] == [("M", "a.py", None, None), ("R", "new.py", "old.py", 87), ("A", "b c.py", None, None)]
+    assert [(n.status, n.path, n.old_path, n.score) for n in ns] == [
+        ("M", "a.py", None, None),
+        ("R", "new.py", "old.py", 87),
+        ("A", "b c.py", None, None),
+    ]
     st = parse_numstat(b"1\t2\ta.py\0-\t-\tbin.dat\0" + b"3\t0\t\0old.py\0new.py\0")
     assert [(n.path, n.additions, n.deletions, n.old_path, n.binary) for n in st] == [
         ("a.py", 1, 2, None, False),
@@ -238,7 +281,9 @@ def test_read_secret_empty_file(tmp_path):
 
 # ============================================================================================ runner / ssh
 def test_runner_environment_is_hardened():
-    runner = GitRunner(author_name="Hermclaw Runtime", author_email="h@x", ssh=GitSshOptions(key_path=Path("/k/id"), known_hosts=Path("/k/kh")))
+    runner = GitRunner(
+        author_name="Hermclaw Runtime", author_email="h@x", ssh=GitSshOptions(key_path=Path("/k/id"), known_hosts=Path("/k/kh"))
+    )
     env = runner.environment()
     assert env["GIT_TERMINAL_PROMPT"] == "0" and env["LC_ALL"] == "C" and env["GIT_CONFIG_NOSYSTEM"] == "1"
     assert env["GIT_CONFIG_GLOBAL"] == os.devnull and env["GIT_ALLOW_PROTOCOL"] == "file:ssh:https:http"
@@ -326,12 +371,14 @@ async def test_gitlab_client_retries_and_errors():
             return httpx.Response(200, json=[], headers={"X-Next-Page": ""})
         return httpx.Response(422, json={"message": "token=glpat-abcdefghijklmnopqrstu invalid"})
 
-    client = GitLabClient("http://gitlab.test", token="glpat-unit-token-0000000000", retries=2, backoff_seconds=0.0, transport=httpx.MockTransport(handler))
+    client = GitLabClient(
+        "http://gitlab.test", token="glpat-unit-token-0000000000", retries=2, backoff_seconds=0.0, transport=httpx.MockTransport(handler)
+    )
     try:
         with pytest.raises(GitLabError) as err:
             await client.create_merge_request("grp/demo", source_branch="hermclaw/x", target_branch="main", title="t")
         assert err.value.details["status"] == 422 and "glpat-abcdefghijklmnopqrstu" not in str(err.value)
-        assert calls[0].url.path == "/api/v4/projects/grp%2Fdemo/merge_requests"
+        assert calls[0].url.raw_path.split(b"?")[0] == b"/api/v4/projects/grp%2Fdemo/merge_requests"  # path stays encoded on the wire
         assert calls[0].headers["PRIVATE-TOKEN"] == "glpat-unit-token-0000000000"
         assert len(calls) == 3  # 503 retried, then lookup ok, then POST 422
     finally:

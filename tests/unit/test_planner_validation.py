@@ -202,7 +202,11 @@ def test_duplicate_work_and_unreachable_and_checking_steps() -> None:
 def test_research_must_run_before_mutating_work() -> None:
     data = plan(
         "goal",
-        [_impl("S001"), step("S002", "research", "research", "Research follow-up question.", depends_on=["S001"]), _impl("S003", depends_on=["S002"], repo_hints=["app/models.py"])],
+        [
+            _impl("S001"),
+            step("S002", "research", "research", "Research follow-up question.", depends_on=["S001"]),
+            _impl("S003", depends_on=["S002"], repo_hints=["app/models.py"]),
+        ],
     )
     errors = _errors(data)
     assert any("S002: research must run before the work that needs it, but it depends on mutating step(s) S001" in e for e in errors)
@@ -279,7 +283,14 @@ def test_preserved_steps_are_only_structural() -> None:
 
 
 def test_ancestors_are_transitive() -> None:
-    data = plan("goal", [_impl("S001"), _impl("S002", depends_on=["S001"], repo_hints=["app/models.py"]), step("S003", "review", "review", "Review all of it.", depends_on=["S002"])])
+    data = plan(
+        "goal",
+        [
+            _impl("S001"),
+            _impl("S002", depends_on=["S001"], repo_hints=["app/models.py"]),
+            step("S003", "review", "review", "Review all of it.", depends_on=["S002"]),
+        ],
+    )
     anc = ancestors(PlanContract.model_validate(data))
     assert anc == {"S001": set(), "S002": {"S001"}, "S003": {"S001", "S002"}}
 

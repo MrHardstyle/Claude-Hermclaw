@@ -166,7 +166,9 @@ FASTAPI = RepoFixture(
                 score=0.92,
                 snippet='router = APIRouter()\n\n@router.get("/users")\ndef list_users(db: Session = Depends(get_db)):\n    return db.query(User).all()\n',
             ),
-            ContextSnippet(path="app/models.py", start_line=1, end_line=3, score=0.5, snippet="class User(Base):\n    id = Column(Integer)\n"),
+            ContextSnippet(
+                path="app/models.py", start_line=1, end_line=3, score=0.5, snippet="class User(Base):\n    id = Column(Integer)\n"
+            ),
         ],
         existing_tests=["tests/test_users.py"],
     ),
@@ -340,7 +342,9 @@ LINUX_ADMIN = RepoFixture(
             ),
             step("S002", "review", "review", "Review the logrotate change on web-01.", depends_on=["S001"]),
         ],
-        research_needed=[{"question": "Which logrotate directives does Debian 13 ship for nginx by default?", "reason": "avoid duplicates"}],
+        research_needed=[
+            {"question": "Which logrotate directives does Debian 13 ship for nginx by default?", "reason": "avoid duplicates"}
+        ],
     ),
 )
 

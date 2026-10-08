@@ -86,7 +86,12 @@ def test_context_section_orders_by_score_and_reports_omissions() -> None:
 # --------------------------------------------------------------------------------------------- payload
 def test_planner_payload_keys_redaction_and_test_command() -> None:
     inputs = FASTAPI.inputs.model_copy(
-        update={"retrieved_context": [*FASTAPI.inputs.retrieved_context, ContextSnippet(path="app/settings.py", snippet=f"TOKEN = '{SECRET}'\n")]}
+        update={
+            "retrieved_context": [
+                *FASTAPI.inputs.retrieved_context,
+                ContextSnippet(path="app/settings.py", snippet=f"TOKEN = '{SECRET}'\n"),
+            ]
+        }
     )
     payload, stats = planner_user_payload(
         job={"id": "j", "title": "t", "goal": f"use password=hunter2xyz and {SECRET}"},
@@ -112,7 +117,9 @@ def test_fit_to_budget_bounds_huge_inputs_deterministically() -> None:
     assert budget.total_chars == int((profile.context_tokens - profile.max_output_tokens) * 3.2 * 0.85) - 4000
     huge = PlannerInput(
         repository_inventory={"files": [f"pkg/m{i}/mod_{i}.py" for i in range(20_000)], "test_command": "pytest"},
-        retrieved_context=[ContextSnippet(path=f"pkg/m{i}/mod_{i}.py", snippet="def f():\n    pass\n" * 400, score=1.0) for i in range(300)],
+        retrieved_context=[
+            ContextSnippet(path=f"pkg/m{i}/mod_{i}.py", snippet="def f():\n    pass\n" * 400, score=1.0) for i in range(300)
+        ],
         research_summary={"text": "finding\n" * 20_000},
         existing_tests=[f"tests/test_{i}.py" for i in range(5000)],
     )

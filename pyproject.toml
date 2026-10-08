@@ -79,7 +79,7 @@ ignore = [
 "hermclaw/core/settings.py" = ["S105"]
 "hermclaw/core/redaction.py" = ["S105"]
 "hermclaw/security/tokens.py" = ["S105"]
-"tests/**" = ["S", "PLR", "B011", "ASYNC"]
+"tests/**" = ["S", "PLR", "B011", "ASYNC", "E501", "RUF059"]
 
 [tool.mypy]
 python_version = "3.12"

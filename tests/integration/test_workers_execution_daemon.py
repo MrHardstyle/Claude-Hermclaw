@@ -263,7 +263,9 @@ async def test_container_recovery_with_real_podman(tmp_path: Path) -> None:
     unrelated = f"hermclaw-p07-unrelated-{uuid.uuid4().hex[:8]}"
     try:
         for name in names:
-            subprocess.run(["podman", "create", "--name", name, "--label", label, "docker.io/library/alpine:3.20", "true"], check=True, timeout=60)
+            subprocess.run(
+                ["podman", "create", "--name", name, "--label", label, "docker.io/library/alpine:3.20", "true"], check=True, timeout=60
+            )
         subprocess.run(["podman", "create", "--name", unrelated, "docker.io/library/alpine:3.20", "true"], check=True, timeout=60)
         app = _app(tmp_path, sandbox=SandboxPolicy(engine="podman"), container_label=label)
         async with _client(app) as c:
@@ -287,7 +289,9 @@ async def test_startup_recovery_removes_leftovers(tmp_path: Path) -> None:
     leftover = tmp_path / "data" / "workspaces" / ".incoming-ws1-deadbeef"
     leftover.mkdir(parents=True)
     try:
-        subprocess.run(["podman", "create", "--name", name, "--label", label, "docker.io/library/alpine:3.20", "true"], check=True, timeout=60)
+        subprocess.run(
+            ["podman", "create", "--name", name, "--label", label, "docker.io/library/alpine:3.20", "true"], check=True, timeout=60
+        )
         app = _app(tmp_path, sandbox=SandboxPolicy(engine="podman"), container_label=label)
         async with lifespan(app):
             pass

@@ -157,11 +157,12 @@ async def test_real_daemon_process_heartbeats_and_graceful_shutdown(
                 break
             await asyncio.sleep(0.1)
         assert last is not None and last.loaded_models[0]["name"] == "qwen3:8b" and last.gpus[0]["name"] == "NVIDIA GeForce GTX 1080"
-        caps = (await _registry.get_worker(s, wid)) if False else None  # noqa: SIM108 - keep session usage explicit below
+        caps = (await _registry.get_worker(s, wid)) if False else None
         async with sessionmaker() as s:
             info = await _registry.get_worker(s, wid)
         assert {"chat", "embedding", "ollama", "gpu_telemetry"} <= set(info.capabilities) and caps is None
-        assert await _stop(proc, signal.SIGTERM) == 0
+        # uvicorn re-raises the captured SIGTERM after its graceful shutdown (systemd treats that as a clean stop)
+        assert await _stop(proc, signal.SIGTERM) in (0, -signal.SIGTERM)
         row = await _wait_state(sessionmaker, wid, "offline", timeout=5)
         assert row.metadata_["reported_state"] == "offline"
     finally:

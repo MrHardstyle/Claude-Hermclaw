@@ -86,7 +86,9 @@ async def test_registry_register_emits_event(world, sessionmaker):
         rows = list(
             (
                 await s.execute(
-                    select(Event).where(Event.event_type == EventType.GIT_OPERATION, Event.payload["repository_id"].astext == str(world.repo.id))
+                    select(Event).where(
+                        Event.event_type == EventType.GIT_OPERATION, Event.payload["repository_id"].astext == str(world.repo.id)
+                    )
                 )
             ).scalars()
         )
@@ -392,7 +394,9 @@ async def test_stage_allowed_deletes_and_strict_vs_non_strict(world):
     res = await world.engine.stage_allowed(ws, strict)
     assert res.staged_paths == ["src/util.py"] and res.staged[0].operation == "delete"
     assert {r.path: r.reason for r in res.refused} == {"docs/new.md": "outside_scope"}
-    lax = ScopeContract(strict_target_paths=False, target_paths=["src/util.py"], allowed_new_paths=["docs/**"], allowed_operations=["create", "delete"])
+    lax = ScopeContract(
+        strict_target_paths=False, target_paths=["src/util.py"], allowed_new_paths=["docs/**"], allowed_operations=["create", "delete"]
+    )
     res2 = await world.engine.stage_allowed(ws, lax)
     assert sorted(res2.staged_paths) == ["docs/new.md", "src/util.py"]
     assert git("diff", "--cached", "--name-status", cwd=path).splitlines() == ["A\tdocs/new.md", "D\tsrc/util.py"]

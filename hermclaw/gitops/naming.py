@@ -77,7 +77,7 @@ def matches_protected(branch: str, patterns: Iterable[str]) -> str | None:
 
 def safe_dir_name(name: str, *, max_len: int = 100) -> str:
     """Filesystem-safe, collision-free directory name derived from a repository name."""
-    cleaned = _SAFE_DIR.sub("-", name.replace("/", "__")).strip(".-") or "repo"
+    cleaned = re.sub(r"\.{2,}", ".", _SAFE_DIR.sub("-", name.replace("/", "__"))).strip(".-") or "repo"
     if cleaned != name or len(cleaned) > max_len:
         digest = hashlib.sha1(name.encode("utf-8"), usedforsecurity=False).hexdigest()[:8]
         cleaned = f"{cleaned[: max_len - 9]}-{digest}"

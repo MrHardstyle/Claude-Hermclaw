@@ -26,7 +26,9 @@ TOKEN = "k" * 48 + "-daemon-token"
 
 # ------------------------------------------------------------------------------------------- settings
 def test_settings_from_env_defaults(tmp_path: Path) -> None:
-    s = WorkerDaemonSettings.from_env({"WORKER_ID": "exec-222", "WORKER_TOKEN_FILE": str(tmp_path / "t")}, default_kind=WorkerKind.execution)
+    s = WorkerDaemonSettings.from_env(
+        {"WORKER_ID": "exec-222", "WORKER_TOKEN_FILE": str(tmp_path / "t")}, default_kind=WorkerKind.execution
+    )
     assert s.kind == WorkerKind.execution and s.bind == "127.0.0.1:8787" and s.orchestrator_url is None
     assert s.heartbeat_seconds == 15.0 and s.max_skew_seconds == 120.0
     assert s.all_capabilities() == sorted(BASE_CAPABILITIES[WorkerKind.execution])
@@ -141,7 +143,9 @@ def test_system_sampler_real_host(tmp_path: Path) -> None:
 
 
 # ------------------------------------------------------------------------------------------- gpu
-NVIDIA_CSV = "0, NVIDIA GeForce GTX 1080, 8192, 1536, 37, 54, 550.163.01\n1, Some GPU, 4096, [N/A], [Not Supported], [N/A], [N/A]\ngarbage\n"
+NVIDIA_CSV = (
+    "0, NVIDIA GeForce GTX 1080, 8192, 1536, 37, 54, 550.163.01\n1, Some GPU, 4096, [N/A], [Not Supported], [N/A], [N/A]\ngarbage\n"
+)
 
 
 def test_parse_nvidia_smi_csv() -> None:
@@ -213,13 +217,17 @@ async def _echo_app(scope: Scope, receive: Receive, send: Send) -> None:
         if not msg.get("more_body"):
             break
     auth = scope.get("state", {}).get("worker_auth")
-    payload = json.dumps({"len": len(body), "sha": __import__("hashlib").sha256(body).hexdigest(), "worker": getattr(auth, "worker_id", None)})
+    payload = json.dumps(
+        {"len": len(body), "sha": __import__("hashlib").sha256(body).hexdigest(), "worker": getattr(auth, "worker_id", None)}
+    )
     await send({"type": "http.response.start", "status": 200, "headers": [(b"content-type", b"application/json")]})
     await send({"type": "http.response.body", "body": payload.encode()})
 
 
 def _mw(max_body: int = 10 * 1024 * 1024) -> SignedRequestMiddleware:
-    return SignedRequestMiddleware(_echo_app, worker_id="exec-1", tokens=lambda: [TOKEN], max_body_bytes=max_body, replay_cache=ReplayCache())
+    return SignedRequestMiddleware(
+        _echo_app, worker_id="exec-1", tokens=lambda: [TOKEN], max_body_bytes=max_body, replay_cache=ReplayCache()
+    )
 
 
 async def test_middleware_health_exempt_and_rejects_unsigned() -> None:
@@ -242,7 +250,9 @@ async def test_middleware_accepts_signed_and_passes_body() -> None:
 
 async def test_middleware_rejects_other_worker_wrong_token_and_replay() -> None:
     mw = _mw()
-    async with httpx.AsyncClient(transport=httpx.ASGITransport(app=mw), base_url="http://w", auth=WorkerRequestSigner("model-1", TOKEN)) as c:
+    async with httpx.AsyncClient(
+        transport=httpx.ASGITransport(app=mw), base_url="http://w", auth=WorkerRequestSigner("model-1", TOKEN)
+    ) as c:
         r = await c.post("/x", content=b"1")
         assert r.status_code == 401 and r.json()["error"]["code"] == "WORKER_AUTH_WRONG_WORKER"
     async with httpx.AsyncClient(

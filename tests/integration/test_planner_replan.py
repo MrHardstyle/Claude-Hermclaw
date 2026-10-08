@@ -70,17 +70,43 @@ async def _planned_fastapi(sm: async_sessionmaker[AsyncSession], *, s003_running
     if s003_running:
         await _move(sm, ids["S003"], StepStatus.running)
     async with sm() as s:
-        s.add(StepAttempt(step_id=ids["S001"], job_id=job_id, attempt_no=1, status="completed", summary="Added limit/offset to list_users."))
-        s.add(StepAttempt(step_id=ids["S002"], job_id=job_id, attempt_no=1, status="failed", outcome="verifier_failed", summary="README edit"))
+        s.add(
+            StepAttempt(step_id=ids["S001"], job_id=job_id, attempt_no=1, status="completed", summary="Added limit/offset to list_users.")
+        )
+        s.add(
+            StepAttempt(step_id=ids["S002"], job_id=job_id, attempt_no=1, status="failed", outcome="verifier_failed", summary="README edit")
+        )
         run = VerificationRun(job_id=job_id, step_id=ids["S002"], passed=False, status="failed", summary="1 blocking failure")
         s.add(run)
         await s.flush()
-        s.add(VerificationCheckRow(verification_run_id=run.id, check_type="diff", name="must_change README.md", status="fail", message="README.md unchanged"))
+        s.add(
+            VerificationCheckRow(
+                verification_run_id=run.id, check_type="diff", name="must_change README.md", status="fail", message="README.md unchanged"
+            )
+        )
         s.add(VerificationCheckRow(verification_run_id=run.id, check_type="scope", name="scope", status="pass", message="ok"))
-        lines = [f"tests/test_users.py::test_{i} PASSED" for i in range(400)] + [f"token={SECRET}", "FAILED tests/test_users.py::test_page - 1 failed"]
-        s.add(TestRun(job_id=job_id, step_id=ids["S002"], command="pytest -q", framework="pytest", status="failed", passed=400, failed=1, output_excerpt="\n".join(lines)))
+        lines = [f"tests/test_users.py::test_{i} PASSED" for i in range(400)] + [
+            f"token={SECRET}",
+            "FAILED tests/test_users.py::test_page - 1 failed",
+        ]
+        s.add(
+            TestRun(
+                job_id=job_id,
+                step_id=ids["S002"],
+                command="pytest -q",
+                framework="pytest",
+                status="failed",
+                passed=400,
+                failed=1,
+                output_excerpt="\n".join(lines),
+            )
+        )
         s.add(ScopeContractRow(job_id=job_id, step_id=ids["S002"], version=1, status="active", contract={"target_paths": ["README.md"]}))
-        s.add(ScopeContractRow(job_id=job_id, step_id=ids["S001"], version=1, status="active", contract={"target_paths": ["app/routers/users.py"]}))
+        s.add(
+            ScopeContractRow(
+                job_id=job_id, step_id=ids["S001"], version=1, status="active", contract={"target_paths": ["app/routers/users.py"]}
+            )
+        )
         s.add(ResearchRun(job_id=job_id, question="pagination conventions", status="completed", synthesis="Use limit/offset with max 100."))
         await s.commit()
     return job_id, ids
@@ -169,7 +195,10 @@ async def test_replan_preserves_completed_steps_and_supersedes_the_rest(sessionm
     # 24.5 new dependencies reference the kept completed row
     async with sm() as s:
         deps = list((await s.execute(select(StepDependency).where(StepDependency.step_id == new_s002.id))).scalars())
-        s004_deps = {d.depends_on_step_id for d in (await s.execute(select(StepDependency).where(StepDependency.step_id == by_key["S004"][0].id))).scalars()}
+        s004_deps = {
+            d.depends_on_step_id
+            for d in (await s.execute(select(StepDependency).where(StepDependency.step_id == by_key["S004"][0].id))).scalars()
+        }
     assert [d.depends_on_step_id for d in deps] == [ids["S001"]]
     assert s004_deps == {ids["S001"], new_s002.id}
 
@@ -211,7 +240,11 @@ async def test_failure_package_contents(sessionmaker: object) -> None:
     ]
     assert payload["original_goal"] == FASTAPI.goal and "goal" not in payload["job"]
     assert payload["trigger"] == {"reason_code": "repeated_verifier_failure", "detail": "S002 failed 3x", "failed_step": "S002"}
-    assert payload["current_plan"]["version"] == 1 and [s["id"] for s in payload["current_plan"]["plan"]["steps"]] == ["S001", "S002", "S003"]
+    assert payload["current_plan"]["version"] == 1 and [s["id"] for s in payload["current_plan"]["plan"]["steps"]] == [
+        "S001",
+        "S002",
+        "S003",
+    ]
     assert payload["completed_steps"][0]["id"] == "S001" and payload["completed_steps"][0]["summary"] == "Added limit/offset to list_users."
     failed = payload["failed_step"]
     assert failed["id"] == "S002" and failed["status"] == "failed" and failed["error_code"] == "VERIFIER_FAILED"
@@ -219,7 +252,14 @@ async def test_failure_package_contents(sessionmaker: object) -> None:
     ev = payload["deterministic_evidence"]
     assert ev["trigger"] == {"verifier": "README.md unchanged"}
     assert ev["verifier"]["failed_checks"] == [
-        {"check_type": "diff", "name": "must_change README.md", "status": "fail", "blocking": True, "message": "README.md unchanged", "evidence": {}}
+        {
+            "check_type": "diff",
+            "name": "must_change README.md",
+            "status": "fail",
+            "blocking": True,
+            "message": "README.md unchanged",
+            "evidence": {},
+        }
     ]
     tail = ev["tests"][0]["output_tail"]
     assert tail.endswith("FAILED tests/test_users.py::test_page - 1 failed") and "line(s) truncated]" in tail
@@ -258,7 +298,9 @@ async def test_unchanged_repeat_of_failed_step_is_rejected(sessionmaker: object)
     sm = _sm(sessionmaker)
     job_id, ids = await _planned_fastapi(sm)
     orig = FASTAPI.answer()["steps"][1]  # identical to the failed S002
-    repeat = plan("Paginate GET /users", [dict(orig), step("S004", "review", "review", "Review the documentation step.", depends_on=["S002"])])
+    repeat = plan(
+        "Paginate GET /users", [dict(orig), step("S004", "review", "review", "Review the documentation step.", depends_on=["S002"])]
+    )
     chat = ScriptedChat([repeat, _replan_answer()])
     result = await Replanner(chat, sm, get_config()).replan(job_id, _trigger(ids), FASTAPI.inputs)
     assert result.repair_attempts == 1
@@ -272,7 +314,9 @@ async def test_unchanged_repeat_is_allowed_when_worker_was_unavailable(sessionma
     sm = _sm(sessionmaker)
     job_id, ids = await _planned_fastapi(sm)
     orig = FASTAPI.answer()["steps"][1]
-    repeat = plan("Paginate GET /users", [dict(orig), step("S004", "review", "review", "Review the documentation step.", depends_on=["S002"])])
+    repeat = plan(
+        "Paginate GET /users", [dict(orig), step("S004", "review", "review", "Review the documentation step.", depends_on=["S002"])]
+    )
     result = await Replanner(ScriptedChat([repeat]), sm, get_config()).replan(job_id, _trigger(ids, "worker_unavailable"), FASTAPI.inputs)
     assert result.repair_attempts == 0 and result.created_step_keys == ["S002", "S004"]
 
@@ -281,7 +325,9 @@ async def test_replan_can_add_research_and_depend_on_completed_steps(sessionmake
     sm = _sm(sessionmaker)
     job_id, ids = await _planned_fastapi(sm)
     answer = _replan_answer(research_needed=[{"question": "How do other FastAPI services document pagination parameters?"}])
-    result = await Replanner(ScriptedChat([answer]), sm, get_config()).replan(job_id, _trigger(ids, "research_changed_assumptions"), FASTAPI.inputs)
+    result = await Replanner(ScriptedChat([answer]), sm, get_config()).replan(
+        job_id, _trigger(ids, "research_changed_assumptions"), FASTAPI.inputs
+    )
     research = [s for s in result.plan.steps if s.kind.value == "research"]
     assert len(research) == 1 and research[0].id == "S005"  # S001-S004 are in use
     s002 = next(s for s in result.plan.steps if s.id == "S002")
