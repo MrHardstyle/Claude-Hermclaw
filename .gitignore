@@ -1,0 +1,52 @@
+# Python
+__pycache__/
+*.py[cod]
+*.so
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.venv/
+venv/
+dist/
+build/
+*.egg-info/
+
+# Node
+node_modules/
+ui/dist/
+ui/.vite/
+
+# Environment / secrets
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+*.crt
+secrets/
+config/secrets/
+
+# IDE / OS
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
+
+# Runtime local data
+artifacts/
+workspaces/
+cache/
+logs/
+*.log
+
+# Test / coverage
+.coverage
+coverage.xml
+htmlcov/
+playwright-report/
+test-results/
+
+# Temporary
+tmp/
+*.tmp
+*.swp
