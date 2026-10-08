@@ -1,24 +1,20 @@
 # DECISIONS
 
-Architekturentscheidungen, die innerhalb des verbindlichen Bauplans noch offen waren.
+Entscheidungen, die der verbindliche Bauplan offen lässt. Die Kernarchitektur wird hier nicht verändert.
 
-Die festgelegte Kernarchitektur aus dem Bauplan darf hier nicht eigenmächtig ersetzt werden.
+## Fest vorgegeben (unverändert)
+Greenfield · PostgreSQL + pgvector · Gemma 4 26B A4B Planner/Replanner (Fallback Gemma 4 12B) · Qwen3-Coder 30B Main Coder · Qwen3.8 27B Heavy Reviewer · Qwen3 8B Fast Router · EmbeddingGemma 2 · FastAPI/Python · React/TS/Vite · LiteLLM + Ollama · rootless Podman · expliziter Scope · deterministic Verifier · Research mit Quellen · Stagnation Detection · Runtime-kontrollierte Git-Operationen.
 
-## Fest vorgegeben
+## Offene Punkte – getroffene Entscheidungen
 
-- Greenfield statt Weiterpatchen der alten Runtime
-- PostgreSQL + pgvector als persistente Source of Truth
-- Gemma 4 26B A4B IT als primärer Planner/Replanner
-- Qwen3-Coder 30B als Implementation Worker
-- Qwen3.8 27B als Heavy Reviewer
-- Qwen3 8B als Fast Router
-- EmbeddingGemma 2 für Retrieval
-- FastAPI / Python Backend
-- React / TypeScript / Vite Frontend
-- LiteLLM + Ollama
-- rootless Podman
-- expliziter Scope
-- deterministic Verifier
-- Research mit transparenten Quellen
-- Stagnation Detection
-- Runtime-kontrollierte Git-Operationen
+| ID | Datum | Entscheidung | Begründung |
+|---|---|---|---|
+| D-001 | 2026-10-08 | Das vom Nutzer angelegte Repository `MrHardstyle/Claude-Hermclaw` ist das Repo `hermclaw-next`; Entwicklung auf Branch `claude/hermclaw-next-build`. | Nutzervorgabe; Bauplan nennt nur den Namen. Python-Paket heißt `hermclaw`. |
+| D-002 | 2026-10-08 | Produktions-PostgreSQL 17 + pgvector ≥ 0.8.2 aus PGDG statt Debian-Paket. | Debian-trixie-pgvector 0.8.0 ist von CVE-2026-3172 betroffen (R-003). |
+| D-003 | 2026-10-08 | Server-Sent Events über FastAPI-native `fastapi.sse`; Live-Benachrichtigung über PostgreSQL `LISTEN/NOTIFY`, Replay über `sequence`. | Kein Redis (Bauplan §5); Reconnect über `Last-Event-ID`. |
+| D-004 | 2026-10-08 | Standard-Suchprovider der Research Engine: selbst gehostetes SearXNG (JSON-API) auf `.225`, intern; weitere Provider über Interface. | Bauplan fordert Research, lässt API offen (R-023). |
+| D-005 | 2026-10-08 | Workspaces und alle Git-Mutationen auf `.225`; Ausführung in der Sandbox auf `.222` über Workspace-Sync (rsync über Worker-API-Upload/Download eines Tar-Streams). | Git-Hoheit der Runtime (§27) + Sandbox auf `.222` (§28). |
+| D-006 | 2026-10-08 | Worker-Authentifizierung: pro Worker ein zufälliges Bearer-Token (systemd credential), Requests zusätzlich HMAC-signiert (Zeitstempel + Body-Hash), TLS optional über Nginx/Stunnel. | §35 „pro Worker eigener Token, rotierbar“. |
+| D-007 | 2026-10-08 | Media-Backends: `ffmpeg` (Video) und `comfyui` (Bild) als konfigurierbare Adapter des Media-Workers. | §32 lässt Backend offen; Pascal-kompatibel (R-024). |
+| D-008 | 2026-10-08 | Token-Schätzung im Context Builder: konservativ 3,2 Zeichen/Token plus Sicherheitsreserve; exakte Zählung über Ollama `prompt_eval_count` als Telemetrie-Rückkopplung. | Kein Tokenizer-Download auf `.225` nötig. |
+| D-009 | 2026-10-08 | Build-/Testumgebung (Cloud-Container, Ubuntu 24.04, PG 16 + pgvector 0.6) ersetzt keine Zielhost-Tests; alle Live-Schritte sind als `[~]` mit BLOCKER-001 markiert. | LAN 192.168.178.0/24 aus der Build-Umgebung nicht erreichbar. |

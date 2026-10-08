@@ -1,0 +1,28 @@
+# P00 0.4–0.17: read-only inventory of all hosts.
+# Usage: ansible-playbook -i infra/ansible/inventory/hosts.yml infra/ansible/playbooks/inventory.yml
+# Results land in ./inventory-results/<host>.json (control node).
+- name: Hermclaw read-only host inventory
+  hosts: all
+  gather_facts: false
+  become: false
+  tasks:
+    - name: Copy inventory script
+      ansible.builtin.copy:
+        src: ../../../scripts/inventory/hermclaw-inventory.sh
+        dest: /tmp/hermclaw-inventory.sh
+        mode: "0755"
+    - name: Run inventory (read-only)
+      ansible.builtin.command: /tmp/hermclaw-inventory.sh --role {{ group_names | join(',') }}
+      register: inv
+      changed_when: false
+    - name: Store result on control node
+      ansible.builtin.copy:
+        content: "{{ inv.stdout }}"
+        dest: "./inventory-results/{{ inventory_hostname }}.json"
+        mode: "0644"
+      delegate_to: localhost
+      become: false
+    - name: Remove script
+      ansible.builtin.file:
+        path: /tmp/hermclaw-inventory.sh
+        state: absent

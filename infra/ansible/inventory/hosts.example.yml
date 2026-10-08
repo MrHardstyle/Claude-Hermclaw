@@ -1,0 +1,37 @@
+# Hermclaw Next – Ansible inventory (copy to hosts.yml and adjust).
+# Host roles are fixed by the architecture and must not be redistributed.
+all:
+  vars:
+    ansible_user: hermclaw-admin
+    ansible_become: true
+    hermclaw_version: "0.1.0-rc1"
+    hermclaw_orchestrator_ip: 192.168.178.225
+    hermclaw_lan_broadcast: 192.168.178.255
+  children:
+    orchestrator:
+      hosts:
+        hermclaw-orchestrator:
+          ansible_host: 192.168.178.225
+    webui:
+      hosts:
+        hermclaw-webui:
+          ansible_host: 192.168.178.223
+    execution_workers:
+      hosts:
+        hermclaw-exec-222:
+          ansible_host: 192.168.178.222
+          wol_mac: "00:00:00:00:00:00"   # TODO: real MAC from inventory
+    model_workers:
+      hosts:
+        hermclaw-model-224:
+          ansible_host: 192.168.178.224
+          wol_mac: "00:00:00:00:00:00"   # TODO: real MAC from inventory
+    gitlab:
+      hosts:
+        gitlab-226:
+          ansible_host: 192.168.178.226
+    backup:
+      hosts:
+        terra-60:
+          ansible_host: 192.168.178.60
+          ansible_user: root            # Unraid typically uses root
