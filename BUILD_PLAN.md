@@ -334,15 +334,15 @@ Legende: `[x]` erledigt mit Evidence · `[~]` erledigt, Live-Verifikation auf Zi
 
 ## P25 – Scheduler
 
-- [ ] 25.1 DAG scheduler. — Evidence: –
-- [ ] 25.2 ready steps. — Evidence: –
+- [x] 25.1 DAG scheduler. — Evidence: hermclaw/scheduler/scheduler.py; tests/integration/test_scheduler.py::test_dag_runs_in_dependency_order_and_finalizes
+- [x] 25.2 ready steps. — Evidence: hermclaw/scheduler/scheduler.py; tests/integration/test_scheduler.py::test_dag_runs_in_dependency_order_and_finalizes
 - [ ] 25.3 capabilities. — Evidence: –
 - [ ] 25.4 resource leases. — Evidence: –
 - [ ] 25.5 worker dispatch. — Evidence: –
-- [ ] 25.6 retries. — Evidence: –
-- [ ] 25.7 timeouts. — Evidence: –
-- [ ] 25.8 parallel steps. — Evidence: –
-- [ ] 25.9 dependency failure. — Evidence: –
+- [x] 25.6 retries. — Evidence: Scheduler._apply_outcome retry/backoff; test_retry_with_backoff_then_success, test_backoff_delays_redispatch
+- [x] 25.7 timeouts. — Evidence: SchedulerSettings.step_timeout_seconds; test_step_timeout_is_retryable_failure
+- [x] 25.8 parallel steps. — Evidence: parallel read-only steps, serialised mutating steps; test_mutating_steps_are_serialised_per_job, test_priority_and_concurrency_limit
+- [x] 25.9 dependency failure. — Evidence: _promote_steps DEPENDENCY_FAILED + replan; test_permanent_failure_blocks_dependents_then_replans
 
 ## P26 – SSH/Admin Tools
 
