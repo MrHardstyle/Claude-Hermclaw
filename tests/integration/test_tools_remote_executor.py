@@ -23,6 +23,7 @@ pytestmark = pytest.mark.asyncio(loop_scope="session")
 
 @pytest.fixture
 async def remote(tmp_path: Path) -> AsyncIterator[tuple[RemoteSandboxExecutor, WorkspaceHandle, Any]]:
+    (tmp_path / "worker").mkdir()
     app = _app(tmp_path / "worker")
     ws_dir = tmp_path / "orchestrator" / "ws"
     (ws_dir / "src").mkdir(parents=True)
@@ -30,7 +31,9 @@ async def remote(tmp_path: Path) -> AsyncIterator[tuple[RemoteSandboxExecutor, W
     (ws_dir / ".git" / "config").write_text("[core]\n")
     (ws_dir / "src" / "a.py").write_text("A = 1\n")
     (ws_dir / "README.md").write_text("# demo\n")
-    handle = WorkspaceHandle(id=uuid.uuid4(), job_id=uuid.uuid4(), path=ws_dir, branch="hermclaw/x", base_branch="main", base_sha="0" * 40, repository_key="demo")
+    handle = WorkspaceHandle(
+        id=uuid.uuid4(), job_id=uuid.uuid4(), path=ws_dir, branch="hermclaw/x", base_branch="main", base_sha="0" * 40, repository_key="demo"
+    )
     async with lifespan(app), _client(app) as c:
         yield RemoteSandboxExecutor(c, SandboxPolicy(engine="local")), handle, app
 
@@ -41,7 +44,9 @@ def _worker_dir(app: Any, handle: WorkspaceHandle) -> Path:
 
 async def test_first_run_uploads_without_git_and_syncs_changes_back(remote: Any) -> None:
     ex, ws, app = remote
-    res = await ex.run(ws, ExecutionRequest(command="cat src/a.py && echo 'B = 2' > src/b.py && echo changed >> README.md", timeout_seconds=30))
+    res = await ex.run(
+        ws, ExecutionRequest(command="cat src/a.py && echo 'B = 2' > src/b.py && echo changed >> README.md", timeout_seconds=30)
+    )
     assert res.exit_code == 0 and "A = 1" in res.stdout
     wdir = _worker_dir(app, ws)
     assert (wdir / "src" / "a.py").read_text() == "A = 1\n" and not (wdir / ".git").exists(), ".git must never reach the worker"
