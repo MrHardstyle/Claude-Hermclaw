@@ -378,3 +378,88 @@ async def test_video_preemption_checkpoints_the_coder_and_the_step_resumes(world
         leases = (await s.execute(select(ResourceLease).where(ResourceLease.owner_job_id == jid))).scalars().all()
     reasons = sorted({lease.release_reason for lease in leases if lease.release_reason})
     assert "preempted" in reasons and all(lease.state not in ("active", "preempting") for lease in leases), reasons
+
+
+def _real_verifier(world: World) -> Any:
+    from hermclaw.runtime.adapters import VerifierAdapter
+
+    cfg = get_config()
+
+    async def executor_for(ws: WorkspaceHandle, step_c: StepContract | None) -> SubprocessExecutor:
+        return SubprocessExecutor(cfg.policies.sandbox, settings=dev_settings())
+
+    return VerifierAdapter(world.sessionmaker, cfg, world.engine.reader(), executor_for)
+
+
+def _plan_with_checks() -> dict[str, Any]:
+    from tests.unit.test_planner_support import plan, step
+
+    return plan(
+        "Set VALUE to 2 and check it",
+        [
+            step(
+                "S001",
+                "implement",
+                "coding",
+                "Change VALUE in src/module.py from 1 to 2.",
+                repo_hints=["src/module.py"],
+                acceptance=[{"type": "presence", "path_glob": "src/module.py", "pattern": "VALUE = 2"}],
+            ),
+            step(
+                "S002",
+                "test",
+                "testing",
+                "Check that VALUE is 2 and the old value is gone.",
+                depends_on=["S001"],
+                acceptance=[
+                    {"type": "presence", "path_glob": "src/module.py", "pattern": "VALUE = 2"},
+                    {"type": "absence", "path_glob": "src/*.py", "pattern": "VALUE = 1", "expected_matches": 0},
+                ],
+            ),
+            step("S003", "review", "review", "Review the whole change.", depends_on=["S002"]),
+        ],
+    )
+
+
+async def test_verify_and_review_step_handlers_in_the_pipeline(world: World, tmp_path: Path) -> None:
+    from hermclaw.runtime.handlers import ReviewStepHandler, VerifyStepHandler
+
+    models = Models([_plan_with_checks()], [EDIT, DONE])
+    verifier = _real_verifier(world)
+    reviewer = ScriptedReviewer(["pass"])
+    impl = _handler(world, models, ScriptedVerifier(world, []), None)
+    impl.deps.verifier = verifier
+    cfg = get_config()
+    handlers = [
+        impl,
+        VerifyStepHandler(world.sessionmaker, cfg, git=world.engine, verifier=verifier),
+        ReviewStepHandler(world.sessionmaker, cfg, git=world.engine, verifier=verifier, reviewer=reviewer),
+    ]
+    jid = await _job(world)
+    jobs = await _run(world, _driver(world, models, tmp_path), handlers, [jid])
+    assert jobs[jid].status == "succeeded", (jobs[jid].error_code, jobs[jid].error_message)
+    assert reviewer.calls == 1
+    async with world.sessionmaker() as s:
+        rows = {r.step_key: r for r in (await s.execute(select(Step).where(Step.job_id == jid))).scalars()}
+    assert rows["S002"].status == "completed" and rows["S002"].result["verification_run_id"]
+    assert rows["S003"].result["verdict"] == "pass"
+
+
+async def test_failing_verification_step_blocks_with_evidence_for_the_replanner(world: World, tmp_path: Path) -> None:
+    from hermclaw.runtime.handlers import VerifyStepHandler
+
+    # the implement step "forgets" the change -> the test step's evidence fails -> replan with the failing checks
+    noop_done = act("complete_step", summary="nothing changed", changed_files=[], tests_run=[])
+    models = Models([_plan_with_checks()], [noop_done])
+    verifier = _real_verifier(world)
+    impl = _handler(world, models, ScriptedVerifier(world, [True]), None)
+    cfg = get_config()
+    handlers = [impl, VerifyStepHandler(world.sessionmaker, cfg, git=world.engine, verifier=verifier), ReviewHandler()]
+    jid = await _job(world)
+    jobs = await _run(world, _driver(world, models, tmp_path), handlers, [jid])
+    assert jobs[jid].status == "failed"  # no scripted replan answer -> replan cannot succeed
+    async with world.sessionmaker() as s:
+        s2 = (await s.execute(select(Step).where(Step.job_id == jid, Step.step_key == "S002"))).scalar_one()
+    assert s2.status == "blocked" and s2.error_code == "VERIFICATION_STEP_FAILED"
+    checks = [f["check"] for f in s2.result["replan_evidence"]["failures"]]
+    assert any(c.startswith("presence") for c in checks) and any(c.startswith("absence") for c in checks)
