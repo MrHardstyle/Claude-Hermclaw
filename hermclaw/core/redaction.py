@@ -56,7 +56,8 @@ class Redactor:
             red: dict[Any, Any] = {}
             for k, v in value.items():
                 numeric = isinstance(v, int | float) and not isinstance(v, bool)
-                if isinstance(k, str) and _SENSITIVE_KEYS.search(k) and v != "" and (isinstance(v, str) or (numeric and not _COUNTER_KEYS.search(k))):
+                secret_shaped = isinstance(v, str) or (numeric and isinstance(k, str) and not _COUNTER_KEYS.search(k))
+                if isinstance(k, str) and _SENSITIVE_KEYS.search(k) and v != "" and secret_shaped:
                     red[k] = REDACTED
                 else:
                     red[k] = self.obj(v)
