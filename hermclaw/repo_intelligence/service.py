@@ -16,6 +16,7 @@ from __future__ import annotations
 import asyncio
 import contextlib
 import hashlib
+import json
 import re
 import time
 import uuid
@@ -36,7 +37,13 @@ from hermclaw.events.store import append_event
 from hermclaw.models.protocols import CallContext, EmbeddingModel
 from hermclaw.repo_intelligence import _proc
 from hermclaw.repo_intelligence.config import RepoIntelConfig
-from hermclaw.repo_intelligence.dependencies import DependencyGraph, ModuleResolver, psr4_from_composer
+from hermclaw.repo_intelligence.dependencies import (
+    DependencyGraph,
+    ModuleResolver,
+    composer_manifests,
+    merge_psr4,
+    psr4_from_composer,
+)
 from hermclaw.repo_intelligence.embeddings import semantic_search
 from hermclaw.repo_intelligence.fileio import lstat_regular, read_bytes, read_text
 from hermclaw.repo_intelligence.indexer import SOURCE_TYPE, IndexTarget, RepoIndexer
@@ -338,14 +345,14 @@ class RepoIntelligence:
         return state
 
     def _psr4(self, root: Path, files: Sequence[str]) -> dict[str, list[str]]:
-        if "composer.json" not in files:
-            return {}
-        import json
-
-        try:
-            return psr4_from_composer(json.loads(read_text(root, "composer.json", 2_000_000) or "{}"))
-        except ValueError:
-            return {}
+        maps: list[dict[str, list[str]]] = []
+        for manifest in composer_manifests(files):
+            try:
+                data = json.loads(read_text(root, manifest, 2_000_000) or "{}")
+            except ValueError:
+                continue
+            maps.append(psr4_from_composer(data, base_dir=manifest.rsplit("/", 1)[0] if "/" in manifest else ""))
+        return merge_psr4(maps)
 
     def _parse_live(self, root: Path, path: str) -> FileSymbols | None:
         if matches_any(path, self.cfg.sensitive_globs) or matches_any(path, self.cfg.index_exclude_globs):

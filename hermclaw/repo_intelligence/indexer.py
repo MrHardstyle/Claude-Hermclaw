@@ -43,7 +43,7 @@ from hermclaw.persistence.models import CodeSymbol, RepoIndexRun, Workspace
 from hermclaw.repo_intelligence import _proc
 from hermclaw.repo_intelligence.chunking import Chunk, Chunker
 from hermclaw.repo_intelligence.config import INDEX_VERSION, RepoIntelConfig
-from hermclaw.repo_intelligence.dependencies import ModuleResolver, psr4_from_composer
+from hermclaw.repo_intelligence.dependencies import ModuleResolver, composer_manifests, merge_psr4, psr4_from_composer
 from hermclaw.repo_intelligence.embeddings import EmbedOutcome, count_pending, embed_pending, replace_file_chunks
 from hermclaw.repo_intelligence.fileio import decode_text
 from hermclaw.repo_intelligence.inventory import build_inventory
@@ -120,7 +120,8 @@ class RepoIndexer:
     async def _lock(self, repository_key: str) -> AsyncIterator[None]:
         local = self._locks.setdefault(repository_key, asyncio.Lock())
         async with local, self.sessionmaker() as s:
-            conn = await s.connection()
+            # autocommit: the session-level advisory lock is held without keeping a transaction open for the whole run
+            conn = await s.connection(execution_options={"isolation_level": "AUTOCOMMIT"})
             key = advisory_key(repository_key)
             deadline = time.monotonic() + self.cfg.index_lock_timeout_seconds
             while not (await conn.execute(text("SELECT pg_try_advisory_lock(:k)"), {"k": key})).scalar():
@@ -339,12 +340,7 @@ class RepoIndexer:
         else:
             deleted = set()
             to_index = list(entries)
-        composer = await self._read_root_file(source, by_path, "composer.json")
-        try:
-            psr4 = psr4_from_composer(json.loads(composer)) if composer else {}
-        except ValueError:
-            psr4 = {}
-        resolver = ModuleResolver(by_path.keys(), psr4=psr4)
+        resolver = ModuleResolver(by_path.keys(), psr4=await self._psr4(source, by_path))
         parsed = await self._parse(source, to_index, resolver)
         file_set_changed = mode == "full" or bool(deleted) or bool(added)
         model_name = self.embedder.model_name if self.embedder is not None else None
@@ -455,14 +451,21 @@ class RepoIndexer:
         )
         return stats
 
-    async def _read_root_file(self, source: GitTreeSource | WorktreeSource, by_path: dict[str, TreeEntry], name: str) -> str | None:
-        entry = by_path.get(name)
-        if entry is None or entry.size > 2_000_000:
-            return None
-        async with contextlib.aclosing(source.read([entry])) as stream:
-            async for _e, data in stream:
-                return decode_text(data)
-        return None
+    async def _psr4(self, source: GitTreeSource | WorktreeSource, by_path: dict[str, TreeEntry]) -> dict[str, list[str]]:
+        """PSR-4 autoload maps of every composer manifest of the workspace (nested PHP projects included)."""
+        entries = [by_path[p] for p in composer_manifests(by_path) if by_path[p].size <= 2_000_000]
+        maps: list[dict[str, list[str]]] = []
+        if not entries:
+            return {}
+        async with contextlib.aclosing(source.read(entries)) as stream:
+            async for entry, data in stream:
+                try:
+                    parsed = json.loads(decode_text(data))
+                except ValueError:
+                    continue
+                base = entry.path.rsplit("/", 1)[0] if "/" in entry.path else ""
+                maps.append(psr4_from_composer(parsed, base_dir=base))
+        return merge_psr4(maps)
 
     async def _parse(self, source: GitTreeSource | WorktreeSource, entries: Sequence[TreeEntry], resolver: ModuleResolver) -> _Parsed:
         cfg = self.cfg

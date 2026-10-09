@@ -12,7 +12,9 @@ import asyncio
 import base64
 import contextlib
 import json
+import os
 import re
+import stat
 import time
 from collections.abc import Sequence
 from dataclasses import dataclass
@@ -94,7 +96,7 @@ class LexicalSearcher:
         pats = _check_patterns([patterns] if isinstance(patterns, str) else list(patterns))
         explicit = [normalize_rel(p) for p in paths] if paths is not None else None
         if explicit is not None:
-            explicit = [p for p in explicit if not matches_any(p, self.cfg.sensitive_globs)]
+            explicit = await asyncio.to_thread(_contained, root, [p for p in explicit if not matches_any(p, self.cfg.sensitive_globs)])
             if not explicit:
                 return LexicalResult(engine="ripgrep" if self.has_ripgrep else "python")
         spec = _Spec(
@@ -120,10 +122,20 @@ class LexicalSearcher:
                         re.compile(p)
                     except re.error as exc:
                         raise ValidationFailed(f"invalid regular expression: {exc}", code="REPO_PATTERN_INVALID") from exc
-            files = list(spec.paths) if spec.paths is not None else (await list_worktree_files(root, self.cfg)).paths
+            files = await self._fallback_files(root, spec.paths)
             res = await asyncio.to_thread(self._python, root, spec, files)
         res.elapsed_ms = int((time.monotonic() - started) * 1000)
         return res
+
+    async def _fallback_files(self, root: Path, explicit: Sequence[str] | None) -> list[str]:
+        if explicit is not None and all(os.path.isfile(os.path.join(root, p)) for p in explicit):
+            return list(explicit)
+        listing = (await list_worktree_files(root, self.cfg)).paths
+        if explicit is None:
+            return listing
+        wanted = set(explicit)
+        prefixes = tuple(p.rstrip("/") + "/" for p in explicit)
+        return [f for f in listing if f in wanted or f.startswith(prefixes)]
 
     # ------------------------------------------------------------------------------------------- ripgrep
     def rg_argv(self, spec: _Spec) -> list[str]:
@@ -146,6 +158,8 @@ class LexicalSearcher:
             str(spec.per_file),
             "--case-sensitive" if spec.case_sensitive else "--ignore-case",
         ]
+        if cfg.lexical_sort_paths:
+            argv += ["--sort", "path"]
         if spec.mode == "fixed":
             argv.append("--fixed-strings")
         if spec.word:
@@ -311,6 +325,29 @@ class LexicalSearcher:
             files = (await list_worktree_files(root, self.cfg)).paths
         visible = [f for f in files if not matches_any(f, self.cfg.sensitive_globs)]
         return self.rank_filenames(visible, query, limit=limit)
+
+
+def _contained(root: Path, paths: Sequence[str]) -> list[str]:
+    """Explicit search paths that are real files/directories inside ``root`` (no symlink at any level, no ``.git``).
+
+    ripgrep follows symlinks named on its command line even with ``--no-follow``, so they are filtered here.
+    """
+    root_real = os.path.realpath(root)
+    out: list[str] = []
+    for p in dict.fromkeys(paths):
+        if p == ".git" or p.startswith(".git/"):
+            continue
+        full = os.path.join(root_real, p)
+        try:
+            st = os.lstat(full)
+        except OSError:
+            continue
+        if stat.S_ISLNK(st.st_mode) or not (stat.S_ISREG(st.st_mode) or stat.S_ISDIR(st.st_mode)):
+            continue
+        if os.path.realpath(full) != os.path.normpath(full):  # a symlinked parent directory
+            continue
+        out.append(p)
+    return out
 
 
 def _parse_rg_line(line: bytes, max_cols: int) -> LexicalHit | None:

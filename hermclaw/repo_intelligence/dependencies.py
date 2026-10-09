@@ -160,7 +160,7 @@ class ModuleResolver:
                 if fqcn == pfx or fqcn.startswith(pfx + "\\"):
                     rest = fqcn[len(pfx) :].lstrip("\\").replace("\\", "/")
                     for d in dirs:
-                        cand = _norm(posixpath.join(d.strip("/"), rest + ".php")) if d.strip("/") else _norm(rest + ".php")
+                        cand = _norm(posixpath.join(d, rest + ".php")) if d else _norm(rest + ".php")
                         if cand and cand in self.files:
                             return cand
             parts = fqcn.split("\\")
@@ -185,7 +185,17 @@ class ModuleResolver:
         return hit if hit != importer else None
 
 
-def psr4_from_composer(data: Mapping[str, object] | None) -> dict[str, list[str]]:
+_VENDOR_PARTS = frozenset({"vendor", "node_modules", ".venv", "venv", "site-packages", "bower_components"})
+
+
+def composer_manifests(files: Iterable[str], *, limit: int = 50) -> list[str]:
+    """``composer.json`` files of the workspace itself (not of installed dependencies), shallowest first."""
+    found = [f for f in files if f.rsplit("/", 1)[-1] == "composer.json" and not (_VENDOR_PARTS & set(f.split("/")[:-1]))]
+    return sorted(found, key=lambda f: (f.count("/"), f))[:limit]
+
+
+def psr4_from_composer(data: Mapping[str, object] | None, *, base_dir: str = "") -> dict[str, list[str]]:
+    """PSR-4 ``prefix -> [dirs]`` of one composer manifest; dirs are made workspace-relative via ``base_dir``."""
     out: dict[str, list[str]] = {}
     if not isinstance(data, Mapping):
         return out
@@ -198,7 +208,19 @@ def psr4_from_composer(data: Mapping[str, object] | None) -> dict[str, list[str]
             continue
         for prefix, dirs in psr.items():
             vals = [dirs] if isinstance(dirs, str) else [d for d in dirs if isinstance(d, str)] if isinstance(dirs, list) else []
-            out.setdefault(str(prefix), []).extend(vals)
+            for v in vals:
+                rel = _norm(posixpath.join(base_dir, v.strip("/"))) if base_dir else _norm(v.strip("/") or ".")
+                if rel is not None:
+                    out.setdefault(str(prefix), []).append(rel)
+    return out
+
+
+def merge_psr4(maps: Iterable[Mapping[str, Iterable[str]]]) -> dict[str, list[str]]:
+    out: dict[str, list[str]] = {}
+    for m in maps:
+        for prefix, dirs in m.items():
+            bucket = out.setdefault(prefix, [])
+            bucket.extend(d for d in dirs if d not in bucket)
     return out
 
 

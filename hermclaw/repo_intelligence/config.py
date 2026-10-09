@@ -108,6 +108,7 @@ class RepoIntelConfig:
     lexical_max_per_file: int = 50
     lexical_max_terms: int = 12
     lexical_max_columns: int = 400
+    lexical_sort_paths: bool = True  # deterministic hit order (ripgrep then searches single-threaded)
     # ---- chunking / embeddings
     chunk_max_tokens: int = 1_500
     chunk_min_tokens: int = 120  # adjacent small segments are merged up to the max
