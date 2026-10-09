@@ -60,7 +60,7 @@ from hermclaw.contracts.worker import CommandRequest, CommandResult
 from hermclaw.core.config import CommandPolicy, SandboxPolicy
 from hermclaw.core.errors import ConfigError, PolicyViolation
 from hermclaw.core.logging import get_logger
-from hermclaw.core.redaction import DEFAULT_REDACTOR, Redactor
+from hermclaw.core.redaction import DEFAULT_REDACTOR, REDACTED, Redactor
 from worker.common.settings import DEFAULT_CONTAINER_LABEL
 
 log = get_logger(__name__)
@@ -79,6 +79,10 @@ ENGINE_ERROR_EXIT = 125
 #: exit code of a SIGKILLed process (timeout kill, OOM kill)
 KILLED_EXIT = 137
 MIN_OUTPUT_BYTES = 1024
+#: truncation cut points move to a line boundary at most this far away
+LINE_ALIGN_MAX_BYTES = 4096
+#: shortest fragment of a known secret that is masked at a truncation boundary
+MIN_SECRET_FRAGMENT = 3
 MIN_MEMORY_BYTES = 6 * 1024 * 1024  # podman/docker refuse smaller memory limits
 MAX_ENV_VALUE_CHARS = 32_768
 #: environment every container starts with (read-only rootfs: ``/tmp`` is the only writable scratch dir)
@@ -94,6 +98,8 @@ _SENSITIVE_ENV_RE = re.compile(r"(?i)(pass(word|wd)?|secret|token|api[_-]?key|cr
 _FORBIDDEN_MOUNT_CHARS = frozenset(":,\n\r\x00")
 _SIZE_FACTORS = {"": 1, "b": 1, "k": 1024, "m": 1024**2, "g": 1024**3}
 _LIMIT_CONTROLLERS = frozenset({"cpu", "memory", "pids"})
+_ENGINE_ERROR_RE = re.compile(r"^(?:Error:|Error response from daemon:|docker: |podman: )")
+_NAME_CONFLICT_RE = re.compile(r"(?i)already in use|name .* is in use|conflict")
 
 
 # ---------------------------------------------------------------------------------------------- protocol
@@ -207,12 +213,28 @@ def _violation_result(req: CommandRequest, engine: EngineName, exc: PolicyViolat
     return CommandResult(request_id=req.request_id, exit_code=None, sandbox=engine, container_name=name, error=f"{exc.code}: {exc.message}")
 
 
+def engine_error_line(stderr: str) -> str | None:
+    """The engine's own error message in ``stderr`` (``Error: …`` / ``docker: …``), else ``None``.
+
+    Exit code 125 is ambiguous (the command itself may ``exit 125``); only a message written by the engine
+    makes it an engine error."""
+    for line in reversed(stderr.strip().splitlines()):
+        if _ENGINE_ERROR_RE.match(line.strip()):
+            return line.strip()
+    return None
+
+
 def _command_digest(command: str) -> str:
     return hashlib.sha256(command.encode("utf-8", "surrogatepass")).hexdigest()[:16]
 
 
 class OutputCapture:
-    """Bounded capture of a byte stream: keeps the first and the last ``limit // 2`` bytes."""
+    """Bounded capture of a byte stream: keeps the first and the last ``limit // 2`` bytes.
+
+    When the stream is truncated, both cut points are moved to the nearest line boundary (if one lies within
+    a quarter of the kept part, max. :data:`LINE_ALIGN_MAX_BYTES`), so ``KEY=value`` lines are kept or
+    dropped as a whole and the redactor always sees complete secrets. :meth:`render` additionally masks
+    fragments of known secrets that a cut inside an overlong line would leave at the boundary."""
 
     def __init__(self, limit: int) -> None:
         self.limit = max(MIN_OUTPUT_BYTES, limit)
@@ -237,13 +259,47 @@ class OutputCapture:
     def truncated(self) -> bool:
         return self.total > self.limit
 
-    def text(self) -> str:
+    def segments(self) -> tuple[bytes, int, bytes]:
+        """``(head, omitted_bytes, tail)``; ``tail`` is empty and ``omitted`` 0 when nothing was dropped."""
         if not self.truncated:
-            return (bytes(self._head) + bytes(self._tail)).decode("utf-8", "replace")
+            return bytes(self._head) + bytes(self._tail), 0, b""
+        head = bytes(self._head)
         tail = bytes(self._tail[-self._tail_limit :])
-        omitted = self.total - len(self._head) - len(tail)
-        head = bytes(self._head).decode("utf-8", "replace")
-        return f"{head}\n...[{omitted} bytes omitted]...\n{tail.decode('utf-8', 'replace')}"
+        window = min(LINE_ALIGN_MAX_BYTES, self._head_limit // 4)
+        cut = head.rfind(b"\n")
+        if cut >= 0 and len(head) - (cut + 1) <= window:
+            head = head[: cut + 1]
+        window = min(LINE_ALIGN_MAX_BYTES, self._tail_limit // 4)
+        start = tail.find(b"\n")
+        if 0 <= start < window:
+            tail = tail[start + 1 :]
+        return head, self.total - len(head) - len(tail), tail
+
+    def text(self) -> str:
+        """The captured text (not redacted)."""
+        return self.render(lambda s: s)
+
+    def render(self, clean: Callable[[str], str], secrets: Sequence[str] = ()) -> str:
+        """The captured text with ``clean`` (the redactor) applied to each kept part separately."""
+        head, omitted, tail = self.segments()
+        if not omitted:
+            return clean(head.decode("utf-8", "replace"))
+        head_text = _mask_cut_fragments(clean(head.decode("utf-8", "replace")), secrets, at_end=True)
+        tail_text = _mask_cut_fragments(clean(tail.decode("utf-8", "replace")), secrets, at_end=False)
+        sep_head = "" if head_text.endswith("\n") else "\n"
+        sep_tail = "" if not tail_text or tail_text.startswith("\n") else "\n"
+        return f"{head_text}{sep_head}...[{omitted} bytes omitted]...{sep_tail}{tail_text}"
+
+
+def _mask_cut_fragments(text: str, secrets: Sequence[str], *, at_end: bool) -> str:
+    """Mask a prefix (``at_end``: the text ends with it) or suffix of a known secret cut by truncation."""
+    for secret in sorted(secrets, key=len, reverse=True):
+        for k in range(len(secret) - 1, MIN_SECRET_FRAGMENT - 1, -1):
+            if at_end and text.endswith(secret[:k]):
+                return text[: len(text) - k] + REDACTED
+            if not at_end and text.startswith(secret[-k:]):
+                return REDACTED + text[k:]
+    return text
 
 
 async def _pump(stream: asyncio.StreamReader | None, capture: OutputCapture) -> None:
@@ -360,20 +416,20 @@ def _finish_result(
     def clean(text: str) -> str:
         return run_redactor.text(redactor.text(text))
 
-    stderr = clean(outcome.stderr.text())
+    stderr = outcome.stderr.render(clean, secrets)
     error: str | None = None
+    engine_line = engine_error_line(stderr) if outcome.returncode == ENGINE_ERROR_EXIT and engine != "local" else None
     if outcome.timed_out:
         error = f"timeout: command exceeded {timeout}s and was killed"
-    elif outcome.returncode == ENGINE_ERROR_EXIT and engine != "local":
-        last = stderr.strip().splitlines()[-1:] if stderr.strip() else []
-        error = f"sandbox engine error: {last[0][:500] if last else 'exit 125'}"
+    elif engine_line is not None:
+        error = f"sandbox engine error: {engine_line[:500]}"
     elif outcome.returncode == KILLED_EXIT and memory:
         error = f"killed (exit {KILLED_EXIT}): possibly out of memory (limit {memory})"
     return CommandResult(
         request_id=req.request_id,
         exit_code=outcome.returncode,
         timed_out=outcome.timed_out,
-        stdout=clean(outcome.stdout.text()),
+        stdout=outcome.stdout.render(clean, secrets),
         stderr=stderr,
         stdout_truncated=outcome.stdout.truncated,
         stderr_truncated=outcome.stderr.truncated,
@@ -654,7 +710,7 @@ class ContainerSandbox:
             f"--label={LABEL_STEP}={label_value(req.step_id)}",
             *self._network_args(network),
             "--read-only",
-            f"--tmpfs=/tmp:rw,size={tmpfs},mode=1777",
+            f"--tmpfs=/tmp:rw,nosuid,nodev,size={tmpfs},mode=1777",
             "--cap-drop=ALL",
             "--security-opt=no-new-privileges",
             f"--pids-limit={self.policy.pids_limit}",
@@ -685,6 +741,13 @@ class ContainerSandbox:
     # ------------------------------------------------------------------ container lifecycle
     def _rm_argv(self, name: str) -> list[str]:
         return [self.executable, "rm", "-f", name]
+
+    @staticmethod
+    def _is_name_conflict(outcome: _ProcOutcome) -> bool:
+        if outcome.returncode != ENGINE_ERROR_EXIT:
+            return False
+        line = engine_error_line(outcome.stderr.text())
+        return line is not None and _NAME_CONFLICT_RE.search(line) is not None
 
     async def container_exists(self, name: str) -> bool:
         rc, _out, _err = await engine_exec([self.executable, "container", "inspect", "--format", "{{.Id}}", name], timeout_seconds=30)
@@ -772,7 +835,7 @@ class ContainerSandbox:
         )
         try:
             outcome = await self._run_once(inv)
-            if outcome.returncode == ENGINE_ERROR_EXIT and await self._is_managed_leftover(name):
+            if self._is_name_conflict(outcome) and await self._is_managed_leftover(name):
                 # a leftover container of a crashed earlier attempt blocks the deterministic name
                 log.warning("removing stale sandbox container", extra={"container": name, "request_id": req.request_id})
                 await self.cleanup(name)
@@ -816,7 +879,7 @@ class ContainerSandbox:
             )
         except (FileNotFoundError, PermissionError) as exc:
             err = OutputCapture(MIN_OUTPUT_BYTES)
-            err.feed(f"{self.executable}: {exc.strerror or exc}".encode())
+            err.feed(f"Error: cannot execute {self.executable}: {exc.strerror or exc}".encode())
             return _ProcOutcome(ENGINE_ERROR_EXIT, False, OutputCapture(MIN_OUTPUT_BYTES), err, 0)
 
         async def terminate() -> None:
@@ -926,16 +989,24 @@ class LocalSandbox:
             return _violation_result(req, "local", exc)
         timeout = self.effective_timeout(req)
         started = time.monotonic()
-        proc = await asyncio.create_subprocess_exec(
-            *self.shell,
-            req.command,
-            cwd=workspace,
-            env=env,
-            stdin=asyncio.subprocess.DEVNULL,
-            stdout=asyncio.subprocess.PIPE,
-            stderr=asyncio.subprocess.PIPE,
-            start_new_session=True,  # own process group: timeout/cleanup kill everything it spawned
-        )
+        try:
+            proc = await asyncio.create_subprocess_exec(
+                *self.shell,
+                req.command,
+                cwd=workspace,
+                env=env,
+                stdin=asyncio.subprocess.DEVNULL,
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.PIPE,
+                start_new_session=True,  # own process group: timeout/cleanup kill everything it spawned
+            )
+        except (FileNotFoundError, PermissionError) as exc:
+            return CommandResult(
+                request_id=req.request_id,
+                exit_code=None,
+                sandbox="local",
+                error=f"cannot execute {self.shell[0]}: {exc.strerror or exc}",
+            )
 
         async def terminate() -> None:
             with contextlib.suppress(ProcessLookupError, PermissionError):

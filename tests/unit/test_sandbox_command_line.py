@@ -68,7 +68,7 @@ def test_podman_argv_has_every_isolation_flag(ws: Path) -> None:
     assert flag(argv, "--label") == [DEFAULT_CONTAINER_LABEL, "hermclaw.request=req-1", "hermclaw.job=job-1", "hermclaw.step=step-1"]
     assert flag(argv, "--network") == ["none"] and inv.network is False
     assert "--read-only" in argv
-    assert flag(argv, "--tmpfs") == ["/tmp:rw,size=128m,mode=1777"]
+    assert flag(argv, "--tmpfs") == ["/tmp:rw,nosuid,nodev,size=128m,mode=1777"]
     assert "--userns=keep-id" in argv
     assert "--cap-drop=ALL" in argv and "--security-opt=no-new-privileges" in argv
     assert flag(argv, "--pids-limit") == ["256"]
