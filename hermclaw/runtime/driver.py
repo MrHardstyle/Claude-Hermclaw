@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import uuid
 from dataclasses import dataclass
+from pathlib import Path
 from typing import TYPE_CHECKING, Any, Literal
 
 from pydantic import BaseModel, Field
@@ -66,6 +67,7 @@ class DriverSettings:
     update_strategy: Literal["rebase", "merge"] = "rebase"
     create_merge_request: bool | None = None  # None: GitLab policy default of the git engine
     max_known_paths: int = 20_000
+    artifacts_dir: Path | None = None  # default: settings.artifacts_dir
 
 
 def _paths_from_inventory(inv: dict[str, Any], limit: int) -> list[str]:
@@ -324,7 +326,7 @@ class RuntimeJobDriver:
         async with self.sm() as s:
             data = await collect_report_data(s, job_id)
             text = render_report(data, extra=extra)
-            art = await write_report_artifact(s, job_id, text, get_settings().artifacts_dir)
+            art = await write_report_artifact(s, job_id, text, self.settings.artifacts_dir or get_settings().artifacts_dir)
             job_row = (await s.execute(select(Job).where(Job.id == job_id).with_for_update())).scalar_one()
             done = sum(1 for st in data["steps"] if st.status == "completed" and not st.superseded)
             job_row.result_summary = f"{done} Steps abgeschlossen; Bericht: {art.name}" + (
