@@ -268,13 +268,13 @@ Legende: `[x]` erledigt mit Evidence · `[~]` erledigt, Live-Verifikation auf Zi
 
 ## P19 – Main Coder
 
-- [ ] 19.1 worker loop. — Evidence: –
-- [ ] 19.2 Qwen3-Coder 30B. — Evidence: –
-- [ ] 19.3 32K context. — Evidence: –
-- [ ] 19.4 tool protocol. — Evidence: –
-- [ ] 19.5 completion. — Evidence: –
-- [ ] 19.6 checkpoints. — Evidence: –
-- [ ] 19.7 result schema. — Evidence: –
+- [x] 19.1 worker loop. — Evidence: hermclaw/coder/loop.py CoderLoop.run; tests/integration/test_coder_loop.py::test_full_turn_sequence_completes_step
+- [~] 19.2 Qwen3-Coder 30B. — Evidence: CoderSettings.alias=coder-main (LiteLLM -> qwen3-coder:30b); scripted model in tests, live run blocked by BLOCKER-001
+- [~] 19.3 32K context. — Evidence: ContextBuilderConfig.from_config(role=coder) uses the coder profile window (32K); exact budget tests in tests/unit/test_context_builder_*; live window BLOCKER-001
+- [x] 19.4 tool protocol. — Evidence: one CoderAction per turn via ChatModel.structured + ToolEngine.execute; test_out_of_scope_write_is_refused_and_reported_to_the_model, test_invalid_model_output_twice_fails_and_timeout_is_model_failure
+- [x] 19.5 completion. — Evidence: terminal complete_step/block_step/request_replan; test_full_turn_sequence_completes_step, test_request_replan_and_correction_items_reach_prompt
+- [x] 19.6 checkpoints. — Evidence: CoderResult.checkpoint/history_from_checkpoint + per-turn StepAttempt.history; test_cancel_and_checkpoint_resume
+- [x] 19.7 result schema. — Evidence: CoderResult (outcome, turns, history digests, completion/block report); test_no_reasoning_or_secrets_in_history
 - [ ] 19.8 code task regression matrix. — Evidence: –
 
 ## P20 – Stagnation Detection
