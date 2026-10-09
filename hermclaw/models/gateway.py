@@ -594,9 +594,10 @@ class LiteLLMGateway:
             fallback_used=fallback_used,
             meta={
                 "request_hash": request_hash(body),
-                "max_tokens": out_tokens,
-                "context_tokens": profile.context_tokens,
-                "estimated_prompt_tokens": budget.prompt_tokens if budget else None,
+                # NB: no "*token*" keys – the event redactor masks such keys; counts live under neutral names
+                "max_output": out_tokens,
+                "num_ctx": profile.context_tokens,
+                "estimated_prompt": budget.prompt_tokens if budget else None,
                 "structured": json_schema is not None,
                 "think": profile.think,
             },
@@ -625,7 +626,8 @@ class LiteLLMGateway:
             meta={
                 "request_hash": request_hash(body),
                 "inputs": len(batch),
-                "estimated_prompt_tokens": sum(estimate_tokens(t) for t in batch),
+                "num_ctx": profile.context_tokens,
+                "estimated_prompt": sum(estimate_tokens(t) for t in batch),
             },
         )
         try:
@@ -837,8 +839,7 @@ class LiteLLMGateway:
             payload=self._event_payload(
                 record,
                 status=status,
-                prompt_tokens=result.prompt_tokens,
-                completion_tokens=result.completion_tokens,
+                usage={"prompt": result.prompt_tokens, "completion": result.completion_tokens},
                 reasoning_chars=result.reasoning_chars,
                 latency_ms=result.latency_ms,
                 finish_reason=result.finish_reason,

@@ -981,7 +981,6 @@ class Scheduler:
             job.lock_expires_at = None
             if job.status == JobStatus.replanning.value:
                 if ok:
-                    job.replan_count += 1
                     await transition_job(
                         s, job, JobStatus(nxt) if nxt else JobStatus.running, reason="replan created", actor=self.instance_id
                     )

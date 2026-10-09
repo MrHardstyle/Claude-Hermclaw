@@ -89,6 +89,7 @@ class FakeDriver:
                 .values(superseded=True)
             )
             await self._insert(s, job_id, specs)
+            await s.execute(update(Job).where(Job.id == job_id).values(replan_count=Job.replan_count + 1))
             await s.commit()
         return JobPhaseResult(ok=True)
 

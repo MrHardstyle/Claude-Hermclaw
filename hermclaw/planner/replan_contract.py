@@ -25,6 +25,8 @@ ReplanReason = Literal[
     "research_changed_assumptions",
     "repeated_verifier_failure",
     "repository_changed",
+    "operator_request",
+    "step_failed",
 ]
 REPLAN_REASONS: tuple[str, ...] = (
     "scope_unavailable",
@@ -35,6 +37,8 @@ REPLAN_REASONS: tuple[str, ...] = (
     "research_changed_assumptions",
     "repeated_verifier_failure",
     "repository_changed",
+    "operator_request",
+    "step_failed",
 )
 # Triggers that prove the failed approach does not work: repeating the failed step unchanged is rejected.
 APPROACH_FAILURE_REASONS = frozenset({"scope_unavailable", "stagnation", "test_architecture_conflict", "repeated_verifier_failure"})

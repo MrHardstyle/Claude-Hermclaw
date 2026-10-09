@@ -362,7 +362,7 @@ class ModelResidency:
                     "alias": alias,
                     "model": profile.model,
                     "host": profile.host,
-                    "context_tokens": profile.context_tokens,
+                    "num_ctx": profile.context_tokens,
                     "keep_alive": self.keep_alive,
                     "resource_group": profile.resource_group,
                     "unloaded": unloaded,
