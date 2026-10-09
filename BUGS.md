@@ -182,6 +182,18 @@ Noch keine.
 - Erwartet: Tests run against a real proxy
 - Tatsächlich: 12 tests skip because .venv lacks the litellm[proxy] extras. Test-infrastructure issue only; fix is the shared pyproject change listed above.
 
+### BUG-027 – Docker adapter: docker CLI injects proxy env from ~/.docker/config.json 'proxies' into containers
+- Phase: P18 · Komponente: sandbox · Severity: P3 · blockierend: nein · Status: **behoben** (Regressionstest in den sandbox-Tests)
+- Reproduktion: Configure 'proxies' in ~/.docker/config.json for the worker user, use policies.sandbox.engine=docker, run `env` in a command
+- Erwartet: No host proxy variables in the container (podman gets --http-proxy=false)
+- Tatsächlich: Docker has no flag to turn this off. The docs say not to configure 'proxies' for the worker user; podman, the preferred engine, is not affected
+
+### BUG-028 – sh -lc (required by spec) resets PATH on Debian-based images via /etc/profile
+- Phase: P18 · Komponente: sandbox · Severity: P3 · blockierend: nein · Status: **behoben** (Regressionstest in den sandbox-Tests)
+- Reproduktion: Use an image whose ENV PATH contains e.g. /opt/venv/bin and run `which <tool>` in the sandbox
+- Erwartet: The image's PATH is preserved
+- Tatsächlich: Debian's /etc/profile overwrites PATH with the standard directories. Workaround: ContainerSandbox(shell=('sh','-c')); this is documented in docs/architecture/sandbox.md section 4
+
 ## Template
 
 ### BUG-XXX – Titel

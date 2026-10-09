@@ -226,7 +226,7 @@ class LocalSandboxExecutor:
             return self._fallback
         if sandbox_module_available():
             module: Any = importlib.import_module(SANDBOX_MODULE)  # errors inside the module must surface
-            self._runner = module.make_sandbox(self.policy)
+            self._runner = module.make_sandbox(self.policy, environment=self.settings.env, max_output_bytes=self.max_output_bytes)
             return self._runner  # type: ignore[return-value]
         if self.settings.env == "production":
             raise SandboxUnavailable(f"execution sandbox ({SANDBOX_MODULE}) is not installed; production refuses unisolated commands")

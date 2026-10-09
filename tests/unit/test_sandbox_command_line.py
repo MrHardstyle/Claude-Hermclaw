@@ -2,6 +2,9 @@
 
 from __future__ import annotations
 
+import asyncio
+import os
+import shutil
 from pathlib import Path
 from typing import Any
 
@@ -105,9 +108,9 @@ def test_docker_argv_equivalent_flags(ws: Path) -> None:
 
 
 def test_network_modes(ws: Path) -> None:
-    assert flag(PodmanSandbox(POLICY, max_output_bytes=10_000, allowed_network="pasta").build_invocation(req(network=True), ws).argv, "--network") == [
-        "pasta"
-    ]
+    assert flag(
+        PodmanSandbox(POLICY, max_output_bytes=10_000, allowed_network="pasta").build_invocation(req(network=True), ws).argv, "--network"
+    ) == ["pasta"]
     auto = PodmanSandbox(POLICY, max_output_bytes=10_000).build_invocation(req(network=True), ws)
     assert auto.network is True and flag(auto.argv, "--network")[0] in ("pasta", "slirp4netns")
     allowed = SandboxPolicy(**{**POLICY.model_dump(), "network_default": "allowed"})
@@ -116,10 +119,10 @@ def test_network_modes(ws: Path) -> None:
 
 
 def test_pasta_auto_only_rootless(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr(sb.shutil, "which", lambda name: "/usr/bin/" + name)
-    monkeypatch.setattr(sb.os, "geteuid", lambda: 1000)
+    monkeypatch.setattr(shutil, "which", lambda name: "/usr/bin/" + name)
+    monkeypatch.setattr(os, "geteuid", lambda: 1000)
     assert PodmanSandbox._auto_network() == "pasta"
-    monkeypatch.setattr(sb.os, "geteuid", lambda: 0)
+    monkeypatch.setattr(os, "geteuid", lambda: 0)
     assert PodmanSandbox._auto_network() == "slirp4netns"
 
 
@@ -155,8 +158,11 @@ def test_env_allowlist(ws: Path) -> None:
             validate_request_env(env, POLICY.env_allowlist)
         assert exc.value.code == code, env
     inv = PodmanSandbox(POLICY, max_output_bytes=10_000).build_invocation(req(env={"APP_TOKEN": "s3cr3t-value", "CI": "1"}), ws)
-    envs = flag(inv.argv, "--env")
-    assert envs == ["HOME=/tmp", "TMPDIR=/tmp", "APP_TOKEN=s3cr3t-value", "CI=1"]  # always NAME=value (never host lookup)
+    envs = [a.removeprefix("--env=") for a in inv.argv if a.startswith("--env=")]
+    # request values are forwarded by name from the engine's own environment, never written into argv
+    assert envs == ["HOME=/tmp", "TMPDIR=/tmp", "APP_TOKEN", "CI"]
+    assert dict(inv.passthrough_env) == {"APP_TOKEN": "s3cr3t-value", "CI": "1"}
+    assert not any("s3cr3t-value" in a for a in inv.argv)
     assert inv.secrets == ("s3cr3t-value",)  # masked in the output later
     # nothing of the worker's own environment is forwarded
     assert not any(e.startswith(("PATH=", "HTTPS_PROXY=", "https_proxy=")) for e in envs)
@@ -164,8 +170,22 @@ def test_env_allowlist(ws: Path) -> None:
 
 def test_request_env_may_override_base_home(ws: Path) -> None:
     policy = SandboxPolicy(**{**POLICY.model_dump(), "env_allowlist": ["HOME"]})
-    envs = flag(PodmanSandbox(policy, max_output_bytes=10_000).build_invocation(req(env={"HOME": "/workspace"}), ws).argv, "--env")
-    assert envs == ["HOME=/workspace", "TMPDIR=/tmp"]
+    inv = PodmanSandbox(policy, max_output_bytes=10_000).build_invocation(req(env={"HOME": "/workspace"}), ws)
+    # HOME would change the engine binary's own behaviour (storage path) -> passed as NAME=value, not via its env
+    assert flag(inv.argv, "--env") == ["HOME=/workspace", "TMPDIR=/tmp"] and dict(inv.passthrough_env) == {}
+
+
+def test_engine_sensitive_names(ws: Path) -> None:
+    assert sb.is_engine_env_name("PATH") and sb.is_engine_env_name("XDG_RUNTIME_DIR") and sb.is_engine_env_name("LD_PRELOAD")
+    assert sb.is_engine_env_name("CONTAINERS_CONF") and sb.is_engine_env_name("LC_ALL")
+    assert not sb.is_engine_env_name("CI") and not sb.is_engine_env_name("APP_HOME")
+    policy = SandboxPolicy(**{**POLICY.model_dump(), "env_allowlist": ["DOCKER_*", "XDG_CACHE_HOME"]})
+    s = PodmanSandbox(policy, max_output_bytes=10_000)
+    with pytest.raises(PolicyViolation) as exc:  # secret-shaped AND engine-sensitive: neither argv nor engine env
+        s.build_invocation(req(env={"DOCKER_AUTH_CONFIG": "{}"}), ws)
+    assert exc.value.code == "SANDBOX_ENV_INVALID"
+    inv = s.build_invocation(req(env={"XDG_CACHE_HOME": "/tmp/c"}), ws)
+    assert "--env=XDG_CACHE_HOME=/tmp/c" in inv.argv and dict(inv.passthrough_env) == {}
 
 
 def test_limits_may_be_lowered_not_raised(ws: Path) -> None:
@@ -251,7 +271,7 @@ async def test_rejected_request_returns_error_result_without_running(ws: Path, m
         calls.append(a)
         raise AssertionError("must not start a process")
 
-    monkeypatch.setattr(sb.asyncio, "create_subprocess_exec", no_exec)
+    monkeypatch.setattr(asyncio, "create_subprocess_exec", no_exec)
     result = await PodmanSandbox(POLICY, max_output_bytes=10_000).run(req(image="evil:latest"), ws)
     assert result.exit_code is None and result.sandbox == "podman"
     assert result.error is not None and result.error.startswith("SANDBOX_IMAGE_NOT_ALLOWED")
@@ -270,13 +290,13 @@ def test_container_names_and_labels() -> None:
 
 
 def test_require_rootless(ws: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr(sb.os, "geteuid", lambda: 0)
+    monkeypatch.setattr(os, "geteuid", lambda: 0)
     s = make_sandbox(POLICY, environment="production", max_output_bytes=10_000)
     assert isinstance(s, PodmanSandbox) and s.require_rootless is True
     with pytest.raises(PolicyViolation) as exc:
         s.build_invocation(req(), ws)
     assert exc.value.code == "SANDBOX_NOT_ROOTLESS"
-    monkeypatch.setattr(sb.os, "geteuid", lambda: 1000)
+    monkeypatch.setattr(os, "geteuid", lambda: 1000)
     assert s.build_invocation(req(), ws).container_name == "hermclaw-req-1"
     dev = make_sandbox(POLICY, environment="development", max_output_bytes=10_000)
     assert isinstance(dev, PodmanSandbox) and dev.require_rootless is False
@@ -364,7 +384,12 @@ def test_default_max_output_bytes_from_policies_file(tmp_path: Path) -> None:
 def test_podman_info_assessment() -> None:
     rootless_v2 = parse_podman_info(
         {
-            "host": {"cgroupVersion": "v2", "cgroupManager": "systemd", "cgroupControllers": ["cpu", "memory", "pids"], "security": {"rootless": True}},
+            "host": {
+                "cgroupVersion": "v2",
+                "cgroupManager": "systemd",
+                "cgroupControllers": ["cpu", "memory", "pids"],
+                "security": {"rootless": True},
+            },
             "version": {"Version": "5.4.2"},
         }
     )
@@ -373,9 +398,13 @@ def test_podman_info_assessment() -> None:
         {"host": {"cgroupVersion": "v2", "cgroupControllers": ["memory", "pids"], "security": {"rootless": True}}, "version": {}}
     )
     assert not undelegated.limits_effective and any("cpu" in w and "Delegate" in w for w in undelegated.warnings)
-    rootless_v1 = parse_podman_info({"host": {"cgroupVersion": "v1", "cgroupControllers": ["cpu", "memory", "pids"], "security": {"rootless": True}}})
+    rootless_v1 = parse_podman_info(
+        {"host": {"cgroupVersion": "v1", "cgroupControllers": ["cpu", "memory", "pids"], "security": {"rootless": True}}}
+    )
     assert not rootless_v1.limits_effective and any("cgroups v1" in w for w in rootless_v1.warnings)
-    rootful = parse_podman_info({"host": {"cgroupVersion": "v1", "cgroupControllers": ["cpu", "memory", "pids"], "security": {"rootless": False}}})
+    rootful = parse_podman_info(
+        {"host": {"cgroupVersion": "v1", "cgroupControllers": ["cpu", "memory", "pids"], "security": {"rootless": False}}}
+    )
     assert rootful.limits_effective and any("root" in w for w in rootful.warnings)
     assert rootful.as_dict()["engine"] == "podman"
 

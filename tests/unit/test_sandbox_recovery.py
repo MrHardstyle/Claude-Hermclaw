@@ -102,6 +102,7 @@ def fake_engine(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> tuple[str, P
     exe.write_text(FAKE_ENGINE)
     exe.chmod(exe.stat().st_mode | stat.S_IXUSR)
     monkeypatch.setenv("FAKE_DIR", str(state))
+    monkeypatch.delenv("WORKER_CONTAINER_LABEL", raising=False)
     return str(exe), state
 
 
@@ -215,3 +216,17 @@ def test_prune_stale_workspaces(tmp_path: Path) -> None:
     assert recent.exists() and busy.exists()
     assert (outside / "precious").read_text() == "p"  # the symlink was removed, never followed
     assert prune_stale_workspaces(tmp_path / "missing", older_than_seconds=1) == []
+
+
+async def test_tracked_callable_is_evaluated_after_listing(fake_engine: tuple[str, Path]) -> None:
+    exe, state = fake_engine
+    _container(state, "id1", "hermclaw-started-during-listing", created=NOW - timedelta(hours=1), status="running")
+    calls_before: list[bool] = []
+
+    def tracked() -> set[str]:
+        calls_before.append((state / "calls").exists())  # the engine was already queried
+        return {"hermclaw-started-during-listing"}
+
+    report = await recover_abandoned(executable=exe, tracked=tracked, older_than_seconds=0, now=NOW)
+    assert calls_before == [True]
+    assert report.removed == [] and report.kept == {"hermclaw-started-during-listing": "tracked"}

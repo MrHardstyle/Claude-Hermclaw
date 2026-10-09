@@ -1,7 +1,7 @@
 """Cleanup and abandoned-container recovery of the execution sandbox (P18 steps 18.8 / 18.9).
 
-Every sandbox container carries the managed label (``hermclaw.managed=true`` by default, the daemon's
-``WORKER_CONTAINER_LABEL``) plus ``hermclaw.request``/``hermclaw.job``/``hermclaw.step``. Containers are
+Every sandbox container carries the managed label (``WORKER_CONTAINER_LABEL``, default
+``hermclaw.managed=true``) plus ``hermclaw.request``/``hermclaw.job``/``hermclaw.step``. Containers are
 normally removed by ``--rm`` or by the sandbox itself (timeout/cancel). Leftovers appear when the worker
 crashes, is killed or loses the engine mid-run; :func:`recover_abandoned` finds them by label and removes
 every container that is
@@ -34,8 +34,7 @@ from typing import Any, Literal
 
 from hermclaw.core.errors import ExternalServiceError
 from hermclaw.core.logging import get_logger
-from worker.common.settings import DEFAULT_CONTAINER_LABEL
-from worker.execution.sandbox import LABEL_JOB, LABEL_REQUEST, LABEL_STEP, ContainerSandbox, engine_exec
+from worker.execution.sandbox import LABEL_JOB, LABEL_REQUEST, LABEL_STEP, ContainerSandbox, default_managed_label, engine_exec
 
 log = get_logger(__name__)
 
@@ -129,8 +128,10 @@ def _parse_inspect(out: str) -> list[ContainerRecord]:
     return [r for r in (_record(item) for item in items if isinstance(item, dict)) if r is not None]
 
 
-async def list_managed_containers(executable: str, *, label: str = DEFAULT_CONTAINER_LABEL) -> list[ContainerRecord]:
-    """All containers (any state) carrying ``label`` (``key`` or ``key=value``)."""
+async def list_managed_containers(executable: str, *, label: str | None = None) -> list[ContainerRecord]:
+    """All containers (any state) carrying ``label`` (``key`` or ``key=value``; default
+    :func:`~worker.execution.sandbox.default_managed_label`)."""
+    label = label or default_managed_label()
     rc, out, err = await engine_exec([executable, "ps", "-a", "-q", "--no-trunc", "--filter", f"label={label}"], timeout_seconds=60)
     if rc != 0:
         raise ExternalServiceError(
@@ -172,24 +173,28 @@ async def recover_abandoned(
     *,
     engine: ContainerEngine = "podman",
     executable: str | None = None,
-    label: str = DEFAULT_CONTAINER_LABEL,
+    label: str | None = None,
     older_than_seconds: float = DEFAULT_ABANDON_AFTER_SECONDS,
-    tracked: Collection[str] = (),
+    tracked: Collection[str] | Callable[[], Collection[str]] = (),
     dry_run: bool = False,
     now: datetime | None = None,
 ) -> RecoveryReport:
     """Remove managed containers that are neither tracked nor younger than ``older_than_seconds`` (18.9).
 
-    ``tracked`` holds container names or ids that belong to running commands. With ``dry_run`` the
-    candidates are reported in ``removed`` without touching them."""
+    ``tracked`` holds container names or ids that belong to running commands, or a callable returning them;
+    the callable is evaluated *after* the listing, so a command that registered while the engine was being
+    queried is never mistaken for a leftover. With ``dry_run`` the candidates are reported in ``removed``
+    without touching them."""
     exe = executable or engine
+    label = label or default_managed_label()
     report = RecoveryReport(engine=engine, label=label, dry_run=dry_run)
     containers = await list_managed_containers(exe, label=label)
+    tracked_now = frozenset(tracked() if callable(tracked) else tracked)
     report.scanned = len(containers)
     current = now or datetime.now(UTC)
     candidates: list[str] = []
     for c in containers:
-        if c.name in tracked or c.id in tracked:
+        if c.name in tracked_now or c.id in tracked_now:
             report.kept[c.name] = "tracked"
             continue
         age = c.age_seconds(current)
@@ -228,7 +233,7 @@ async def recover_for_sandbox(
         executable=sandbox.executable,
         label=sandbox.managed_label,
         older_than_seconds=older_than_seconds,
-        tracked=set(sandbox.active_containers()),
+        tracked=sandbox.active_containers,
         dry_run=dry_run,
     )
 

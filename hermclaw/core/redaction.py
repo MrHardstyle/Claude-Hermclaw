@@ -22,6 +22,9 @@ _PATTERNS: list[re.Pattern[str]] = [
     re.compile(r"(?i)(postgres(?:ql)?(?:\+\w+)?://[^:/\s]+:)([^@\s]+)(@)"),
 ]
 
+#: public, read-only view of the secret shapes (used by the verifier secret scan)
+SECRET_PATTERNS: tuple[re.Pattern[str], ...] = tuple(_PATTERNS)
+
 _SENSITIVE_KEYS = re.compile(r"(?i)(password|passwd|secret|token|api[_-]?key|authorization|private[_-]?key|credential)")
 # numeric telemetry under "sensitive-looking" keys (prompt_tokens, max_tokens, token_count …) is not a secret
 _COUNTER_KEYS = re.compile(r"(?i)(tokens|_count|_ms|_seconds|_bytes|_chars)$|^(max|min|num|total)_")

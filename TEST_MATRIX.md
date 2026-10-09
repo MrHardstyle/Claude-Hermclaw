@@ -45,3 +45,7 @@
 | P16 | Context Builder | `pytest tests/*/test_context_builder_*.py` | 79 passed | – |
 | P17 | Tool Engine | `pytest tests/*/test_tools_*.py` | 151 passed | Remote-Sandbox `.222` über Integration (P18/P19) |
 | P30+ | Runtime Driver | `pytest tests/integration/test_runtime_driver.py` | 9 passed | – |
+| P18 | Execution Sandbox | `pytest tests/*/test_sandbox_*.py` | 117 passed, 1 live deselektiert | `pytest -m live -k test_live_222_rootless_with_delegated_cgroups_v2` auf `.222` |
+| P21 | Deterministic Verifier | `pytest tests/*/test_verifier_*.py` | 124 passed (echte pytest/go/cargo/tsc/php/node/bash) | – |
+| P19/P23 | Coder-Loop + Implement-Handler | `pytest tests/integration/test_coder_loop.py tests/integration/test_coder_handler.py` | 12 passed | Live-Coder über LiteLLM `coder-main` |
+| – | Operator-CLI | `pytest tests/integration/test_cli.py` | 3 passed | – |

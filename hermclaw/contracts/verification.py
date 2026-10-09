@@ -13,7 +13,7 @@ CheckStatus = Literal["pass", "fail", "skip", "error"]
 
 class VerificationCheck(Contract):
     check_type: str = Field(
-        description="scope|forbidden|syntax|compile|lint|unit|integration|secrets|conflicts|presence|absence|command|test|diff|schema|artifact|generated|changed_files|deletions|test_evidence"
+        description="scope|forbidden|syntax|compile|lint|unit|integration|secrets|conflicts|presence|absence|command|test|diff|schema|artifact|generated|changed_files|deletions|test_evidence|side_effects|contract|changes|workspace|verifier"
     )
     name: str
     status: CheckStatus

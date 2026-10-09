@@ -7,6 +7,7 @@ tests are the ``live`` verification (BLOCKER-001)."""
 from __future__ import annotations
 
 import asyncio
+import os
 import shutil
 import subprocess
 import uuid
@@ -17,6 +18,7 @@ import pytest
 
 from hermclaw.contracts.worker import CommandRequest
 from hermclaw.core.config import SandboxPolicy
+from hermclaw.core.errors import ConfigError, PolicyViolation
 from hermclaw.core.redaction import REDACTED
 from worker.execution.sandbox import DockerSandbox, PodmanSandbox, make_sandbox, podman_info
 
@@ -113,7 +115,9 @@ async def test_network_off_by_default(ws: Path) -> None:
 
 
 async def test_network_allowed_mode_has_route(ws: Path) -> None:
-    r = await sandbox(allowed_network="slirp4netns").run(req("ip route | grep -c '^default'; ls /sys/class/net | grep -vc '^lo$'", network=True), ws)
+    r = await sandbox(allowed_network="slirp4netns").run(
+        req("ip route | grep -c '^default'; ls /sys/class/net | grep -vc '^lo$'", network=True), ws
+    )
     assert r.exit_code == 0, r
     assert r.stdout.split() == ["1", "1"]
 
@@ -161,6 +165,9 @@ async def test_only_allowlisted_env_reaches_container(ws: Path, monkeypatch: pyt
     assert "HERMCLAW_P18_HOST_SECRET" not in env
     assert not any("proxy" in k.lower() for k in env), sorted(env)  # --http-proxy=false
     assert "proxy-password" not in r.stdout
+    tricky = "two words \"quoted\" 'single' a=b $HOME `id`\nsecond line"
+    lit = await sandbox().run(req('printf "[%s]" "$APP_TRICKY"', env={"APP_TRICKY": tricky}), ws)
+    assert lit.exit_code == 0 and lit.stdout == f"[{tricky}]"  # passed literally, no shell/env-file parsing
     denied = await sandbox().run(req("env", env={"LD_PRELOAD": "/x.so"}), ws)
     assert denied.exit_code is None and denied.error and denied.error.startswith("SANDBOX_ENV_NOT_ALLOWED")
 
@@ -173,6 +180,29 @@ async def test_output_limits_and_redaction(ws: Path) -> None:
     assert "supersecretvalue123" not in r.stderr and REDACTED in r.stderr
     secret = await sandbox().run(req("echo value=$MY_API_TOKEN", env={"MY_API_TOKEN": "abcd-1234-efgh"}), ws)
     assert "abcd-1234-efgh" not in secret.stdout and REDACTED in secret.stdout
+
+
+async def test_secret_values_never_on_engine_command_line(ws: Path) -> None:
+    s = sandbox()
+    request = req("echo $MY_API_TOKEN | wc -c; sleep 2", env={"MY_API_TOKEN": "cmdline-secret-4711"})
+    task = asyncio.create_task(s.run(request, ws))
+    cmdlines: list[str] = []
+    for _ in range(100):
+        await asyncio.sleep(0.05)
+        for proc in Path("/proc").iterdir():
+            if proc.name.isdigit():
+                try:
+                    cmd = (proc / "cmdline").read_bytes().replace(b"\0", b" ").decode(errors="replace")
+                except OSError:
+                    continue
+                if request.request_id in cmd:
+                    cmdlines.append(cmd)
+        if cmdlines:
+            break
+    r = await task
+    assert cmdlines, "engine process not found"
+    assert all("cmdline-secret-4711" not in c for c in cmdlines) and any("--env=MY_API_TOKEN" in c for c in cmdlines)
+    assert r.exit_code == 0 and r.stdout.split()[0] == str(len("cmdline-secret-4711") + 1)  # value arrived in the container
 
 
 async def test_exit_code_and_stderr(ws: Path) -> None:
@@ -286,3 +316,60 @@ async def test_make_sandbox_default_runner_end_to_end(ws: Path) -> None:
     runner = make_sandbox(policy(), environment="test", pull="never", managed_label="hermclaw.p18test=true", max_output_bytes=10_000)
     r = await runner.run(req("cat input.txt"), ws)
     assert r.exit_code == 0 and r.stdout.strip() == "42"
+
+
+async def test_preflight_reports_rootless_state_and_limits() -> None:
+    info = await podman_info()
+    s = sandbox()
+    checked = await s.preflight()
+    assert checked.available and checked.rootless == info.rootless
+    strict = sandbox(require_rootless=True)
+    if info.rootless:
+        assert (await strict.preflight()).rootless is True
+    else:  # this build host runs podman as root: production settings must refuse it
+        with pytest.raises(PolicyViolation) as exc:
+            await strict.preflight()
+        assert exc.value.code == "SANDBOX_NOT_ROOTLESS"
+    missing = PodmanSandbox(policy(), executable="/nonexistent/podman", pull="never", max_output_bytes=1000)
+    with pytest.raises(ConfigError) as cfg:
+        await missing.preflight()
+    assert cfg.value.code == "SANDBOX_ENGINE_UNAVAILABLE"
+    r = await missing.run(req("true"), Path("/tmp"))
+    assert r.exit_code == 125 and r.error and r.error.startswith("sandbox engine error")
+
+
+async def test_ensure_images_pulls_missing_allowed_image() -> None:
+    """18.2: allowed images are pre-pulled (through the host's configured registry proxy)."""
+    image = "docker.io/library/busybox:1.36.1"
+    subprocess.run(["podman", "rmi", "-f", image], capture_output=True, check=False)
+    s = PodmanSandbox(policy(images={"busybox": image}), pull="missing", managed_label="hermclaw.p18test=true", max_output_bytes=10_000)
+    try:
+        report = await s.ensure_images([image], pull_timeout=300)
+        if report[image] != "pulled":
+            pytest.skip(f"registry not reachable from this host: {report[image]}")
+        assert (await s.ensure_images([image]))[image] == "present"
+        never = PodmanSandbox(policy(), pull="never", managed_label="hermclaw.p18test=true", max_output_bytes=10_000)
+        assert (await never.ensure_images(["docker.io/library/busybox:0.0-missing"]))["docker.io/library/busybox:0.0-missing"].startswith(
+            "error: missing"
+        )
+    finally:
+        subprocess.run(["podman", "rmi", "-f", image], capture_output=True, check=False)
+
+
+@pytest.mark.live
+async def test_live_222_rootless_with_delegated_cgroups_v2(ws: Path) -> None:
+    """Live verification on ``.222`` (BLOCKER-001): rootless podman, cgroups v2 with delegated cpu/memory/pids,
+    limits enforced, pasta/slirp4netns networking available. Run as the worker user:
+    ``.venv/bin/pytest -m live tests/integration/test_sandbox_podman.py``."""
+    info = await podman_info()
+    assert info.rootless is True and info.cgroup_version == "v2" and info.limits_effective, info.as_dict()
+    strict = sandbox(require_rootless=True)
+    await strict.preflight()
+    mem = await strict.run(req("head -c 200000000 /dev/zero | tail > /dev/null", memory="32m"), ws)
+    assert mem.exit_code == 137
+    pids = await sandbox(require_rootless=True, policy_kw={"pids_limit": 16}).run(req("for i in $(seq 1 40); do sleep 5 & done; wait"), ws)
+    assert "can't fork" in pids.stderr or "Resource temporarily unavailable" in pids.stderr
+    net = await strict.run(req("ls /sys/class/net | grep -vc '^lo$'", network=True), ws)
+    assert net.exit_code == 0 and net.stdout.strip() == "1"
+    owner = await strict.run(req("touch owned && stat -c %u owned"), ws)
+    assert owner.stdout.strip() == str(os.getuid())  # --userns=keep-id: files belong to the worker user

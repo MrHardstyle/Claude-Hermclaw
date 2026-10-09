@@ -102,7 +102,10 @@ def default_workspace_ops() -> WorkspaceOps:
 def default_runner(settings: WorkerDaemonSettings) -> CommandRunner:
     from worker.execution.sandbox import make_sandbox
 
-    runner: CommandRunner = make_sandbox(settings.sandbox)
+    if settings.sandbox.engine == "local":
+        runner: CommandRunner = make_sandbox(settings.sandbox)
+    else:  # one label source: the daemon settings (recovery and sandbox must agree)
+        runner = make_sandbox(settings.sandbox, managed_label=settings.container_label)
     return runner
 
 
@@ -238,6 +241,10 @@ class ExecutionService:
     commands: OrderedDict[str, CommandEntry] = field(default_factory=OrderedDict)
     engine_version: str | None = None
     engine_error: str | None = None
+    recovery_interval_seconds: float = 600.0
+    workspace_max_age_seconds: float = 7 * 86400.0
+    _maintenance_stop: asyncio.Event = field(default_factory=asyncio.Event)
+    _maintenance_task: asyncio.Task[None] | None = None
 
     @property
     def root(self) -> Path:
@@ -478,15 +485,53 @@ class ExecutionService:
             log.info("sandbox containers recovered", extra={"removed": removed, "errors": errors, "label": label})
         return RecoverResult(removed=removed, errors=errors, engine=self.engine)
 
+    async def stop_maintenance(self) -> None:
+        self._maintenance_stop.set()
+        if self._maintenance_task is not None:
+            with contextlib.suppress(asyncio.CancelledError, Exception):
+                await asyncio.wait_for(self._maintenance_task, timeout=10)
+            self._maintenance_task = None
+
     async def startup_recovery(self) -> None:
         await self.probe_engine()
         if self.engine_error is not None:
             log.error("sandbox engine unavailable", extra={"error": self.engine_error})
             return
-        try:
-            await self.recover_containers(force=True)
-        except DaemonError as exc:
-            log.warning("startup container recovery failed", extra={"code": exc.code, "error": exc.message})
+        from worker.execution.sandbox import ContainerSandbox
+
+        if isinstance(self.runner, ContainerSandbox):
+            from hermclaw.core.errors import ConfigError, PolicyViolation
+            from worker.execution.recovery import recover_for_sandbox, run_periodic_recovery
+
+            try:
+                info = await self.runner.preflight()  # 18.1: engine answers and really runs rootless
+                for warning in getattr(info, "warnings", []) or []:
+                    log.warning("sandbox preflight warning", extra={"warning": warning})
+            except (PolicyViolation, ConfigError) as exc:
+                self.engine_error = f"{getattr(exc, 'code', 'SANDBOX_PREFLIGHT')}: {exc}"
+                log.error("sandbox preflight failed", extra={"error": self.engine_error})
+                return
+            try:
+                await recover_for_sandbox(self.runner, older_than_seconds=0)
+            except Exception as exc:  # recovery must never keep the daemon from starting
+                log.warning("startup container recovery failed", extra={"error": str(exc)[:300]})
+            self._maintenance_stop.clear()
+            self._maintenance_task = asyncio.create_task(
+                run_periodic_recovery(
+                    self.runner,
+                    interval_seconds=self.recovery_interval_seconds,
+                    stop=self._maintenance_stop,
+                    workspaces_root=self.root,
+                    workspace_max_age_seconds=self.workspace_max_age_seconds,
+                    busy_workspaces=lambda: [ws for ws, lk in self.locks.items() if not lk.idle],
+                ),
+                name="sandbox-maintenance",
+            )
+        else:
+            try:
+                await self.recover_containers(force=True)
+            except DaemonError as exc:
+                log.warning("startup container recovery failed", extra={"code": exc.code, "error": exc.message})
         # leftovers of an interrupted replace-upload
         if self.root.is_dir():
             for p in self.root.iterdir():
@@ -578,6 +623,7 @@ def create_app(
         heartbeat=heartbeat,
         heartbeat_transport=heartbeat_transport,
         on_startup=(svc.startup_recovery,),
+        on_shutdown=(svc.stop_maintenance,),
     )
     app.state.execution = svc
 

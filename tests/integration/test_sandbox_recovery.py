@@ -41,7 +41,9 @@ pytestmark = [pytest.mark.integration, pytest.mark.skipif(_SKIP is not None, rea
 def label() -> Any:
     value = f"hermclaw.p18rec={uuid.uuid4().hex[:10]}"
     yield value
-    ids = subprocess.run(["podman", "ps", "-a", "-q", "--filter", f"label={value}"], capture_output=True, text=True, check=False).stdout.split()
+    ids = subprocess.run(
+        ["podman", "ps", "-a", "-q", "--filter", f"label={value}"], capture_output=True, text=True, check=False
+    ).stdout.split()
     if ids:
         subprocess.run(["podman", "rm", "-f", "-t", "0", *ids], capture_output=True, check=False)
 
@@ -60,7 +62,12 @@ def sandbox(label: str) -> PodmanSandbox:
 
 def req(command: str, **kw: Any) -> CommandRequest:
     return CommandRequest(
-        request_id=kw.pop("request_id", f"p18rec-{uuid.uuid4().hex[:10]}"), job_id="job-r", step_id="step-r", workspace="ws", command=command, **kw
+        request_id=kw.pop("request_id", f"p18rec-{uuid.uuid4().hex[:10]}"),
+        job_id="job-r",
+        step_id="step-r",
+        workspace="ws",
+        command=command,
+        **kw,
     )
 
 

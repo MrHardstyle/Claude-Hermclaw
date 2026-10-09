@@ -256,15 +256,15 @@ Legende: `[x]` erledigt mit Evidence · `[~]` erledigt, Live-Verifikation auf Zi
 
 ## P18 – Execution Sandbox
 
-- [ ] 18.1 rootless Podman. — Evidence: –
-- [ ] 18.2 images. — Evidence: –
-- [ ] 18.3 mounts. — Evidence: –
-- [ ] 18.4 resource limits. — Evidence: –
-- [ ] 18.5 timeouts. — Evidence: –
-- [ ] 18.6 network-off default. — Evidence: –
-- [ ] 18.7 allowed network mode. — Evidence: –
-- [ ] 18.8 cleanup. — Evidence: –
-- [ ] 18.9 abandoned container recovery. — Evidence: –
+- [~] 18.1 rootless Podman. — Evidence: worker/execution/sandbox.py PodmanSandbox (--userns=keep-id, require_rootless euid check, preflight() via podman info rootless flag; make_sandbox enforces rootless in production). Tests: test_podman_argv_has_every_isolation_flag, test_require_rootless, test_make_sandbox_engines, test_podman_info_ass
+- [x] 18.2 images. — Evidence: resolve_image/allowed_images (policy.image, policy.images aliases, extra_images allowlist, strict reference regex), ContainerSandbox.ensure_images (inspect, pull, pull policy). Tests: test_image_allowlist_and_aliases, test_rejected_request_returns_error_result_without_running (unit); test_ensure_ima
+- [x] 18.3 mounts. — Evidence: Exactly one bind mount (/workspace, :Z), --read-only, size-limited /tmp tmpfs and /dev/shm tmpfs, --read-only-tmpfs=false so /run and /var/tmp are not writable; workspace path validation. Tests: test_workspace_rw_rootfs_ro_tmp_rw, test_only_workspace_tmp_and_shm_writable (checks df sizes too), test_
+- [x] 18.4 resource limits. — Evidence: --cpus/--memory/--memory-swap(=memory)/--pids-limit; requests may lower but not raise them (resolve_limits, minimums 0.01 CPUs / 6m). Tests: test_limits_may_be_lowered_not_raised, test_cpus_never_formatted_with_exponent (unit); test_pids_limit_enforced and test_memory_limit_enforced enforced for rea
+- [x] 18.5 timeouts. — Evidence: _supervise + wait_exit: on timeout, podman kill -s KILL, client SIGKILL after a grace period, then rm -f; timed_out=True, exit_code=None; shielded cleanup on cancellation. LocalSandbox kills its whole process group. Tests: test_timeout_kills_and_removes_container, test_cancellation_kills_and_removes
+- [x] 18.6 network-off default. — Evidence: --network=none unless req.network or policy network_default=allowed. Tests: test_network_modes (unit); test_network_off_by_default (real container: no routes, only lo, wget fails).
+- [x] 18.7 allowed network mode. — Evidence: With the network capability: pasta (rootless and installed) or slirp4netns for podman, bridge for docker; allowed_network override. Tests: test_network_modes, test_pasta_auto_only_rootless (unit); test_network_allowed_mode_has_route (real slirp4netns: default route and one interface). The pasta path
+- [x] 18.8 cleanup. — Evidence: --rm; kill+rm on timeout, cancellation and engine-created-but-not-started containers; stale same-request leftover replaced, foreign containers never touched; LocalSandbox kills background children after exit; recovery.prune_stale_workspaces, remove_containers. Tests: test_stale_leftover_with_same_na
+- [x] 18.9 abandoned container recovery. — Evidence: recovery.recover_abandoned/recover_for_sandbox/list_managed_containers/run_periodic_recovery: find containers by managed label, keep tracked (evaluated after listing) and young ones, dry_run, report {scanned, removed, kept, errors}. Tests: test_crashed_worker_leftover_is_recovered (real: podman clie
 
 ## P19 – Main Coder
 
@@ -290,20 +290,20 @@ Legende: `[x]` erledigt mit Evidence · `[~]` erledigt, Live-Verifikation auf Zi
 
 ## P21 – Deterministic Verifier
 
-- [ ] 21.1 scope. — Evidence: –
-- [ ] 21.2 syntax. — Evidence: –
-- [ ] 21.3 compile. — Evidence: –
-- [ ] 21.4 lint. — Evidence: –
-- [ ] 21.5 unit. — Evidence: –
-- [ ] 21.6 integration. — Evidence: –
-- [ ] 21.7 secrets. — Evidence: –
-- [ ] 21.8 conflicts. — Evidence: –
-- [ ] 21.9 presence evidence. — Evidence: –
-- [ ] 21.10 absence evidence. — Evidence: –
-- [ ] 21.11 command evidence. — Evidence: –
-- [ ] 21.12 test evidence. — Evidence: –
-- [ ] 21.13 diff evidence. — Evidence: –
-- [ ] 21.14 report. — Evidence: –
+- [x] 21.1 scope. — Evidence: changes.collect_changes: GitReader.changed_files plus status renames; each op judged against the base tree with LocalGit.tree_files (create/modify/delete), falling back to porcelain codes. checks.scope_checks: ScopeGuard.audit and forbidden paths, which always apply. Policy checks: generated_check, 
+- [x] 21.2 syntax. — Evidence: syntax.py: Python compile() in-process, strict JSON with a JSONC fallback, tolerant YAML safe loader, tomllib, local parse-only bash -n, batched php -l and node --check in the sandbox with nonce markers. TS/JSX are skipped (left to compile) and missing tools give a skip with a reason. Tests: test_sy
+- [x] 21.3 compile. — Evidence: checks.compile_checks/_toolchains: tsconfig.json runs npx tsc --noEmit (skipped without node_modules/typescript), go.mod runs go build ./..., Cargo.toml runs cargo check [--offline]. Each runs only when the repo has the marker and a relevant file changed. Tests: test_compile_go_pass_and_fail, test_c
+- [x] 21.4 lint. — Evidence: checks.lint_checks: policies.verifier.lint_commands[language], run only for languages that have changed files; {files} is replaced by shell-quoted paths; purpose=lint. Tests: test_lint_commands_run_only_for_changed_languages, test_lint_command_quotes_paths
+- [x] 21.5 unit. — Evidence: evidence.run_test_evidence: framework-aware parsing via tools.testparse (pytest/unittest/npm->jest|vitest|mocha/phpunit/go/cargo/generic auto-detect), min_passed and a per-evidence timeout; unit category; test_runs and command_runs rows. Tests: test_passing_step_is_persisted_with_checks_events_and_c
+- [x] 21.6 integration. — Evidence: evidence.categorise_test: integration/e2e and contract categories (check_type integration/contract), same evaluation path as unit. Tests: test_failing_and_insufficient_tests (the integration-subset criterion), test_evidence_helpers
+- [x] 21.7 secrets. — Evidence: secrets.SecretScanner over added lines only (git diff -U0 base per file; untracked files are scanned whole; fallback to the GitReader diff, where ***REDACTED*** counts as a finding). Uses the hermclaw.core.redaction patterns, a prefixed-assignment rule, literals registered in DEFAULT_REDACTOR, priva
+- [x] 21.8 conflicts. — Evidence: conflicts.scan_conflicts: <<<<<<< ||||||| ======= >>>>>>> at line start in added lines; a bare ======= is ignored in markup files unless real markers are present. Tests: test_conflict_markers_are_found_at_line_start, test_heading_underline_in_markup_is_not_a_conflict, test_conflict_markers_block
+- [x] 21.9 presence evidence. — Evidence: evidence.presence: path count or regex match count over the glob (min_matches), with samples (path/line/snippet), ReDoS guard, per-file and total byte budgets. Tests: test_presence_and_absence_evidence, test_passing_step_is_persisted_with_checks_events_and_command_rows
+- [x] 21.10 absence evidence. — Evidence: evidence.absence (first-class): the path must be absent (literal paths are found even when git-ignored; directory globs are supported) or the pattern must have 0 matches over the glob. Matching files and lines are reported. Tests: test_presence_and_absence_evidence (fail and fixed-pass cases), test_
+- [x] 21.11 command evidence. — Evidence: evidence.command_evidence: expect_exit_code, optional stdout regex, timeout, network only when both the evidence and the step allow it; executor errors and hangs become an error check. Tests: test_command_evidence_exit_code_stdout_and_timeout, test_executor_outage_is_an_error_and_redacted, test_hang
+- [x] 21.12 test evidence. — Evidence: checks.require_tests_check: an implement step in a repo with tests (languages.repo_has_tests) needs at least one test criterion that ran and passed; zero executed tests fails; other step kinds and repos without tests are skipped. Tests: test_implement_step_in_repo_with_tests_needs_test_evidence, tes
+- [x] 21.13 diff evidence. — Evidence: evidence.diff_evidence: must_change, must_not_change, max_changed_files, allow_empty. Tests: test_diff_evidence, test_passing_step_is_persisted_with_checks_events_and_command_rows
+- [x] 21.14 report. — Evidence: report.build_report/run_status (passed iff no blocking fail or error; a summary listing failures; report.failures used by correction). store.start_run/finish_run/abort_run write verification_runs and verification_checks (plus command_runs and test_runs) and emit VERIFIER_STARTED, VERIFIER_CHECK_FAIL
 
 ## P22 – Heavy Review
 

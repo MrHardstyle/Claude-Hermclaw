@@ -86,9 +86,12 @@ async def test_local_sandbox_executor_fallback_only_outside_production(tmp_path:
 async def test_local_sandbox_executor_delegates_to_sandbox_module(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     calls: list[tuple[SandboxPolicy, CommandRequest, Path]] = []
 
+    created: list[dict[str, object]] = []
+
     class FakeRunner:
-        def __init__(self, policy: SandboxPolicy) -> None:
+        def __init__(self, policy: SandboxPolicy, *, environment: str | None = None, max_output_bytes: int | None = None) -> None:
             self.policy = policy
+            created.append({"environment": environment, "max_output_bytes": max_output_bytes})
 
         async def run(self, req: CommandRequest, workspace_dir: Path) -> CommandResult:
             calls.append((self.policy, req, workspace_dir))
@@ -110,6 +113,8 @@ async def test_local_sandbox_executor_delegates_to_sandbox_module(tmp_path: Path
     assert pol is policy and path == tmp_path
     assert (req.command, req.timeout_seconds, req.network, req.image, req.env) == ("pytest -q", 99, True, "python", {"A": "1"})
     assert req.workspace == str(ws.id) and req.job_id == str(ws.job_id) and req.step_id == str(step_id)
+    # environment and the configured output cap are forwarded to the sandbox factory
+    assert created == [{"environment": PROD.env, "max_output_bytes": ex.max_output_bytes}]
 
 
 async def test_sandbox_module_import_errors_surface(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:

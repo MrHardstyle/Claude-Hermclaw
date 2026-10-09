@@ -29,7 +29,11 @@ Every command of a step runs in its own throw-away container::
 
 Environment: ``policy.env_allowlist`` lists the names (exact or ``fnmatch`` glob) a request may set; nothing
 from the worker's own environment is forwarded into a container (podman additionally gets
-``--http-proxy=false`` so host proxy variables, which may embed credentials, never leak in).
+``--http-proxy=false`` so host proxy variables, which may embed credentials, never leak in). Request values
+never appear on the engine's command line (``/proc/<pid>/cmdline`` is world-readable): they are handed to the
+engine process through its environment and forwarded by name (``--env=NAME``). Only names that would change
+the behaviour of the engine binary itself (``HOME``, ``PATH``, ``XDG_*``, ``CONTAINERS_*`` …) are passed as
+``--env=NAME=value``; such names with a secret-looking name are refused.
 
 Output of both streams is captured up to ``policies.commands.max_output_bytes`` each (head and tail are
 kept, the middle is replaced by a marker, ``*_truncated`` is set) and passed through the redactor. Neither
@@ -103,6 +107,17 @@ _IMAGE_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._/:@+-]{0,254}$")
 _NAME_SAFE_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.-]{0,99}$")
 _NAME_UNSAFE_CHARS_RE = re.compile(r"[^A-Za-z0-9_.-]")
 _LABEL_UNSAFE_CHARS_RE = re.compile(r"[^A-Za-z0-9_.:@/+=-]")
+#: variables read by the podman/docker binaries themselves: never placed into the engine's own environment
+_ENGINE_ENV_NAMES = frozenset(
+    {
+        "HOME", "PATH", "TMPDIR", "USER", "LOGNAME", "SHELL", "PWD", "LANG", "LANGUAGE", "TZ", "NOTIFY_SOCKET",
+        "SSL_CERT_FILE", "SSL_CERT_DIR", "GODEBUG", "GOGC", "GOMAXPROCS", "GOMEMLIMIT", "GOTRACEBACK",
+    }
+)  # fmt: skip
+_ENGINE_ENV_PREFIXES = (
+    "LC_", "XDG_", "LD_", "CONTAINERS_", "CONTAINER_", "PODMAN_", "DOCKER_", "BUILDAH_", "REGISTRY_", "STORAGE_",
+    "DBUS_", "SYSTEMD_", "LISTEN_",
+)  # fmt: skip
 _SENSITIVE_ENV_RE = re.compile(r"(?i)(pass(word|wd)?|secret|token|api[_-]?key|credential|auth|private[_-]?key|dsn)")
 _FORBIDDEN_MOUNT_CHARS = frozenset(":,\n\r\x00")
 _SIZE_FACTORS = {"": 1, "b": 1, "k": 1024, "m": 1024**2, "g": 1024**3}
@@ -200,9 +215,18 @@ def validate_request_env(env: Mapping[str, str], allowlist: Sequence[str]) -> di
     return out
 
 
+def is_engine_env_name(name: str) -> bool:
+    """Whether ``name`` changes the behaviour of the container engine binary when set in its environment."""
+    return name in _ENGINE_ENV_NAMES or name.startswith(_ENGINE_ENV_PREFIXES)
+
+
+def is_secret_env_name(name: str) -> bool:
+    return _SENSITIVE_ENV_RE.search(name) is not None
+
+
 def secret_env_values(env: Mapping[str, str]) -> list[str]:
     """Values of variables whose *name* marks them as secret; they are masked in the captured output."""
-    return [v for k, v in env.items() if _SENSITIVE_ENV_RE.search(k) and len(v) >= 4]
+    return [v for k, v in env.items() if is_secret_env_name(k) and len(v) >= 4]
 
 
 def validate_workspace_dir(workspace_dir: Path) -> Path:
@@ -618,6 +642,8 @@ class SandboxInvocation:
     memory: str
     env_names: tuple[str, ...]
     secrets: tuple[str, ...] = ()
+    #: request values handed to the engine process through its environment (``--env=NAME`` in ``argv``)
+    passthrough_env: Mapping[str, str] = field(default_factory=dict)
 
 
 class ContainerSandbox:
@@ -682,6 +708,22 @@ class ContainerSandbox:
     async def health(self) -> EngineInfo:
         return await engine_info(self.engine, self.executable)
 
+    async def preflight(self) -> EngineInfo:
+        """Startup check (18.1): the engine answers and – with ``require_rootless`` – really runs rootless.
+
+        The euid check of :meth:`build_invocation` cannot see an engine that is rootful for other reasons
+        (``CONTAINER_HOST`` pointing to a root socket, a sudo wrapper); ``podman info`` can. Raises
+        :class:`PolicyViolation` (``SANDBOX_NOT_ROOTLESS``) or :class:`ConfigError` (engine unavailable);
+        returns the :class:`EngineInfo` (whose ``warnings`` say whether resource limits are effective)."""
+        info = await self.health()
+        if not info.available:
+            raise ConfigError(f"sandbox engine {self.engine} unavailable: {info.error}", code="SANDBOX_ENGINE_UNAVAILABLE")
+        if self.require_rootless and info.rootless is not True:
+            raise PolicyViolation(f"{self.engine} does not run rootless (Bauplan §28)", code="SANDBOX_NOT_ROOTLESS")
+        for warning in info.warnings:
+            log.warning("sandbox engine check", extra={"engine": self.engine, "warning": warning})
+        return info
+
     # ------------------------------------------------------------------ command line
     def network_enabled(self, req: CommandRequest) -> bool:
         return req.network or self.policy.network_default == "allowed"
@@ -730,8 +772,13 @@ class ContainerSandbox:
             raise PolicyViolation("command contains a NUL byte", code="SANDBOX_COMMAND_INVALID")
         workspace = validate_workspace_dir(workspace_dir)
         image = resolve_image(self.policy, req.image, self.extra_images)
-        env = dict(BASE_CONTAINER_ENV)
-        env.update(validate_request_env(req.env, self.policy.env_allowlist))
+        requested = validate_request_env(req.env, self.policy.env_allowlist)
+        env = {**BASE_CONTAINER_ENV, **requested}
+        passthrough = {k: v for k, v in requested.items() if not is_engine_env_name(k)}
+        for k in requested.keys() - passthrough.keys():
+            if is_secret_env_name(k):
+                raise PolicyViolation(f"environment variable {k!r} cannot be passed to the sandbox", code="SANDBOX_ENV_INVALID")
+        env_args = [f"--env={k}" if k in passthrough else f"--env={k}={v}" for k, v in env.items()]
         cpus, memory = self.resolve_limits(req)
         network = self.network_enabled(req)
         name = container_name_for(req.request_id)
@@ -757,7 +804,7 @@ class ContainerSandbox:
             f"--pull={self.pull}",
             *self._engine_args(workspace),
             f"--workdir={WORKDIR}",
-            *(f"--env={k}={v}" for k, v in env.items()),
+            *env_args,
             f"--entrypoint={self.shell[0]}",
             image,
             *self.shell[1:],
@@ -773,6 +820,7 @@ class ContainerSandbox:
             memory=memory,
             env_names=tuple(sorted(env)),
             secrets=tuple(secret_env_values(env)),
+            passthrough_env=passthrough,
         )
 
     # ------------------------------------------------------------------ container lifecycle
@@ -920,9 +968,14 @@ class ContainerSandbox:
 
     async def _run_once(self, inv: SandboxInvocation) -> _ProcOutcome:
         started = time.monotonic()
+        engine_env = {**os.environ, **inv.passthrough_env} if inv.passthrough_env else None
         try:
             proc = await asyncio.create_subprocess_exec(
-                *inv.argv, stdin=asyncio.subprocess.DEVNULL, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE
+                *inv.argv,
+                stdin=asyncio.subprocess.DEVNULL,
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.PIPE,
+                env=engine_env,
             )
         except (FileNotFoundError, PermissionError) as exc:
             err = OutputCapture(MIN_OUTPUT_BYTES)

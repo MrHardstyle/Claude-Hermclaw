@@ -48,6 +48,10 @@ correction: {max_corrections_per_step: 2, max_attempts_per_step: 3, max_replans_
 verifier:
   max_changed_files: 40
   allow_deletions: true
+  # files that are never accepted as hand-written changes (generated artefacts)
+  generated_file_globs: ["**/node_modules/**", "**/__pycache__/**", "**/*.pyc", "**/dist/**"]
+  # language id -> lint command; {files} is replaced by the changed files of that language (ids: hermclaw/verifier/languages.py)
+  # example: {python: "ruff check {files}", javascript: "npx eslint {files}", php: "php -l {files}"}
   lint_commands: {}
 review:
   required_for_kinds: [implement, database, docker, deploy, ssh]
