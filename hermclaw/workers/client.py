@@ -31,6 +31,8 @@ from hermclaw.contracts.worker import (
     CommandResult,
     GpuInfo,
     LoadedModel,
+    MediaJobRequest,
+    MediaJobResult,
     ModelLoadRequest,
     WorkspaceSyncManifest,
 )
@@ -344,6 +346,34 @@ class ModelWorkerClient(WorkerClient):
 
     async def gpus(self) -> list[GpuInfo]:
         return (await self.gpu_info()).gpus
+
+
+class MediaWorkerClient(ModelWorkerClient):
+    """Image/video jobs on the model/media worker (``worker.media.service`` mounted in the model daemon)."""
+
+    async def put_media_input(self, job_id: str, name: str, data: bytes, *, timeout_seconds: float | None = 600.0) -> dict[str, Any]:
+        path = f"/v1/media/{_workspace_segment(job_id)}/inputs/{_workspace_segment(name)}"
+        resp = await self._request(
+            "PUT", path, content=data, headers={"Content-Type": "application/octet-stream"}, timeout_seconds=timeout_seconds
+        )
+        body: dict[str, Any] = resp.json()
+        return body
+
+    async def run_media_job(self, request: MediaJobRequest) -> MediaJobResult:
+        http_timeout = float(request.timeout_seconds) + COMMAND_TIMEOUT_MARGIN_SECONDS
+        resp = await self._request("POST", "/v1/media/jobs", json_body=request.model_dump(mode="json"), timeout_seconds=http_timeout)
+        result = self._parse(resp, MediaJobResult)
+        if result.request_id != request.request_id:
+            raise WorkerProtocolError(f"worker {self.worker_id}: media result for '{result.request_id}' instead of '{request.request_id}'")
+        return result
+
+    async def download_media_file(self, job_id: str, request_id: str, name: str, *, timeout_seconds: float | None = 600.0) -> bytes:
+        path = f"/v1/media/{_workspace_segment(job_id)}/{_request_id_segment(request_id)}/{_workspace_segment(name)}"
+        return (await self._request("GET", path, timeout_seconds=timeout_seconds)).content
+
+    async def delete_media_job(self, job_id: str) -> dict[str, Any]:
+        body: dict[str, Any] = (await self._request("DELETE", f"/v1/media/{_workspace_segment(job_id)}")).json()
+        return body
 
 
 async def probe_health(base_url: str, *, timeout_seconds: float = 5.0, transport: httpx.AsyncBaseTransport | None = None) -> DaemonHealth:

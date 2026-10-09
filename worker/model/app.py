@@ -221,6 +221,7 @@ def create_app(
     heartbeat: bool = True,
     heartbeat_transport: httpx.AsyncBaseTransport | None = None,
     extra_routers: Sequence[APIRouter] = (),
+    comfyui_transport: httpx.AsyncBaseTransport | None = None,
     load_timeout_seconds: float = 900.0,
     unload_timeout_seconds: float = 120.0,
     poll_seconds: float = 0.5,
@@ -281,6 +282,20 @@ def create_app(
     # ``state.work(...)`` so heartbeats report ``busy``. Their capability names are announced via
     # ``WORKER_CAPABILITIES`` (e.g. ``image,video``). GPU residency must go through ``svc.residency_lock``.
     # ------------------------------------------------------------------------------------------------
+    if settings.media_enabled:  # P29: image/video jobs share this daemon's GPU residency lock
+        from worker.media.backends import ComfyUIBackend, FfmpegBackend
+        from worker.media.service import MediaService, create_media_router
+
+        app.state.media = MediaService(
+            root=settings.data_dir / "media",
+            state=state,
+            ffmpeg=FfmpegBackend(settings.ffmpeg, settings.ffprobe),
+            comfyui=ComfyUIBackend(settings.comfyui_url, workflows_dir=settings.comfyui_workflows_dir, transport=comfyui_transport)
+            if settings.comfyui_url
+            else None,
+            model=svc,
+        )
+        app.include_router(create_media_router())
     for router in extra_routers:
         app.include_router(router)
 

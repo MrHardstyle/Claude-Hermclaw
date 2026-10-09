@@ -84,6 +84,14 @@ class WorkerDaemonSettings(BaseModel):
     container_label: str = DEFAULT_CONTAINER_LABEL
     ollama_url: str = DEFAULT_OLLAMA_URL
     nvidia_smi: str = "nvidia-smi"
+    comfyui_url: str | None = None  # media worker: ComfyUI API (e.g. http://127.0.0.1:8188)
+    comfyui_workflows_dir: Path | None = None
+    ffmpeg: str = "ffmpeg"
+    ffprobe: str = "ffprobe"
+
+    @property
+    def media_enabled(self) -> bool:
+        return bool({"image", "video"} & set(self.capabilities))
 
     @property
     def max_body_bytes(self) -> int:
@@ -136,11 +144,17 @@ class WorkerDaemonSettings(BaseModel):
             ("log_level", "WORKER_LOG_LEVEL"),
             ("container_label", "WORKER_CONTAINER_LABEL"),
             ("nvidia_smi", "WORKER_NVIDIA_SMI"),
+            ("ffmpeg", "WORKER_FFMPEG"),
+            ("ffprobe", "WORKER_FFPROBE"),
         ):
             if raw := env.get(env_name, "").strip():
                 values[key] = raw
         if raw := env.get("OLLAMA_URL", "").strip():
             values["ollama_url"] = raw.rstrip("/")
+        if raw := env.get("WORKER_COMFYUI_URL", "").strip():
+            values["comfyui_url"] = raw.rstrip("/")
+        if raw := env.get("WORKER_COMFYUI_WORKFLOWS", "").strip():
+            values["comfyui_workflows_dir"] = Path(raw)
         if raw := env.get("WORKER_DATA_DIR", "").strip():
             values["data_dir"] = Path(raw)
         if raw := env.get("WORKER_LOG_JSON", "").strip():
