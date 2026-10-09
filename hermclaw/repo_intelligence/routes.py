@@ -98,7 +98,7 @@ def _python_prefixes(tree: ast.Module) -> dict[str, str]:
 def _python_routes(path: str, text: str) -> list[Route]:
     try:
         tree = ast.parse(text)
-    except (SyntaxError, ValueError):
+    except (SyntaxError, ValueError, RecursionError, MemoryError):
         return _regex_routes(path, text, _PY_FALLBACK, "generic")
     framework = _py_framework(tree)
     prefixes = _python_prefixes(tree)
@@ -168,7 +168,7 @@ _PY_FALLBACK = [
 # ============================================================================================= javascript / typescript
 _JS_CALL = re.compile(r"\b([A-Za-z_$][\w$]*)\s*\.\s*(get|post|put|patch|delete|del|all|options|head|use)\s*\(\s*([\"'`])(/[^\"'`]*|\*)\3")
 _JS_ROUTE_CHAIN = re.compile(r"\.\s*route\s*\(\s*([\"'`])(/[^\"'`]*)\1\s*\)")
-_JS_CHAIN_METHOD = re.compile(r"^\s*\.\s*(get|post|put|patch|delete|all|options|head)\s*\(")
+_JS_CHAIN_METHOD = re.compile(r"\s*\.\s*(get|post|put|patch|delete|all|options|head)\s*\(")
 _JS_FASTIFY = re.compile(r"\bmethod\s*:\s*[\"'](\w+)[\"'][^{}]{0,300}?\burl\s*:\s*[\"'](/[^\"']*)[\"']", re.S)
 _NEST_CONTROLLER = re.compile(r"@Controller\s*\(\s*(?:[\"'`]([^\"'`]*)[\"'`])?")
 _NEST_METHOD = re.compile(r"@(Get|Post|Put|Patch|Delete|Options|Head|All)\s*\(\s*(?:[\"'`]([^\"'`]*)[\"'`])?\s*\)")

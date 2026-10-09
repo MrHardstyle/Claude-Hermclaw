@@ -13,8 +13,8 @@ import hashlib
 from collections.abc import Sequence
 from dataclasses import dataclass
 
-from hermclaw.core.redaction import DEFAULT_REDACTOR
 from hermclaw.repo_intelligence.config import INDEX_VERSION, RepoIntelConfig
+from hermclaw.repo_intelligence.redact import redact_code
 from hermclaw.repo_intelligence.schemas import SymbolRecord
 
 CHARS_PER_TOKEN = 3.2  # same conservative estimate as hermclaw.models.tokens
@@ -47,11 +47,11 @@ def estimate_tokens(text: str) -> int:
 
 def document_text(path: str, symbol: str | None, content: str, cfg: RepoIntelConfig) -> str:
     title = f"{path} {symbol}" if symbol else path
-    return cfg.embed_document_template.format(title=title, text=DEFAULT_REDACTOR.text(content))
+    return cfg.embed_document_template.format(title=title, text=redact_code(content))
 
 
 def query_text(query: str, cfg: RepoIntelConfig) -> str:
-    return cfg.embed_query_template.format(query=DEFAULT_REDACTOR.text(query))
+    return cfg.embed_query_template.format(query=redact_code(query))
 
 
 def content_hash(embed_text: str) -> str:
@@ -135,13 +135,13 @@ class Chunker:
             s, e = max(lo, d.start_line), min(hi, d.end_line)
             if s > hi or e < lo:
                 continue
-            if s > cur:
-                segs.append(_Seg(cur, s - 1, list(base)))
+            if s > cur:  # code between definitions (module level) – windowed when oversized, too
+                segs.extend(self._split(lines, _Seg(cur, s - 1, list(base)), None, symbols))
             name = f"{owner}.{d.name}" if owner else d.name
             segs.extend(self._split(lines, _Seg(s, e, [name]), d, symbols))
             cur = e + 1
         if cur <= hi:
-            segs.append(_Seg(cur, hi, list(base)))
+            segs.extend(self._split(lines, _Seg(cur, hi, list(base)), None, symbols))
         return [g for g in segs if any(lines[i - 1].strip() for i in range(g.start, g.end + 1))]
 
     def _merge(self, lines: list[str], segs: list[_Seg]) -> list[_Seg]:

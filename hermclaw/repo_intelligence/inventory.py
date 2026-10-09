@@ -18,12 +18,12 @@ from typing import Any
 
 import yaml
 
-from hermclaw.core.redaction import DEFAULT_REDACTOR
 from hermclaw.repo_intelligence import _proc
 from hermclaw.repo_intelligence.config import RepoIntelConfig
 from hermclaw.repo_intelligence.fileio import lstat_regular, read_bytes, read_text
 from hermclaw.repo_intelligence.languages import category, detect_language, is_binary_name, looks_binary
 from hermclaw.repo_intelligence.paths import is_test_path, matches_any
+from hermclaw.repo_intelligence.redact import redact_code
 from hermclaw.repo_intelligence.routes import extract_routes
 from hermclaw.repo_intelligence.schemas import (
     BuildSystem,
@@ -763,9 +763,7 @@ def _readme(ctx: _Ctx) -> ReadmeInfo | None:
         if s:
             title = s.lstrip("#").strip()[:200] or None
             break
-    return ReadmeInfo(
-        path=pref, title=DEFAULT_REDACTOR.text(title) if title else None, excerpt=DEFAULT_REDACTOR.text(t[:README_EXCERPT_CHARS])
-    )
+    return ReadmeInfo(path=pref, title=redact_code(title) if title else None, excerpt=redact_code(t[:README_EXCERPT_CHARS]))
 
 
 # ============================================================================================= git
@@ -850,7 +848,8 @@ def _analyze(root: Path, paths: list[str], cfg: RepoIntelConfig, truncated: bool
     ci = _ci(ctx)
     migrations = _migrations(ctx)
     configs = _config_files(ctx, {c.path for c in ci}, set(docker.compose_files))
-    entry = _entry_points(ctx, man)
+    entry = [e.model_copy(update={"target": redact_code(e.target)}) if e.target else e for e in _entry_points(ctx, man)]
+    tests.scripts = {k: redact_code(v) for k, v in tests.scripts.items()}  # commands may carry credentials
     routes = _routes(ctx)
     readme = _readme(ctx)
     if ctx.budget <= 0:

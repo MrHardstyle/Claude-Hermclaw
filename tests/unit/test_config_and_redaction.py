@@ -59,3 +59,13 @@ def test_numeric_token_counters_are_not_redacted() -> None:
     out = redact({"prompt_tokens": 120, "completion_tokens": 30, "max_tokens": 512, "token_count": 3, "token": 123456, "api_key": "abcd1234", "ok": True})
     assert out["prompt_tokens"] == 120 and out["completion_tokens"] == 30 and out["max_tokens"] == 512 and out["token_count"] == 3
     assert out["token"] == REDACTED and out["api_key"] == REDACTED and out["ok"] is True
+
+
+def test_prefixed_secret_identifiers_are_redacted() -> None:
+    from hermclaw.core.redaction import DEFAULT_REDACTOR, REDACTED
+
+    for text in ("DB_PASSWORD = 'hunter2hunter2'", 'smtp-password: s3cr3tvalue', '"apiToken": "abcd1234efgh"', "X_API_KEY=zzzzyyyyxxxx", "client_secret=abcdefgh"):
+        out = DEFAULT_REDACTOR.text(text)
+        assert REDACTED in out and not any(v in out for v in ("hunter2hunter2", "s3cr3tvalue", "abcd1234efgh", "zzzzyyyyxxxx", "abcdefgh")), (text, out)
+    for text in ("max_tokens = 1000", "tokens: 1234", "passwords_count = 12345", "token_budget: 5000"):
+        assert DEFAULT_REDACTOR.text(text) == text, text

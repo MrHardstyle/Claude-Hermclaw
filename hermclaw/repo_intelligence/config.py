@@ -83,7 +83,6 @@ DEFAULT_WALK_SKIP_DIRS: tuple[str, ...] = (
 )
 
 SIGNALS: tuple[str, ...] = ("lexical", "symbol", "structural", "semantic", "test_reference", "dependency")
-PRIMARY_SIGNALS: tuple[str, ...] = ("lexical", "symbol", "structural", "semantic")
 
 
 @dataclass(frozen=True)
@@ -127,11 +126,16 @@ class RepoIntelConfig:
             "symbol": 1.2,
             "structural": 0.8,
             "semantic": 1.0,
-            "test_reference": 0.5,
+            "test_reference": 0.8,  # tests exercising a file are direct evidence that it implements the feature
             "dependency": 0.5,
         }
     )
     signal_depth: int = 50  # candidates kept per signal before fusion
+    signal_relative_floors: dict[str, float] = field(
+        default_factory=lambda: {"lexical": 0.12, "symbol": 0.15, "structural": 0.15}
+    )  # candidates below this share of the signal's best raw score are dropped before fusion
+    semantic_min_similarity: float = 0.05  # cosine similarity below this is no evidence
+    semantic_relative_floor: float = 0.5  # neighbours below this share of the best similarity are dropped
     dependency_seeds: int = 5
     test_reference_candidates: int = 20
     # ---- context selection / reads
@@ -141,6 +145,11 @@ class RepoIntelConfig:
     context_max_snippets_per_file: int = 2
     context_search_k: int = 30
     # ---- service
+    #: "workspace": every job workspace has its own index key (``<repository>@ws:<id>``) so concurrent jobs on
+    #: different commits never see each other's rows (vectors of identical chunks are re-used across keys);
+    #: "repository": all workspaces of a repository share one index (single-workspace deployments)
+    index_scope: str = "workspace"
+    embedding_reuse_max_keys: int = 8  # sibling index keys of the same repository searched for re-usable vectors
     auto_index: bool = True  # queries bring the index to the workspace HEAD first
     overlay_max_files: int = 500  # dirty working-tree files parsed live per query
     index_lock_timeout_seconds: float = 600.0
@@ -149,8 +158,28 @@ class RepoIntelConfig:
     index_wait_seconds: float = 120.0  # a query waits at most this long for a running (re)index, then degrades
     query_timeout_seconds: float = 30.0  # per signal; a slow signal is dropped, never fails the query
 
+    def index_fingerprint(self) -> str:
+        """Digest of every knob that changes the *content* of an index (file selection, parsing, chunking, embedding
+        input). A different fingerprint than the previous run's forces a full rebuild instead of an incremental one."""
+        import hashlib
+        import json
+
+        material = {
+            "version": INDEX_VERSION,
+            "sensitive": list(self.sensitive_globs),
+            "exclude": list(self.index_exclude_globs),
+            "max_index_file_bytes": self.max_index_file_bytes,
+            "max_files": self.max_files,
+            "chunk": [self.chunk_max_tokens, self.chunk_min_tokens, self.chunk_overlap_lines],
+            "embed_document_template": self.embed_document_template,
+        }
+        return hashlib.sha256(json.dumps(material, sort_keys=True).encode()).hexdigest()[:16]
+
     def weight(self, signal: str) -> float:
         return float(self.signal_weights.get(signal, 1.0))
+
+    def signal_floor(self, signal: str) -> float:
+        return float(self.signal_relative_floors.get(signal, 0.0))
 
     def with_overrides(self, **overrides: Any) -> RepoIntelConfig:
         return replace(self, **overrides)

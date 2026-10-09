@@ -208,6 +208,36 @@ Noch keine.
 - Erwartet: A lower-priority request on another budget member is blocked only when the higher waiter actually waits for capacity.
 - Tatsächlich: It is blocked whenever the higher waiter's resource has no exclusive holder. This is safe (it never lets a lower waiter overtake), but it can delay lower-priority work. Fixing it needs the shared schema change (weight and exclusive columns on resource_requests).
 
+### BUG-031 – Primary domains listed with www. prefix (e.g. www.postgresql.org in policies.example.yaml) never matched
+- Phase: P12 · Komponente: research · Severity: P2 · blockierend: nein · Status: **behoben** (Regressionstest in den research-Tests)
+- Reproduktion: classify_source('https://www.postgresql.org/docs/16/', ['www.postgresql.org'])
+- Erwartet: official_docs, authority 0.95 (primary source)
+- Tatsächlich: Fixed in this session (was documentation-path 0.75); regression test tests/failure/test_research_failures.py::test_primary_domain_listed_with_www_prefix_matches
+
+### BUG-032 – SSRF guard treated RFC 8215 local-use NAT64 (64:ff9b:1::/48) addresses as public when their low 32 bits looked public
+- Phase: P12 · Komponente: research · Severity: P2 · blockierend: nein · Status: **behoben** (Regressionstest in den research-Tests)
+- Reproduktion: is_public_address(ip_address('64:ff9b:1:7f00:1::808:808'))
+- Erwartet: False (embedded IPv4 position depends on operator prefix length)
+- Tatsächlich: Fixed in this session (was True); regression tests test_nat64_local_use_prefix_is_never_public / test_nat64_local_use_answer_is_blocked_by_fetcher
+
+### BUG-033 – Raw source URLs (possibly containing tokens) were kept in ResearchOutcome.errors and research_sources.url
+- Phase: P12 · Komponente: research · Severity: P3 · blockierend: nein · Status: **behoben** (Regressionstest in den research-Tests)
+- Reproduktion: search result URL with ?api_key=<secret> that fails to fetch
+- Erwartet: secret redacted everywhere
+- Tatsächlich: Fixed in this session: URLs and error extras pass through DEFAULT_REDACTOR; regression test test_secrets_in_question_and_urls_never_reach_events_db_or_prompts
+
+### BUG-034 – Test fixture server ignored routes when the request carried a query string (2 SearXNG tests failed)
+- Phase: P12 · Komponente: research · Severity: P3 · blockierend: nein · Status: **behoben** (Regressionstest in den research-Tests)
+- Reproduktion: pytest tests/integration/test_research_fetch_search.py
+- Erwartet: route '/search' serves '/search?q=...'
+- Tatsächlich: Fixed in tests/integration/test_research_support.py
+
+### BUG-035 – Shared redactor misses secrets assigned to prefixed identifiers
+- Phase: P11 · Komponente: repo_intelligence · Severity: P2 · blockierend: nein · Status: **behoben** (Regressionstest in den repo_intelligence-Tests)
+- Reproduktion: from hermclaw.core.redaction import DEFAULT_REDACTOR; DEFAULT_REDACTOR.text("DB_PASSWORD = 'hunter2-very-secret'")
+- Erwartet: the literal is masked
+- Tatsächlich: returned unchanged (\bpassword\b does not match inside DB_PASSWORD). Repo intelligence works around it with hermclaw/repo_intelligence/redact.py::redact_code; other components using DEFAULT_REDACTOR on code are still affected.
+
 ## Template
 
 ### BUG-XXX – Titel

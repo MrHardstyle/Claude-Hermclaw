@@ -23,6 +23,7 @@ from hermclaw.core.errors import ValidationFailed
 from hermclaw.models.protocols import ChatMessage
 from hermclaw.persistence.models import Event, Job, ResearchClaim, ResearchClaimSource, ResearchRun, ResearchSource
 from hermclaw.research import store
+from hermclaw.research.browser import RenderingFetcher, find_chromium
 from hermclaw.research.engine import (
     RESEARCH_DECISION_LINKED,
     ResearchEngine,
@@ -177,7 +178,9 @@ async def claims_of(sm: async_sessionmaker[AsyncSession], run_id: uuid.UUID) -> 
         claims = list(
             (
                 await s.execute(
-                    select(ResearchClaim).where(ResearchClaim.research_run_id == run_id).order_by(ResearchClaim.created_at, ResearchClaim.id)
+                    select(ResearchClaim)
+                    .where(ResearchClaim.research_run_id == run_id)
+                    .order_by(ResearchClaim.created_at, ResearchClaim.id)
                 )
             ).scalars()
         )
@@ -284,8 +287,10 @@ async def test_full_pipeline_persists_scored_sources_linked_claims_contradiction
     assert types.count(EventType.RESEARCH_SOURCE_READ) == 3
     assert types.count(EventType.RESEARCH_CLAIM_CREATED) == 4
     assert types.count(RESEARCH_DECISION_LINKED) == 1
-    assert types.index(EventType.RESEARCH_QUERY_STARTED) < types.index(EventType.RESEARCH_SOURCE_READ) < types.index(
-        EventType.RESEARCH_CLAIM_CREATED
+    assert (
+        types.index(EventType.RESEARCH_QUERY_STARTED)
+        < types.index(EventType.RESEARCH_SOURCE_READ)
+        < types.index(EventType.RESEARCH_CLAIM_CREATED)
     )
     texts_ui = [str(e.payload.get("text", "")) for e in events]
     assert any(t.startswith("Research sucht: toolkit 4.2 python version requirement") for t in texts_ui)
@@ -383,7 +388,10 @@ async def test_invalid_model_output_everywhere_uses_deterministic_fallbacks(
             # hallucinated, ungrounded claims (values not in the source) -> dropped -> heuristic sentences
             "research_claims": lambda a, m, n: {"claims": ["Toolkit 9.9 requires Rust 1.70 and a GPU with 48 GB memory."]},
             # uncited prose is rejected (also after the repair round) -> deterministic cited synthesis
-            "research_synthesis": lambda a, m, n: {"answer": "Toolkit needs a recent Python interpreter on all platforms.", "used_claims": [1]},
+            "research_synthesis": lambda a, m, n: {
+                "answer": "Toolkit needs a recent Python interpreter on all platforms.",
+                "used_claims": [1],
+            },
         }
     )
     docs = url(server, "docs.toolkit.test", "/install")
@@ -458,9 +466,13 @@ async def test_failed_blocked_unsupported_and_tiny_sources_are_recorded_and_run_
     rows = {r.domain: r for r in await sources_of(sessionmaker, outcome.run_id)}
     assert rows["docs.toolkit.test"].status == "read"
     assert rows["broken.example.test"].status == "failed" and (rows["broken.example.test"].error or "").startswith("FETCH_HTTP_ERROR")
-    assert rows["files.example.test"].status == "failed" and (rows["files.example.test"].error or "").startswith("FETCH_UNSUPPORTED_CONTENT")
+    assert rows["files.example.test"].status == "failed" and (rows["files.example.test"].error or "").startswith(
+        "FETCH_UNSUPPORTED_CONTENT"
+    )
     assert rows["intranet.corp.test"].status == "failed" and (rows["intranet.corp.test"].error or "").startswith("FETCH_BLOCKED")
-    assert rows["unknown-host.example.test"].status == "failed" and (rows["unknown-host.example.test"].error or "").startswith("FETCH_FAILED")
+    assert rows["unknown-host.example.test"].status == "failed" and (rows["unknown-host.example.test"].error or "").startswith(
+        "FETCH_FAILED"
+    )
     assert rows["tiny.example.test"].status == "skipped" and rows["tiny.example.test"].error == "no extractable text"
     # SSRF: the private host never got a request
     assert not any(r["host"] == "intranet.corp.test" for r in server.requests)
@@ -539,6 +551,8 @@ async def test_link_decision_marks_claims_and_emits_event(sessionmaker: async_se
     try:
         outcome = await engine.run_detailed(QUESTION)
         assert [c.used_for_decision for c in outcome.contract.claims] == [True, False]
+        # 12.11: one source, two claims, no contradiction -> simple question -> fast model (Qwen3 8B role "fast")
+        assert outcome.synthesis.mode == "fast" and chat.aliases("research_synthesis") == ["fast-router"]
         assert await engine.link_decision(outcome.run_id, [1, 1], "plan:v2:step-3") == 1
         with pytest.raises(ValidationFailed):
             await engine.link_decision(outcome.run_id, [7], "plan:v2:step-3")
@@ -628,7 +642,8 @@ async def test_secrets_in_question_and_urls_never_reach_events_db_or_prompts(
     server.add("/install", Route(DOCS_PAGE), host="docs.toolkit.test")
     leaky = url(server, "docs.toolkit.test", f"/install?token={secret}")
     chat = happy_chat()
-    engine = engine_for(sessionmaker, chat, StaticSearchProvider(default=[leaky]))
+    failing = url(server, "broken.example.test", f"/down?api_key={secret}")
+    engine = engine_for(sessionmaker, chat, StaticSearchProvider(default=[leaky, failing]))
     try:
         outcome = await engine.run_detailed(f"{QUESTION} (token {secret})")
     finally:
@@ -636,7 +651,8 @@ async def test_secrets_in_question_and_urls_never_reach_events_db_or_prompts(
     assert secret not in outcome.contract.question and secret not in chat.prompts()
     assert all(secret not in s.url for s in outcome.contract.sources)
     rows = await sources_of(sessionmaker, outcome.run_id)
-    assert rows and all(secret not in r.url for r in rows)
+    assert len(rows) == 2 and all(secret not in r.url and secret not in (r.error or "") for r in rows)
+    assert any(e["stage"] == "fetch" for e in outcome.errors) and secret not in json.dumps(outcome.errors)
     for ev in await events_of(sessionmaker, outcome.run_id):
         assert secret not in json.dumps(ev.payload)
 
@@ -653,6 +669,14 @@ def test_build_research_engine_from_config(sessionmaker: async_sessionmaker[Asyn
     disabled = cfg.model_copy(deep=True)
     disabled.policies.research.search_provider = "none"
     assert isinstance(build_research_engine(sessionmaker, ScriptedChat(), disabled).search, DisabledSearchProvider)
+    # browser fetch fallback: wired when Chromium exists, silently HTTP-only when it does not
+    no_browser = build_research_engine(sessionmaker, ScriptedChat(), cfg, render_js=True, chromium="/nonexistent/chrome")
+    assert isinstance(no_browser.fetcher, HttpFetcher)
+    if find_chromium() is not None:
+        with_browser = build_research_engine(sessionmaker, ScriptedChat(), cfg, render_js=True)
+        assert (
+            isinstance(with_browser.fetcher, RenderingFetcher) and with_browser.fetcher.http.user_agent == cfg.policies.research.user_agent
+        )
 
 
 @pytest.mark.live

@@ -6,8 +6,10 @@ Public entry points:
 * :func:`hermclaw.research.engine.build_research_engine` – production wiring from ``policies.research``
 * :class:`hermclaw.research.search.SearxngSearchProvider` / ``StaticSearchProvider`` – search providers
 * :class:`hermclaw.research.fetch.HttpFetcher` – SSRF-guarded HTTP fetcher
+* :class:`hermclaw.research.browser.RenderingFetcher` – browser (JavaScript) fetch fallback behind the guard proxy
 """
 
+from hermclaw.research.browser import BrowserRenderer, RenderingFetcher
 from hermclaw.research.engine import (
     RESEARCH_DECISION_LINKED,
     ResearchEngine,
@@ -23,8 +25,10 @@ from hermclaw.research.search import SearchProvider, SearchResult, SearxngSearch
 
 __all__ = [
     "RESEARCH_DECISION_LINKED",
+    "BrowserRenderer",
     "FetchResult",
     "HttpFetcher",
+    "RenderingFetcher",
     "ResearchEngine",
     "ResearchModels",
     "ResearchOutcome",

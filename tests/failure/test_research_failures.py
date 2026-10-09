@@ -176,9 +176,7 @@ async def test_oversized_page_is_truncated_not_dropped(sessionmaker: async_sessi
     assert [s.domain for s in outcome.contract.sources] == ["docs.toolkit.test"]
     async with sessionmaker() as s:
         ev = (
-            await s.execute(
-                select(Event).where(Event.source_id == str(outcome.run_id), Event.event_type == EventType.RESEARCH_SOURCE_READ)
-            )
+            await s.execute(select(Event).where(Event.source_id == str(outcome.run_id), Event.event_type == EventType.RESEARCH_SOURCE_READ))
         ).scalar_one()
     assert ev.payload["truncated"] is True and ev.payload["bytes"] == 20_000
     assert len(json.dumps(ev.payload)) < 10_000  # excerpt clipped, event stays small

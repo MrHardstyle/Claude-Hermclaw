@@ -157,34 +157,34 @@ Legende: `[x]` erledigt mit Evidence · `[~]` erledigt, Live-Verifikation auf Zi
 
 ## P11 – Repository Intelligence
 
-- [ ] 11.1 inventory. — Evidence: –
-- [ ] 11.2 language detection. — Evidence: –
-- [ ] 11.3 build/test discovery. — Evidence: –
-- [ ] 11.4 lexical search. — Evidence: –
-- [ ] 11.5 symbol index. — Evidence: –
-- [ ] 11.6 AST adapters. — Evidence: –
-- [ ] 11.7 dependency relations. — Evidence: –
-- [ ] 11.8 EmbeddingGemma index. — Evidence: –
-- [ ] 11.9 pgvector store. — Evidence: –
-- [ ] 11.10 fusion ranking. — Evidence: –
-- [ ] 11.11 targeted read. — Evidence: –
-- [ ] 11.12 incremental reindex by Git SHA. — Evidence: –
+- [x] 11.1 inventory. — Evidence: inventory.py build_inventory -> RepoInventory (persisted in repo_index_runs.inventory). Covers files (git ls-files tracked+untracked, .gitignore honoured), sizes, Docker, CI, migrations, config files, entry points, routes, README (redacted), git branch/head/status, and redacts credentials in manifes
+- [x] 11.2 language detection. — Evidence: languages.py (extension, file name, shebang, binary sniffing, categories). Tests: tests/unit/test_repo_intelligence_inventory.py::test_language_detection and the shebang/binary assertions in ::test_inventory_of_a_multi_language_repository
+- [x] 11.3 build/test discovery. — Evidence: inventory.py _manifests/_tests. Detects build systems (pyproject/setup.py/package.json/composer/Makefile/CMake/go.mod/Cargo/Maven/Gradle/...), package managers with lockfiles, test dirs, frameworks (pytest/unittest/jest/vitest/mocha/phpunit/pest/go-test/cargo/junit/rspec) and test scripts. Tests: te
+- [x] 11.4 lexical search. — Evidence: lexical.py LexicalSearcher: rg --json with fixed/regex, globs, word, smart case, per-file and total limits, timeout, deterministic --sort path, symlink-safe explicit paths. Fallback is pure Python; regex runs in an isolated child interpreter (python -I) with a deadline. Also does filename search. Te
+- [x] 11.5 symbol index. — Evidence: symbols.py persists code_symbols (repository_key, git_sha): functions, classes, methods, interfaces, traits, enums, constants, routes, tables/views (tables.py: CREATE TABLE/VIEW plus migration DSLs), imports, and module-level call rows; queries query_symbols, referencing_files, load_imports. Tests: 
+- [x] 11.6 AST adapters. — Evidence: AST adapters: Python ast, plus tree-sitter (tree_sitter_language_pack.get_parser) for javascript/typescript/tsx/php, collecting definitions, call references and imports (incl. require/dynamic/export-from/PHP use and include). Recursion and syntax errors degrade to partial structure. Tests: tests/uni
+- [x] 11.7 dependency relations. — Evidence: dependencies.py ModuleResolver: Python packages and relative imports, JS/TS relative specifiers with extension/index probing, PHP include literals, and PSR-4 from every workspace composer.json. Also provides DependencyGraph. Imports of untouched files are re-resolved during incremental runs. Tests: 
+- [~] 11.8 EmbeddingGemma index. — Evidence: chunking.py: symbol-aligned chunks of at most ~1500 tokens, member split, overlapping windows, oversized module-level and doc segments windowed too, redacted embedding input. embeddings.py does batched embedding through the EmbeddingModel protocol, validates count/dim/NaN/zero vectors, and reuses ve
+- [x] 11.9 pgvector store. — Evidence: embeddings.py stores code_chunks vector(768) with embedding_model via pgvector.sqlalchemy. semantic_search uses cosine_distance (<=>) ordered by distance, exact scan for small indexes, HNSW with hnsw.ef_search otherwise; models are never mixed. Tests against real PG16 + pgvector: tests/integration/t
+- [x] 11.10 fusion ranking. — Evidence: ranking.py does Reciprocal Rank Fusion over lexical, symbol, structural (paths, routes, tables, plus query-matching definitions used by other files via JSONB @>), semantic (similarity floors), test_reference (tests that import, mention or are named after a file, scaled by preliminary relevance) and 
+- [x] 11.11 targeted read. — Evidence: reader.py FileReader: exact line ranges, character budget cut at line boundaries, numbered view, binary and size refusal, no ../absolute/.git/secret paths, symlink escape refused. Service read and context_for give fair-share budget snippets, redacted. Tests: tests/unit/test_repo_intelligence_reader.
+- [x] 11.12 incremental reindex by Git SHA. — Evidence: indexer.py RepoIndexer: noop/incremental/full by Git SHA using git diff --name-status --no-renames old..new. Only changed files are re-parsed, re-chunked and re-embedded; deleted files are removed; imports of untouched files are re-resolved. Falls back to full when the old SHA is unknown, INDEX_VERS
 
 ## P12 – Research Engine
 
-- [ ] 12.1 query planner. — Evidence: –
-- [ ] 12.2 web search interface. — Evidence: –
-- [ ] 12.3 HTTP/browser fetch. — Evidence: –
-- [ ] 12.4 source records. — Evidence: –
-- [ ] 12.5 content extraction. — Evidence: –
-- [ ] 12.6 claim extraction. — Evidence: –
-- [ ] 12.7 source-to-claim links. — Evidence: –
-- [ ] 12.8 freshness. — Evidence: –
-- [ ] 12.9 authority/relevance. — Evidence: –
-- [ ] 12.10 contradiction detection. — Evidence: –
-- [ ] 12.11 Qwen synth. — Evidence: –
-- [ ] 12.12 Gemma deep synth. — Evidence: –
-- [ ] 12.13 UI source stream. — Evidence: –
+- [x] 12.1 query planner. — Evidence: hermclaw/research/planner.py (QueryPlanner.plan: role fast, QueryPlan schema, capped at policies.research.max_queries; sanitize_queries; fallback_queries). Tests: tests/unit/test_research_planner_synth.py::test_planner_uses_fast_model_and_caps_queries, ::test_planner_falls_back_on_model_failure_or_u
+- [~] 12.2 web search interface. — Evidence: hermclaw/research/search.py (SearchProvider protocol, SearxngSearchProvider GET /search?format=json, 403/HTML -> SEARCH_JSON_DISABLED, StaticSearchProvider, DisabledSearchProvider, canonical_url/dedupe/merge). Tests: tests/integration/test_research_fetch_search.py::test_searxng_json_parsing_against_
+- [x] 12.3 HTTP/browser fetch. — Evidence: hermclaw/research/fetch.py HttpFetcher (SSRF guard for every hop, DNS pinning with Host/SNI, redirect limit, content-type allowlist, max bytes, timeouts, policy UA) + hermclaw/research/browser.py (RenderingFetcher/BrowserRenderer: headless Chromium --dump-dom behind GuardProxy that applies check_url
+- [x] 12.4 source records. — Evidence: hermclaw/research/store.py (add_source, SourceRow, load_contract) + engine._read_one/_persist_source: read/failed/skipped rows in research_sources with type, scores, content_hash, excerpt, published_at. Tests: tests/integration/test_research_engine.py::test_full_pipeline_persists_scored_sources_link
+- [x] 12.5 content extraction. — Evidence: hermclaw/research/extract.py (BeautifulSoup+lxml, drops nav/script/style/footer/aside/hidden/roles, prefers main/article, title, language, sha256 content hash of text; text/json docs). Tests: tests/unit/test_research_text_extract.py::test_html_extraction_drops_boilerplate_and_prefers_main, ::test_co
+- [x] 12.6 claim extraction. — Evidence: hermclaw/research/claims.py ClaimExtractor (fast model, ClaimExtraction, fenced untrusted source, grounding check, heuristic sentence fallback). Tests: tests/unit/test_research_claims.py::test_model_claims_are_grounded_and_deduplicated, ::test_model_failure_and_ungrounded_output_fall_back_to_heurist
+- [x] 12.7 source-to-claim links. — Evidence: claims.merge_claims (cross-source merge, noisy-OR confidence from authority*relevance*freshness) + store.add_claim (research_claim_sources links). Tests: tests/unit/test_research_claims.py::test_merge_claims_links_sources_and_combines_confidence; tests/integration/test_research_engine.py::test_same_
+- [x] 12.8 freshness. — Evidence: extract.py dates from JSON-LD/meta/<time>, fetch Last-Modified, SearXNG publishedDate; sources.assess_freshness (fresh/aging/stale/unknown factors) used in confidence and contradiction tie-break. Tests: tests/unit/test_research_text_extract.py::test_meta_and_time_dates_and_multiple_articles, ::test_
+- [x] 12.9 authority/relevance. — Evidence: sources.classify_source (primary_domains incl. path prefix and www., standards, docs.*/readthedocs/docs paths, github.com/<org>/<repo>, registries, vendor, secondary, forum), relevance_score (BM25-like), prior_score (primary first). Tests: tests/unit/test_research_sources.py::test_classify_source, :
+- [x] 12.10 contradiction detection. — Evidence: hermclaw/research/contradictions.py (value/negation/antonym conflicts, same-source exclusion, union-find groups, preferred claim, optional LlmContradictionConfirmer hook). Tests: tests/unit/test_research_claims.py::test_contradictions_value_negation_antonym_and_same_source, ::test_grouping_is_transi
+- [~] 12.11 Qwen synth. — Evidence: synth.py Synthesizer fast mode (role fast) with citation validation, repair, strip, deterministic fallback; persisted research_runs.synthesis; decision linkage. Tests: tests/unit/test_research_planner_synth.py::test_fast_synthesis_valid_first_try, ::test_uncited_text_after_repair_is_stripped, ::test
+- [~] 12.12 Gemma deep synth. — Evidence: synth.choose_mode -> deep (role planner = Gemma) for deep flag/contradictions/>=6 sources/>=16 claims, fallback chain deep->fast->deterministic. Tests: tests/unit/test_research_planner_synth.py::test_deep_synthesis_for_contradictions_uses_planner_alias_and_repairs, ::test_deep_failure_falls_back_to_
+- [x] 12.13 UI source stream. — Evidence: engine.py events research.started / research.query.started ('Research sucht: ...') / research.source.read ('Research liest: ...', failed+skipped too) / research.claim.created ('Quelle verwendet für: ...') / research.decision.linked / research.finished (sources_used with used_for_claims, contradictio
 
 ## P13 – Contracts
 

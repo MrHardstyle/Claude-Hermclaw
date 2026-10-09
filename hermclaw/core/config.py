@@ -221,6 +221,9 @@ class ResearchPolicy(_Strict):
     max_fetch_bytes: int = 2_000_000
     primary_domains: list[str] = Field(default_factory=list)
     user_agent: str = "HermclawResearch/0.1 (+internal)"
+    browser_render: bool = False  # render JS pages with a headless Chromium (HERMCLAW_CHROMIUM or auto-detected)
+    browser_executable: str | None = None
+
 
 
 class GitPolicy(_Strict):

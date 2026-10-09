@@ -52,8 +52,22 @@ def local_fetcher(**kw: object) -> HttpFetcher:
 # ----------------------------------------------------------------------------------------------- SSRF guard
 @pytest.mark.parametrize(
     "addr",
-    ["127.0.0.1", "10.0.0.5", "172.16.1.1", "192.168.178.225", "169.254.169.254", "100.64.0.1", "0.0.0.0", "::1", "fc00::1", "fe80::1",
-     "::ffff:127.0.0.1", "64:ff9b::7f00:1", "2002:7f00:1::", "224.0.0.1"],
+    [
+        "127.0.0.1",
+        "10.0.0.5",
+        "172.16.1.1",
+        "192.168.178.225",
+        "169.254.169.254",
+        "100.64.0.1",
+        "0.0.0.0",
+        "::1",
+        "fc00::1",
+        "fe80::1",
+        "::ffff:127.0.0.1",
+        "64:ff9b::7f00:1",
+        "2002:7f00:1::",
+        "224.0.0.1",
+    ],
 )
 def test_non_public_addresses_detected(addr: str) -> None:
     assert not is_public_address(ipaddress.ip_address(addr))
@@ -222,8 +236,15 @@ SEARX_JSON = {
     "query": "toolkit python",
     "number_of_results": 3,
     "results": [
-        {"url": "https://docs.toolkit.dev/install", "title": "Install", "content": "Toolkit requires Python 3.10", "engine": "duckduckgo",
-         "engines": ["duckduckgo", "brave"], "score": 2.0, "publishedDate": "2026-03-01T00:00:00"},
+        {
+            "url": "https://docs.toolkit.dev/install",
+            "title": "Install",
+            "content": "Toolkit requires Python 3.10",
+            "engine": "duckduckgo",
+            "engines": ["duckduckgo", "brave"],
+            "score": 2.0,
+            "publishedDate": "2026-03-01T00:00:00",
+        },
         {"url": "https://docs.toolkit.dev/install#section", "title": "Install again", "engines": ["google"]},
         {"url": "javascript:void(0)", "title": "bad"},
         "not-a-dict",

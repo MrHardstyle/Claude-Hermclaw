@@ -54,3 +54,5 @@
 | P09 | Resource Manager | `pytest tests/*/test_resources_*.py` | 55 passed (Advisory Locks, Preemption, Recovery) | – |
 | P29 | Media Worker | `pytest tests/integration/test_media_worker.py` | 4 passed (echtes ffmpeg/ffprobe) | NVENC + ComfyUI auf `.224` |
 | P18/D-005 | Remote-Executor | `pytest tests/integration/test_tools_remote_executor.py` | 5 passed | gegen `.222` |
+| P11 | Repository Intelligence | `pytest tests/*/test_repo_intelligence_*.py` | 91 passed, 1 live deselektiert (pgvector, ripgrep, tree-sitter) | – |
+| P12 | Research Engine | `pytest tests/*/test_research_*.py` | 143 passed, 2 live deselektiert | SearXNG auf `.225:8888` |

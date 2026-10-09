@@ -11,6 +11,7 @@ import asyncio
 import contextlib
 import os
 import shutil
+import signal
 from collections.abc import Sequence
 from dataclasses import dataclass
 from functools import lru_cache
@@ -65,11 +66,26 @@ def _env(extra: dict[str, str] | None = None) -> dict[str, str]:
     return env
 
 
-async def _kill(proc: asyncio.subprocess.Process) -> None:
-    with contextlib.suppress(ProcessLookupError):
-        proc.kill()
+async def terminate(proc: asyncio.subprocess.Process, *, drain: bool = True) -> None:
+    """Kill the process *group* (children such as shell-spawned helpers included), reap it and drain its pipes so
+    the transport closes now and not when the event loop is already gone."""
+    if proc.returncode is None:
+        try:
+            os.killpg(proc.pid, signal.SIGKILL)  # started with start_new_session=True: pgid == pid
+        except (ProcessLookupError, PermissionError, OSError):
+            with contextlib.suppress(ProcessLookupError):
+                proc.kill()
     with contextlib.suppress(Exception):
         await asyncio.wait_for(proc.wait(), timeout=5)
+    if drain:
+        for stream in (proc.stdout, proc.stderr):
+            if stream is not None:
+                with contextlib.suppress(Exception):
+                    await asyncio.wait_for(stream.read(), timeout=2)
+
+
+async def _kill(proc: asyncio.subprocess.Process) -> None:
+    await terminate(proc, drain=True)
 
 
 async def run(
@@ -90,6 +106,7 @@ async def run(
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE,
             env=_env(env),
+            start_new_session=True,
         )
     except (FileNotFoundError, PermissionError, NotADirectoryError) as exc:
         raise RepoCommandError(f"cannot start {argv[0]}: {exc}", details={"argv0": argv[0]}) from exc

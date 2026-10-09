@@ -38,6 +38,7 @@ from hermclaw.events.store import append_event
 from hermclaw.models.protocols import CallContext, ChatModel
 from hermclaw.persistence.models import ResearchRun
 from hermclaw.research import store
+from hermclaw.research.browser import BrowserRenderer, RenderingFetcher, find_chromium
 from hermclaw.research.claims import ClaimDraft, ClaimExtractor, MergedClaim, SourceScore, merge_claims
 from hermclaw.research.contradictions import ContradictionConfirmer, ContradictionReport, LlmContradictionConfirmer, detect_contradictions
 from hermclaw.research.errors import SearchDisabled, SearchJsonDisabled
@@ -231,7 +232,8 @@ class ResearchEngine:
     def _error(self, st: _RunState, stage: str, exc: BaseException, **extra: Any) -> str:
         code = str(getattr(exc, "code", type(exc).__name__))
         message = DEFAULT_REDACTOR.text(str(getattr(exc, "message", None) or exc))[:300]
-        st.errors.append({"stage": stage, "code": code, "message": message, **extra})
+        safe = {k: DEFAULT_REDACTOR.text(v)[:500] if isinstance(v, str) else v for k, v in extra.items()}
+        st.errors.append({"stage": stage, "code": code, "message": message, **safe})
         return code
 
     # ------------------------------------------------------------------------------------------- public API
@@ -462,6 +464,7 @@ class ResearchEngine:
             "authority_reason": cls.reason,
             "bytes": fetched.bytes_read,
             "truncated": fetched.truncated,
+            "rendered": fetched.rendered,
             "queries": list(cand.queries),
         }
         if skip_reason:
@@ -795,9 +798,15 @@ def build_research_engine(
     config: HermclawConfig | None = None,
     *,
     settings: ResearchSettings | None = None,
+    render_js: bool = False,
+    chromium: str | None = None,
     **fetcher_overrides: object,
 ) -> ResearchEngine:
-    """Production wiring from ``policies.research`` and the model profiles (fast + planner roles)."""
+    """Production wiring from ``policies.research`` and the model profiles (fast + planner roles).
+
+    ``render_js`` adds the browser fetch fallback (headless Chromium behind the SSRF guard proxy) for pages whose
+    static HTML carries too little text; it is skipped with a warning when no Chromium executable is found.
+    """
     cfg = config or get_config()
     policy = cfg.policies.research
     search: SearchProvider
@@ -807,7 +816,19 @@ def build_research_engine(
         )
     else:
         search = DisabledSearchProvider()
-    fetcher = HttpFetcher.from_policy(policy, **fetcher_overrides)
+    http = HttpFetcher.from_policy(policy, **fetcher_overrides)
+    fetcher: Fetcher = http
+    if render_js:
+        if find_chromium(chromium) is not None:
+            renderer = BrowserRenderer(
+                http,
+                executable=chromium,
+                timeout_seconds=max(float(policy.fetch_timeout_seconds), 10.0) * 2,
+                max_output_bytes=http.max_bytes,
+            )
+            fetcher = RenderingFetcher(http, renderer, min_text_chars=max((settings or ResearchSettings()).min_text_chars, 400))
+        else:
+            log.warning("browser fetch requested but no Chromium executable found; using HTTP fetch only")
     return ResearchEngine(sessionmaker, chat, search, fetcher, policy, models=ResearchModels.from_config(cfg.models), settings=settings)
 
 

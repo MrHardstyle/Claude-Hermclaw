@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from typing import ClassVar, Literal
+from typing import Any, ClassVar, Literal
 
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -141,7 +141,7 @@ class RepoInventory(_M):
     git: GitInfo = Field(default_factory=GitInfo)
     warnings: list[str] = Field(default_factory=list)
 
-    def summary(self, *, max_items: int = 30) -> dict[str, object]:
+    def summary(self, *, max_items: int = 30) -> dict[str, Any]:
         """Compact, prompt-sized view for the planner (no full file list)."""
         return {
             "root": self.root_name,
@@ -247,6 +247,7 @@ class SignalHit(_M):
     start_line: int = 1
     end_line: int = 1
     detail: str = ""
+    boost: float = 1.0  # multiplier (0..1] of this hit's fusion contribution (supporting evidence of weak candidates)
 
 
 class FileHit(_M):
@@ -265,6 +266,7 @@ class FileHit(_M):
 
 class IndexStats(_M):
     repository_key: str
+    repository: str | None = None  # base repository of a workspace-scoped index key (embedding re-use)
     git_sha: str
     base_sha: str | None = None
     mode: Literal["full", "incremental", "noop"]
@@ -286,3 +288,4 @@ class IndexStats(_M):
     embedding_error: str | None = None
     duration_ms: int = 0
     index_version: int = 0
+    index_config: str | None = None  # RepoIntelConfig.index_fingerprint() of the run

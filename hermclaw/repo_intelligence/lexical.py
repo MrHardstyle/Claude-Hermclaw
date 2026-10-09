@@ -11,10 +11,12 @@ from __future__ import annotations
 import asyncio
 import base64
 import contextlib
+import dataclasses
 import json
 import os
 import re
 import stat
+import sys
 import time
 from collections.abc import Sequence
 from dataclasses import dataclass
@@ -123,12 +125,17 @@ class LexicalSearcher:
                     except re.error as exc:
                         raise ValidationFailed(f"invalid regular expression: {exc}", code="REPO_PATTERN_INVALID") from exc
             files = await self._fallback_files(root, spec.paths)
-            res = await asyncio.to_thread(self._python, root, spec, files)
+            if mode == "regex":
+                # Python's re holds the GIL while backtracking: a pathological pattern could freeze the event loop, so
+                # caller-supplied regexes run in a short-lived child interpreter that is killed at the deadline
+                res = await self._python_isolated(root, spec, files)
+            else:
+                res = await asyncio.to_thread(self._python, root, spec, files)
         res.elapsed_ms = int((time.monotonic() - started) * 1000)
         return res
 
     async def _fallback_files(self, root: Path, explicit: Sequence[str] | None) -> list[str]:
-        if explicit is not None and all(os.path.isfile(os.path.join(root, p)) for p in explicit):
+        if explicit is not None and await asyncio.to_thread(lambda: all(os.path.isfile(os.path.join(root, p)) for p in explicit)):
             return list(explicit)
         listing = (await list_worktree_files(root, self.cfg)).paths
         if explicit is None:
@@ -186,6 +193,7 @@ class LexicalSearcher:
             stderr=asyncio.subprocess.PIPE,
             env=_proc._env(),
             limit=4 * 1024 * 1024,
+            start_new_session=True,
         )
         assert proc.stdout is not None and proc.stderr is not None
         hits: list[LexicalHit] = []
@@ -215,21 +223,21 @@ class LexicalSearcher:
                     truncated = True
                     break
         finally:
-            if proc.returncode is None and truncated:
-                with contextlib.suppress(ProcessLookupError):
-                    proc.kill()
+            if truncated:
+                await _proc.terminate(proc, drain=False)
             with contextlib.suppress(Exception):
                 await asyncio.wait_for(proc.wait(), 5)
             if proc.returncode is None:
-                with contextlib.suppress(ProcessLookupError):
-                    proc.kill()
-                with contextlib.suppress(Exception):
-                    await proc.wait()
+                await _proc.terminate(proc, drain=False)
+            with contextlib.suppress(Exception):  # unread output: drain so the pipe transport closes now
+                await asyncio.wait_for(proc.stdout.read(), 2)
         stderr = b""
         with contextlib.suppress(Exception):
             stderr = await asyncio.wait_for(stderr_task, 2)
         if not stderr_task.done():
             stderr_task.cancel()
+            with contextlib.suppress(BaseException):
+                await stderr_task
         if not truncated and proc.returncode == 2 and not hits:
             msg = stderr.decode("utf-8", errors="replace").strip()
             if "regex" in msg.lower() or "parse error" in msg.lower():
@@ -240,54 +248,38 @@ class LexicalSearcher:
         return LexicalResult(hits=hits, truncated=truncated, engine="ripgrep")
 
     # ------------------------------------------------------------------------------------------- python fallback
+    async def _python_isolated(self, root: Path, spec: _Spec, files: Sequence[str]) -> LexicalResult:
+        payload = json.dumps(
+            {
+                "spec": dataclasses.asdict(spec),
+                "files": list(files),
+                "sensitive_globs": list(self.cfg.sensitive_globs),
+                "max_read_file_bytes": self.cfg.max_read_file_bytes,
+                "max_columns": self.cfg.lexical_max_columns,
+            }
+        ).encode()
+        argv = [sys.executable, "-I", "-c", "from hermclaw.repo_intelligence.lexical import _child_main; _child_main()"]
+        try:
+            proc = await _proc.run(argv, cwd=root, timeout_s=spec.timeout_s + 2.0, stdin=payload, max_output=self.cfg.max_output_bytes)
+        except _proc.RepoCommandTimeout:
+            return LexicalResult(truncated=True, engine="python")
+        if not proc.ok:
+            log.warning("python search worker failed (rc=%s)", proc.returncode)
+            return LexicalResult(truncated=True, engine="python")
+        try:
+            return LexicalResult.model_validate_json(proc.stdout)
+        except ValueError:
+            return LexicalResult(truncated=True, engine="python")
+
     def _python(self, root: Path, spec: _Spec, files: Sequence[str]) -> LexicalResult:
-        deadline = time.monotonic() + spec.timeout_s
-        body = "|".join(re.escape(p) if spec.mode == "fixed" else f"(?:{p})" for p in spec.patterns)
-        if spec.word:
-            body = rf"(?<!\w)(?:{body})(?!\w)"
-        rx = re.compile(body, 0 if spec.case_sensitive else re.IGNORECASE)
-        include = [g for g in spec.globs if not g.startswith("!")]
-        exclude = [*spec.exclude_globs, *(g.lstrip("!") for g in spec.globs if g.startswith("!"))]
-        hits: list[LexicalHit] = []
-        truncated = False
-        for path in sorted(files):
-            if time.monotonic() > deadline:
-                truncated = True
-                break
-            if matches_any(path, self.cfg.sensitive_globs) or path.startswith(".git/"):
-                continue
-            if include and not matches_any(path, include):
-                continue
-            if exclude and matches_any(path, exclude):
-                continue
-            if is_binary_name(path):
-                continue
-            data = read_bytes(root, path, self.cfg.max_read_file_bytes + 1)
-            if data is None or len(data) > self.cfg.max_read_file_bytes or looks_binary(data[:8192]):
-                continue
-            n = 0
-            for lineno, line in enumerate(data.decode("utf-8", errors="replace").splitlines(), start=1):
-                found = list(rx.finditer(line))
-                if not found:
-                    continue
-                hits.append(
-                    LexicalHit(
-                        path=path,
-                        line=lineno,
-                        column=found[0].start() + 1,
-                        text=line[: self.cfg.lexical_max_columns],
-                        matches=[m.group(0) for m in found[:20]],
-                    )
-                )
-                n += 1
-                if len(hits) >= spec.limit:
-                    truncated = True
-                    break
-                if n >= spec.per_file:
-                    break
-            if truncated:
-                break
-        return LexicalResult(hits=hits, truncated=truncated, engine="python")
+        return _python_search(
+            root,
+            spec,
+            files,
+            sensitive_globs=self.cfg.sensitive_globs,
+            max_read_file_bytes=self.cfg.max_read_file_bytes,
+            max_columns=self.cfg.lexical_max_columns,
+        )
 
     # ------------------------------------------------------------------------------------------- filenames
     @staticmethod
@@ -325,6 +317,84 @@ class LexicalSearcher:
             files = (await list_worktree_files(root, self.cfg)).paths
         visible = [f for f in files if not matches_any(f, self.cfg.sensitive_globs)]
         return self.rank_filenames(visible, query, limit=limit)
+
+
+def _python_search(
+    root: Path,
+    spec: _Spec,
+    files: Sequence[str],
+    *,
+    sensitive_globs: Sequence[str],
+    max_read_file_bytes: int,
+    max_columns: int,
+) -> LexicalResult:
+    """Pure-Python search with ripgrep semantics (used when ripgrep is unavailable)."""
+    deadline = time.monotonic() + spec.timeout_s
+    body = "|".join(re.escape(p) if spec.mode == "fixed" else f"(?:{p})" for p in spec.patterns)
+    if spec.word:
+        body = rf"(?<!\w)(?:{body})(?!\w)"
+    rx = re.compile(body, 0 if spec.case_sensitive else re.IGNORECASE)
+    include = [g for g in spec.globs if not g.startswith("!")]
+    exclude = [*spec.exclude_globs, *(g.lstrip("!") for g in spec.globs if g.startswith("!"))]
+    hits: list[LexicalHit] = []
+    truncated = False
+    for path in sorted(files):
+        if time.monotonic() > deadline:
+            truncated = True
+            break
+        if matches_any(path, sensitive_globs) or path.startswith(".git/"):
+            continue
+        if include and not matches_any(path, include):
+            continue
+        if exclude and matches_any(path, exclude):
+            continue
+        if is_binary_name(path):
+            continue
+        data = read_bytes(root, path, max_read_file_bytes + 1)
+        if data is None or len(data) > max_read_file_bytes or looks_binary(data[:8192]):
+            continue
+        n = 0
+        for lineno, line in enumerate(data.decode("utf-8", errors="replace").splitlines(), start=1):
+            found = list(rx.finditer(line))
+            if not found:
+                continue
+            hits.append(
+                LexicalHit(
+                    path=path,
+                    line=lineno,
+                    column=found[0].start() + 1,
+                    text=line[:max_columns],
+                    matches=[m.group(0) for m in found[:20]],
+                )
+            )
+            n += 1
+            if len(hits) >= spec.limit:
+                truncated = True
+                break
+            if n >= spec.per_file:
+                break
+        if truncated:
+            break
+    return LexicalResult(hits=hits, truncated=truncated, engine="python")
+
+
+def _child_main() -> None:  # pragma: no cover - runs in the isolated child interpreter (exercised by tests)
+    """Entry point of the isolated regex search: JSON request on stdin, ``LexicalResult`` JSON on stdout."""
+    req = json.loads(sys.stdin.buffer.read())
+    spec_d = req["spec"]
+    spec = _Spec(**{**spec_d, "patterns": tuple(spec_d["patterns"]), "globs": tuple(spec_d["globs"]),
+                    "exclude_globs": tuple(spec_d["exclude_globs"]),
+                    "paths": tuple(spec_d["paths"]) if spec_d["paths"] is not None else None})  # fmt: skip
+    res = _python_search(
+        Path.cwd(),
+        spec,
+        req["files"],
+        sensitive_globs=req["sensitive_globs"],
+        max_read_file_bytes=int(req["max_read_file_bytes"]),
+        max_columns=int(req["max_columns"]),
+    )
+    sys.stdout.write(res.model_dump_json())
+    sys.stdout.flush()
 
 
 def _contained(root: Path, paths: Sequence[str]) -> list[str]:

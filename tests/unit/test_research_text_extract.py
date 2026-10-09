@@ -41,7 +41,9 @@ def test_html_extraction_drops_boilerplate_and_prefers_main() -> None:
 
 def test_content_hash_ignores_markup_only_changes() -> None:
     a = extract_html("<html><body><main><p>Same text here for hashing purposes.</p></main></body></html>")
-    b = extract_html("<html><body><main><div class='x'><p>Same   text here for <span>hashing</span> purposes.</p></div></main></body></html>")
+    b = extract_html(
+        "<html><body><main><div class='x'><p>Same   text here for <span>hashing</span> purposes.</p></div></main></body></html>"
+    )
     assert a.content_hash == b.content_hash
 
 

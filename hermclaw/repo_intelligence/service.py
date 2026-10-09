@@ -32,7 +32,6 @@ from hermclaw.contracts.events import EventType
 from hermclaw.core.errors import NotFoundError, ValidationFailed
 from hermclaw.core.interfaces import RepoHit, WorkspaceHandle
 from hermclaw.core.logging import get_logger
-from hermclaw.core.redaction import DEFAULT_REDACTOR
 from hermclaw.events.store import append_event
 from hermclaw.models.protocols import CallContext, EmbeddingModel
 from hermclaw.repo_intelligence import _proc
@@ -56,12 +55,14 @@ from hermclaw.repo_intelligence.ranking import (
     dependency_signal,
     fuse,
     lexical_signal,
+    query_definitions,
     referencing_tests_signal,
     semantic_signal,
     structural_signal,
     symbol_signal,
 )
 from hermclaw.repo_intelligence.reader import FileReader, ReadResult
+from hermclaw.repo_intelligence.redact import redact_code
 from hermclaw.repo_intelligence.schemas import (
     ChunkHit,
     FileHit,
@@ -75,8 +76,14 @@ from hermclaw.repo_intelligence.schemas import (
     SignalHit,
     SymbolRecord,
 )
-from hermclaw.repo_intelligence.sources import list_worktree_files
-from hermclaw.repo_intelligence.symbols import extract_file_symbols, load_imports, query_symbols, symbols_by_kind
+from hermclaw.repo_intelligence.sources import TreeEntry, WorktreeSource, list_worktree_files
+from hermclaw.repo_intelligence.symbols import (
+    extract_file_symbols,
+    load_imports,
+    query_symbols,
+    referencing_files,
+    symbols_by_kind,
+)
 
 log = get_logger(__name__)
 T = TypeVar("T")
@@ -162,11 +169,36 @@ class RepoIntelligence:
         self._index_tasks: dict[tuple[str, str], asyncio.Task[IndexStats | None]] = {}
 
     # ============================================================================== RepoContextProvider protocol
-    @staticmethod
-    def target_of(workspace: WorkspaceHandle) -> IndexTarget:
+    def index_key(self, workspace: WorkspaceHandle) -> str:
+        """Index key of a workspace (see ``RepoIntelConfig.index_scope``)."""
+        base = workspace.repository_key
+        if self.cfg.index_scope == "repository":
+            return base
+        return f"{base[:270]}@ws:{workspace.id.hex[:16]}"
+
+    def target_of(self, workspace: WorkspaceHandle) -> IndexTarget:
         return IndexTarget(
-            root=Path(workspace.path), repository_key=workspace.repository_key, workspace_id=workspace.id, job_id=workspace.job_id
+            root=Path(workspace.path),
+            repository_key=self.index_key(workspace),
+            workspace_id=workspace.id,
+            job_id=workspace.job_id,
+            repository=workspace.repository_key,
         )
+
+    async def drop_workspace_index(self, workspace: WorkspaceHandle) -> dict[str, int]:
+        """Remove the index rows of a workspace-scoped key (call when the job workspace is cleaned up)."""
+        target = self.target_of(workspace)
+        if target.repository_key == target.base_repository:
+            return {"symbols": 0, "chunks": 0}  # a shared repository index is kept
+        return await self.purge(target)
+
+    async def purge(self, target: IndexTarget) -> dict[str, int]:
+        counts = await self.indexer.purge(target)
+        key = target.repository_key
+        self._fresh.pop(key, None)
+        for ck in [ck for ck in self._graph_cache if ck[0] == key]:
+            self._graph_cache.pop(ck, None)
+        return counts
 
     async def inventory_summary(self, workspace: WorkspaceHandle) -> dict[str, Any]:
         target = self.target_of(workspace)
@@ -185,7 +217,7 @@ class RepoIntelligence:
             with contextlib.suppress(Exception):
                 end = min(h.end_line, h.start_line + 7)
                 res = await self.reader.read(root, h.path, h.start_line, end, max_chars=_SEARCH_SNIPPET_CHARS)
-                hit.snippet = DEFAULT_REDACTOR.text(res.text)
+                hit.snippet = redact_code(res.text)
                 hit.end_line = max(h.end_line, res.end_line) if res.text else h.end_line
             hits.append(hit)
         return hits
@@ -318,12 +350,19 @@ class RepoIntelligence:
         digest = hashlib.sha256(repr(entries).encode()).hexdigest()
         cached = self._state_cache.get(str(root))
         listing_key = f"{revision}:{digest}"
-        if cached is not None and cached[0] == listing_key and is_git:
+        if cached is not None and cached[0] == listing_key and revision is not None:
             files = cached[2].files
         else:
             files = (await list_worktree_files(root, cfg, git_repo=is_git)).paths
-        overlay = _Overlay()
-        if is_git:
+        if revision is None:
+            # no commit to compare against (plain directory / unborn branch): a content fingerprint is the revision
+            revision = await WorktreeSource(root, cfg).fingerprint([TreeEntry(path=p, size=0) for p in files])
+            digest = revision
+
+        def _scan() -> tuple[_Overlay, ModuleResolver | None]:
+            overlay = _Overlay()
+            if not is_git:
+                return overlay, None
             for xy, path, orig in entries:
                 if orig:
                     overlay.deleted.add(orig)
@@ -333,14 +372,19 @@ class RepoIntelligence:
                     continue
                 overlay.dirty.add(path)
             overlay.deleted -= overlay.dirty
-            resolver = ModuleResolver(files, psr4=self._psr4(root, files))
+            return overlay, (ModuleResolver(files, psr4=self._psr4(root, files)) if overlay.dirty else None)
+
+        overlay, resolver = await asyncio.to_thread(_scan)
+        if resolver is not None:
             for path in sorted(overlay.dirty)[: cfg.overlay_max_files]:
                 fs = await asyncio.to_thread(self._parse_live, root, path)
                 if fs is not None:
                     for imp in fs.imports:
                         imp.resolved = resolver.resolve(path, fs.language, imp)
                     overlay.files[path] = fs
-        state = _State(revision=revision or "worktree", files=files, overlay=overlay, status_digest=digest)
+        state = _State(revision=revision, files=files, overlay=overlay, status_digest=digest)
+        if len(self._state_cache) > 256:
+            self._state_cache.clear()
         self._state_cache[str(root)] = (listing_key, target.repository_key, state)
         return state
 
@@ -418,7 +462,7 @@ class RepoIntelligence:
         if cached is not None:
             return cached
         inv: RepoInventory | None = None
-        if not state.overlay.hidden and state.revision != "worktree":
+        if not state.overlay.hidden:
             with contextlib.suppress(Exception):
                 run = await self.indexer.latest_run(target.repository_key)
                 if run is not None and run.git_sha == state.revision and run.inventory:
@@ -493,15 +537,27 @@ class RepoIntelligence:
 
     async def find_files(self, target: IndexTarget, query: str, *, limit: int = 50) -> list[FileMatch]:
         root = self._check_target(target)
-        return await self.lexical.find_files(root, query, limit=limit)
+        started = time.monotonic()
+        matches = await self.lexical.find_files(root, query, limit=limit)
+        await self._event(
+            target,
+            EventType.REPO_SEARCH_EXECUTED,
+            {"repository_key": target.repository_key, "kind": "filename", "query": _clip_query(query), "hits": len(matches)},
+            duration_ms=int((time.monotonic() - started) * 1000),
+        )
+        return matches
 
     # ============================================================================== semantic
     async def semantic(self, target: IndexTarget, query: str, *, k: int = 20) -> list[ChunkHit]:
+        """Nearest chunks of the (refreshed) semantic index; ``[]`` without an embedding model."""
         if self.embedder is None:
             return []
         self._check_target(target)
+        started = time.monotonic()
+        degraded: list[str] = []
+        await self.refresh(target, degraded)
         async with self.sessionmaker() as s:
-            return await semantic_search(
+            hits = await semantic_search(
                 s,
                 self.embedder,
                 target.repository_key,
@@ -510,6 +566,21 @@ class RepoIntelligence:
                 cfg=self.cfg,
                 ctx=CallContext(purpose="embedding", job_id=target.job_id),
             )
+        await self._event(
+            target,
+            EventType.REPO_SEARCH_EXECUTED,
+            {
+                "repository_key": target.repository_key,
+                "kind": "semantic",
+                "query": _clip_query(query),
+                "k": k,
+                "hits": len(hits),
+                "top": [{"path": h.path, "line": h.start_line, "score": round(h.score, 4)} for h in hits[:10]],
+                "degraded": degraded,
+            },
+            duration_ms=int((time.monotonic() - started) * 1000),
+        )
+        return hits
 
     # ============================================================================== fusion search
     async def search_files(self, target: IndexTarget, query: str, *, k: int = 20) -> SearchOutcome:
@@ -566,11 +637,16 @@ class RepoIntelligence:
         all_syms = [*db_syms, *live_syms]
         routes = [_route_of(s) for s in [*struct_syms, *live_syms] if s.kind == "route"]
         tables = [s for s in [*struct_syms, *live_syms] if s.kind in ("table", "view")]
+        definitions = query_definitions(all_syms, q)
+        users = await self._guard("structural", self._referencing(key, definitions, overlay), {}, degraded)
+        referenced = [(d, len(users.get(d.name, set()) - {d.path})) for d in definitions]
         signals: dict[str, list[SignalHit]] = {
             "lexical": lexical_signal(lex_res.hits, q, len(state.files), context=cfg.snippet_context_lines),
             "symbol": symbol_signal(all_syms, q),
-            "structural": structural_signal(state.files, q, routes=[r for r in routes if r is not None], tables=tables),
-            "semantic": semantic_signal(chunks),
+            "structural": structural_signal(
+                state.files, q, routes=[r for r in routes if r is not None], tables=tables, referenced=referenced
+            ),
+            "semantic": semantic_signal(chunks, min_similarity=cfg.semantic_min_similarity, relative_floor=cfg.semantic_relative_floor),
         }
         prelim = fuse(signals, cfg)
         imports = await self._guard("dependency", self._imports(key, self._fresh.get(key, state.revision), overlay), {}, degraded)
@@ -584,7 +660,12 @@ class RepoIntelligence:
             relevant = {h.path for h in lex_res.hits if is_test_path(h.path)}
             mentions = await self._guard("test_reference", self._symbol_mentions(root, candidates, all_syms, q, tests), {}, degraded)
             signals["test_reference"] = referencing_tests_signal(
-                candidates, graph, tests, relevant_tests=relevant, symbol_mentions=mentions
+                candidates,
+                graph,
+                tests,
+                relevant_tests=relevant,
+                symbol_mentions=mentions,
+                relevance={h.path: h.rrf / top for h in prelim[: cfg.test_reference_candidates]},
             )
         fused = fuse(signals, cfg)
         existing = set(state.files)
@@ -608,6 +689,20 @@ class RepoIntelligence:
             duration_ms=int((time.monotonic() - started) * 1000),
         )
         return SearchOutcome(hits=fused, per_signal=per_signal, chunks=chunks, degraded=degraded, query=q)
+
+    async def _referencing(self, key: str, definitions: Sequence[SymbolRecord], overlay: _Overlay) -> dict[str, set[str]]:
+        """``name -> files`` using each definition (index rows of unchanged files + live overlay files)."""
+        names = sorted({d.name for d in definitions})
+        if not names:
+            return {}
+        async with self.sessionmaker() as s:
+            users = await referencing_files(s, key, names, exclude_paths=overlay.hidden)
+        for path, fs in overlay.files.items():
+            refs = set(fs.calls) | {r for sym in fs.symbols for r in sym.references}
+            for n in names:
+                if n in refs:
+                    users.setdefault(n, set()).add(path)
+        return users
 
     async def _symbol_mentions(
         self, root: Path, candidates: Sequence[str], syms: Sequence[SymbolRecord], q: QueryTerms, tests: Sequence[str]
@@ -658,14 +753,14 @@ class RepoIntelligence:
                 return await query_symbols(s, key, [last], exclude_paths=state.overlay.hidden, limit=500)
 
         db = await self._guard("symbol", _exact(), [], degraded)
-        live = [s for s in state.overlay.symbols() if s.kind != "import" and s.name.lower() == last.lower()]
+        live = [s for s in state.overlay.symbols() if s.kind not in ("import", "module") and s.name.lower() == last.lower()]
         if any(d.startswith("symbol") for d in degraded) and not live:
             live = await self._live_symbol_scan(root, last)
         cands = [*db, *live]
         exact_mode = bool(cands)
         if not cands:
             cands = await self._guard("symbol", _fuzzy(), [], degraded)
-            cands += [s for s in state.overlay.symbols() if s.kind != "import" and last.lower() in s.name.lower()]
+            cands += [s for s in state.overlay.symbols() if s.kind not in ("import", "module") and last.lower() in s.name.lower()]
         existing = set(state.files)
         scored: list[tuple[float, SymbolRecord]] = []
         for s in cands:
@@ -679,7 +774,7 @@ class RepoIntelligence:
                 start_line=s.start_line,
                 end_line=max(s.start_line, s.end_line),
                 score=round(score, 4),
-                snippet=DEFAULT_REDACTOR.text(s.signature or f"{s.kind} {s.name}")[:300],
+                snippet=redact_code(s.signature or f"{s.kind} {s.name}")[:300],
                 signals={"symbol": round(score, 4)},
             )
             for score, s in scored[: max(0, k)]
@@ -711,7 +806,7 @@ class RepoIntelligence:
         for path in sorted({h.path for h in res.hits})[:50]:
             fs = await asyncio.to_thread(self._parse_live, root, path)
             if fs is not None:
-                out.extend(s for s in fs.symbols if s.kind != "import" and s.name.lower() == name.lower())
+                out.extend(s for s in fs.symbols if s.kind not in ("import", "module") and s.name.lower() == name.lower())
         return out
 
     # ============================================================================== reads / context
@@ -722,18 +817,21 @@ class RepoIntelligence:
         return await self.reader.read(root, path, start, end, max_chars=max_chars)
 
     async def context(self, target: IndexTarget, goal: str, *, budget_chars: int = 24_000) -> list[RepoHit]:
-        """Most relevant snippets for ``goal`` within ``budget_chars`` (fresh reads, redacted)."""
+        """Most relevant snippets for ``goal`` within ``budget_chars`` (fresh reads, redacted).
+
+        Two passes over the fused ranking: first the best snippet of every hit (each at most a fair share of the
+        budget, so one large file cannot starve the others), then further snippets of the top files with what is
+        left. Output order: file rank, then line."""
         root = self._check_target(target)
         cfg = self.cfg
         outcome = await self.search_files(target, goal, k=cfg.context_search_k)
-        remaining = max(0, int(budget_chars))
-        out: list[RepoHit] = []
+        budget = max(0, int(budget_chars))
+        remaining = budget
         chunks_by_file: dict[str, list[ChunkHit]] = defaultdict(list)
         for c in outcome.chunks:
             chunks_by_file[c.path].append(c)
+        plans: list[tuple[FileHit, list[tuple[int, int]]]] = []
         for hit in outcome.hits:
-            if remaining < 200:
-                break
             ranges: list[tuple[int, int]] = [(hit.start_line, hit.end_line)]
             for name in ("symbol", "semantic", "lexical"):
                 sh = outcome.per_signal.get(name, {}).get(hit.path)
@@ -742,36 +840,55 @@ class RepoIntelligence:
             ranges.extend((c.start_line, c.end_line) for c in chunks_by_file.get(hit.path, []))
             picked: list[tuple[int, int]] = []
             for r_start, r_end in ranges:
-                s = max(1, r_start - cfg.snippet_context_lines)
-                e = min(max(s, r_end + cfg.snippet_context_lines), s + cfg.snippet_max_lines - 1)
-                if any(not (e < ps or s > pe) for ps, pe in picked):
+                lo = max(1, r_start - cfg.snippet_context_lines)
+                hi = min(max(lo, r_end + cfg.snippet_context_lines), lo + cfg.snippet_max_lines - 1)
+                if any(not (hi < ps or lo > pe) for ps, pe in picked):
                     continue
-                picked.append((s, e))
+                picked.append((lo, hi))
                 if len(picked) >= cfg.context_max_snippets_per_file:
                     break
-            for s, e in sorted(picked):
-                overhead = len(hit.path) + 40
-                if remaining - overhead < 100:
+            plans.append((hit, picked))
+        share = max(400, budget // max(1, min(len(plans), 4)))
+        taken: dict[tuple[str, int], RepoHit] = {}
+        unreadable: set[str] = set()
+
+        async def _take(hit: FileHit, lo: int, hi: int, cap: int) -> bool:
+            nonlocal remaining
+            overhead = len(hit.path) + 40
+            limit = min(cap, remaining - overhead)
+            if limit < 100:
+                return False
+            try:
+                res = await self.reader.read(root, hit.path, lo, hi, max_chars=limit)
+            except Exception as exc:  # unreadable/binary/protected: skip, never fail the context
+                log.debug("context read skipped %s: %s", hit.path, getattr(exc, "code", type(exc).__name__))
+                unreadable.add(hit.path)
+                return True
+            snippet = redact_code(res.text)
+            end_line = max(res.start_line, res.end_line)
+            if len(snippet) > limit:  # masking can lengthen the text: cut back to whole lines within the limit
+                cut = snippet.rfind("\n", 0, limit)
+                snippet = snippet[: cut + 1] if cut >= 0 else snippet[:limit]
+                n_lines = snippet.count("\n") + (0 if snippet.endswith("\n") else 1)
+                end_line = res.start_line + max(0, n_lines - 1)
+            if not snippet.strip():
+                return True
+            remaining -= len(snippet) + overhead
+            taken[(hit.path, res.start_line)] = RepoHit(
+                path=hit.path, start_line=res.start_line, end_line=end_line, score=hit.score, snippet=snippet, signals=dict(hit.signals)
+            )
+            return True
+
+        for hit, picked in plans:  # pass 1: one snippet per file
+            if picked and remaining >= 200 and not await _take(hit, picked[0][0], picked[0][1], share):
+                continue
+        for hit, picked in plans:  # pass 2: further snippets of the best files
+            for lo, hi in sorted(picked[1:]):
+                if hit.path in unreadable or remaining < 200:
                     break
-                try:
-                    res = await self.reader.read(root, hit.path, s, e, max_chars=remaining - overhead)
-                except Exception as exc:  # unreadable/binary/protected: skip, never fail the context
-                    log.debug("context read skipped %s: %s", hit.path, getattr(exc, "code", type(exc).__name__))
-                    break
-                if not res.text.strip():
-                    continue
-                remaining -= len(res.text) + overhead
-                out.append(
-                    RepoHit(
-                        path=hit.path,
-                        start_line=res.start_line,
-                        end_line=max(res.start_line, res.end_line),
-                        score=hit.score,
-                        snippet=DEFAULT_REDACTOR.text(res.text),
-                        signals=dict(hit.signals),
-                    )
-                )
-        return out
+                await _take(hit, lo, hi, remaining)
+        order = {h.path: i for i, (h, _) in enumerate(plans)}
+        return sorted(taken.values(), key=lambda r: (order.get(r.path, 0), r.start_line))
 
     # ============================================================================== events
     async def _event(self, target: IndexTarget, event_type: str, payload: dict[str, Any], *, duration_ms: int | None = None) -> None:
@@ -835,7 +952,7 @@ def _retrieve(task: asyncio.Task[Any]) -> None:
 
 
 def _clip_query(q: str) -> str:
-    return DEFAULT_REDACTOR.text(q)[:300]
+    return redact_code(q)[:300]
 
 
 def _to_repo_hit(h: FileHit) -> RepoHit:

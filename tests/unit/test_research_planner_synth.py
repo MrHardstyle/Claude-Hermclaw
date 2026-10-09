@@ -46,7 +46,15 @@ def test_fallback_queries_question_plus_key_term_variants() -> None:
 
 
 def test_sanitize_queries_drops_off_topic_duplicates_and_caps() -> None:
-    raw = ["1. toolkit 4 python requirement", "Toolkit 4 Python requirement", "best pizza in town", "  ", "x", "toolkit changelog", "python 3.10 toolkit"]
+    raw = [
+        "1. toolkit 4 python requirement",
+        "Toolkit 4 Python requirement",
+        "best pizza in town",
+        "  ",
+        "x",
+        "toolkit changelog",
+        "python 3.10 toolkit",
+    ]
     queries, dropped = sanitize_queries(raw, question=QUESTION, max_queries=2)
     assert queries == ["toolkit 4 python requirement", "toolkit changelog"]
     assert dropped == 5  # duplicate, off-topic, blank, too short + one over the cap
@@ -65,13 +73,17 @@ async def test_planner_uses_fast_model_and_caps_queries() -> None:
 
 
 async def test_planner_falls_back_on_model_failure_or_unusable_output() -> None:
-    broken = await QueryPlanner(ScriptedChat({"research_queries": lambda a, m, n: ModelError("down")}), "fast", max_queries=3).plan(QUESTION, ctx=QCTX)
-    assert broken.source == "fallback" and broken.error == "MODEL_ERROR" and broken.queries == fallback_queries(QUESTION, max_queries=3)
-    invalid = await QueryPlanner(ScriptedChat({"research_queries": lambda a, m, n: '{"queries": []}'}), "fast", max_queries=3).plan(QUESTION, ctx=QCTX)
-    assert invalid.source == "fallback" and invalid.error == "MODEL_OUTPUT_INVALID"
-    off_topic = await QueryPlanner(ScriptedChat({"research_queries": lambda a, m, n: {"queries": ["pizza recipes"]}}), "fast", max_queries=3).plan(
+    broken = await QueryPlanner(ScriptedChat({"research_queries": lambda a, m, n: ModelError("down")}), "fast", max_queries=3).plan(
         QUESTION, ctx=QCTX
     )
+    assert broken.source == "fallback" and broken.error == "MODEL_ERROR" and broken.queries == fallback_queries(QUESTION, max_queries=3)
+    invalid = await QueryPlanner(ScriptedChat({"research_queries": lambda a, m, n: '{"queries": []}'}), "fast", max_queries=3).plan(
+        QUESTION, ctx=QCTX
+    )
+    assert invalid.source == "fallback" and invalid.error == "MODEL_OUTPUT_INVALID"
+    off_topic = await QueryPlanner(
+        ScriptedChat({"research_queries": lambda a, m, n: {"queries": ["pizza recipes"]}}), "fast", max_queries=3
+    ).plan(QUESTION, ctx=QCTX)
     assert off_topic.source == "fallback" and off_topic.error == "NO_USABLE_QUERIES" and off_topic.dropped == 1
 
 
@@ -85,7 +97,9 @@ def test_citation_parsing_and_uncited_detection() -> None:
 def test_validate_rejects_unknown_and_uncited() -> None:
     ok = ResearchSynthesis(answer="Toolkit 4 requires Python 3.10 [1].", key_points=["Install via pip [3]."], used_claims=[1, 3])
     assert validate_synthesis(ok, 3).ok
-    bad = ResearchSynthesis(answer="Toolkit 4 requires Python 3.10 [7]. It is great software for everyone.", key_points=["No cite here at all."])
+    bad = ResearchSynthesis(
+        answer="Toolkit 4 requires Python 3.10 [7]. It is great software for everyone.", key_points=["No cite here at all."]
+    )
     report = validate_synthesis(bad, 3)
     assert not report.ok and report.unknown == [7]
     assert "It is great software for everyone." in report.uncited and "No cite here at all." in report.uncited
@@ -105,7 +119,10 @@ def test_choose_mode() -> None:
     assert choose_mode(deep=False, n_sources=2, n_claims=3, n_contradictions=1, thresholds=th) == "deep"
     assert choose_mode(deep=False, n_sources=6, n_claims=3, n_contradictions=0, thresholds=th) == "deep"
     assert choose_mode(deep=False, n_sources=2, n_claims=16, n_contradictions=0, thresholds=th) == "deep"
-    assert choose_mode(deep=False, n_sources=2, n_claims=3, n_contradictions=1, thresholds=SynthesisThresholds(deep_on_contradictions=False)) == "fast"
+    assert (
+        choose_mode(deep=False, n_sources=2, n_claims=3, n_contradictions=1, thresholds=SynthesisThresholds(deep_on_contradictions=False))
+        == "fast"
+    )
 
 
 # ----------------------------------------------------------------------------------------------- synthesizer
@@ -143,7 +160,10 @@ async def test_deep_synthesis_for_contradictions_uses_planner_alias_and_repairs(
 
 async def test_uncited_text_after_repair_is_stripped() -> None:
     def answer(alias: str, messages: list[ChatMessage], n: int) -> object:
-        return {"answer": "Toolkit 4 requires Python 3.10 [1]. This is definitely the best tool ever made.", "key_points": ["Uncited point here."]}
+        return {
+            "answer": "Toolkit 4 requires Python 3.10 [1]. This is definitely the best tool ever made.",
+            "key_points": ["Uncited point here."],
+        }
 
     out = await Synthesizer(ScriptedChat({"research_synthesis": answer}), fast=FAST, deep=DEEP).synthesize(QUESTION, CLAIMS[2:], ctx=SCTX)
     assert out.answer == "Toolkit 4 requires Python 3.10 [1]." and out.key_points == []

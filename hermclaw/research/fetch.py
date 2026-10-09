@@ -67,6 +67,7 @@ class FetchResult:
     elapsed_ms: int
     last_modified: datetime | None = None
     redirects: tuple[str, ...] = ()
+    rendered: bool = False  # True when ``text`` is the DOM after JavaScript rendering (browser fetch)
 
 
 @runtime_checkable

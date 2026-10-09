@@ -11,18 +11,21 @@ Six signals produce ranked candidate lists (raw scores, higher is better):
 * ``dependency``     – import-graph neighbours of the strongest preliminary candidates.
 
 Fusion is Reciprocal Rank Fusion: ``rrf(d) = Σ_s w_s / (k + rank_s(d))`` (competition ranking for ties). The
-reported ``score`` is ``rrf`` divided by the ideal value of the *primary* signals that produced candidates
-(lexical/symbol/structural/semantic) and clamped to ``[0, 1]`` – a file ranked first by every active primary
-signal scores 1.0; test/dependency evidence only adds. Files matching several signals therefore rank first.
+reported ``score`` is ``rrf`` divided by the ideal value over every signal that produced candidates, so it lies in
+``[0, 1]`` and a file ranked first by every active signal scores 1.0. A signal that does not list a file contributes
+nothing, therefore files matching several signals rank first; among those, better ranks win. Before ranking, each
+signal drops candidates scoring below ``signal_relative_floors[signal]`` x its best score: RRF only sees ranks, and a
+one-word incidental match must not count as much as presence in a list as the dominant evidence does.
 """
 
 from __future__ import annotations
 
 import math
+import re
 from collections import defaultdict
 from collections.abc import Iterable, Mapping, Sequence
 
-from hermclaw.repo_intelligence.config import PRIMARY_SIGNALS, RepoIntelConfig
+from hermclaw.repo_intelligence.config import RepoIntelConfig
 from hermclaw.repo_intelligence.dependencies import DependencyGraph
 from hermclaw.repo_intelligence.query import QueryTerms, idf, normalize_identifier, split_identifier, stem
 from hermclaw.repo_intelligence.schemas import ChunkHit, FileHit, LexicalHit, Route, SignalHit, SymbolRecord
@@ -34,7 +37,8 @@ _KIND_WEIGHT = {
 }  # fmt: skip
 
 
-def _ranked(hits: Iterable[SignalHit], depth: int) -> list[tuple[SignalHit, int]]:
+def _ranked(hits: Iterable[SignalHit], depth: int, floor: float = 0.0) -> list[tuple[SignalHit, int]]:
+    """Best hit per file, ordered by score; hits below ``floor`` x the signal's best score are noise and dropped."""
     best: dict[str, SignalHit] = {}
     for h in hits:
         if h.score <= 0:
@@ -42,6 +46,9 @@ def _ranked(hits: Iterable[SignalHit], depth: int) -> list[tuple[SignalHit, int]
         cur = best.get(h.path)
         if cur is None or h.score > cur.score:
             best[h.path] = h
+    if best and floor > 0:
+        cut = max(h.score for h in best.values()) * floor
+        best = {p: h for p, h in best.items() if h.score >= cut}
     ordered = sorted(best.values(), key=lambda h: (-h.score, h.path))[:depth]
     out: list[tuple[SignalHit, int]] = []
     rank = 0
@@ -62,18 +69,17 @@ def fuse(signals: Mapping[str, Sequence[SignalHit]], cfg: RepoIntelConfig) -> li
     best: dict[str, dict[str, SignalHit]] = defaultdict(dict)
     active: list[str] = []
     for name, hits in signals.items():
-        ranked = _ranked(hits, cfg.signal_depth)
+        ranked = _ranked(hits, cfg.signal_depth, cfg.signal_floor(name))
         if not ranked:
             continue
         active.append(name)
         w = cfg.weight(name)
         for h, r in ranked:
-            rrf[h.path] += w / (k + r)
+            rrf[h.path] += w * max(0.0, min(1.0, h.boost)) / (k + r)
             raw[h.path][name] = round(h.score, 6)
             ranks[h.path][name] = r
             best[h.path][name] = h
-    primary = [s for s in active if s in PRIMARY_SIGNALS] or active
-    ideal = sum(cfg.weight(s) / (k + 1) for s in primary) or 1.0
+    ideal = sum(cfg.weight(s) / (k + 1) for s in active) or 1.0
     out: list[FileHit] = []
     for path, value in rrf.items():
         sig = best[path]
@@ -200,7 +206,7 @@ def _symbol_score(sym: SymbolRecord, q: QueryTerms) -> float:
 def symbol_signal(symbols: Iterable[SymbolRecord], q: QueryTerms) -> list[SignalHit]:
     per_file: dict[str, list[tuple[float, SymbolRecord]]] = defaultdict(list)
     for s in symbols:
-        if s.kind == "import":
+        if s.kind in ("import", "module"):
             continue
         sc = _symbol_score(s, q)
         if sc > 0:
@@ -223,14 +229,27 @@ def symbol_signal(symbols: Iterable[SymbolRecord], q: QueryTerms) -> list[Signal
 
 
 def _route_norm(path: str) -> str:
-    import re
-
     return re.sub(r"\{[^}]*\}|<[^>]*>|:\w+|\[[^\]]*\]", "*", path.lower()).rstrip("/") or "/"
 
 
+def query_definitions(symbols: Iterable[SymbolRecord], q: QueryTerms, *, limit: int = 8) -> list[SymbolRecord]:
+    """The definitions that match the query best (input of the reference part of the structural signal)."""
+    scored = [(_symbol_score(s, q), s) for s in symbols if s.kind in _KIND_WEIGHT and s.kind not in ("route", "table", "view")]
+    scored = [t for t in scored if t[0] > 0]
+    scored.sort(key=lambda t: (-t[0], t[1].path, t[1].start_line))
+    return [s for _, s in scored[:limit]]
+
+
 def structural_signal(
-    files: Sequence[str], q: QueryTerms, *, routes: Sequence[Route] = (), tables: Sequence[SymbolRecord] = ()
+    files: Sequence[str],
+    q: QueryTerms,
+    *,
+    routes: Sequence[Route] = (),
+    tables: Sequence[SymbolRecord] = (),
+    referenced: Sequence[tuple[SymbolRecord, int]] = (),
 ) -> list[SignalHit]:
+    """Structural evidence: path tokens, declared routes and tables matching the query, and query-matching
+    definitions that other files use (``referenced``: definition, number of other files calling/instantiating it)."""
     terms = set(q.terms)
     idents = {normalize_identifier(i) for i in q.identifiers}
     scores: dict[str, float] = defaultdict(float)
@@ -269,19 +288,47 @@ def structural_signal(
             scores[t.path] += s
             if t.path not in lines or lines[t.path][2] == "path":
                 lines[t.path] = (t.start_line, t.end_line, f"{t.kind} {t.name}")
+    for d, n_files in referenced:
+        if n_files <= 0:
+            continue
+        scores[d.path] += 1.0 * min(n_files, 5)
+        if d.path not in lines or lines[d.path][2] == "path":
+            lines[d.path] = (d.start_line, d.end_line, f"{d.kind} {d.name} used by {n_files} file(s)")
     return [SignalHit(path=p, score=s, start_line=lines[p][0], end_line=lines[p][1], detail=lines[p][2][:120]) for p, s in scores.items()]
 
 
-def semantic_signal(chunks: Sequence[ChunkHit]) -> list[SignalHit]:
+def semantic_signal(chunks: Sequence[ChunkHit], *, min_similarity: float = 0.0, relative_floor: float = 0.0) -> list[SignalHit]:
+    """Best chunk per file. Nearest-neighbour search always returns ``k`` rows, so neighbours below
+    ``min_similarity`` or below ``relative_floor`` x the best similarity are not evidence and are dropped."""
     best: dict[str, ChunkHit] = {}
     for c in chunks:
         if c.path not in best or c.score > best[c.path].score:
             best[c.path] = c
-    # cosine similarity may be <= 0 for unrelated text; shift so every returned neighbour keeps a positive score
+    if not best:
+        return []
+    top = max(c.score for c in best.values())
+    # cosine similarity may be <= 0 for unrelated text; shift so every kept neighbour has a positive score
     return [
         SignalHit(path=p, score=1.0 + c.score, start_line=c.start_line, end_line=c.end_line, detail=f"sim {c.score:.3f}")
         for p, c in best.items()
+        if c.score > min_similarity and c.score >= top * relative_floor
     ]
+
+
+_TEST_AFFIXES = re.compile(r"^(?:test[_-]?)|(?:[_.-]?(?:test|tests|spec|specs))$")
+
+
+def name_subject(path: str) -> str:
+    """Normalised subject of a file name: ``tests/test_billing.py``/``billing.test.ts``/``BillingTest.php`` -> ``billing``."""
+    name = path.rsplit("/", 1)[-1]
+    parts = name.split(".")
+    stem = ".".join(parts[:-1]) if len(parts) > 1 and parts[0] else name  # drop the extension only
+    low = stem.lower()
+    if low in ("conftest", "__init__", "setup", "index"):
+        return ""
+    for _ in range(2):
+        low = _TEST_AFFIXES.sub("", low)
+    return re.sub(r"[^a-z0-9]", "", low)
 
 
 def referencing_tests_signal(
@@ -291,21 +338,38 @@ def referencing_tests_signal(
     *,
     relevant_tests: Iterable[str] = (),
     symbol_mentions: Mapping[str, Iterable[str]] | None = None,
+    relevance: Mapping[str, float] | None = None,
 ) -> list[SignalHit]:
-    """``symbol_mentions``: candidate path -> test files mentioning one of its matched symbols."""
+    """Tests that exercise a candidate: they import it (1.0), mention its matched symbols (0.5) or are named after it
+    (``test_<name>``/``<name>.test``/``<Name>Test``: 0.75). Tests that are themselves relevant to the query count double.
+
+    ``symbol_mentions``: candidate path -> test files mentioning one of its matched symbols.
+    ``relevance``: candidate path -> preliminary relevance in ``(0, 1]``; tests are supporting evidence, so a weakly
+    relevant candidate only gets that share of the signal's fusion contribution (``SignalHit.boost``).
+    """
     tests = set(test_files)
     relevant = set(relevant_tests)
+    by_subject: dict[str, set[str]] = defaultdict(set)
+    for t in tests:
+        subj = name_subject(t)
+        if len(subj) >= 3:
+            by_subject[subj].add(t)
     out: list[SignalHit] = []
     for c in candidates:
         if c in tests:
             continue
         importing = {t for t in graph.importers.get(c, ()) if t in tests}
-        mentioning = set(symbol_mentions.get(c, ())) & tests if symbol_mentions else set()
+        mentioning = (set(symbol_mentions.get(c, ())) & tests) - importing if symbol_mentions else set()
+        named = by_subject.get(name_subject(c), set()) - importing - mentioning
         score = sum(1.0 + (1.0 if t in relevant else 0.0) for t in importing)
-        score += sum(0.5 * (1.0 + (1.0 if t in relevant else 0.0)) for t in mentioning - importing)
+        score += sum(0.5 * (1.0 + (1.0 if t in relevant else 0.0)) for t in mentioning)
+        score += sum(0.75 * (1.0 + (1.0 if t in relevant else 0.0)) for t in named)
         if score > 0:
-            n = len(importing | mentioning)
-            out.append(SignalHit(path=c, score=score, start_line=1, end_line=1, detail=f"{n} test(s)"))
+            n = len(importing | mentioning | named)
+            rel = 1.0 if relevance is None else max(0.0, min(1.0, float(relevance.get(c, 0.0))))
+            if rel <= 0:
+                continue
+            out.append(SignalHit(path=c, score=score * rel, start_line=1, end_line=1, detail=f"{n} test(s)", boost=rel))
     return out
 
 

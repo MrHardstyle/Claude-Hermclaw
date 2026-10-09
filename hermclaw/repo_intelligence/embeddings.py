@@ -26,6 +26,7 @@ from hermclaw.models.protocols import CallContext, EmbeddingModel
 from hermclaw.persistence.models import EMBEDDING_DIM, CodeChunk
 from hermclaw.repo_intelligence.chunking import Chunk, query_text
 from hermclaw.repo_intelligence.config import RepoIntelConfig
+from hermclaw.repo_intelligence.redact import redact_code
 from hermclaw.repo_intelligence.schemas import ChunkHit
 
 log = get_logger(__name__)
@@ -49,16 +50,25 @@ def validate_vectors(vectors: Sequence[Sequence[float]], expected: int) -> list[
 
 
 # ============================================================================================= storage
-async def reusable_embeddings(session: AsyncSession, repository_key: str, hashes: Iterable[str], model_name: str | None) -> dict[str, Any]:
-    """``content_hash -> embedding`` of existing chunks embedded by ``model_name`` (to avoid re-embedding)."""
+async def reusable_embeddings(
+    session: AsyncSession, repository_keys: str | Sequence[str], hashes: Iterable[str], model_name: str | None
+) -> dict[str, Any]:
+    """``content_hash -> embedding`` of existing chunks embedded by ``model_name`` (to avoid re-embedding).
+
+    ``content_hash`` covers the exact embedding input, so a vector stored under another index key of the same
+    repository (e.g. the index of another job workspace) is the vector the model would return again.
+    """
     if model_name is None:
         return {}
+    keys = [repository_keys] if isinstance(repository_keys, str) else list(dict.fromkeys(repository_keys))
     wanted = sorted(set(hashes))
     out: dict[str, Any] = {}
+    if not keys or not wanted:
+        return out
     for i in range(0, len(wanted), 1_000):
         rows = await session.execute(
             select(CodeChunk.content_hash, CodeChunk.embedding).where(
-                CodeChunk.repository_key == repository_key,
+                CodeChunk.repository_key.in_(keys),
                 CodeChunk.embedding_model == model_name,
                 CodeChunk.embedding.is_not(None),
                 CodeChunk.content_hash.in_(wanted[i : i + 1_000]),
@@ -79,10 +89,11 @@ async def replace_file_chunks(
     remove_paths: Iterable[str] = (),
     replace_all: bool = False,
     model_name: str | None = None,
+    reuse_keys: Sequence[str] = (),
     batch: int = 1_000,
 ) -> tuple[int, int]:
     """Replace the chunks of ``paths`` (+ drop ``remove_paths``); returns ``(inserted, embeddings_reused)``."""
-    reuse = await reusable_embeddings(session, repository_key, (c.content_hash for c in chunks), model_name)
+    reuse = await reusable_embeddings(session, [repository_key, *reuse_keys], (c.content_hash for c in chunks), model_name)
     if replace_all:
         await session.execute(delete(CodeChunk).where(CodeChunk.repository_key == repository_key))
     else:
@@ -133,6 +144,7 @@ async def count_pending(session: AsyncSession, repository_key: str, model_name: 
 @dataclass
 class EmbedOutcome:
     embedded: int = 0
+    reused: int = 0  # of ``embedded``: copied from an identical input instead of calling the model
     pending: int = 0
     batches: int = 0
     error: str | None = None
@@ -147,8 +159,11 @@ async def embed_pending(
     *,
     ctx: CallContext,
     max_chunks: int | None = None,
+    reuse_keys: Sequence[str] = (),
 ) -> EmbedOutcome:
-    """Embed chunks without a vector of the current model, batch by batch (keyset pagination on ``id``)."""
+    """Embed chunks without a vector of the current model, batch by batch (keyset pagination on ``id``).
+
+    Vectors of identical embedding inputs already stored under ``reuse_keys`` are copied instead of recomputed."""
     from hermclaw.repo_intelligence.chunking import document_text
 
     out = EmbedOutcome()
@@ -167,24 +182,36 @@ async def embed_pending(
         if not rows:
             break
         last_id = rows[-1].id
-        texts = [document_text(r.path, r.symbol, r.content, cfg) for r in rows]
-        try:
-            vectors = validate_vectors(await embedder.embed(texts, ctx=ctx), len(texts))
-        except HermclawError as exc:
-            out.error, out.error_code = DEFAULT_REDACTOR.text(exc.message)[:500], exc.code
-            break
-        except Exception as exc:  # transport errors of foreign implementations: recorded, never fatal for the index
-            out.error, out.error_code = DEFAULT_REDACTOR.text(f"{type(exc).__name__}: {exc}")[:500], "EMBEDDING_FAILED"
-            break
-        async with sessionmaker() as s, s.begin():
-            for r, vec in zip(rows, vectors, strict=True):
-                await s.execute(
-                    update(CodeChunk)
-                    .where(CodeChunk.id == r.id, CodeChunk.content_hash == r.content_hash)
-                    .values(embedding=vec, embedding_model=model)
-                )
-        out.embedded += len(rows)
+        reused: dict[str, Any] = {}
+        if reuse_keys:
+            async with sessionmaker() as s:
+                reused = await reusable_embeddings(s, reuse_keys, (r.content_hash for r in rows), model)
+        todo = [r for r in rows if r.content_hash not in reused]
+        vectors: list[list[float]] = []
+        if todo:
+            texts = [document_text(r.path, r.symbol, r.content, cfg) for r in todo]
+            try:
+                vectors = validate_vectors(await embedder.embed(texts, ctx=ctx), len(texts))
+            except HermclawError as exc:
+                out.error, out.error_code = DEFAULT_REDACTOR.text(exc.message)[:500], exc.code
+            except Exception as exc:  # transport errors of foreign implementations: recorded, never fatal for the index
+                out.error, out.error_code = DEFAULT_REDACTOR.text(f"{type(exc).__name__}: {exc}")[:500], "EMBEDDING_FAILED"
+        updates: list[tuple[Any, Any]] = [(r, reused[r.content_hash]) for r in rows if r.content_hash in reused]
+        if not out.error:
+            updates.extend(zip(todo, vectors, strict=True))
+        if updates:
+            async with sessionmaker() as s, s.begin():
+                for r, vec in updates:
+                    await s.execute(
+                        update(CodeChunk)
+                        .where(CodeChunk.id == r.id, CodeChunk.content_hash == r.content_hash)
+                        .values(embedding=vec, embedding_model=model)
+                    )
+        out.embedded += len(updates)
+        out.reused += len(rows) - len(todo)
         out.batches += 1
+        if out.error:
+            break
     async with sessionmaker() as s:
         out.pending = await count_pending(s, repository_key, model)
     if out.error:
@@ -193,6 +220,15 @@ async def embed_pending(
 
 
 # ============================================================================================= search
+async def _pgvector_at_least(session: AsyncSession, version: tuple[int, int]) -> bool:
+    raw = (await session.execute(text("SELECT extversion FROM pg_extension WHERE extname = 'vector'"))).scalar()
+    try:
+        parts = tuple(int(x) for x in str(raw or "0.0").split(".")[:2])
+    except ValueError:
+        return False
+    return parts >= version
+
+
 async def semantic_search(
     session: AsyncSession,
     embedder: EmbeddingModel,
@@ -225,6 +261,9 @@ async def semantic_search(
     else:
         ef = max(int(cfg.hnsw_ef_search), limit * 4)
         await session.execute(text(f"SET LOCAL hnsw.ef_search = {min(ef, 1000):d}"))
+        if await _pgvector_at_least(session, (0, 8)):
+            # filtered ANN (repository_key/model): keep scanning the graph until enough rows pass the filter
+            await session.execute(text("SET LOCAL hnsw.iterative_scan = strict_order"))
     distance = CodeChunk.embedding.cosine_distance(qvec).label("distance")
     stmt = (
         select(
@@ -256,7 +295,7 @@ async def semantic_search(
                 language=r.language,
                 score=max(-1.0, min(1.0, 1.0 - d)),
                 distance=d,
-                content=r.content,
+                content=redact_code(r.content),
                 git_sha=r.git_sha,
             )
         )

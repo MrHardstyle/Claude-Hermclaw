@@ -29,7 +29,7 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
-from sqlalchemy import select, text, update
+from sqlalchemy import delete, func, or_, select, text, update
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from hermclaw.contracts.common import Severity
@@ -39,7 +39,7 @@ from hermclaw.core.logging import get_logger
 from hermclaw.core.redaction import DEFAULT_REDACTOR
 from hermclaw.events.store import append_event
 from hermclaw.models.protocols import CallContext, EmbeddingModel
-from hermclaw.persistence.models import CodeSymbol, RepoIndexRun, Workspace
+from hermclaw.persistence.models import CodeChunk, CodeSymbol, RepoIndexRun, Workspace
 from hermclaw.repo_intelligence import _proc
 from hermclaw.repo_intelligence.chunking import Chunk, Chunker
 from hermclaw.repo_intelligence.config import INDEX_VERSION, RepoIntelConfig
@@ -62,10 +62,15 @@ _MAX_LISTED_CHANGES = 200
 @dataclass(frozen=True)
 class IndexTarget:
     root: Path
-    repository_key: str
+    repository_key: str  # index key (rows of code_symbols/code_chunks)
     workspace_id: uuid.UUID | None = None
     repository_id: uuid.UUID | None = None
     job_id: uuid.UUID | None = None
+    repository: str | None = None  # base repository when ``repository_key`` is workspace-scoped
+
+    @property
+    def base_repository(self) -> str:
+        return self.repository or self.repository_key
 
 
 @dataclass
@@ -106,6 +111,49 @@ class RepoIndexer:
             )
             return (await s.execute(q)).scalars().first()
 
+    async def reuse_keys(self, target: IndexTarget) -> list[str]:
+        """Other index keys of the same base repository (most recent first) whose vectors may be re-used."""
+        limit = max(0, self.cfg.embedding_reuse_max_keys)
+        if limit == 0:
+            return []
+        async with self.sessionmaker() as s:
+            key_col = RepoIndexRun.stats["repository_key"].astext
+            q = (
+                select(key_col, func.max(RepoIndexRun.finished_at).label("last"))
+                .where(
+                    RepoIndexRun.status == "finished",
+                    or_(RepoIndexRun.stats["repository"].astext == target.base_repository, key_col == target.base_repository),
+                    key_col != target.repository_key,
+                )
+                .group_by(key_col)
+                .order_by(func.max(RepoIndexRun.finished_at).desc().nulls_last())
+                .limit(limit)
+            )
+            return [str(r[0]) for r in (await s.execute(q)).all() if r[0]]
+
+    async def purge(self, target: IndexTarget) -> dict[str, int]:
+        """Delete every symbol/chunk row of ``target.repository_key`` (e.g. when a job workspace is removed).
+
+        Finished runs are marked ``purged`` so the next index of that key is a full one; history rows stay."""
+        key = target.repository_key
+        async with self._lock(key), self.sessionmaker() as s, s.begin():
+            n_sym = _rowcount(await s.execute(delete(CodeSymbol).where(CodeSymbol.repository_key == key)))
+            n_chunks = _rowcount(await s.execute(delete(CodeChunk).where(CodeChunk.repository_key == key)))
+            await s.execute(
+                update(RepoIndexRun)
+                .where(RepoIndexRun.stats["repository_key"].astext == key, RepoIndexRun.status == "finished")
+                .values(status="purged")
+            )
+            await append_event(
+                s,
+                EventType.REPO_INDEX_UPDATED,
+                source_type=SOURCE_TYPE,
+                source_id=key[:200],
+                job_id=target.job_id,
+                payload={"repository_key": key, "phase": "purge", "symbols_deleted": n_sym, "chunks_deleted": n_chunks},
+            )
+        return {"symbols": int(n_sym), "chunks": int(n_chunks)}
+
     async def current_revision(self, root: Path) -> tuple[str, str]:
         """``(revision, source)``: HEAD SHA for git workspaces, a content fingerprint otherwise."""
         cfg = self.cfg
@@ -131,8 +179,12 @@ class RepoIndexer:
             try:
                 yield
             finally:
+                released = False
                 with contextlib.suppress(Exception):
-                    await conn.execute(text("SELECT pg_advisory_unlock(:k)"), {"k": key})
+                    released = bool((await conn.execute(text("SELECT pg_advisory_unlock(:k)"), {"k": key})).scalar())
+                if not released:  # never hand a connection that may still hold the lock back to the pool
+                    with contextlib.suppress(Exception):
+                        await conn.invalidate()
                 with contextlib.suppress(Exception):
                     await s.rollback()
 
@@ -163,7 +215,10 @@ class RepoIndexer:
             async with self.sessionmaker() as s:
                 if await count_pending(s, target.repository_key, self.embedder.model_name) == 0:
                     return EmbedOutcome()
-            outcome = await embed_pending(self.sessionmaker, self.embedder, target.repository_key, self.cfg, ctx=ctx, max_chunks=max_chunks)
+            reuse = await self.reuse_keys(target)
+            outcome = await embed_pending(
+                self.sessionmaker, self.embedder, target.repository_key, self.cfg, ctx=ctx, max_chunks=max_chunks, reuse_keys=reuse
+            )
             async with self.sessionmaker() as s, s.begin():
                 if run_id is not None:
                     run = await s.get(RepoIndexRun, run_id)
@@ -203,7 +258,9 @@ class RepoIndexer:
         revision, source_kind = await self.current_revision(root)
         prev = await self.latest_run(key)
         prev_stats = (prev.stats or {}) if prev else {}
-        same_version = int(prev_stats.get("index_version", -1)) == INDEX_VERSION
+        same_version = (
+            int(prev_stats.get("index_version", -1)) == INDEX_VERSION and prev_stats.get("index_config") == cfg.index_fingerprint()
+        )
         if prev is not None and not force_full and same_version and prev.git_sha == revision:
             st = IndexStats.model_validate({k: v for k, v in prev_stats.items() if k in IndexStats.model_fields})
             st.mode, st.run_id, st.base_sha = "noop", str(prev.id), prev.git_sha
@@ -226,7 +283,14 @@ class RepoIndexer:
                 git_sha=revision,
                 base_index_sha=prev.git_sha if (prev is not None and mode == "incremental") else None,
                 status="running",
-                stats={"repository_key": key, "mode": mode, "source": source_kind, "index_version": INDEX_VERSION},
+                stats={
+                    "repository_key": key,
+                    "repository": target.base_repository,
+                    "mode": mode,
+                    "source": source_kind,
+                    "index_version": INDEX_VERSION,
+                    "index_config": cfg.index_fingerprint(),
+                },
             )
             s.add(run)
             await s.flush()
@@ -346,6 +410,7 @@ class RepoIndexer:
         model_name = self.embedder.model_name if self.embedder is not None else None
         stats = IndexStats(
             repository_key=key,
+            repository=target.base_repository,
             git_sha=revision,
             base_sha=prev.git_sha if (prev is not None and mode == "incremental") else None,
             mode="incremental" if mode == "incremental" else "full",
@@ -359,8 +424,10 @@ class RepoIndexer:
             deleted_paths=sorted(deleted)[:_MAX_LISTED_CHANGES],
             embedding_model=model_name,
             index_version=INDEX_VERSION,
+            index_config=cfg.index_fingerprint(),
         )
         indexed_paths = [e.path for e in to_index]
+        reuse = await self.reuse_keys(target) if model_name else []
         async with self.sessionmaker() as s, s.begin():
             n_sym, n_imp = await replace_file_symbols(
                 s, key, revision, parsed.symbols, remove_paths=set(indexed_paths) | deleted, replace_all=(mode == "full")
@@ -374,6 +441,7 @@ class RepoIndexer:
                 remove_paths=deleted,
                 replace_all=(mode == "full"),
                 model_name=model_name,
+                reuse_keys=reuse,
             )
             if mode == "incremental" and file_set_changed:
                 await self._reresolve_untouched(s, key, resolver, skip=set(indexed_paths) | deleted)
@@ -503,7 +571,11 @@ class RepoIndexer:
                     continue
                 txt = decode_text(data)
                 lang = detect_language(path, data[:512]) or "text"
-                fs = extract_file_symbols(path, lang, txt)
+                try:
+                    fs = extract_file_symbols(path, lang, txt)
+                except Exception as exc:  # one unparsable file never fails the run: it is chunked without structure
+                    fs = FileSymbols(path=path, language=lang, parse_error=f"{type(exc).__name__}: {str(exc)[:200]}")
+                    skip["parse_error"] = skip.get("parse_error", 0) + 1
                 for imp in fs.imports:
                     imp.resolved = resolver.resolve(path, lang, imp)
                 out_s.append(fs)
@@ -556,6 +628,10 @@ class RepoIndexer:
                 await s.execute(update(CodeSymbol).where(CodeSymbol.id == row.id).values(references=[meta, *refs[1:]]))
                 changed += 1
         return changed
+
+
+def _rowcount(result: Any) -> int:
+    return int(getattr(result, "rowcount", 0) or 0)
 
 
 def _inventory_json(inv: RepoInventory) -> dict[str, Any]:

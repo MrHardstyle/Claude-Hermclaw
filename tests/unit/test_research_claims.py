@@ -61,7 +61,9 @@ async def test_model_claims_are_grounded_and_deduplicated() -> None:
         }
 
     chat = ScriptedChat({"research_claims": answer})
-    out = await ClaimExtractor(chat, "fast-router", max_claims=5).extract(QUESTION, title="Install", url="https://toolkit.dev", text=SOURCE, ctx=CTX)
+    out = await ClaimExtractor(chat, "fast-router", max_claims=5).extract(
+        QUESTION, title="Install", url="https://toolkit.dev", text=SOURCE, ctx=CTX
+    )
     assert out.method == "model"
     assert out.claims == ["Toolkit 4 requires Python 3.10 or later.", "The Toolkit server listens on port 8080 by default."]
     assert out.dropped_ungrounded == 2

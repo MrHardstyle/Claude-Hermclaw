@@ -29,6 +29,8 @@ from hermclaw.repo_intelligence.tables import extract_tables
 MAX_REFS = 100
 MAX_SYMBOLS_PER_FILE = 5_000
 DEFINITION_KINDS = ("function", "method", "class", "interface", "trait", "enum", "type", "constant")
+#: rows that are not definitions: imports (11.7) and per-file module-level call references
+AUX_KINDS = ("import", "module")
 _TS_LANGS = {"javascript": "javascript", "typescript": "typescript", "tsx": "tsx", "php": "php"}
 _local = threading.local()
 log = get_logger(__name__)
@@ -154,10 +156,15 @@ class _PyCollector(ast.NodeVisitor):
 def _python(path: str, text: str) -> FileSymbols:
     try:
         tree = ast.parse(text)
-    except (SyntaxError, ValueError) as exc:
+    except (SyntaxError, ValueError, RecursionError, MemoryError) as exc:
         return FileSymbols(path=path, language="python", parse_error=f"{type(exc).__name__}: {str(exc)[:200]}")
     col = _PyCollector(path)
-    col.visit(tree)
+    try:
+        col.visit(tree)
+    except RecursionError:  # pathologically nested code: keep what was collected
+        return FileSymbols(
+            path=path, language="python", symbols=col.symbols, imports=col.imports, parse_error="RecursionError: nesting too deep"
+        )
     module_calls: list[str] = []
     for node in tree.body:
         if not isinstance(node, ast.FunctionDef | ast.AsyncFunctionDef | ast.ClassDef):
@@ -468,11 +475,14 @@ def _tree_sitter(path: str, lang: str, text: str) -> FileSymbols:
     except Exception as exc:  # parser unavailable/crash: no structure, never a failed index run
         return FileSymbols(path=path, language=lang, parse_error=f"{type(exc).__name__}: {str(exc)[:200]}")
     col = _TSCollector(path, lang, src)
-    if lang == "php":
-        col.walk_php(tree.root_node, None, False)
-    else:
-        col.walk_js(tree.root_node, None, False)
     err = "syntax errors (partial structure)" if tree.root_node.has_error else None
+    try:
+        if lang == "php":
+            col.walk_php(tree.root_node, None, False)
+        else:
+            col.walk_js(tree.root_node, None, False)
+    except RecursionError:  # pathologically nested code: keep what was collected
+        err = "RecursionError: nesting too deep (partial structure)"
     return FileSymbols(path=path, language=lang, symbols=col.symbols, imports=col.imports, calls=_dedup(col.module_calls), parse_error=err)
 
 
@@ -540,6 +550,21 @@ def symbol_rows(repository_key: str, git_sha: str, fs: FileSymbols) -> list[dict
                 "references": [imp.model_dump(exclude={"line"})],
             }
         )
+    if fs.calls:  # module-level call references (scripts, registrations) – a "module" row keeps them queryable
+        rows.append(
+            {
+                "repository_key": repository_key,
+                "git_sha": git_sha,
+                "path": fs.path,
+                "name": fs.path.rsplit("/", 1)[-1][:300],
+                "kind": "module",
+                "language": fs.language[:32],
+                "start_line": 1,
+                "end_line": 1,
+                "parent": None,
+                "references": fs.calls[:MAX_REFS],
+            }
+        )
     return rows
 
 
@@ -587,7 +612,8 @@ async def replace_file_symbols(
     for i in range(0, len(rows), batch):
         await session.execute(insert(CodeSymbol), rows[i : i + batch])
     n_imports = sum(1 for r in rows if r["kind"] == "import")
-    return len(rows) - n_imports, n_imports
+    n_aux = sum(1 for r in rows if r["kind"] in AUX_KINDS)
+    return len(rows) - n_aux, n_imports
 
 
 def _like_escape(term: str) -> str:
@@ -619,7 +645,7 @@ async def query_symbols(
         CodeSymbol.references,
     ).where(CodeSymbol.repository_key == repository_key)
     if not include_imports:
-        stmt = stmt.where(CodeSymbol.kind != "import")
+        stmt = stmt.where(CodeSymbol.kind.not_in(AUX_KINDS))
     if exact:
         stmt = stmt.where(func.lower(CodeSymbol.name).in_([t.lower() for t in terms]))
     else:
@@ -628,6 +654,35 @@ async def query_symbols(
     stmt = stmt.order_by(CodeSymbol.path, CodeSymbol.start_line, CodeSymbol.name).limit(limit + len(excluded) * 20)
     rows = (await session.execute(stmt)).all()
     return [row_to_symbol(r) for r in rows if r.path not in excluded][:limit]
+
+
+async def referencing_files(
+    session: AsyncSession, repository_key: str, names: Sequence[str], *, exclude_paths: Iterable[str] = (), limit: int = 5_000
+) -> dict[str, set[str]]:
+    """``name -> files`` whose definitions or module-level code call/instantiate ``name`` (JSONB ``@>`` on references)."""
+    wanted = [n for n in dict.fromkeys(names) if n][:25]
+    if not wanted:
+        return {}
+    excluded = set(exclude_paths)
+    stmt = (
+        select(CodeSymbol.path, CodeSymbol.references)
+        .where(
+            CodeSymbol.repository_key == repository_key,
+            CodeSymbol.kind != "import",
+            or_(*(CodeSymbol.references.contains([n]) for n in wanted)),
+        )
+        .order_by(CodeSymbol.path)
+        .limit(limit)
+    )
+    out: dict[str, set[str]] = {}
+    for path, refs in (await session.execute(stmt)).all():
+        if path in excluded or not isinstance(refs, list):
+            continue
+        present = {r for r in refs if isinstance(r, str)}
+        for n in wanted:
+            if n in present:
+                out.setdefault(n, set()).add(path)
+    return out
 
 
 async def load_imports(session: AsyncSession, repository_key: str) -> dict[str, list[ImportRecord]]:

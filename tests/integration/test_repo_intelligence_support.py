@@ -69,7 +69,7 @@ FIXTURE_FILES: dict[str, str] = {
     ),
     "app/services/__init__.py": "",
     "app/services/billing.py": (
-        "\"\"\"Invoice arithmetic.\"\"\"\n\n"
+        '"""Invoice arithmetic."""\n\n'
         "TAX_RATE = 0.19\n\n\n"
         "def calculate_invoice_total(amounts: list[int]) -> float:\n"
         "    subtotal = sum(amounts)\n"
@@ -122,7 +122,7 @@ FIXTURE_FILES: dict[str, str] = {
         '{\n  "name": "acme/portal",\n  "autoload": {"psr-4": {"App\\\\": "src/"}},\n'
         '  "require-dev": {"phpunit/phpunit": "^11.0"},\n  "scripts": {"test": "phpunit"}\n}\n'
     ),
-    "php/phpunit.xml": "<phpunit bootstrap=\"vendor/autoload.php\"></phpunit>\n",
+    "php/phpunit.xml": '<phpunit bootstrap="vendor/autoload.php"></phpunit>\n',
     "php/public/index.php": (
         "<?php\nrequire_once __DIR__ . '/../src/helpers.php';\n\n"
         "if ($_SERVER['REQUEST_METHOD'] === 'POST') {\n"
@@ -153,14 +153,13 @@ FIXTURE_FILES: dict[str, str] = {
     ),
     "alembic.ini": "[alembic]\nscript_location = alembic\n",
     "alembic/versions/a1b2c3_create_users.py": (
-        "\"\"\"create users\"\"\"\nfrom alembic import op\nimport sqlalchemy as sa\n\n"
+        '"""create users"""\nfrom alembic import op\nimport sqlalchemy as sa\n\n'
         "revision = 'a1b2c3'\ndown_revision = None\n\n\n"
         "def upgrade() -> None:\n    op.create_table('users', sa.Column('id', sa.Integer, primary_key=True))\n\n\n"
         "def downgrade() -> None:\n    op.drop_table('users')\n"
     ),
     "Dockerfile": (
-        "FROM python:3.12-slim AS base\nWORKDIR /srv\nCOPY . .\n"
-        "FROM base AS runtime\nEXPOSE 8000\nCMD [\"uvicorn\", \"app.main:app\"]\n"
+        'FROM python:3.12-slim AS base\nWORKDIR /srv\nCOPY . .\nFROM base AS runtime\nEXPOSE 8000\nCMD ["uvicorn", "app.main:app"]\n'
     ),
     "docker-compose.yml": "services:\n  api:\n    build: .\n  db:\n    image: postgres:16\n",
     ".gitlab-ci.yml": "stages:\n  - test\n  - deploy\n\nvariables:\n  X: '1'\n\nunit:\n  stage: test\n  script: pytest\n\n.hidden:\n  script: echo\n",

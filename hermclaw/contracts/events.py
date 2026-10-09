@@ -30,6 +30,7 @@ class EventType:
     RESEARCH_SOURCE_READ = "research.source.read"
     RESEARCH_CLAIM_CREATED = "research.claim.created"
     RESEARCH_FINISHED = "research.finished"
+    RESEARCH_DECISION_LINKED = "research.decision.linked"
     PLANNER_INVOKED = "planner.invoked"
     PLANNER_REPAIR = "planner.repair"
     PLANNER_FALLBACK_USED = "planner.fallback.used"

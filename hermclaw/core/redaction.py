@@ -12,8 +12,9 @@ _PATTERNS: list[re.Pattern[str]] = [
     re.compile(r"-----BEGIN [A-Z0-9 ]*(?:PRIVATE|SECRET)[A-Z0-9 ]*-----.*?-----END [A-Z0-9 ]*-----", re.S),
     re.compile(r"(?i)(authorization\s*[:=]\s*bearer\s+)[A-Za-z0-9._~+/=-]{8,}"),
     re.compile(
-        r"(?i)(\b(?:api[_-]?key|access[_-]?token|auth[_-]?token|token|secret|password|passwd|private[_-]?token|client[_-]?secret)\b"
-        r"[\"']?\s*[:=]\s*[\"']?)([^\s\"',;]{4,})"
+        # optional identifier prefix (DB_PASSWORD, smtp-password, apiToken, X_API_KEY) – never a plural/suffix (max_tokens)
+        r"(\b(?:[A-Za-z0-9]+[_-]|[a-z0-9]+(?=[A-Z]))*(?i:api[_-]?key|access[_-]?token|auth[_-]?token|token|secret|password|passwd|"
+        r"private[_-]?token|client[_-]?secret)\b[\"']?\s*[:=]\s*[\"']?)([^\s\"',;]{4,})"
     ),
     re.compile(r"\bglpat-[A-Za-z0-9_-]{20,}\b"),  # GitLab personal access token
     re.compile(r"\bgh[pousr]_[A-Za-z0-9]{30,}\b"),  # GitHub tokens

@@ -58,7 +58,10 @@ def test_classify_source(url: str, source_type: str, min_score: float, max_score
 
 
 def test_primary_outranks_everything_and_forum_is_lowest() -> None:
-    scores = {u: classify_source(u, PRIMARY).authority_score for u in ["https://toolkit.dev/x", "https://docs.other.io/x", "https://stackoverflow.com/q/1"]}
+    scores = {
+        u: classify_source(u, PRIMARY).authority_score
+        for u in ["https://toolkit.dev/x", "https://docs.other.io/x", "https://stackoverflow.com/q/1"]
+    }
     assert scores["https://toolkit.dev/x"] > scores["https://docs.other.io/x"] > scores["https://stackoverflow.com/q/1"]
 
 

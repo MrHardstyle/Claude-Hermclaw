@@ -122,6 +122,7 @@ class GitTreeSource:
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.DEVNULL,
             env=_proc._env(),
+            start_new_session=True,
         )
         assert proc.stdin is not None and proc.stdout is not None
         timeout = self.cfg.git_timeout_seconds
@@ -147,11 +148,7 @@ class GitTreeSource:
                 proc.stdin.close()
             with contextlib.suppress(Exception):
                 await asyncio.wait_for(proc.wait(), 5)
-            if proc.returncode is None:
-                with contextlib.suppress(ProcessLookupError):
-                    proc.kill()
-                with contextlib.suppress(Exception):
-                    await proc.wait()
+            await _proc.terminate(proc)
 
 
 class WorktreeSource:
