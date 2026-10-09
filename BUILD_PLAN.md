@@ -337,7 +337,7 @@ Legende: `[x]` erledigt mit Evidence · `[~]` erledigt, Live-Verifikation auf Zi
 - [x] 25.1 DAG scheduler. — Evidence: hermclaw/scheduler/scheduler.py; tests/integration/test_scheduler.py::test_dag_runs_in_dependency_order_and_finalizes
 - [x] 25.2 ready steps. — Evidence: hermclaw/scheduler/scheduler.py; tests/integration/test_scheduler.py::test_dag_runs_in_dependency_order_and_finalizes
 - [ ] 25.3 capabilities. — Evidence: –
-- [ ] 25.4 resource leases. — Evidence: –
+- [x] 25.4 resource leases. — Evidence: ImplementStepHandler._model: coder lease during the loop (preemptible -> checkpoint), heavy lease during review; MediaStepHandler hold_media; test_coder_handler.py::test_video_preemption_checkpoints_the_coder_and_the_step_resumes
 - [ ] 25.5 worker dispatch. — Evidence: –
 - [x] 25.6 retries. — Evidence: Scheduler._apply_outcome retry/backoff; test_retry_with_backoff_then_success, test_backoff_delays_redispatch
 - [x] 25.7 timeouts. — Evidence: SchedulerSettings.step_timeout_seconds; test_step_timeout_is_retryable_failure

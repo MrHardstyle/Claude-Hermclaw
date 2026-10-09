@@ -6,6 +6,7 @@ deterministic verifier and the heavy reviewer (their own components are tested s
 
 from __future__ import annotations
 
+import asyncio
 import json
 import uuid
 from pathlib import Path
@@ -334,3 +335,46 @@ async def test_two_implement_steps_with_real_verifier_commit_separately(world: W
     async with world.sessionmaker() as s:
         rows = {r.step_key: r for r in (await s.execute(select(Step).where(Step.job_id == jid))).scalars()}
     assert rows["S001"].result["files"] == ["src/module.py"] and rows["S002"].result["files"] == ["src/util.py"]
+
+
+async def test_video_preemption_checkpoints_the_coder_and_the_step_resumes(world: World, tmp_path: Path) -> None:
+    """25.4/29.4/29.7: the coder holds the coder-model lease; a video job preempts it, the coder checkpoints,
+    the GPU goes to the video, and after its release the scheduler resumes the step from the checkpoint."""
+    from hermclaw.persistence.models import ResourceLease
+    from hermclaw.resources.manager import ResourceManager
+
+    rm = ResourceManager.from_config(world.sessionmaker, get_config(), "test-preempt")
+    video_done = asyncio.Event()
+    media_task: list[asyncio.Task[Any]] = []
+
+    async def video_job() -> None:
+        media = await rm.acquire_gpu_for_media("video", ttl_seconds=60, wait_timeout=30)
+        await asyncio.sleep(0.2)  # "render"
+        await rm.release_media(media)
+        video_done.set()
+
+    class PreemptingModels(Models):
+        async def structured(
+            self, alias: str, messages: list[ChatMessage], schema: type[T], *, ctx: CallContext, **kw: Any
+        ) -> StructuredResult[T]:  # type: ignore[override]
+            if alias == "coder-main" and not media_task:
+                media_task.append(asyncio.create_task(video_job()))  # a video job arrives during the first coder turn
+                await asyncio.sleep(0.5)  # the keeper sees the preemption request while the turn runs
+            return await super().structured(alias, messages, schema, ctx=ctx, **kw)
+
+    models = PreemptingModels([_plan()], [act("read_file", path="src/module.py"), EDIT, DONE])
+    handler = _handler(world, models, ScriptedVerifier(world, [True]), None)
+    handler.deps.resources = rm
+    handler.deps.lease_wait_seconds = 30
+    handler.deps.lease_keeper_interval = 0.05
+    jid = await _job(world)
+    jobs = await _run(world, _driver(world, models, tmp_path), [handler, ReviewHandler()], [jid])
+    assert jobs[jid].status == "succeeded", (jobs[jid].error_code, jobs[jid].error_message)
+    assert video_done.is_set()
+    attempts = await _attempts(world, jid)
+    s1 = [(a.attempt_no, a.kind, a.outcome) for a in attempts if a.kind in ("initial", "resume")]
+    assert (1, "initial", "checkpointed") in s1 and any(k == "resume" and o == "completed" for _, k, o in s1), s1
+    async with world.sessionmaker() as s:
+        leases = (await s.execute(select(ResourceLease).where(ResourceLease.owner_job_id == jid))).scalars().all()
+    reasons = sorted({lease.release_reason for lease in leases if lease.release_reason})
+    assert "preempted" in reasons and all(lease.state not in ("active", "preempting") for lease in leases), reasons

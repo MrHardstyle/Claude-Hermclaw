@@ -10,6 +10,7 @@ completely again (23.5 regression rerun). When the correction budget is exhauste
 
 from __future__ import annotations
 
+import contextlib
 import dataclasses
 import uuid
 from collections.abc import Awaitable, Callable
@@ -28,7 +29,7 @@ from hermclaw.contracts.scope import ScopeContract, ScopeExpansionRequest
 from hermclaw.contracts.step import StepContract
 from hermclaw.contracts.verification import VerificationReport
 from hermclaw.core.config import HermclawConfig
-from hermclaw.core.errors import ConfigError, GitError, HermclawError
+from hermclaw.core.errors import ConfigError, GitError, HermclawError, ResourceUnavailable
 from hermclaw.core.interfaces import CommandExecutor, RepoContextProvider, WorkspaceHandle
 from hermclaw.core.logging import get_logger
 from hermclaw.core.redaction import DEFAULT_REDACTOR
@@ -91,6 +92,12 @@ class ResearchPort(Protocol):
     async def ask(self, question: str, *, job_id: uuid.UUID, step_id: uuid.UUID) -> str: ...
 
 
+class ModelLeaser(Protocol):
+    """The part of :class:`hermclaw.resources.manager.ResourceManager` the handler uses."""
+
+    def hold_model(self, profile: Any, **kw: Any) -> contextlib.AbstractAsyncContextManager[Any]: ...
+
+
 ExecutorFactory = Callable[[WorkspaceHandle, StepContract], Awaitable[CommandExecutor]]
 StagnationFactory = Callable[[StepRunContext], Awaitable[StagnationHook]]
 
@@ -109,6 +116,10 @@ class ImplementDeps:
     research: ResearchPort | None = None
     stagnation_factory: StagnationFactory | None = None
     coder_settings: CoderSettings = field(default_factory=CoderSettings)
+    resources: ModelLeaser | None = None  # P09: GPU model leases (coder during the loop, heavy during review)
+    lease_wait_seconds: float = 3600.0
+    lease_ttl_seconds: float = 600.0
+    lease_keeper_interval: float | None = None  # None: resource manager default (heartbeat-derived)
 
 
 # ----------------------------------------------------------------------------- helpers
@@ -300,19 +311,46 @@ class ImplementStepHandler:
         )
         corrections = corrections_from_input(ctx.correction_input) if ctx.attempt_kind == "correction" else []
         await self._status(ctx, f"Coder startet {row.step_key} ({ctx.attempt_kind}, max {settings.max_turns} Turns)")
-        result = await loop.run(
-            step=StepBrief.from_contract(step),
-            workspace=handle,
+        try:
+            async with self._model(ctx, "coder", preemptible=True):
+                result = await loop.run(
+                    step=StepBrief.from_contract(step),
+                    workspace=handle,
+                    job_id=ctx.job_id,
+                    step_id=ctx.step_id,
+                    attempt_id=ctx.attempt_id,
+                    token=ctx.token,
+                    history=history,
+                    start_turn=start + 1,
+                    last_failure=last_failure,
+                    correction=corrections,
+                )
+        except ResourceUnavailable as exc:
+            return StepOutcome("failed", error_code=exc.code, error_message=exc.message, retryable=True)
+        try:
+            return await self._after_loop(_Run(ctx, row, step, ws, handle), result)
+        except ResourceUnavailable as exc:  # heavy-review lease not granted in time
+            return StepOutcome("failed", error_code=exc.code, error_message=exc.message, retryable=True)
+
+    def _model(self, ctx: StepRunContext, role: str, *, preemptible: bool) -> contextlib.AbstractAsyncContextManager[Any]:
+        """Hold the GPU model lease for ``role``; a preemption request (video/image) makes the coder checkpoint."""
+        if self.deps.resources is None:
+            return contextlib.nullcontext()
+        profile = self.config.models.by_role(role)
+
+        def on_preempt(*_: Any) -> None:
+            ctx.token.request_checkpoint(f"GPU needed by a higher-priority job ({role} lease preempted)")
+
+        return self.deps.resources.hold_model(
+            profile,
+            on_preempt=on_preempt if preemptible else None,
             job_id=ctx.job_id,
             step_id=ctx.step_id,
-            attempt_id=ctx.attempt_id,
-            token=ctx.token,
-            history=history,
-            start_turn=start + 1,
-            last_failure=last_failure,
-            correction=corrections,
+            ttl_seconds=self.deps.lease_ttl_seconds,
+            wait_timeout=self.deps.lease_wait_seconds,
+            preemptible=preemptible,
+            keeper_interval=self.deps.lease_keeper_interval,
         )
-        return await self._after_loop(_Run(ctx, row, step, ws, handle), result)
 
     async def _after_loop(self, run: _Run, result: CoderResult) -> StepOutcome:
         ctx, row = run.ctx, run.row
@@ -396,11 +434,11 @@ class ImplementStepHandler:
             )
         if self.deps.reviewer is not None and self.deps.reviewer.should_review(row.kind, True):
             await self._status(ctx, f"Heavy Review für {row.step_key}")
-            review, _ = enforce_review_invariant(
-                await self.deps.reviewer.review(
+            async with self._model(ctx, "heavy", preemptible=False):
+                raw_review = await self.deps.reviewer.review(
                     step, handle, outcome.report, job_id=ctx.job_id, step_id=ctx.step_id, attempt_id=ctx.attempt_id
                 )
-            )
+            review, _ = enforce_review_invariant(raw_review)
             if review.verdict != "pass":
                 return await self._correction(
                     ctx,
@@ -415,9 +453,11 @@ class ImplementStepHandler:
     async def _review_and_correct(self, run: _Run, report: VerificationReport, items: list[CorrectionItem]) -> StepOutcome:
         ctx, row, step, handle = run.ctx, run.row, run.step, run.handle
         assert self.deps.reviewer is not None
-        review, _ = enforce_review_invariant(
-            await self.deps.reviewer.review(step, handle, report, job_id=ctx.job_id, step_id=ctx.step_id, attempt_id=ctx.attempt_id)
-        )
+        async with self._model(ctx, "heavy", preemptible=False):
+            raw_review = await self.deps.reviewer.review(
+                step, handle, report, job_id=ctx.job_id, step_id=ctx.step_id, attempt_id=ctx.attempt_id
+            )
+        review, _ = enforce_review_invariant(raw_review)
         return await self._correction(
             ctx, row, "review", items + list(CorrectionItem.from_review(review)), "STAGNATION", "stagnation escalated to heavy review"
         )

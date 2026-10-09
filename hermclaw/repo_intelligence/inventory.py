@@ -257,6 +257,10 @@ def _load_yaml(ctx: _Ctx, path: str) -> Any:
     return docs[0] if len(docs) == 1 else docs
 
 
+def _as_dict(value: Any) -> dict[str, Any]:
+    return {str(k): v for k, v in value.items()} if isinstance(value, dict) else {}
+
+
 def _deps_text(*parts: Any) -> str:
     return json.dumps(parts, default=str).lower()
 
@@ -317,7 +321,7 @@ def _manifests(ctx: _Ctx) -> _Manifests:
             data = _load_json(ctx, f.path) or {}
             m.package_json[d] = data
             detail = str(data.get("name")) if data.get("name") else None
-            scripts = data.get("scripts") if isinstance(data.get("scripts"), dict) else {}
+            scripts = _as_dict(data.get("scripts"))
             for sname, cmd in sorted(scripts.items()):
                 m.entry.append(EntryPoint(kind="npm-script", name=str(sname), path=f.path, target=str(cmd)[:300]))
                 if "test" in str(sname).lower():
@@ -342,7 +346,7 @@ def _manifests(ctx: _Ctx) -> _Manifests:
             data = _load_json(ctx, f.path) or {}
             m.composer[d] = data
             detail = str(data.get("name")) if data.get("name") else None
-            scripts = data.get("scripts") if isinstance(data.get("scripts"), dict) else {}
+            scripts = _as_dict(data.get("scripts"))
             for sname, cmd in sorted(scripts.items()):
                 cmd_s = " && ".join(map(str, cmd)) if isinstance(cmd, list) else str(cmd)
                 m.entry.append(EntryPoint(kind="composer-script", name=str(sname), path=f.path, target=cmd_s[:300]))

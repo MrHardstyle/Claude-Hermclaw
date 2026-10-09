@@ -12,7 +12,7 @@ from __future__ import annotations
 import asyncio
 import contextlib
 import os
-from collections.abc import AsyncIterator, Sequence
+from collections.abc import AsyncGenerator, Sequence
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -110,7 +110,7 @@ class GitTreeSource:
         entries.sort(key=lambda e: e.path)
         return entries[: self.cfg.max_files]
 
-    async def read(self, entries: Sequence[TreeEntry]) -> AsyncIterator[tuple[TreeEntry, bytes]]:
+    async def read(self, entries: Sequence[TreeEntry]) -> AsyncGenerator[tuple[TreeEntry, bytes], None]:
         """Stream blob contents through one ``git cat-file --batch`` process (request/response, no deadlock)."""
         if not entries:
             return
@@ -176,7 +176,7 @@ class WorktreeSource:
 
         return await asyncio.to_thread(_sizes)
 
-    async def read(self, entries: Sequence[TreeEntry]) -> AsyncIterator[tuple[TreeEntry, bytes]]:
+    async def read(self, entries: Sequence[TreeEntry]) -> AsyncGenerator[tuple[TreeEntry, bytes], None]:
         for entry in entries:
             data = await asyncio.to_thread(read_bytes, self.root, entry.path, entry.size + 1)
             if data is not None:
