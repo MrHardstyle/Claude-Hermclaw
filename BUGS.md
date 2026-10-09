@@ -194,6 +194,7 @@ Noch keine.
 - Erwartet: The image's PATH is preserved
 - Tatsächlich: Debian's /etc/profile overwrites PATH with the standard directories. Workaround: ContainerSandbox(shell=('sh','-c')); this is documented in docs/architecture/sandbox.md section 4
 
+
 ## Template
 
 ### BUG-XXX – Titel

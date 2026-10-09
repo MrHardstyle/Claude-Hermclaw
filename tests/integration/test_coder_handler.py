@@ -9,7 +9,7 @@ from __future__ import annotations
 import json
 import uuid
 from pathlib import Path
-from typing import Any, TypeVar
+from typing import Any, ClassVar, TypeVar
 
 import pytest
 from pydantic import BaseModel
@@ -251,3 +251,36 @@ async def test_exhausted_corrections_escalate_to_replan(world: World, tmp_path: 
     assert old.superseded and old.correction_count == 2 and old.result["replan_reason"] == "repeated_verifier_failure"
     assert new.status == "completed" and job.status == "succeeded"
     assert _remote_value(world) == "VALUE = 2"
+
+
+async def test_stagnation_research_recommendation_feeds_research_into_correction(world: World, tmp_path: Path) -> None:
+    from hermclaw.coder import StagnationDirective
+
+    class StopOnce:
+        calls = 0
+
+        async def observe(self, obs: Any) -> StagnationDirective:
+            StopOnce.calls += 1
+            if StopOnce.calls == 1:
+                return StagnationDirective("stop", recommendation="research", reasons=("same error signature 4x",))
+            return StagnationDirective()
+
+    class Research:
+        questions: ClassVar[list[str]] = []
+
+        async def ask(self, question: str, *, job_id: uuid.UUID, step_id: uuid.UUID) -> str:
+            Research.questions.append(question)
+            return "Official docs: set VALUE via module constant; tests read it directly."
+
+    async def stagnation_factory(ctx: Any) -> StopOnce:
+        return StopOnce()
+
+    models = Models([_plan()], [act("read_file", path="src/module.py"), EDIT, DONE])
+    handler = _handler(world, models, ScriptedVerifier(world, [True]), None)
+    handler.deps.research = Research()
+    handler.deps.stagnation_factory = stagnation_factory
+    jid = await _job(world)
+    jobs = await _run(world, _driver(world, models, tmp_path), [handler, ReviewHandler()], [jid])
+    assert jobs[jid].status == "succeeded", (jobs[jid].error_code, jobs[jid].error_message)
+    assert Research.questions and "same error signature" in Research.questions[0]
+    assert any("Official docs" in m.content for m in models.coder_prompts[1]), "research result must reach the correction attempt"

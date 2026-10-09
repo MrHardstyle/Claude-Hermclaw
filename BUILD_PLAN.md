@@ -279,14 +279,14 @@ Legende: `[x]` erledigt mit Evidence · `[~]` erledigt, Live-Verifikation auf Zi
 
 ## P20 – Stagnation Detection
 
-- [ ] 20.1 action fingerprints. — Evidence: –
-- [ ] 20.2 error fingerprints. — Evidence: –
-- [ ] 20.3 diff progress. — Evidence: –
-- [ ] 20.4 thresholds. — Evidence: –
-- [ ] 20.5 forced diagnose. — Evidence: –
-- [ ] 20.6 strategy switch. — Evidence: –
-- [ ] 20.7 replan. — Evidence: –
-- [ ] 20.8 stop conditions. — Evidence: –
+- [x] 20.1 action fingerprints. — Evidence: hermclaw/stagnation/fingerprints.py action_fingerprint/action_label/tool_sequence/decision_label; detector signals action, tool_sequence, decision. Tests: test_stagnation_fingerprints.py::test_action_fingerprint_normalises_paths_whitespace_and_order, ::test_tool_sequence_and_decision_label; test_sta
+- [x] 20.2 error fingerprints. — Evidence: fingerprints.py normalise_text/error_signature (key error lines, redacted)/extract_failing_tests (pytest, unittest, go, cargo, jest/vitest, mocha, phpunit)/failing_tests_fingerprint; detector signals error, failing_tests, changed_files. Tests: test_stagnation_fingerprints.py::test_two_runs_differing
+- [x] 20.3 diff progress. — Evidence: detector.py workspace epochs: diff_hash of the full workspace diff (monitor diff_provider) or action-derived states; no_diff_progress streak. Tests: test_stagnation_detector.py::test_rewriting_identical_content_is_no_progress, ::test_oscillating_content_is_no_progress_in_fallback_mode, ::test_diff_m
+- [x] 20.4 thresholds. — Evidence: detector.py level_for/validate_policy using policies.stagnation (2 warning / 3 diagnose / 4 stop). Tests: test_stagnation_detector.py::test_default_threshold_table, ::test_custom_threshold_table, ::test_identical_read_only_actions_follow_the_ladder (hypothesis), ::test_invalid_policy_is_rejected
+- [x] 20.5 forced diagnose. — Evidence: actions.py diagnosis_message (asks only for the next action + decision label, no written reasoning), monitor injects it via StagnationDirective. Tests: test_stagnation_actions.py::test_forced_diagnosis_and_strategy_switch, ::test_diagnosis_names_the_previous_decision_label; test_stagnation_detector.
+- [x] 20.6 strategy switch. — Evidence: actions.py in_loop_strategy (request_scope_expansion / block_external_failure / switch_to_research / reread_before_edit / switch_approach) + STOP_STRATEGY; persistence.record_events emits strategy.changed. Tests: test_stagnation_actions.py::test_forced_diagnosis_and_strategy_switch, ::test_research_
+- [x] 20.7 replan. — Evidence: actions.py LADDER/choose_recommendation (same failing test after changes: heavy_review then replan; scope: replan), replan_hint (ReplanTrigger-compatible reason_code/evidence); persistence.prior_escalations feeds used rungs across attempts. Tests: test_stagnation_actions.py::test_stop_ladder_table, 
+- [x] 20.8 stop conditions. — Evidence: detector stop at stop_after, diagnosis cap -> stop, sticky stop, replay protection; actions.decide stop -> research|heavy_review|replan|block; monitor ends the coder loop (outcome stagnated); state persisted in step_attempts.fingerprints['stagnation'] with stale-write guard. Tests: test_stagnation_d
 
 ## P21 – Deterministic Verifier
 

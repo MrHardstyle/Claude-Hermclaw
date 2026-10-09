@@ -342,6 +342,14 @@ class ImplementStepHandler:
             ]
             if result.recommendation == "heavy_review" and self.deps.reviewer is not None:
                 return await self._review_and_correct(run, VerificationReport(passed=False, checks=[], summary="stagnation"), items)
+            if result.recommendation == "research" and self.deps.research is not None:
+                question = (
+                    f"Step '{row.title}' ({row.kind}) is stuck: {result.detail}. "
+                    f"Last failure: {(result.last_failure or 'n/a')[:600]}. Which documented approach or API usage solves this?"
+                )
+                summary = await self.deps.research.ask(DEFAULT_REDACTOR.text(question), job_id=ctx.job_id, step_id=ctx.step_id)
+                items.append(CorrectionItem(source="research", label="research result", message=summary[:3000]))
+                return await self._correction(ctx, row, "stagnation", items, "STAGNATION", "stagnation escalated to research")
             return StepOutcome(
                 "blocked",
                 error_code="STAGNATION",

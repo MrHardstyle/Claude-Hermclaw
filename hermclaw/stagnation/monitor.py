@@ -235,13 +235,18 @@ def make_stagnation_factory(
             async with ctx.sessionmaker() as s:
                 inherit = await previous_attempt_id(s, ctx.step_id, ctx.attempt_no)
         effective: StagnationPolicy = policy or ctx.config.policies.stagnation
+        effective_tuning = tuning or DetectorTuning(
+            sequence_length=effective.sequence_length,
+            max_diagnoses=effective.max_diagnoses,
+            strip_line_numbers=effective.strip_line_numbers,
+        )
         return await create_monitor(
             ctx.sessionmaker,
             job_id=ctx.job_id,
             step_id=ctx.step_id,
             attempt_id=ctx.attempt_id,
             policy=effective,
-            tuning=tuning,
+            tuning=effective_tuning,
             research_available=research_available,
             heavy_review_available=heavy_review_available,
             diff_provider=diff_provider,

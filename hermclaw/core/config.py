@@ -189,6 +189,9 @@ class StagnationPolicy(_Strict):
     warn_after: int = 2
     diagnose_after: int = 3
     stop_after: int = 4
+    sequence_length: int = 3  # n of the "same tool sequence" n-gram
+    max_diagnoses: int = 2  # a further forced diagnosis escalates to stop
+    strip_line_numbers: bool = True  # line/column numbers do not distinguish error signatures
 
 
 class CorrectionPolicy(_Strict):
