@@ -76,6 +76,8 @@ LABEL_REQUEST = "hermclaw.request"
 LABEL_JOB = "hermclaw.job"
 LABEL_STEP = "hermclaw.step"
 DEFAULT_SHELL: tuple[str, ...] = ("sh", "-lc")
+#: the local runner uses a non-login shell: host ``/etc/profile*`` must not inject variables or secrets
+LOCAL_SHELL: tuple[str, ...] = ("sh", "-c")
 #: podman/docker exit code when the engine itself (not the command) failed
 ENGINE_ERROR_EXIT = 125
 #: exit code of a SIGKILLed process (timeout kill, OOM kill)
@@ -87,6 +89,8 @@ LINE_ALIGN_MAX_BYTES = 4096
 MIN_SECRET_FRAGMENT = 3
 MIN_MEMORY_BYTES = 6 * 1024 * 1024  # podman/docker refuse smaller memory limits
 MIN_CPUS = 0.01
+#: longest pause between two checks whether a command's process has exited
+EXIT_POLL_MAX_SECONDS = 0.1
 #: size of the writable ``/dev/shm`` (POSIX semaphores/shared memory, e.g. Python multiprocessing)
 DEFAULT_SHM_SIZE = "64m"
 MAX_ENV_VALUE_CHARS = 32_768
@@ -352,6 +356,19 @@ class _ProcOutcome:
     duration_ms: int
 
 
+async def wait_exit(proc: asyncio.subprocess.Process, *, max_interval: float = EXIT_POLL_MAX_SECONDS) -> int:
+    """Wait until ``proc`` itself has exited and return its exit code.
+
+    Unlike :meth:`asyncio.subprocess.Process.wait` (which on Python >= 3.12 also waits until every pipe is
+    closed) this returns as soon as the child is reaped, even when a background grandchild still holds
+    stdout/stderr open – the caller can then kill the stragglers instead of hanging until the timeout."""
+    interval = 0.005
+    while proc.returncode is None:
+        await asyncio.sleep(interval)
+        interval = min(max_interval, interval * 2)
+    return proc.returncode
+
+
 async def _supervise(
     proc: asyncio.subprocess.Process,
     *,
@@ -376,15 +393,15 @@ async def _supervise(
         with contextlib.suppress(Exception):
             await terminate()
         try:
-            await asyncio.wait_for(proc.wait(), reader_grace)
+            await asyncio.wait_for(wait_exit(proc), reader_grace)
         except TimeoutError:
             with contextlib.suppress(ProcessLookupError):
                 proc.kill()
-            await proc.wait()
+            await wait_exit(proc)
 
     try:
         try:
-            await asyncio.wait_for(proc.wait(), timeout_seconds)
+            await asyncio.wait_for(wait_exit(proc), timeout_seconds)
         except TimeoutError:
             timed_out = True
             await stop()
@@ -983,7 +1000,7 @@ class LocalSandbox:
         environment: str | None = None,
         max_output_bytes: int | None = None,
         redactor: Redactor | None = None,
-        shell: Sequence[str] = DEFAULT_SHELL,
+        shell: Sequence[str] = LOCAL_SHELL,
         kill_grace_seconds: float = 5.0,
     ) -> None:
         env_name = environment or _current_environment()
