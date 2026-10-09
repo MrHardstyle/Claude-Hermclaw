@@ -63,6 +63,8 @@ class ReviewSettings:
     max_snippet_chars: int = 3_000
     snippet_budget_chars: int = 16_000  # what the workspace adapter asks repo intelligence for
     git_diff_max_bytes: int = 400_000  # what the workspace adapter asks the git reader for
+    context_timeout_seconds: float = 120.0  # bound for collecting diff / snippets / commands
+    max_command_log: int = 60  # executed commands of the attempt shown as change evidence
     review_failed_verification: bool = False  # should_review(kind, verifier_passed=False) -> True?
 
 

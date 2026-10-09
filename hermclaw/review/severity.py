@@ -61,6 +61,7 @@ _SEVERITY_SYNONYMS: dict[str, FindingSeverity] = {
     "trivial": FindingSeverity.minor,
     "nit": FindingSeverity.minor,
     "nitpick": FindingSeverity.minor,
+    "nit_pick": FindingSeverity.minor,
     "info": FindingSeverity.minor,
     "informational": FindingSeverity.minor,
     "note": FindingSeverity.minor,
