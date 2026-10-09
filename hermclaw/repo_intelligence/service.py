@@ -734,10 +734,9 @@ class RepoIntelligence:
                     ranges.append((sh.start_line, sh.end_line))
             ranges.extend((c.start_line, c.end_line) for c in chunks_by_file.get(hit.path, []))
             picked: list[tuple[int, int]] = []
-            for s, e in ranges:
-                s = max(1, s - cfg.snippet_context_lines)
-                e = max(s, e + cfg.snippet_context_lines)
-                e = min(e, s + cfg.snippet_max_lines - 1)
+            for r_start, r_end in ranges:
+                s = max(1, r_start - cfg.snippet_context_lines)
+                e = min(max(s, r_end + cfg.snippet_context_lines), s + cfg.snippet_max_lines - 1)
                 if any(not (e < ps or s > pe) for ps, pe in picked):
                     continue
                 picked.append((s, e))

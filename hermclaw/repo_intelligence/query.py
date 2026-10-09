@@ -6,8 +6,7 @@ import math
 import re
 from dataclasses import dataclass, field
 
-_STOP = frozenset(
-    """
+_STOP_WORDS = """
     a an the and or not no of to in on at by for from with without into onto over under is are was were be been being
     it its this that these those there here where when what which who whom how why do does did done can could should
     would will shall may might must have has had i we you they he she them our your their my me us all any some each
@@ -18,8 +17,8 @@ _STOP = frozenset(
     werden wurde wurden im in am an auf aus bei mit nach von vor zu zum zur für über unter durch ohne um wie was wo
     wann warum welche welcher welches wer bitte soll sollte muss müssen kann können neue neuen neues neu hinzufügen
     ändern ändere anpassen implementieren datei dateien funktion funktionen klasse klassen auch nur noch schon dass
-    """.split()
-)
+    """
+_STOP = frozenset(_STOP_WORDS.split())
 _IDENT_RE = re.compile(r"[A-Za-z_$][\w$]*(?:(?:\.|::|->|\\)[A-Za-z_$][\w$]*)*")
 _ROUTE_RE = re.compile(r"(?<![\w.])/[\w\-{}:.<>\[\]]+(?:/[\w\-{}:.<>\[\]]*)*")
 _PHRASE_RE = re.compile(r"`([^`]{2,200})`|\"([^\"]{2,200})\"|'([^']{3,200})'")

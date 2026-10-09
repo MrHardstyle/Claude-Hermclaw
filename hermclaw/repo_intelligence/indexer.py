@@ -239,7 +239,9 @@ class RepoIndexer:
                 payload={"repository_key": key, "run_id": str(run_id), "git_sha": revision, "mode": mode},
             )
         try:
-            return await self._build(target, root, run_id, revision, source_kind, mode, prev, started)
+            return await self._build(
+                target, root, run_id=run_id, revision=revision, source_kind=source_kind, mode=mode, prev=prev, started=started
+            )
         except BaseException as exc:
             await self._fail(target, run_id, exc)
             raise
@@ -314,6 +316,7 @@ class RepoIndexer:
         self,
         target: IndexTarget,
         root: Path,
+        *,
         run_id: uuid.UUID,
         revision: str,
         source_kind: str,
@@ -541,7 +544,8 @@ class RepoIndexer:
                 imp = ImportRecord(
                     line=row.start_line, **{k: v for k, v in meta.items() if k in ("module", "names", "kind", "level", "resolved")}
                 )
-            except Exception:
+            except Exception as exc:  # malformed legacy row: leave it untouched
+                log.debug("skipping malformed import row %s: %s", row.id, type(exc).__name__)
                 continue
             new = resolver.resolve(row.path, row.language, imp)
             if new != meta.get("resolved"):

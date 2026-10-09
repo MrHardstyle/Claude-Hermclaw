@@ -426,7 +426,7 @@ def _tests(ctx: _Ctx, man: _Manifests) -> TestInfo:
         if _skip_vendor(p):
             continue
         name = p.rsplit("/", 1)[-1].lower()
-        if name == "pytest.ini" or name == "conftest.py":
+        if name in ("pytest.ini", "conftest.py"):
             add("pytest", p, "pytest")
         elif name in ("setup.cfg", "tox.ini"):
             t = ctx.text(p) or ""
@@ -646,7 +646,7 @@ def _config_files(ctx: _Ctx, ci_paths: set[str], compose: set[str]) -> list[Conf
             kind = "env-example"
         elif f.sensitive:
             continue
-        elif "nginx" in p.lower() and lower.endswith((".conf", ".conf.template", ".template")) or lower == "nginx.conf":
+        elif ("nginx" in p.lower() and lower.endswith((".conf", ".conf.template", ".template"))) or lower == "nginx.conf":
             kind = "nginx"
         elif _CONFIG_TOOLING_RE.match(name):
             kind = "tooling"
@@ -823,13 +823,12 @@ async def status_entries(root: Path, cfg: RepoIntelConfig) -> list[tuple[str, st
         except UnicodeDecodeError:
             continue
         orig = None
-        if "R" in xy or "C" in xy:
-            if i < len(items):
-                try:
-                    orig = items[i].decode("utf-8")
-                except UnicodeDecodeError:
-                    orig = None
-                i += 1
+        if ("R" in xy or "C" in xy) and i < len(items):
+            try:
+                orig = items[i].decode("utf-8")
+            except UnicodeDecodeError:
+                orig = None
+            i += 1
         res.append((xy, path, orig))
     res.sort(key=lambda e: e[1])
     return res

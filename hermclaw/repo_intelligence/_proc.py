@@ -167,7 +167,8 @@ async def is_git_repo(root: Path, *, timeout_s: float = 30.0, git_binary: str = 
     if not top.ok:
         return False
     try:
-        return os.path.realpath(top.text().strip()) == os.path.realpath(root)
+        top_real, root_real = await asyncio.to_thread(lambda: (os.path.realpath(top.text().strip()), os.path.realpath(root)))
+        return top_real == root_real
     except OSError:
         return False
 

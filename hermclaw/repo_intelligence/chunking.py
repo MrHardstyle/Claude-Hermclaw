@@ -111,7 +111,7 @@ class Chunker:
         if sym is not None and sym.kind in _CONTAINER_KINDS:
             members = _members(sym, symbols)
             if members:
-                parts = self._segments(lines, seg.start, seg.end, members, symbols, owner=sym.name)
+                parts = self._segments(lines, seg.start, seg.end, members, symbols=symbols, owner=sym.name)
                 out: list[_Seg] = []
                 for p in parts:
                     out.extend(self._windows(lines, p) if self._size(lines, p) > self.max_chars else [p])
@@ -124,6 +124,7 @@ class Chunker:
         lo: int,
         hi: int,
         defs: Sequence[SymbolRecord],
+        *,
         symbols: Sequence[SymbolRecord],
         owner: str | None = None,
     ) -> list[_Seg]:
@@ -163,7 +164,7 @@ class Chunker:
             return []
         n = len(lines)
         defs = _top_level(symbols)
-        segs = self._segments(lines, 1, n, defs, symbols)
+        segs = self._segments(lines, 1, n, defs, symbols=symbols)
         segs = self._merge(lines, segs)
         chunks: list[Chunk] = []
         for seg in segs:

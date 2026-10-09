@@ -20,6 +20,7 @@ from typing import Any
 from sqlalchemy import delete, func, insert, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from hermclaw.core.logging import get_logger
 from hermclaw.persistence.models import CodeSymbol
 from hermclaw.repo_intelligence.routes import extract_routes
 from hermclaw.repo_intelligence.schemas import FileSymbols, ImportRecord, SymbolRecord
@@ -30,6 +31,7 @@ MAX_SYMBOLS_PER_FILE = 5_000
 DEFINITION_KINDS = ("function", "method", "class", "interface", "trait", "enum", "type", "constant")
 _TS_LANGS = {"javascript": "javascript", "typescript": "typescript", "tsx": "tsx", "php": "php"}
 _local = threading.local()
+log = get_logger(__name__)
 
 
 def _parser(lang: str) -> Any:
@@ -378,9 +380,9 @@ class _TSCollector:
             n = stack.pop()
             if n.type in ("string", "encapsed_string"):
                 literal = _string_value(n, self.src) or literal
-            elif n.type == "name" and _txt(n, self.src) == "__DIR__":
-                dir_relative = True
-            elif n.type == "function_call_expression" and _txt(n, self.src).replace(" ", "").startswith("dirname(__FILE__"):
+            elif (n.type == "name" and _txt(n, self.src) == "__DIR__") or (
+                n.type == "function_call_expression" and _txt(n, self.src).replace(" ", "").startswith("dirname(__FILE__")
+            ):
                 dir_relative = True
             stack.extend(n.children)
         if literal:
@@ -639,7 +641,8 @@ async def load_imports(session: AsyncSession, repository_key: str) -> dict[str, 
         meta = refs[0] if refs and isinstance(refs[0], dict) else {}
         try:
             rec = ImportRecord(line=line, **{k: v for k, v in meta.items() if k in ("module", "names", "kind", "level", "resolved")})
-        except Exception:
+        except Exception as exc:  # malformed row: no dependency edge, never a failed query
+            log.debug("skipping malformed import row of %s: %s", path, type(exc).__name__)
             continue
         out.setdefault(path, []).append(rec)
     return out
