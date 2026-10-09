@@ -412,7 +412,7 @@ class ResearchEngine:
             code = self._error(st, "fetch", exc, url=cand.url)
             st.failed_sources += 1
             row = store.SourceRow(
-                url=cand.url,
+                url=DEFAULT_REDACTOR.text(cand.url),
                 domain=domain,
                 title=cand.title,
                 status="failed",
@@ -425,8 +425,8 @@ class ResearchEngine:
                 st, row, text=f"Research konnte {domain} nicht lesen ({code})", severity=Severity.warning, extra={"error_code": code}, t0=t0
             )
             return None
-        final_url = fetched.final_url
-        if final_url != cand.url:  # a redirect may lead to another site: classify what was actually read
+        final_url = DEFAULT_REDACTOR.text(fetched.final_url)  # never persist/show secrets embedded in URLs
+        if fetched.final_url != cand.url:  # a redirect may lead to another site: classify what was actually read
             domain = host_of(final_url).removeprefix("www.") or domain
             cls = classify_source(final_url, self.policy.primary_domains)
         retrieved = self.clock()

@@ -121,7 +121,13 @@ class FixtureServer:
             def do_GET(self) -> None:
                 host = (self.headers.get("Host") or "").split(":")[0]
                 server.requests.append({"host": host, "path": self.path, "ua": self.headers.get("User-Agent", "")})
-                route = server.routes.get(f"{host}{self.path}") or server.routes.get(self.path)
+                bare = self.path.split("?", 1)[0]  # routes match the path with or without the query string
+                route = (
+                    server.routes.get(f"{host}{self.path}")
+                    or server.routes.get(self.path)
+                    or server.routes.get(f"{host}{bare}")
+                    or server.routes.get(bare)
+                )
                 if route is None:
                     route = Route(b"not found", status=404, content_type="text/plain")
                 if route.delay:

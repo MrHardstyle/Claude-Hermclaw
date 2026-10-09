@@ -376,13 +376,13 @@ Legende: `[x]` erledigt mit Evidence · `[~]` erledigt, Live-Verifikation auf Zi
 
 ## P29 – Media
 
-- [ ] 29.1 image step. — Evidence: –
-- [ ] 29.2 video step. — Evidence: –
-- [ ] 29.3 GPU leases. — Evidence: –
-- [ ] 29.4 safe AI drain. — Evidence: –
-- [ ] 29.5 model unload. — Evidence: –
-- [ ] 29.6 artifacts. — Evidence: –
-- [ ] 29.7 resume AI. — Evidence: –
+- [x] 29.1 image step. — Evidence: worker/media (comfyui backend) + hermclaw/media/handler.py; tests/integration/test_media_worker.py::test_comfyui_workflow_with_overrides_and_rejection, test_media_handler.py
+- [x] 29.2 video step. — Evidence: ffmpeg backend + MediaStepHandler; test_media_handler.py::test_video_step_registers_artifacts_and_releases_gpu, test_media_worker.py::test_video_transcode_thumbnail_probe_concat_unloads_models_first
+- [x] 29.3 GPU leases. — Evidence: ResourceManager.hold_media (gpu-224 + video-224, priority video 100/image 90); test_media_handler.py::test_video_preempts_running_ai_lease
+- [x] 29.4 safe AI drain. — Evidence: drain leases on AI model groups + preemption request -> AI holder yields (checkpoint); test_video_preempts_running_ai_lease
+- [x] 29.5 model unload. — Evidence: media service unloads all Ollama models before GPU work, residency lock; test_video_transcode_thumbnail_probe_concat_unloads_models_first
+- [x] 29.6 artifacts. — Evidence: sha256-verified download into artifacts_dir + artifacts rows (kind image/video); test_video_step_registers_artifacts_and_releases_gpu
+- [x] 29.7 resume AI. — Evidence: lease released after the job; scheduler resumes checkpointed AI steps (scheduler checkpoint resume tests); test_video_step_registers_artifacts_and_releases_gpu asserts no active leases
 
 ## P30 – API
 

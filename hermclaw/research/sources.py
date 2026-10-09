@@ -137,7 +137,8 @@ def _primary_match(host: str, path: str, primary: Sequence[str]) -> str | None:
         if not entry:
             continue
         dom, _, prefix = entry.partition("/")
-        if not _matches(host, dom):
+        dom = dom.removeprefix("www.")  # ``host`` arrives without ``www.`` as well
+        if not dom or not _matches(host, dom):
             continue
         if prefix and not (path.lower().rstrip("/") + "/").startswith("/" + prefix + "/"):
             continue
@@ -192,7 +193,7 @@ def classify_source(url: str, primary_domains: Sequence[str] = ()) -> SourceClas
         return SourceClassification("official_docs", 0.75, "documentation path")
     reg = registrable_domain(bare)
     for entry in primary_domains:
-        dom = entry.strip().lower().removeprefix("https://").removeprefix("http://").split("/", 1)[0]
+        dom = entry.strip().lower().removeprefix("https://").removeprefix("http://").split("/", 1)[0].removeprefix("www.")
         if dom and registrable_domain(dom) == reg:
             return SourceClassification("vendor", 0.7, f"vendor site of {dom}")
     if bare.startswith(("blog.", "blogs.")) or (segments and segments[0].lower() in {"blog", "blogs", "news"}):

@@ -244,7 +244,8 @@ class ClaimExtractor:
             ChatMessage("system", SYSTEM_PROMPT.format(max_claims=self.max_claims)),
             ChatMessage(
                 "user",
-                f"Research question:\n{question}\n\nSource title: {DEFAULT_REDACTOR.text(title)}\nSource URL: {url}\n\n"
+                f"Research question:\n{question}\n\nSource title: {DEFAULT_REDACTOR.text(title)}\n"
+                f"Source URL: {DEFAULT_REDACTOR.text(url)}\n\n"
                 f"<source>\n{safe}\n</source>",
             ),
         ]

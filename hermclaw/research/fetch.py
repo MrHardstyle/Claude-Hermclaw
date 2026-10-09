@@ -43,7 +43,10 @@ from hermclaw.research.errors import (
 
 ALLOWED_CONTENT_TYPES: frozenset[str] = frozenset({"text/html", "text/plain", "application/json", "application/xhtml+xml"})
 REDIRECT_CODES: frozenset[int] = frozenset({301, 302, 303, 307, 308})
-_NAT64 = (ipaddress.ip_network("64:ff9b::/96"), ipaddress.ip_network("64:ff9b:1::/48"))
+_NAT64_WKP = ipaddress.ip_network("64:ff9b::/96")  # RFC 6052 well-known prefix: IPv4 in the low 32 bits
+# RFC 8215 local-use prefix: the IPv4 position depends on the operator's prefix length, so it cannot be unwrapped
+# reliably – such addresses are never treated as public
+_NAT64_LOCAL = ipaddress.ip_network("64:ff9b:1::/48")
 _META_CHARSET_RE = re.compile(rb"""<meta[^>]+charset\s*=\s*["']?\s*([A-Za-z0-9_.:-]+)""", re.I)
 
 IPAddress = ipaddress.IPv4Address | ipaddress.IPv6Address
@@ -90,7 +93,7 @@ def embedded_ipv4(ip: IPAddress) -> ipaddress.IPv4Address | None:
         return ip.ipv4_mapped
     if ip.sixtofour is not None:
         return ip.sixtofour
-    if any(ip in net for net in _NAT64):
+    if ip in _NAT64_WKP:
         return ipaddress.IPv4Address(int(ip) & 0xFFFFFFFF)
     return None
 
@@ -100,7 +103,7 @@ def is_public_address(ip: IPAddress) -> bool:
     inner = embedded_ipv4(ip)
     if inner is not None:
         return is_public_address(inner)
-    if isinstance(ip, ipaddress.IPv6Address) and ip.teredo is not None:
+    if isinstance(ip, ipaddress.IPv6Address) and (ip.teredo is not None or ip in _NAT64_LOCAL):
         return False
     return bool(ip.is_global) and not ip.is_multicast and not ip.is_unspecified and not ip.is_reserved
 
