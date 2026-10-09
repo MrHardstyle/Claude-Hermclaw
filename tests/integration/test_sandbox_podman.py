@@ -90,6 +90,18 @@ async def test_workspace_rw_rootfs_ro_tmp_rw(ws: Path) -> None:
     assert not _exists(r.container_name)  # --rm
 
 
+async def test_only_workspace_tmp_and_shm_writable(ws: Path) -> None:
+    r = await sandbox().run(
+        req("for d in /tmp /dev/shm /workspace /var/tmp /run /etc /usr /root; do touch $d/.w 2>/dev/null && echo $d=W || echo $d=RO; done"),
+        ws,
+    )
+    assert r.exit_code == 0, r
+    status = dict(line.split("=") for line in r.stdout.split())
+    assert {d for d, v in status.items() if v == "W"} == {"/tmp", "/dev/shm", "/workspace"}, status
+    tmp_size = await sandbox().run(req("df -k /tmp /dev/shm | tail -2 | awk '{print $2}'"), ws)
+    assert tmp_size.stdout.split() == [str(16 * 1024), str(64 * 1024)]  # size-limited tmpfs mounts
+
+
 async def test_network_off_by_default(ws: Path) -> None:
     r = await sandbox().run(
         req("cat /proc/net/route | wc -l; ls /sys/class/net; wget -q -T 3 -O /dev/null http://1.1.1.1/ && echo NET_OK || echo NET_FAIL"), ws
@@ -188,10 +200,30 @@ async def test_stale_leftover_with_same_name_is_replaced(ws: Path) -> None:
     label = "hermclaw.p18test=true"
     rid = f"p18-stale-{uuid.uuid4().hex[:8]}"
     name = f"hermclaw-{rid}"
-    subprocess.run(["podman", "create", "--name", name, "--label", label, IMAGE, "true"], check=True, capture_output=True)
+    subprocess.run(
+        ["podman", "create", "--name", name, "--label", label, "--label", f"hermclaw.request={rid}", IMAGE, "true"],
+        check=True,
+        capture_output=True,
+    )
     try:
         r = await sandbox(managed_label=label).run(req("echo fresh", request_id=rid), ws)
         assert r.exit_code == 0 and r.stdout.strip() == "fresh", r
+    finally:
+        subprocess.run(["podman", "rm", "-f", "-i", name], capture_output=True, check=False)
+
+
+async def test_managed_container_of_other_request_with_same_name_is_not_touched(ws: Path) -> None:
+    rid = f"p18-other-{uuid.uuid4().hex[:8]}"
+    name = f"hermclaw-{rid}"
+    subprocess.run(
+        ["podman", "create", "--name", name, "--label", "hermclaw.p18test=true", "--label", "hermclaw.request=someone-else", IMAGE, "true"],
+        check=True,
+        capture_output=True,
+    )
+    try:
+        r = await sandbox().run(req("echo hi", request_id=rid), ws)
+        assert r.exit_code == 125 and r.error and r.error.startswith("sandbox engine error"), r
+        assert _exists(name)
     finally:
         subprocess.run(["podman", "rm", "-f", "-i", name], capture_output=True, check=False)
 

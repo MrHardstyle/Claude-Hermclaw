@@ -68,7 +68,8 @@ def test_podman_argv_has_every_isolation_flag(ws: Path) -> None:
     assert flag(argv, "--label") == [DEFAULT_CONTAINER_LABEL, "hermclaw.request=req-1", "hermclaw.job=job-1", "hermclaw.step=step-1"]
     assert flag(argv, "--network") == ["none"] and inv.network is False
     assert "--read-only" in argv
-    assert flag(argv, "--tmpfs") == ["/tmp:rw,nosuid,nodev,size=128m,mode=1777"]
+    assert flag(argv, "--tmpfs") == ["/tmp:rw,nosuid,nodev,size=128m,mode=1777", "/dev/shm:rw,nosuid,nodev,noexec,size=64m,mode=1777"]
+    assert "--read-only-tmpfs=false" in argv  # no implicit writable /run and /var/tmp
     assert "--userns=keep-id" in argv
     assert "--cap-drop=ALL" in argv and "--security-opt=no-new-privileges" in argv
     assert flag(argv, "--pids-limit") == ["256"]
@@ -99,6 +100,8 @@ def test_docker_argv_equivalent_flags(ws: Path) -> None:
     assert flag(argv, "--network") == ["bridge"]
     assert flag(argv, "--memory") == flag(argv, "--memory-swap") == ["2g"]
     assert "--userns=keep-id" not in argv and "--http-proxy=false" not in argv  # podman-only flags
+    assert flag(argv, "--shm-size") == ["64m"] and "--log-driver=none" in argv
+    assert flag(argv, "--tmpfs") == ["/tmp:rw,nosuid,nodev,size=128m,mode=1777"]
 
 
 def test_network_modes(ws: Path) -> None:
@@ -173,6 +176,7 @@ def test_limits_may_be_lowered_not_raised(ws: Path) -> None:
     for kw, code in (
         ({"cpus": 4.0}, "SANDBOX_LIMIT_EXCEEDED"),
         ({"cpus": 0.0}, "SANDBOX_LIMIT_EXCEEDED"),
+        ({"cpus": 0.00001}, "SANDBOX_LIMIT_EXCEEDED"),
         ({"memory": "3g"}, "SANDBOX_LIMIT_EXCEEDED"),
         ({"memory": "1k"}, "SANDBOX_LIMIT_INVALID"),
         ({"memory": "lots"}, "SANDBOX_LIMIT_INVALID"),
@@ -180,6 +184,32 @@ def test_limits_may_be_lowered_not_raised(ws: Path) -> None:
         with pytest.raises(PolicyViolation) as exc:
             s.build_invocation(req(**kw), ws)
         assert exc.value.code == code, kw
+
+
+def test_cpus_never_formatted_with_exponent(ws: Path) -> None:
+    s = PodmanSandbox(POLICY, max_output_bytes=10_000)
+    assert s.build_invocation(req(cpus=0.01), ws).cpus == "0.01"
+    assert s.build_invocation(req(cpus=1.0), ws).cpus == "1"
+    assert s.build_invocation(req(cpus=1.25), ws).cpus == "1.25"
+
+
+def test_managed_label_defaults_to_worker_container_label(ws: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    assert sb.default_managed_label({}) == DEFAULT_CONTAINER_LABEL
+    assert sb.default_managed_label({"WORKER_CONTAINER_LABEL": " hermclaw.site=lab "}) == "hermclaw.site=lab"
+    monkeypatch.setenv("WORKER_CONTAINER_LABEL", "hermclaw.site=lab")
+    s = PodmanSandbox(POLICY, max_output_bytes=10_000)
+    assert s.managed_label == "hermclaw.site=lab"
+    assert flag(s.build_invocation(req(), ws).argv, "--label")[0] == "hermclaw.site=lab"
+    monkeypatch.setenv("WORKER_CONTAINER_LABEL", "bad label")
+    with pytest.raises(ConfigError):
+        PodmanSandbox(POLICY, max_output_bytes=10_000)
+
+
+def test_shm_size_configurable(ws: Path) -> None:
+    argv = PodmanSandbox(POLICY, max_output_bytes=10_000, shm_size="16m").build_invocation(req(), ws).argv
+    assert "/dev/shm:rw,nosuid,nodev,noexec,size=16m,mode=1777" in flag(argv, "--tmpfs")
+    with pytest.raises(ConfigError):
+        PodmanSandbox(POLICY, max_output_bytes=10_000, shm_size="big")
 
 
 def test_explicit_timeout_wins_over_policy_default(ws: Path) -> None:

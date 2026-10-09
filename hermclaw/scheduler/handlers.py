@@ -29,6 +29,7 @@ class StepOutcome:
     replan_reason: str | None = None
     replan_evidence: dict[str, Any] = field(default_factory=dict)
     checkpoint: dict[str, Any] | None = None
+    retry_delay_seconds: int | None = None  # overrides the scheduler backoff (e.g. 0 for correction attempts)
 
 
 class CancelToken:

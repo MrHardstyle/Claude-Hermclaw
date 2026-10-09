@@ -317,3 +317,33 @@ def test_manifest_diff_after_changes(tree: Path) -> None:
     (tree / "leak").symlink_to("README.md")  # retargeted link counts as changed
     changed, deleted = diff_manifest(before, manifest(tree))
     assert changed == ["README.md", "leak", "src/new.py"] and deleted == ["src/pkg/mod.py"]
+
+
+def test_file_over_existing_directory_rejected_before_any_write(dest: Path) -> None:
+    (dest / "d").mkdir()
+    (dest / "d" / "keep").write_text("k")
+    for members in (
+        [("file", "new.txt", b"1"), ("file", "d", b"file over dir")],
+        [("file", "new.txt", b"1"), ("sym", "d", "new.txt")],
+        [("file", "new.txt", b"1"), ("lnk", "d", "new.txt")],
+    ):
+        with pytest.raises(UnsafeArchiveError, match="cannot replace directory"):
+            extract_tar_safely(_tar(*members), dest)
+        assert not (dest / "new.txt").exists()  # rejected in the preflight, nothing written
+        assert (dest / "d" / "keep").read_text() == "k"
+
+
+def test_setuid_and_world_writable_bits_stripped(dest: Path) -> None:
+    buf = io.BytesIO()
+    with tarfile.open(fileobj=buf, mode="w") as tf:
+        info = tarfile.TarInfo("tool")
+        info.size = 2
+        info.mode = 0o6777
+        tf.addfile(info, io.BytesIO(b"#!"))
+        d = tarfile.TarInfo("shared")
+        d.type = tarfile.DIRTYPE
+        d.mode = 0o1777
+        tf.addfile(d)
+    extract_tar_safely(buf.getvalue(), dest)
+    assert stat.S_IMODE((dest / "tool").stat().st_mode) == 0o755
+    assert stat.S_IMODE((dest / "shared").stat().st_mode) == 0o755

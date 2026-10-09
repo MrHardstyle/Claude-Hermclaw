@@ -316,12 +316,12 @@ Legende: `[x]` erledigt mit Evidence · `[~]` erledigt, Live-Verifikation auf Zi
 
 ## P23 – Correction Pipeline
 
-- [ ] 23.1 verifier failure correction. — Evidence: –
-- [ ] 23.2 review correction. — Evidence: –
-- [ ] 23.3 bounded attempts. — Evidence: –
-- [ ] 23.4 evidence passed forward. — Evidence: –
-- [ ] 23.5 regression rerun. — Evidence: –
-- [ ] 23.6 escalation. — Evidence: –
+- [x] 23.1 verifier failure correction. — Evidence: ImplementStepHandler._correction (verifier source); tests/integration/test_coder_handler.py::test_verifier_failure_triggers_correction_with_evidence
+- [x] 23.2 review correction. — Evidence: review fix_required/major via enforce_review_invariant -> correction; test_review_invariant_major_finding_forces_correction
+- [x] 23.3 bounded attempts. — Evidence: steps.correction_count/attempt_count vs policies.correction; test_exhausted_corrections_escalate_to_replan
+- [x] 23.4 evidence passed forward. — Evidence: step_attempts.correction_input items -> CorrectionItem in coder prompt; test_verifier_failure_triggers_correction_with_evidence
+- [x] 23.5 regression rerun. — Evidence: every attempt fully re-verified; finalize RegressionCheck after base update (test_runtime_driver::test_base_moved_during_job_is_rebased_and_regression_rerun)
+- [x] 23.6 escalation. — Evidence: blocked repeated_verifier_failure -> Gemma replan; test_exhausted_corrections_escalate_to_replan
 
 ## P24 – Replanning
 

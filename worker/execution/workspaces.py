@@ -236,11 +236,13 @@ def _clear_for(name: str, dir_fd: int, *, path: str, kind: str) -> None:
 
 
 def _preflight(root: Path, entries: list[_Entry]) -> None:
-    """Refuse (before writing) entries whose parent chain in ``root`` contains a symlink or a non-directory."""
+    """Refuse (before writing) entries whose parent chain in ``root`` contains a symlink or a non-directory,
+    and file/link entries that would replace an existing directory."""
     checked: set[str] = set()
     for entry in entries:
         parts = entry.path.split("/")
         chain = parts if entry.kind == "dir" else parts[:-1]
+        complete = True
         for i in range(1, len(chain) + 1):
             prefix = "/".join(chain[:i])
             if prefix in checked:
@@ -248,10 +250,18 @@ def _preflight(root: Path, entries: list[_Entry]) -> None:
             try:
                 st = os.lstat(root / prefix)
             except FileNotFoundError:
+                complete = False
                 break
             if not stat.S_ISDIR(st.st_mode):
                 raise UnsafeArchiveError(f"refusing to write through symlink or non-directory {prefix!r}")
             checked.add(prefix)
+        if entry.kind != "dir" and complete:
+            try:
+                st = os.lstat(root / entry.path)
+            except FileNotFoundError:
+                continue
+            if stat.S_ISDIR(st.st_mode):
+                raise UnsafeArchiveError(f"cannot replace directory {entry.path!r} with a {entry.kind}")
 
 
 def _file_mode(member: tarfile.TarInfo) -> int:

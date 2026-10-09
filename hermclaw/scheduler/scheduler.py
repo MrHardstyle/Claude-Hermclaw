@@ -739,7 +739,11 @@ class Scheduler:
                     error_message=out.error_message,
                 )
                 if out.retryable and st.attempt_count < st.max_attempts:
-                    backoff = self.settings.retry_backoff_seconds[min(st.attempt_count - 1, len(self.settings.retry_backoff_seconds) - 1)]
+                    backoff = (
+                        out.retry_delay_seconds
+                        if out.retry_delay_seconds is not None
+                        else self.settings.retry_backoff_seconds[min(st.attempt_count - 1, len(self.settings.retry_backoff_seconds) - 1)]
+                    )
                     st.not_before = _now() + timedelta(seconds=backoff)
                     await emit_status(
                         s, ctx.job_id, f"Step {st.step_key} wird in {backoff}s erneut versucht", step_id=st.id, severity=Severity.warning

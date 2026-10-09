@@ -6,6 +6,7 @@ Every command of a step runs in its own throw-away container::
         --label hermclaw.job=<job> --label hermclaw.step=<step> --network=none --read-only
         --tmpfs /tmp:rw,size=<tmpfs> --userns=keep-id --cap-drop=ALL --security-opt=no-new-privileges
         --pids-limit <n> --memory <m> --memory-swap <m> --cpus <c> -v <workspace>:/workspace:Z -w /workspace
+        --read-only-tmpfs=false --tmpfs /dev/shm:rw,size=<shm> --http-proxy=false --log-driver=none
         --env NAME=value ... --entrypoint=sh <image> -lc <command>
 
 * **18.1 rootless Podman** – :class:`PodmanSandbox`; ``--userns=keep-id`` maps the worker's uid into the
@@ -14,8 +15,9 @@ Every command of a step runs in its own throw-away container::
   resource limits are effective (cgroups v2 with delegated ``cpu``/``memory``/``pids`` controllers).
 * **18.2 images** – only the policy's ``image``/``images`` (aliases such as ``python``) or an explicit extra
   allowlist may be used; :meth:`ContainerSandbox.ensure_images` pre-pulls them.
-* **18.3 mounts** – exactly one bind mount (the workspace at ``/workspace``), read-only root filesystem and a
-  size-limited ``/tmp`` tmpfs.
+* **18.3 mounts** – exactly one bind mount (the workspace at ``/workspace``), read-only root filesystem and
+  size-limited ``/tmp`` and ``/dev/shm`` tmpfs mounts; podman's implicit ``/run``/``/var/tmp`` tmpfs mounts
+  are switched off (``--read-only-tmpfs=false``), so nothing else is writable (same as docker's ``--read-only``).
 * **18.4 resource limits** – ``--cpus``, ``--memory`` (= ``--memory-swap``, no swap), ``--pids-limit``;
   requests may lower but never raise the policy limits.
 * **18.5 timeouts** – the command is killed (``kill -s KILL`` + ``rm -f``) when it exceeds its timeout;
@@ -84,6 +86,9 @@ LINE_ALIGN_MAX_BYTES = 4096
 #: shortest fragment of a known secret that is masked at a truncation boundary
 MIN_SECRET_FRAGMENT = 3
 MIN_MEMORY_BYTES = 6 * 1024 * 1024  # podman/docker refuse smaller memory limits
+MIN_CPUS = 0.01
+#: size of the writable ``/dev/shm`` (POSIX semaphores/shared memory, e.g. Python multiprocessing)
+DEFAULT_SHM_SIZE = "64m"
 MAX_ENV_VALUE_CHARS = 32_768
 #: environment every container starts with (read-only rootfs: ``/tmp`` is the only writable scratch dir)
 BASE_CONTAINER_ENV: Mapping[str, str] = {"HOME": "/tmp", "TMPDIR": "/tmp"}  # noqa: S108 - paths inside the container
@@ -122,6 +127,11 @@ def parse_size(value: str) -> int:
 def _normalize_size(value: str) -> str:
     parse_size(value)
     return value.strip().lower()
+
+
+def _format_cpus(cpus: float) -> str:
+    """``1.0`` -> ``"1"``, ``0.25`` -> ``"0.25"`` (never exponent notation, at most two decimals)."""
+    return f"{max(cpus, MIN_CPUS):.2f}".rstrip("0").rstrip(".")
 
 
 def container_name_for(request_id: str) -> str:
@@ -440,6 +450,12 @@ def _finish_result(
     )
 
 
+def default_managed_label(environ: Mapping[str, str] | None = None) -> str:
+    """``WORKER_CONTAINER_LABEL`` (the label the execution daemon recovers by), else ``hermclaw.managed=true``."""
+    env = os.environ if environ is None else environ
+    return env.get("WORKER_CONTAINER_LABEL", "").strip() or DEFAULT_CONTAINER_LABEL
+
+
 def default_max_output_bytes(environ: Mapping[str, str] | None = None) -> int:
     """``policies.commands.max_output_bytes`` of ``WORKER_POLICIES_FILE`` (the file the worker's sandbox
     policy comes from), else the :class:`CommandPolicy` default."""
@@ -600,7 +616,7 @@ class ContainerSandbox:
         executable: str | None = None,
         max_output_bytes: int | None = None,
         redactor: Redactor | None = None,
-        managed_label: str = DEFAULT_CONTAINER_LABEL,
+        managed_label: str | None = None,
         extra_images: Iterable[str] = (),
         allowed_network: str | None = None,
         pull: PullPolicy = "missing",
@@ -608,18 +624,20 @@ class ContainerSandbox:
         require_rootless: bool = False,
         selinux_relabel: bool = True,
         shell: Sequence[str] = DEFAULT_SHELL,
+        shm_size: str = DEFAULT_SHM_SIZE,
     ) -> None:
         if not shell:
             raise ConfigError("sandbox shell must not be empty")
+        managed_label = default_managed_label() if managed_label is None else managed_label
         key, sep, value = managed_label.partition("=")
         if not key or _LABEL_UNSAFE_CHARS_RE.search(managed_label) or (sep and not value):
             raise ConfigError(f"invalid managed label {managed_label!r} (expected key or key=value)")
-        for size_name, size in (("memory", policy.memory), ("tmpfs_size", policy.tmpfs_size)):
+        for size_name, size in (("memory", policy.memory), ("tmpfs_size", policy.tmpfs_size), ("shm_size", shm_size)):
             try:
                 parse_size(size)
             except ValueError as exc:
                 raise ConfigError(f"policies.sandbox.{size_name}: {exc}") from exc
-        if policy.cpus <= 0 or policy.pids_limit <= 0 or policy.default_timeout_seconds <= 0:
+        if policy.cpus < MIN_CPUS or policy.pids_limit <= 0 or policy.default_timeout_seconds <= 0:
             raise ConfigError("policies.sandbox cpus, pids_limit and default_timeout_seconds must be positive")
         self.policy = policy
         self.executable = executable or self.engine
@@ -633,6 +651,7 @@ class ContainerSandbox:
         self.require_rootless = require_rootless
         self.selinux_relabel = selinux_relabel
         self.shell = tuple(shell)
+        self.shm_size = _normalize_size(shm_size)
         self._active: dict[str, str] = {}  # container name -> request id
 
     # ------------------------------------------------------------------ introspection
@@ -669,12 +688,13 @@ class ContainerSandbox:
             memory = _normalize_size(req.memory)
         cpus = self.policy.cpus
         if req.cpus is not None:
-            if not 0 < req.cpus <= self.policy.cpus:
+            if not MIN_CPUS <= req.cpus <= self.policy.cpus:
                 raise PolicyViolation(
-                    f"cpus {req.cpus:g} must be > 0 and <= the sandbox limit {self.policy.cpus:g}", code="SANDBOX_LIMIT_EXCEEDED"
+                    f"cpus {req.cpus:g} must be >= {MIN_CPUS:g} and <= the sandbox limit {self.policy.cpus:g}",
+                    code="SANDBOX_LIMIT_EXCEEDED",
                 )
             cpus = req.cpus
-        return f"{cpus:g}", memory
+        return _format_cpus(cpus), memory
 
     def _network_args(self, enabled: bool) -> list[str]:
         if not enabled:
@@ -743,6 +763,10 @@ class ContainerSandbox:
         return [self.executable, "rm", "-f", name]
 
     @staticmethod
+    def _is_engine_error(outcome: _ProcOutcome) -> bool:
+        return outcome.returncode == ENGINE_ERROR_EXIT and engine_error_line(outcome.stderr.text()) is not None
+
+    @staticmethod
     def _is_name_conflict(outcome: _ProcOutcome) -> bool:
         if outcome.returncode != ENGINE_ERROR_EXIT:
             return False
@@ -766,13 +790,15 @@ class ContainerSandbox:
             return {}
         return {str(k): str(v) for k, v in labels.items()} if isinstance(labels, dict) else {}
 
-    async def _is_managed_leftover(self, name: str) -> bool:
-        """A container with our deterministic name that carries the managed label (never a foreign one)."""
+    async def _is_managed_leftover(self, name: str, request_id: str) -> bool:
+        """A container with our deterministic name carrying the managed label and the same request label
+        (a foreign container that happens to use the name is never touched)."""
         labels = await self.container_labels(name)
         if labels is None:
             return False
         key, _sep, value = self.managed_label.partition("=")
-        return key in labels and (not value or labels[key] == value)
+        managed = key in labels and (not value or labels[key] == value)
+        return managed and labels.get(LABEL_REQUEST) == label_value(request_id)
 
     async def kill_container(self, name: str) -> bool:
         rc, _out, _err = await engine_exec([self.executable, "kill", "-s", "KILL", name], timeout_seconds=30)
@@ -835,18 +861,22 @@ class ContainerSandbox:
         )
         try:
             outcome = await self._run_once(inv)
-            if self._is_name_conflict(outcome) and await self._is_managed_leftover(name):
-                # a leftover container of a crashed earlier attempt blocks the deterministic name
-                log.warning("removing stale sandbox container", extra={"container": name, "request_id": req.request_id})
+            if self._is_name_conflict(outcome):
+                if await self._is_managed_leftover(name, req.request_id):
+                    # a leftover container of a crashed earlier attempt blocks the deterministic name
+                    log.warning("removing stale sandbox container", extra={"container": name, "request_id": req.request_id})
+                    await self.cleanup(name)
+                    outcome = await self._run_once(inv)
+            elif self._is_engine_error(outcome) and await self._is_managed_leftover(name, req.request_id):
+                # the engine created the container but failed to start it (OCI runtime error …): remove it
                 await self.cleanup(name)
-                outcome = await self._run_once(inv)
+            if outcome.timed_out or outcome.returncode is None:
+                await self.cleanup(name)
         except asyncio.CancelledError:
             await asyncio.shield(self.cleanup(name))
             raise
         finally:
             self._active.pop(name, None)
-        if outcome.timed_out or outcome.returncode is None:
-            await self.cleanup(name)
         result = _finish_result(
             req,
             self.engine,
@@ -917,6 +947,8 @@ class PodmanSandbox(ContainerSandbox):
         mount = f"{workspace}:{WORKDIR}:Z" if self.selinux_relabel else f"{workspace}:{WORKDIR}"
         return [
             "--userns=keep-id",
+            "--read-only-tmpfs=false",  # no implicit writable /run, /var/tmp, /dev/shm tmpfs mounts
+            f"--tmpfs=/dev/shm:rw,nosuid,nodev,noexec,size={self.shm_size},mode=1777",
             "--http-proxy=false",  # podman forwards the host's proxy variables (with credentials) by default
             "--log-driver=none",  # output is streamed to us; never persisted in container logs
             f"--volume={mount}",
@@ -935,7 +967,7 @@ class DockerSandbox(ContainerSandbox):
     def _engine_args(self, workspace: Path) -> list[str]:
         st = workspace.stat()  # run as the owner of the workspace so the bind mount stays writable without root
         mount = f"type=bind,source={workspace},target={WORKDIR}"
-        return [f"--user={st.st_uid}:{st.st_gid}", f"--mount={mount}"]
+        return [f"--user={st.st_uid}:{st.st_gid}", f"--shm-size={self.shm_size}", "--log-driver=none", f"--mount={mount}"]
 
 
 # ---------------------------------------------------------------------------------------------- local
