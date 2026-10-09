@@ -163,7 +163,10 @@ def parse_mocha(out: str) -> TestCounts | None:
     if not passing:
         return None
     return TestCounts(
-        "mocha", passed=_num(passing[-1]), failed=_num(_MOCHA_FAILING.search(out, passing[-1].end())), skipped=_num(_MOCHA_PENDING.search(out))
+        "mocha",
+        passed=_num(passing[-1]),
+        failed=_num(_MOCHA_FAILING.search(out, passing[-1].end())),
+        skipped=_num(_MOCHA_PENDING.search(out)),
     )
 
 
@@ -206,16 +209,12 @@ def parse_go(out: str) -> TestCounts | None:
         return None
     build_failures = len(_GO_BUILD_FAIL.findall(out))
     if cases:
-        return TestCounts(
-            "go", passed=cases.count("PASS"), failed=cases.count("FAIL"), skipped=cases.count("SKIP"), errors=build_failures
-        )
+        return TestCounts("go", passed=cases.count("PASS"), failed=cases.count("FAIL"), skipped=cases.count("SKIP"), errors=build_failures)
     return TestCounts("go", passed=len(pkg_ok), failed=len(pkg_fail) - build_failures, errors=build_failures)
 
 
 # ---------------------------------------------------------------------------------------------- cargo test
-_CARGO_RESULT = re.compile(
-    r"^test result: (?:ok|FAILED)\. (\d+) passed; (\d+) failed; (\d+) ignored; \d+ measured; \d+ filtered out", re.M
-)
+_CARGO_RESULT = re.compile(r"^test result: (?:ok|FAILED)\. (\d+) passed; (\d+) failed; (\d+) ignored; \d+ measured; \d+ filtered out", re.M)
 
 
 def parse_cargo(out: str) -> TestCounts | None:

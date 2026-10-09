@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import time
 from collections import deque
 from typing import Any
 
@@ -37,7 +38,10 @@ def completion(content: Any, *, reasoning: str | None = None, finish: str = "sto
     msg: dict[str, Any] = {"role": "assistant", "content": content}
     if reasoning is not None:
         msg["reasoning_content"] = reasoning
-    return {"choices": [{"index": 0, "finish_reason": finish, "message": msg}], "usage": {"prompt_tokens": 11, "completion_tokens": 3, "total_tokens": 14}}
+    return {
+        "choices": [{"index": 0, "finish_reason": finish, "message": msg}],
+        "usage": {"prompt_tokens": 11, "completion_tokens": 3, "total_tokens": 14},
+    }
 
 
 class Script:
@@ -95,7 +99,7 @@ def test_protocol_conformance(script: Script) -> None:
 @pytest.mark.parametrize(
     ("raw", "expected", "removed"),
     [
-        ("<think>secret</think>\n{\"a\":1}", '{"a":1}', len("<think>secret</think>")),
+        ('<think>secret</think>\n{"a":1}', '{"a":1}', len("<think>secret</think>")),
         ("<THINKING>x</THINKING>answer", "answer", len("<THINKING>x</THINKING>")),
         ("<think>never closed", "", len("<think>never closed")),
         ("plain answer", "plain answer", 0),
@@ -438,7 +442,13 @@ def test_from_config_resolves_key(monkeypatch: pytest.MonkeyPatch) -> None:
 
     monkeypatch.setenv("HERMCLAW_TEST_LITELLM_KEY", "sk-from-env-key-1234567890abcdef")
     cfg = load_config()
-    cfg = cfg.model_copy(update={"models": cfg.models.model_copy(update={"litellm": cfg.models.litellm.model_copy(update={"api_key_ref": "env:HERMCLAW_TEST_LITELLM_KEY"})})})
+    cfg = cfg.model_copy(
+        update={
+            "models": cfg.models.model_copy(
+                update={"litellm": cfg.models.litellm.model_copy(update={"api_key_ref": "env:HERMCLAW_TEST_LITELLM_KEY"})}
+            )
+        }
+    )
     gw = LiteLLMGateway.from_config(cfg)
     assert gw._headers()["Authorization"] == "Bearer sk-from-env-key-1234567890abcdef"
     from hermclaw.core.redaction import DEFAULT_REDACTOR
@@ -447,4 +457,49 @@ def test_from_config_resolves_key(monkeypatch: pytest.MonkeyPatch) -> None:
 
 
 def test_module_exports_stable_codes() -> None:
-    assert gw_mod.TECHNICAL_FAILURE_CODES == {MODEL_UNAVAILABLE, MODEL_LOAD_FAILED, MODEL_NOT_FOUND, "MODEL_TIMEOUT", MODEL_PROTOCOL_ERROR}
+    assert {MODEL_UNAVAILABLE, MODEL_LOAD_FAILED, MODEL_NOT_FOUND, "MODEL_TIMEOUT", MODEL_PROTOCOL_ERROR} == gw_mod.TECHNICAL_FAILURE_CODES
+
+
+# ----------------------------------------------------------------------------------------------- self-review regressions
+def test_extract_json_hostile_inputs() -> None:
+    """Untrusted model output must always surface as ValueError (→ repair), never as RecursionError & co."""
+    with pytest.raises(ValueError, match="too deep"):
+        extract_json("[" * 100_000)
+    with pytest.raises(ValueError):
+        extract_json('{"a": ' + "1" * 5000 + "}")  # int digit limit
+    t0 = time.monotonic()
+    with pytest.raises(ValueError):
+        extract_json("{x " * 50_000)  # bounded candidate scan
+    assert time.monotonic() - t0 < 2.0
+    assert extract_json("{x " * 10 + '{"ok": 1}') == {"ok": 1}
+    with pytest.raises(ValueError):
+        extract_json("{x " * 10 + '{"ok": 1}', max_candidates=5)
+
+
+async def test_structured_hostile_nesting_triggers_repair(script: Script) -> None:
+    script.add("planner-gemma", completion("[" * 60_000), completion('{"title": "t", "steps": ["a"]}'))
+    async with make(script) as gw:
+        out = await gw.structured("planner-gemma", [ChatMessage("user", "plan")], Plan, ctx=CTX)
+    assert out.repair_attempts == 1 and out.value.steps == ["a"]
+    assert "too deep" in script.requests[1]["messages"][-1]["content"]
+    # the echo of the rejected answer is capped
+    assert len(script.requests[1]["messages"][-2]["content"]) <= gw_mod.MAX_REPAIR_ECHO_CHARS + 1
+
+
+async def test_structured_repair_drops_echo_when_context_is_tight(script: Script) -> None:
+    # fast-router: 16384 ctx, 2048 output → the prompt (~13.5K tokens) fits, prompt + echo (~1.9K tokens) does not
+    big = "x" * int(3.2 * 13_500)
+    script.add("fast-router", completion("not json " * 800), completion('{"title": "t", "steps": ["a"]}'))
+    async with make(script) as gw:
+        out = await gw.structured("fast-router", [ChatMessage("user", big)], Plan, ctx=CTX)
+    assert out.repair_attempts == 1
+    repair = script.requests[1]["messages"]
+    assert [m["role"] for m in repair] == ["user", "user"]
+    assert "rejected" in repair[-1]["content"] and "not json" not in repair[-1]["content"]
+
+
+async def test_structured_repair_keeps_echo_when_it_fits(script: Script) -> None:
+    script.add("fast-router", completion("not json"), completion('{"title": "t", "steps": ["a"]}'))
+    async with make(script) as gw:
+        await gw.structured("fast-router", [ChatMessage("user", "short")], Plan, ctx=CTX)
+    assert [m["role"] for m in script.requests[1]["messages"]] == ["user", "assistant", "user"]

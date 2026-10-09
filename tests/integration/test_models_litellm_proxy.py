@@ -20,7 +20,7 @@ from sqlalchemy import select
 
 from hermclaw.contracts.events import EventType
 from hermclaw.core.errors import ModelError, ModelTimeout
-from hermclaw.models.gateway import MODEL_BAD_REQUEST, MODEL_AUTH_FAILED, MODEL_NOT_FOUND, GatewayOptions, LiteLLMGateway
+from hermclaw.models.gateway import MODEL_AUTH_FAILED, MODEL_BAD_REQUEST, MODEL_NOT_FOUND, GatewayOptions, LiteLLMGateway
 from hermclaw.models.health import ModelHealthChecker
 from hermclaw.models.litellm_config import build_litellm_config, write_litellm_config
 from hermclaw.models.protocols import CallContext, ChatMessage
@@ -77,8 +77,14 @@ async def test_chat_request_fields_reach_ollama(stack: dict[str, Any]) -> None:
     fake: FakeOllama = stack["fake"]
     schema = Answer.model_json_schema()
     async with gateway(stack) as gw:
-        res = await gw.chat("fast-router", [ChatMessage("system", "be brief"), ChatMessage("user", "hi")], ctx=CTX,
-                            max_tokens=123, temperature=0.3, json_schema=schema)
+        res = await gw.chat(
+            "fast-router",
+            [ChatMessage("system", "be brief"), ChatMessage("user", "hi")],
+            ctx=CTX,
+            max_tokens=123,
+            temperature=0.3,
+            json_schema=schema,
+        )
     body = fake.bodies("/api/chat")[-1]
     assert body["model"] == "qwen3:8b"
     assert body["format"] == schema  # response_format.json_schema.schema -> Ollama `format`
@@ -109,6 +115,20 @@ async def test_request_level_think_overrides_proxy_default(stack: dict[str, Any]
     assert body["model"] == "qwen3.8:27b"
     assert body["think"] is True  # proxy config says false, the request wins
     assert body["options"]["num_ctx"] == 24576
+
+
+async def test_request_level_num_ctx_and_keep_alive_override_proxy_defaults(stack: dict[str, Any]) -> None:
+    """The proxy config says num_ctx=32768 / keep_alive=10m for coder-main; the per-request values must win."""
+    fake: FakeOllama = stack["fake"]
+    cfg = models_config(stack["proxy_url"])
+    coder = cfg.by_alias("coder-main")
+    cfg = cfg.model_copy(update={"profiles": [p.model_copy(update={"context_tokens": 30000}) if p is coder else p for p in cfg.profiles]})
+    async with gateway(stack, models=cfg, options=GatewayOptions(keep_alive="45m")) as gw:
+        await gw.chat("coder-main", [ChatMessage("user", "x")], ctx=CTX, max_tokens=64)
+    body = fake.bodies("/api/chat")[-1]
+    assert body["model"] == "qwen3-coder:30b"
+    assert body["options"]["num_ctx"] == 30000
+    assert body["keep_alive"] == "45m"
 
 
 async def test_proxy_config_defaults_apply_without_passthrough(stack: dict[str, Any]) -> None:
@@ -163,7 +183,11 @@ async def test_load_error_falls_back_once_without_litellm_retries(stack: dict[st
     models_hit = [b["model"] for b in fake.bodies("/api/chat")]
     assert models_hit == ["gemma4:26b", "gemma4:12b"]  # num_retries: 0 – LiteLLM did not retry or switch itself
     async with sessionmaker() as s:
-        rows = (await s.execute(select(ModelInvocation).where(ModelInvocation.job_id == job_ctx.job_id).order_by(ModelInvocation.started_at))).scalars().all()
+        rows = (
+            (await s.execute(select(ModelInvocation).where(ModelInvocation.job_id == job_ctx.job_id).order_by(ModelInvocation.started_at)))
+            .scalars()
+            .all()
+        )
         assert [(r.alias, r.status, r.fallback_used) for r in rows] == [
             ("planner-gemma", "failed", False),
             ("planner-gemma-fallback", "succeeded", True),
@@ -190,9 +214,12 @@ async def test_proxy_timeout_maps_to_model_timeout(stack: dict[str, Any]) -> Non
     fake.b("qwen3-coder:30b").delay = 6.0
     async with gateway(stack, options=GatewayOptions(timeout_retries=0, timeout_grace_seconds=3.0)) as gw:
         t0 = time.monotonic()
-        with pytest.raises(ModelTimeout):
+        with pytest.raises(ModelTimeout) as exc:
             await gw.chat("coder-main", [ChatMessage("user", "x")], ctx=CTX, timeout_seconds=1.5)
-    assert time.monotonic() - t0 < 5.5
+    elapsed = time.monotonic() - t0
+    # the body `timeout` is enforced by the proxy (HTTP 408) well before the client-side limit (1.5 s + 3 s grace)
+    assert exc.value.details.get("http_status") == 408, exc.value.details
+    assert elapsed < 4.0, elapsed
     assert len(fake.bodies("/api/chat")) == 1
 
 

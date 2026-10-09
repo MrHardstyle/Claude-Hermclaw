@@ -87,6 +87,7 @@ class WorkspaceSnapshot:
     dirs: set[str]
     git_meta: GitMeta | None
     nested_repos: set[str] = field(default_factory=set)  # untracked embedded repositories ("dir/")
+    generated: set[str] = field(default_factory=set)  # untracked, not ignored generated files (caches)
 
 
 @dataclass(frozen=True)
@@ -110,6 +111,7 @@ class Violation:
 class AuditOutcome:
     allowed: list[DetectedChange] = field(default_factory=list)
     violations: list[Violation] = field(default_factory=list)
+    cleaned: list[str] = field(default_factory=list)  # new generated files (not git-ignored) that were removed
 
     @property
     def clean(self) -> bool:
@@ -155,7 +157,8 @@ class WorkspaceTracker:
         self.max_rounds = max_rounds
 
     # ------------------------------------------------------------------------------------------- snapshot
-    async def _inventory(self, git_mode: bool) -> tuple[list[str], set[str], set[str]]:
+    async def _inventory(self, git_mode: bool) -> tuple[list[str], set[str], set[str], set[str]]:
+        """``(files, tracked, nested_repos, generated)``; untracked generated caches are not part of ``files``."""
         if git_mode:
             files = await self.git.list_files()
             tracked = await self.git.tracked_files()
@@ -163,16 +166,24 @@ class WorkspaceTracker:
             files = await asyncio.to_thread(self.fs.walk_files)
             tracked = set()
         nested = {f.rstrip("/") for f in files if f.endswith("/")}
-        keep = [f for f in files if not f.endswith("/") and (f in tracked or not any_match(f, self.generated_globs))]
-        return keep, tracked, nested
+        keep: list[str] = []
+        generated: set[str] = set()
+        for f in files:
+            if f.endswith("/"):
+                continue
+            if f in tracked or not any_match(f, self.generated_globs):
+                keep.append(f)
+            else:
+                generated.add(f)
+        return keep, tracked, nested, generated
 
     async def snapshot(self) -> WorkspaceSnapshot:
         git_mode = await self.git.is_repo_root()
-        files, tracked, nested = await self._inventory(git_mode)
+        files, tracked, nested, generated = await self._inventory(git_mode)
         dirty = set((await self.git.worktree_dirty()).keys()) if git_mode else set(files)
         states, backups, unbackupable = await asyncio.to_thread(self._stat_and_backup, files, dirty)
         meta = await self._git_meta() if git_mode else None
-        return WorkspaceSnapshot(git_mode, states, tracked, dirty, backups, unbackupable, _parent_dirs(files), meta, nested)
+        return WorkspaceSnapshot(git_mode, states, tracked, dirty, backups, unbackupable, _parent_dirs(files), meta, nested, generated)
 
     def _stat_and_backup(self, files: list[str], dirty: set[str]) -> tuple[dict[str, FileState], dict[str, Backup], set[str]]:
         states: dict[str, FileState] = {}
@@ -236,7 +247,7 @@ class WorkspaceTracker:
 
     # ------------------------------------------------------------------------------------------- detection
     async def detect(self, before: WorkspaceSnapshot) -> list[DetectedChange]:
-        files, _tracked, nested = await self._inventory(before.git_mode)
+        files, _tracked, nested, _generated = await self._inventory(before.git_mode)
         candidates = list(dict.fromkeys([*before.files.keys(), *files]))
         dirty_after = set((await self.git.worktree_dirty()).keys()) if before.git_mode else set()
         changes = await asyncio.to_thread(self._compare, before, candidates, dirty_after)
@@ -333,7 +344,16 @@ class WorkspaceTracker:
             v.reverted = (key[5:] not in meta_left) if key.startswith(".git:") else (v.path not in still_bad)
         outcome.violations = list(reported.values())
         outcome.allowed = [ch for ch in changes if ch.path not in still_bad and ch.path not in reported]
+        outcome.cleaned = await self._clean_generated(before, decide)
         return outcome
+
+    async def _clean_generated(self, before: WorkspaceSnapshot, decide: Decide) -> list[str]:
+        """Remove new generated caches the scope does not allow (they would otherwise leak into the change set)."""
+        _files, _tracked, _nested, generated = await self._inventory(before.git_mode)
+        doomed = sorted(p for p in generated - before.generated if not decide(p, "create")[0])
+        if doomed:
+            await asyncio.to_thread(self._remove_created, before, [DetectedChange(p, "create") for p in doomed])
+        return doomed
 
     def _meta_label(self, before: WorkspaceSnapshot, path: str) -> str:
         p = Path(path)

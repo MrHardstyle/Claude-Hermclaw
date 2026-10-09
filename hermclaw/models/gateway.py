@@ -46,7 +46,7 @@ from hermclaw.core.redaction import DEFAULT_REDACTOR, Redactor
 from hermclaw.events.store import append_event
 from hermclaw.models.profiles import ProfileRegistry, assert_architecture, resolve_api_key, validate_http_url
 from hermclaw.models.protocols import CallContext, ChatMessage, ChatResult, StructuredResult
-from hermclaw.models.tokens import ContextBudget, estimate_tokens, validate_context
+from hermclaw.models.tokens import ContextBudget, context_budget, estimate_tokens, validate_context
 from hermclaw.persistence.models import ModelInvocation
 
 log = get_logger(__name__)
@@ -59,6 +59,7 @@ SOURCE_TYPE = "model_gateway"
 MAX_EXCERPT_CHARS = 4000
 MAX_ERROR_CHARS = 2000
 MAX_REPAIR_ECHO_CHARS = 6000
+MAX_JSON_CANDIDATES = 256
 
 # Stable error codes (ModelError.code) ------------------------------------------------------------------------------
 MODEL_UNAVAILABLE = "MODEL_UNAVAILABLE"  # connection to LiteLLM/Ollama failed
@@ -113,8 +114,12 @@ def strip_reasoning(content: str) -> tuple[str, int]:
     return out.strip() if removed else out, removed
 
 
-def extract_json(text: str) -> Any:
-    """Parse the JSON value of a model answer: plain JSON, a fenced code block or the first JSON object/array."""
+def extract_json(text: str, *, max_candidates: int = MAX_JSON_CANDIDATES) -> Any:
+    """Parse the JSON value of a model answer: plain JSON, a fenced code block or the first JSON object/array.
+
+    Model output is untrusted: every failure (including pathological nesting → ``RecursionError`` and oversized
+    integers) surfaces as ``ValueError`` so the caller treats it as invalid output (→ repair), and the search for an
+    embedded value is bounded to ``max_candidates`` start positions (no quadratic blow-up on garbage)."""
     s = text.strip().lstrip("﻿")
     if not s:
         raise ValueError("empty content")
@@ -123,16 +128,25 @@ def extract_json(text: str) -> Any:
         s = fenced.group(1).strip()
     try:
         return json.loads(s)
-    except json.JSONDecodeError:
+    except RecursionError as exc:
+        raise ValueError("JSON nesting too deep") from exc
+    except ValueError:  # JSONDecodeError, int-digit limit
         pass
     decoder = json.JSONDecoder()
+    tried = 0
     for start, ch in enumerate(s):
-        if ch in "{[":
-            try:
-                value, _end = decoder.raw_decode(s, start)
-            except json.JSONDecodeError:
-                continue
-            return value
+        if ch not in "{[":
+            continue
+        if tried >= max_candidates:
+            break
+        tried += 1
+        try:
+            value, _end = decoder.raw_decode(s, start)
+        except RecursionError as exc:
+            raise ValueError("JSON nesting too deep") from exc
+        except ValueError:
+            continue
+        return value
     raise ValueError("no JSON value found in content")
 
 
@@ -436,7 +450,14 @@ class LiteLLMGateway:
                 return StructuredResult(value=last.parsed, result=last.result, repair_attempts=attempt_no)
             error = last.error or "invalid answer"
             errors.append(error)
-            conversation = list(messages) + self._repair_messages(last.result.content, error, schema_title=schema_name(schema))
+            conversation = self._repair_conversation(
+                messages,
+                last.result.content,
+                error,
+                schema_title=schema_name(schema),
+                profile=pinned or self.registry.get(alias),
+                max_tokens=max_tokens,
+            )
         assert last is not None
         raise ModelOutputInvalid(
             f"'{last.result.alias}' returned no valid {schema.__name__} after {max_repairs} repair attempts",
@@ -507,6 +528,26 @@ class LiteLLMGateway:
                     raise
 
     # ------------------------------------------------------------------------------------------ internals
+    def _repair_conversation(
+        self,
+        messages: Sequence[ChatMessage],
+        previous: str,
+        error: str,
+        *,
+        schema_title: str,
+        profile: ModelProfileConfig,
+        max_tokens: int | None,
+    ) -> list[ChatMessage]:
+        """Original conversation + repair turn. The echo of the rejected answer is dropped when it would push the
+        request over the context window (the validation error alone is still a usable repair instruction)."""
+        repaired = list(messages) + self._repair_messages(previous, error, schema_title=schema_title)
+        if self.options.enforce_context and previous.strip():
+            budget = context_budget(profile, repaired, max_tokens=max_tokens, reserve_tokens=self.options.context_reserve_tokens)
+            if not budget.fits:
+                log.info("repair echo dropped to fit the context window", extra={"alias": profile.alias})
+                repaired = list(messages) + self._repair_messages("", error, schema_title=schema_title)
+        return repaired
+
     @staticmethod
     def _repair_messages(previous: str, error: str, *, schema_title: str) -> list[ChatMessage]:
         msgs: list[ChatMessage] = []

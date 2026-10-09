@@ -61,7 +61,7 @@ class LocalGit:
         self.binary = binary
         self._is_repo: bool | None = None
 
-    async def run(self, *args: str, stdin: bytes | None = None, timeout: float | None = None) -> GitRun:
+    async def run(self, *args: str, stdin: bytes | None = None, timeout_seconds: float | None = None) -> GitRun:
         cmd = [self.binary, "-c", "core.quotepath=off", "-c", "core.fsmonitor=false", *args]
         try:
             proc = await asyncio.create_subprocess_exec(
@@ -75,7 +75,7 @@ class LocalGit:
         except FileNotFoundError:
             return GitRun(127, b"", b"git binary not found")
         try:
-            out, err = await asyncio.wait_for(proc.communicate(stdin), timeout or self.timeout_seconds)
+            out, err = await asyncio.wait_for(proc.communicate(stdin), timeout_seconds or self.timeout_seconds)
         except TimeoutError:
             with contextlib.suppress(ProcessLookupError):
                 proc.kill()
@@ -97,8 +97,8 @@ class LocalGit:
         if not res.ok:
             return []
         out: list[Path] = []
-        for line in res.stdout.decode("utf-8", errors="replace").splitlines():
-            line = line.strip()
+        for raw in res.stdout.decode("utf-8", errors="replace").splitlines():
+            line = raw.strip()
             if not line:
                 continue
             p = Path(line)
@@ -124,6 +124,15 @@ class LocalGit:
         res = await self.run("ls-files", "-z", "--cached")
         if not res.ok:
             raise RuntimeError(f"git ls-files failed: {res.err_text()}")
+        return {raw.decode("utf-8", errors="surrogateescape") for raw in res.stdout.split(b"\0") if raw}
+
+    async def tree_files(self, rev: str) -> set[str] | None:
+        """All file paths of commit ``rev`` (``None`` if ``rev`` is unknown or this is not a repository)."""
+        if not rev or rev.startswith("-"):
+            return None
+        res = await self.run("ls-tree", "-r", "-z", "--name-only", "--full-tree", f"{rev}^{{tree}}")
+        if not res.ok:
+            return None
         return {raw.decode("utf-8", errors="surrogateescape") for raw in res.stdout.split(b"\0") if raw}
 
     async def worktree_dirty(self) -> dict[str, str]:

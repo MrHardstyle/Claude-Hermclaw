@@ -28,7 +28,9 @@ CommandKind = Literal["forbidden", "destructive", "mutate", "read", "unknown"]
 _SEGMENT_SPLIT = re.compile(r"\|\||&&|[;&|\n]")
 _ASSIGNMENT = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*=")
 _NUMERIC = re.compile(r"^\d+(?:\.\d+)?[smhd]?$")
-_WRAPPERS = frozenset({"env", "nohup", "exec", "time", "command", "builtin", "setsid", "stdbuf", "ionice", "nice", "timeout", "xargs", "chronic"})
+_WRAPPERS = frozenset(
+    {"env", "nohup", "exec", "time", "command", "builtin", "setsid", "stdbuf", "ionice", "nice", "timeout", "xargs", "chronic"}
+)
 
 GIT_READ_SUBCOMMANDS = frozenset(
     {

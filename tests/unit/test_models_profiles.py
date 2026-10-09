@@ -213,7 +213,11 @@ def test_build_litellm_config() -> None:
     emb = by_name["embedding"]
     assert emb["litellm_params"]["model"] == "ollama/embeddinggemma-2:740m" and "think" not in emb["litellm_params"]
     assert emb["model_info"] == {"mode": "embedding", "max_input_tokens": 2048, "output_vector_size": 8}
-    assert conf["general_settings"] == {"master_key": "os.environ/LITELLM_MASTER_KEY", "background_health_checks": False, "health_check_details": False}
+    assert conf["general_settings"] == {
+        "master_key": "os.environ/LITELLM_MASTER_KEY",
+        "background_health_checks": False,
+        "health_check_details": False,
+    }
     assert conf["router_settings"]["disable_cooldowns"] is True
     rendered = render_litellm_config(conf)
     assert rendered.startswith("# Generated") and yaml.safe_load(rendered) == conf

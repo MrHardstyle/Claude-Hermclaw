@@ -159,7 +159,12 @@ _SPECS: list[ToolSpec] = [
     _spec(ToolName.list_files, ListFilesArgs, "read", "List repository files (tracked and untracked, not ignored) below a directory."),
     _spec(ToolName.read_file, ReadFileArgs, "read", "Read a whole UTF-8 text file (output is budgeted; use read_range for large files)."),
     _spec(ToolName.read_range, ReadRangeArgs, "read", "Read lines start..end (1-based, inclusive) of a text file."),
-    _spec(ToolName.find_text, FindTextArgs, "read", "Search text (literal by default, optional regex) in repository files; returns path:line: text."),
+    _spec(
+        ToolName.find_text,
+        FindTextArgs,
+        "read",
+        "Search text (literal by default, optional regex) in repository files; returns path:line: text.",
+    ),
     _spec(ToolName.search_repo, SearchRepoArgs, "read", "Semantic/lexical repository search via repository intelligence."),
     _spec(ToolName.search_symbol, SearchSymbolArgs, "read", "Find definitions of a symbol (function, class, ...) by name."),
     _spec(ToolName.git_status, NoArgs, "git", "Show changed/untracked files of the workspace (read-only)."),
@@ -199,7 +204,9 @@ def get_spec(name: ToolName | str) -> ToolSpec:
     try:
         return TOOL_SPECS[ToolName(name)]
     except (ValueError, KeyError) as exc:
-        raise ToolProtocolError(E.UNKNOWN_TOOL, f"unknown tool '{name}'; valid tools: {', '.join(t.value for t in ToolName)}") from exc
+        raise ToolProtocolError(
+            E.UNKNOWN_TOOL, f"unknown tool '{str(name)[:64]}'; valid tools: {', '.join(t.value for t in ToolName)}"
+        ) from exc
 
 
 def tool_schemas(allowed: Iterable[ToolName] | None = None) -> list[dict[str, Any]]:

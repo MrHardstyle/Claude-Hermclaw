@@ -11,6 +11,8 @@ from typing import Any
 import pytest
 from sqlalchemy import select
 
+from hermclaw.contracts.events import EventType
+from hermclaw.contracts.worker import LoadedModel
 from hermclaw.core.errors import ModelError
 from hermclaw.models.gateway import MODEL_UNAVAILABLE, LiteLLMGateway
 from hermclaw.models.protocols import CallContext, ChatMessage
@@ -126,3 +128,29 @@ async def test_ollama_error_bodies_are_redacted() -> None:
         with pytest.raises(ModelError) as exc:
             await client.load("gemma4:26b", 32768, "10m")
     assert "supersecretvalue123" not in exc.value.message
+
+
+async def test_failed_conflict_unload_blocks_switch_and_is_evented(sessionmaker: Any) -> None:
+    """If an exclusive group member cannot be unloaded, the target is NOT loaded next to it and the failure is evented."""
+    fake = FakeOllama(["gemma4:26b", "qwen3-coder:30b"])
+    fake.loaded = {"gemma4:26b": 32768}
+
+    class StickyHost(OllamaHostClient):
+        async def loaded_models(self) -> list[LoadedModel]:  # Ollama keeps reporting the old model as resident
+            return [LoadedModel(name="gemma4:26b", context_length=32768)]
+
+    job = uuid.uuid4()
+    async with serve(fake.app) as url:
+        res = ModelResidency(models_config(), StickyHost(url, unload_wait_seconds=0.3, poll_seconds=0.05), session_factory=sessionmaker)
+        with pytest.raises(ModelError) as exc:
+            await res.ensure_loaded("coder-main", job_id=job, lease_id="lease-1")
+    assert exc.value.code == "MODEL_UNLOAD_FAILED"
+    gen = fake.bodies("/api/generate")
+    assert gen and all(b.get("keep_alive") == 0 for b in gen)  # only the unload attempt, never a load
+    assert "qwen3-coder:30b" not in fake.loaded
+    async with sessionmaker() as s:
+        evs = list((await s.execute(select(Event).where(Event.job_id == job).order_by(Event.sequence))).scalars())
+    assert [e.event_type for e in evs] == [EventType.MODEL_LOAD_FINISHED]
+    payload = evs[0].payload
+    assert payload["ok"] is False and payload["phase"] == "unload" and payload["error_code"] == "MODEL_UNLOAD_FAILED"
+    assert payload["lease_id"] == "lease-1" and evs[0].severity == "error"

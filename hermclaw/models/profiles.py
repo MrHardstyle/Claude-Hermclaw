@@ -40,8 +40,9 @@ DEFAULT_OLLAMA_PORT = 11434
 def resolve_api_key(ref: str | None, *, required: bool = True, env: str | None = None) -> str | None:
     """Resolve a secret reference (``cred:``/``file:``/``env:``; ``literal:`` only in tests).
 
-    Delegates to the shared ``SecretStore`` (production policy: no ``env:``/``literal:``, file mode 0400) which also
-    registers the value with the default redactor so the key can never leak into logs, events or prompts."""
+    Delegates to the shared ``SecretStore`` (production policy: no ``env:``/``literal:``, ``file:`` not group/world
+    readable) which also registers the value with the default redactor so the key can never leak into logs, events or
+    prompts."""
     from hermclaw.security.secrets import SecretStore
 
     if not ref:

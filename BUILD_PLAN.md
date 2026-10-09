@@ -119,17 +119,17 @@ Legende: `[x]` erledigt mit Evidence · `[~]` erledigt, Live-Verifikation auf Zi
 
 ## P08 – Model Gateway
 
-- [ ] 8.1 LiteLLM adapter. — Evidence: –
-- [ ] 8.2 model profiles. — Evidence: –
-- [ ] 8.3 Fast Qwen profile. — Evidence: –
-- [ ] 8.4 Gemma Planner profile. — Evidence: –
-- [ ] 8.5 Coder profile. — Evidence: –
-- [ ] 8.6 Heavy profile. — Evidence: –
-- [ ] 8.7 embedding profile. — Evidence: –
-- [ ] 8.8 health checks. — Evidence: –
-- [ ] 8.9 context validation. — Evidence: –
-- [ ] 8.10 load/unload adapter. — Evidence: –
-- [ ] 8.11 metrics. — Evidence: –
+- [~] 8.1 LiteLLM adapter. — Evidence: hermclaw/models/gateway.py LiteLLMGateway (chat/structured/embed/call_with_fallback, model_invocations rows + model.invocation.started/finished events, planner.fallback.used). Tested against a REAL LiteLLM 1.104.2 proxy plus a fake Ollama in tests/integration/test_models_litellm_proxy.py: test_chat_
+- [x] 8.2 model profiles. — Evidence: hermclaw/models/profiles.py: ProfileRegistry, check_architecture/assert_architecture, sync_profiles (INSERT ON CONFLICT, disables profiles that are no longer configured), get_profile_row(_by_role), profile_from_row. hermclaw/models/litellm_config.py generator + CLI. Tests: test_models_profiles.py::t
+- [~] 8.3 Fast Qwen profile. — Evidence: ARCHITECTURE fast=qwen3:8b with ctx >= 16K enforced in profiles.py. Tests: test_models_profiles.py::test_architecture_errors; test_models_litellm_proxy.py::test_chat_request_fields_reach_ollama (fast-router: think=false, num_ctx 16384). Live check: test_models_live.py::test_live_fast_router_returns_
+- [~] 8.4 Gemma Planner profile. — Evidence: planner=gemma4:26b, planner_fallback=gemma4:12b with fallback_for pointing at the planner, enforced in profiles.py. Technical fallback in gateway.call_with_fallback. Tests: test_models_gateway.py::test_fallback_on_load_error, test_fallback_after_repeated_timeout_only, test_no_fallback_for_non_techni
+- [~] 8.5 Coder profile. — Evidence: coder=qwen3-coder:30b, ctx >= 32K, output 4K-8K enforced in profiles.py. Tests: test_models_profiles.py::test_architecture_missing_role_and_warnings; test_models_litellm_proxy.py::test_proxy_config_defaults_apply_without_passthrough (coder num_ctx 32768). Live: test_live_residency_loads_coder_with_c
+- [~] 8.6 Heavy profile. — Evidence: heavy=qwen3.8:27b, ctx 24K-32K enforced in profiles.py. Test: test_models_litellm_proxy.py::test_request_level_think_overrides_proxy_default (heavy-review num_ctx 24576). Live inference on .224 blocked (BLOCKER-001).
+- [~] 8.7 embedding profile. — Evidence: embedding=embeddinggemma via ollama/<tag>, embedding_dimensions required. LiteLLMGateway.embed: batching, index ordering, dimension check, no fallback. Tests: test_models_gateway.py::test_embed_batches_and_orders, test_embed_dimension_and_count_checks, test_embed_rejects_oversized_input, test_embed_
+- [~] 8.8 health checks. — Evidence: hermclaw/models/health.py ModelHealthChecker: /health/liveliness, /health/readiness, /v1/models, Ollama /api/version /api/tags /api/ps; per-profile availability; never sends inference. Tests: test_models_litellm_proxy.py::test_health_against_real_proxy; test_models_residency.py::test_health_report_w
+- [x] 8.9 context validation. — Evidence: hermclaw/models/tokens.py: 3.2 chars/token (D-008) plus per-message overhead; validate_context raises ValidationFailed(CONTEXT_OVERFLOW) before any HTTP call. The repair echo is dropped when it would overflow. Tests: test_models_profiles.py::test_estimate_tokens_is_conservative, test_message_estimat
+- [~] 8.10 load/unload adapter. — Evidence: hermclaw/models/residency.py: ModelHostClient protocol, OllamaHostClient (/api/ps, /api/generate keep_alive, /api/embed for embedding models), WorkerModelHostClient adapter, ModelResidency.ensure_loaded/unload/unload_group/status (exclusive groups, num_ctx check, per-host lock, model.load.started/fi
+- [x] 8.11 metrics. — Evidence: hermclaw/models/health.py invocation_metrics (per alias: calls, outcome counts, fallback/repair calls, tokens, reasoning chars, avg/p50/p95/p99/max latency via percentile_cont, error_rate, invalid_rate) and error_breakdown. Test: test_models_gateway_db.py::test_invocation_metrics on real PostgreSQL.
 
 ## P09 – Resource Manager
 
@@ -228,31 +228,31 @@ Legende: `[x]` erledigt mit Evidence · `[~]` erledigt, Live-Verifikation auf Zi
 
 ## P16 – Context Builder
 
-- [ ] 16.1 context sections. — Evidence: –
-- [ ] 16.2 token budgeting. — Evidence: –
-- [ ] 16.3 relevance. — Evidence: –
-- [ ] 16.4 deduplication. — Evidence: –
-- [ ] 16.5 error preservation. — Evidence: –
-- [ ] 16.6 tool summary. — Evidence: –
-- [ ] 16.7 current diff. — Evidence: –
-- [ ] 16.8 tests. — Evidence: –
-- [ ] 16.9 context telemetry. — Evidence: –
+- [x] 16.1 context sections. — Evidence: sections.py SectionName (13 sections, Bauplan §18 order), SYSTEM/USER layout, DEFAULT_SYSTEM_CONTRACT, RESPONSE_PROTOCOL (single JSON action {tool,args,status,decision}), MANDATORY_SECTIONS; render.py renderers (goal, scope, constraints, acceptance for all 9 evidence types, repo facts, failure+corre
+- [x] 16.2 token budgeting. — Evidence: tokens.py estimate_tokens (3.2 chars/token exact integer arithmetic, non-ASCII costed >=1 token, D-008); budget.py plan_budget (total = context - max_output - max(min margin, fraction)), framing reservation, SectionBudgets fixed shares (sum 1.00, validated), split_elastic redistribution to RELEVANT 
+- [x] 16.3 relevance. — Evidence: builder.py relevance: context_for(title+goal+first error line), scope target heads (literal_path), failure file:line regions (traceback/path:line/pytest node ids, workspace-absolute paths relativised), ranking (failure 3.0 > target/acceptance 2.0 > search 1.0+norm > context norm, +1 inside targets),
+- [x] 16.4 deduplication. — Evidence: snippets.py dedupe_snippets (identical keys folded, overlapping/adjacent ranges merged line-accurately with re-read of gaps, max_snippet_lines cap, contained non-exact dropped, duplicate content never twice), pack_snippets first-fit + head clipping with read_range hint, render_packed grouping. Tests
+- [x] 16.5 error preservation. — Evidence: failure.py preserve_failure (verbatim if it fits; else first error line block + final summary lines always kept, head/tail alternating, exact '[… n chars omitted …]' markers, single huge line clipped, never above budget), first_error_line, truncate_middle; render.py render_failure (fenced verbatim f
+- [x] 16.6 tool summary. — Evidence: history.py TurnRecord (no reasoning field, from_mapping ignores status/decision/reasoning), render_history (last N full digest lines, older turns as counts per tool + error codes + last failure + files changed, budget shrinking), strip_reasoning (<think>/<thinking>/<reasoning>/analysis channel). Tes
+- [x] 16.7 current diff. — Evidence: diff.py split_diff/render_diff (per-file water-filling truncation with git_diff hint markers, listing of files that do not fit, exclusion of always_forbidden paths incl. renames); builder.py GitReader.diff(max_bytes=diff_max_bytes), redaction, fencing. Tests: test_context_builder_failure.py::test_di
+- [x] 16.8 tests. — Evidence: builder.py RELEVANT TESTS: test files from acceptance test/command evidence (shlex parsing, ::node ids), failure references in test files, search(target stem / code-like goal identifiers) filtered by is_test_path, context_for test hits; separate budget with redistribution. Tests: test_context_builde
+- [x] 16.9 context telemetry. — Evidence: report.py ContextReport (budget figures, per-section budget/estimate/chars/truncated/items/omitted_reason, dropped items with reasons, merged count, warnings, SHA-256 fingerprint), to_event_payload() (bounded, redacted, keys free of 'token' so the event-store redactor does not erase counters), recor
 
 ## P17 – Tool Engine
 
-- [ ] 17.1 list/read/find/search. — Evidence: –
-- [ ] 17.2 git read. — Evidence: –
-- [ ] 17.3 file writes. — Evidence: –
-- [ ] 17.4 patch. — Evidence: –
-- [ ] 17.5 commands. — Evidence: –
-- [ ] 17.6 tests. — Evidence: –
-- [ ] 17.7 research request. — Evidence: –
-- [ ] 17.8 scope request. — Evidence: –
-- [ ] 17.9 replan request. — Evidence: –
-- [ ] 17.10 checkpoint. — Evidence: –
-- [ ] 17.11 complete_step. — Evidence: –
-- [ ] 17.12 block_step. — Evidence: –
-- [ ] 17.13 policy enforcement. — Evidence: –
+- [x] 17.1 list/read/find/search. — Evidence: engine.py _list_files/_read_file/_read_range/_find_text/_search_repo/_search_symbol + workspace.py WorkspaceFS. Tests in test_tools_engine_read_write.py: test_list_files_hides_secrets_and_git_and_honours_filters, test_read_file_and_range, test_read_output_budget_sets_truncated, test_path_traversal_a
+- [x] 17.2 git read. — Evidence: engine.py _git_status/_git_diff go through the GitReader protocol; diff sections of protected files are left out; there are no git mutation tools. Tests: test_git_status_and_diff_are_read_only; test_broken_git_reader (failure)
+- [x] 17.3 file writes. — Evidence: engine.py _write_file/_replace_text: ScopeGuard check with the operation judged against base_sha, atomic temp+fsync+rename, file mode kept, symlinked directories refused, redaction marker refused. Tests: test_write_file_create_modify_scope_and_events, test_write_tools_require_a_scope_contract, test_
+- [x] 17.4 patch. — Evidence: patch.py parse_patch/targets (renames, deletes, -p0/-p1, symlinks refused) plus engine._apply_patch: every target checked against scope -> numstat cross-check -> git apply --check -> git apply (worktree only) inside a tracker audit. Tests: test_apply_patch_applies_in_scope_without_committing, test_a
+- [x] 17.5 commands. — Evidence: classify.py (policy patterns, checks against several rewritten forms of the command so simple obfuscation fails, built-in git-mutation detection), engine._sandbox_run (cwd validation, timeout and network from ToolPermissions, command_runs rows, COMMAND_RUN), snapshot.WorkspaceTracker (reverts out-of
+- [x] 17.6 tests. — Evidence: testparse.py parsers for pytest/unittest/jest/vitest/mocha/phpunit/go/cargo/generic plus summarise(); engine._run_test writes test_runs rows and TEST_STARTED/TEST_PASSED/TEST_FAILED. Tests: test_tools_testparse.py (16 recorded outputs + verdict tests), test_run_test_real_pytest_pass_and_fail (real p
+- [x] 17.7 research request. — Evidence: engine._request_research -> ToolCallbacks.on_research, per-attempt limit, output clipped and redacted. Tests: test_request_research_forwards_and_limits, test_callback_failures_are_contained
+- [x] 17.8 scope request. — Evidence: engine._request_scope_expansion: protected paths refused locally, forwarded to on_scope_expansion, a newer granted ScopeContract replaces the guard (an older one is ignored). Tests: test_request_scope_expansion_swaps_guard, test_callback_failures_are_contained, test_null_callbacks_refuse
+- [x] 17.9 replan request. — Evidence: engine._request_replan -> on_replan, terminal; later calls get STEP_FINISHED. Tests: test_request_replan_is_terminal, test_callback_failures_are_contained (failed replan is not terminal)
+- [x] 17.10 checkpoint. — Evidence: engine._checkpoint + recorder.save_checkpoint (row lock, redacted, step status untouched) + CHECKPOINT_CREATED. Tests: test_checkpoint_persists_on_step, test_checkpoint_for_unknown_step
+- [x] 17.11 complete_step. — Evidence: engine._complete_step validates CompletionReport (unknown keys refused), normalises paths, puts reported vs. actual changed files in data, terminal. Tests: test_complete_step_validates_and_is_terminal, test_broken_git_reader
+- [x] 17.12 block_step. — Evidence: engine._block_step validates BlockReport, terminal. Test: test_block_step_is_terminal
+- [x] 17.13 policy enforcement. — Evidence: engine.execute: pre-checks (finished, allowed tools, turn budget, ARGS_INVALID with schema), tool_calls row (redacted, long values stored as head + sha256) with status succeeded/refused/failed/cancelled, TOOL_CALL_STARTED/FINISHED with duration, output budget with truncated flag, terminal flag, per-
 
 ## P18 – Execution Sandbox
 

@@ -35,6 +35,8 @@ dev = [
   "mypy>=1.10",
   "types-PyYAML",
 ]
+# LiteLLM proxy on .225 runs in its own venv (its pinned deps must not leak into the orchestrator venv)
+litellm-proxy = ["litellm[proxy]==1.104.2"]
 
 [project.scripts]
 hermclaw = "hermclaw.cli:main"

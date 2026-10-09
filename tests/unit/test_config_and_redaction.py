@@ -51,3 +51,11 @@ def test_redactor_masks_known_secret_shapes():
         "nested": {"password": REDACTED},
         "ok": "fine",
     }
+
+
+def test_numeric_token_counters_are_not_redacted() -> None:
+    from hermclaw.core.redaction import REDACTED, redact
+
+    out = redact({"prompt_tokens": 120, "completion_tokens": 30, "max_tokens": 512, "token_count": 3, "token": 123456, "api_key": "abcd1234", "ok": True})
+    assert out["prompt_tokens"] == 120 and out["completion_tokens"] == 30 and out["max_tokens"] == 512 and out["token_count"] == 3
+    assert out["token"] == REDACTED and out["api_key"] == REDACTED and out["ok"] is True

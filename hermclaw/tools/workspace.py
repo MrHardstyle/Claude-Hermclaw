@@ -120,9 +120,14 @@ class WorkspaceFS:
             raise ToolError(E.PATH_OUTSIDE_WORKSPACE, f"parent directory of '{rel}' resolves outside the workspace")
         if target.is_dir():
             raise ToolError(E.NOT_A_FILE, f"'{rel}' is a directory")
-        # every existing ancestor must be a real directory (not a file)
+        # every existing ancestor must be a real directory: not a file and not a symlink (a symlinked directory would
+        # make the scope check run on a different path than the file actually written)
         for anc in target.relative_to(self.root).parents:
+            if anc.as_posix() == ".":
+                continue
             p = self.root / anc
+            if p.is_symlink():
+                raise ToolError(E.SYMLINK_REFUSED, f"'{anc.as_posix()}' is a symlink; tools never write through symlinked directories")
             if p.exists() and not p.is_dir():
                 raise ToolError(E.NOT_A_DIRECTORY, f"'{anc.as_posix()}' is a file, cannot create '{rel}' below it")
         return rel, target
@@ -235,6 +240,14 @@ def immediate_children(files: Iterable[str], base: str) -> list[str]:
 
 
 # ----------------------------------------------------------------------------------------------- search
+_NESTED_QUANTIFIER = re.compile(r"\((?:[^()\\]|\\.)*[+*}](?:[^()\\]|\\.)*\)[+*{]|\((?:[^()\\]|\\.)*\|(?:[^()\\]|\\.)*\)[+*]")
+
+
+def regex_is_risky(pattern: str) -> bool:
+    """Heuristic guard against catastrophic backtracking: nested quantifiers (``(a+)+``) / quantified alternations."""
+    return bool(_NESTED_QUANTIFIER.search(pattern))
+
+
 @dataclass
 class SearchOutcome:
     lines: list[str]

@@ -60,6 +60,7 @@ class EventType:
     MODEL_UNLOADED = "model.unloaded"
     MODEL_INVOCATION_STARTED = "model.invocation.started"
     MODEL_INVOCATION_FINISHED = "model.invocation.finished"
+    CONTEXT_BUILT = "context.built"
     TOOL_CALL_STARTED = "tool.call.started"
     TOOL_CALL_FINISHED = "tool.call.finished"
     COMMAND_RUN = "command.run"

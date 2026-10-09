@@ -118,7 +118,12 @@ async def test_load_failure_and_embedding_load(ollama: tuple[FakeOllama, str]) -
     assert exc.value.code == "MODEL_LOAD_FAILED" and exc.value.details["http_status"] == 404
     out = await res.ensure_loaded("embedding")  # /api/generate rejected -> /api/embed load
     assert out.context_length == 2048
-    assert fake.bodies("/api/embed")[-1] == {"model": "embeddinggemma-2:740m", "input": [], "keep_alive": "10m", "options": {"num_ctx": 2048}}
+    assert fake.bodies("/api/embed")[-1] == {
+        "model": "embeddinggemma-2:740m",
+        "input": [],
+        "keep_alive": "10m",
+        "options": {"num_ctx": 2048},
+    }
 
 
 async def test_unload_and_unload_group(ollama: tuple[FakeOllama, str], sessionmaker: Any) -> None:
@@ -165,7 +170,9 @@ class FakeWorker:
     async def loaded_models(self) -> list[LoadedModel]:
         return [LoadedModel(name=n, context_length=c) for n, c in self.loaded.items()]
 
-    async def load_model(self, request: ModelLoadRequest, *, exclusive: bool = False, keep: Sequence[str] = (), timeout_seconds: float | None = 900.0) -> Any:
+    async def load_model(
+        self, request: ModelLoadRequest, *, exclusive: bool = False, keep: Sequence[str] = (), timeout_seconds: float | None = 900.0
+    ) -> Any:
         self.calls.append(("load", (request, exclusive)))
         self.loaded[request.model] = request.context_tokens
         return {"model": request.model, "loaded": True}

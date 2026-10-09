@@ -23,6 +23,8 @@ _PATTERNS: list[re.Pattern[str]] = [
 ]
 
 _SENSITIVE_KEYS = re.compile(r"(?i)(password|passwd|secret|token|api[_-]?key|authorization|private[_-]?key|credential)")
+# numeric telemetry under "sensitive-looking" keys (prompt_tokens, max_tokens, token_count …) is not a secret
+_COUNTER_KEYS = re.compile(r"(?i)(tokens|_count|_ms|_seconds|_bytes|_chars)$|^(max|min|num|total)_")
 
 
 class Redactor:
@@ -53,7 +55,8 @@ class Redactor:
         if isinstance(value, dict):
             red: dict[Any, Any] = {}
             for k, v in value.items():
-                if isinstance(k, str) and _SENSITIVE_KEYS.search(k) and isinstance(v, str | int | float) and v != "":
+                numeric = isinstance(v, int | float) and not isinstance(v, bool)
+                if isinstance(k, str) and _SENSITIVE_KEYS.search(k) and v != "" and (isinstance(v, str) or (numeric and not _COUNTER_KEYS.search(k))):
                     red[k] = REDACTED
                 else:
                     red[k] = self.obj(v)

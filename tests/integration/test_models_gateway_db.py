@@ -44,7 +44,11 @@ def ctx(purpose: str = "review") -> CallContext:
 
 async def rows_for(sm: Any, job_id: uuid.UUID) -> list[ModelInvocation]:
     async with sm() as s:
-        stmt = select(ModelInvocation).where(ModelInvocation.job_id == job_id).order_by(ModelInvocation.started_at, ModelInvocation.repair_attempt)
+        stmt = (
+            select(ModelInvocation)
+            .where(ModelInvocation.job_id == job_id)
+            .order_by(ModelInvocation.started_at, ModelInvocation.repair_attempt)
+        )
         return list((await s.execute(stmt)).scalars())
 
 
@@ -56,7 +60,10 @@ async def events_for(sm: Any, job_id: uuid.UUID) -> list[Event]:
 # ----------------------------------------------------------------------------------------------- invocations
 async def test_chat_persists_invocation_and_events(fake: tuple[FakeLiteLLM, str], sessionmaker: Any) -> None:
     server, url = fake
-    server.script("heavy-review", Scripted(body=FakeLiteLLM.completion('{"passed": true, "findings": []}', reasoning="REASONING-SECRET", prompt=99, completion=12)))
+    server.script(
+        "heavy-review",
+        Scripted(body=FakeLiteLLM.completion('{"passed": true, "findings": []}', reasoning="REASONING-SECRET", prompt=99, completion=12)),
+    )
     c = ctx()
     async with LiteLLMGateway(models_config(url), api_key=MASTER_KEY, session_factory=sessionmaker) as gw:
         res = await gw.chat("heavy-review", [ChatMessage("user", "review this diff")], ctx=c)
@@ -100,7 +107,11 @@ async def test_structured_repairs_are_traceable(fake: tuple[FakeLiteLLM, str], s
         out = await gw.structured("heavy-review", [ChatMessage("user", "review")], Verdict, ctx=c)
     assert out.repair_attempts == 2 and out.value.findings == ["major: x"]
     rows = await rows_for(sessionmaker, c.job_id)  # type: ignore[arg-type]
-    assert [(r.repair_attempt, r.status, r.response_valid) for r in rows] == [(0, "invalid", False), (1, "invalid", False), (2, "succeeded", True)]
+    assert [(r.repair_attempt, r.status, r.response_valid) for r in rows] == [
+        (0, "invalid", False),
+        (1, "invalid", False),
+        (2, "succeeded", True),
+    ]
     assert rows[0].error_code == "MODEL_OUTPUT_INVALID" and "no final content" in (rows[0].error_message or "")
     assert rows[0].response_excerpt == "" and rows[0].reasoning_chars == len("long thoughts")
     assert "passed" in (rows[1].error_message or "")
@@ -123,7 +134,9 @@ async def test_exhausted_repairs_raise_and_persist(fake: tuple[FakeLiteLLM, str]
 async def test_failures_and_timeouts_are_persisted(fake: tuple[FakeLiteLLM, str], sessionmaker: Any) -> None:
     server, url = fake
     server.script("heavy-review", Scripted(status=500, body={"error": {"message": "failed to load model: out of memory"}}))
-    server.script("coder-main", Scripted(delay=3.0, body=FakeLiteLLM.completion("late")), Scripted(delay=3.0, body=FakeLiteLLM.completion("late")))
+    server.script(
+        "coder-main", Scripted(delay=3.0, body=FakeLiteLLM.completion("late")), Scripted(delay=3.0, body=FakeLiteLLM.completion("late"))
+    )
     c = ctx()
     opts = GatewayOptions(timeout_grace_seconds=0.0)
     async with LiteLLMGateway(models_config(url), api_key=MASTER_KEY, session_factory=sessionmaker, options=opts) as gw:
@@ -236,8 +249,15 @@ async def test_sync_profiles_roundtrip(sessionmaker: Any) -> None:
     async with sessionmaker() as s:
         again = await sync_profiles(s, cfg)
         assert again.as_dict() == {"created": [], "updated": [], "disabled": []}
-        changed = cfg.model_copy(update={"profiles": [p.model_copy(update={"context_tokens": 20480}) if p.alias == "heavy-review" else p
-                                                      for p in cfg.profiles if p.alias != "fast-router"]})
+        changed = cfg.model_copy(
+            update={
+                "profiles": [
+                    p.model_copy(update={"context_tokens": 20480}) if p.alias == "heavy-review" else p
+                    for p in cfg.profiles
+                    if p.alias != "fast-router"
+                ]
+            }
+        )
         report = await sync_profiles(s, changed)
         assert report.updated == ["heavy-review"] and report.disabled == ["fast-router"]
         await s.commit()

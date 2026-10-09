@@ -326,29 +326,52 @@ class ModelResidency:
                 )
             lease = str(lease_id) if lease_id else None
             unloaded: list[str] = []
-            for other in conflicts:
-                await self._unload(
-                    client,
-                    profile.host,
-                    other,
-                    reason=f"exclusive resource group '{profile.resource_group}' for {alias}",
-                    lease_id=lease,
+            try:
+                for other in conflicts:
+                    await self._unload(
+                        client,
+                        profile.host,
+                        other,
+                        reason=f"exclusive resource group '{profile.resource_group}' for {alias}",
+                        lease_id=lease,
+                        job_id=job_id,
+                        step_id=step_id,
+                    )
+                    unloaded.append(other)
+                if target is not None and not self._context_ok(profile, target):
+                    # resident with a different num_ctx – reload explicitly instead of relying on Ollama's implicit reload
+                    await self._unload(
+                        client,
+                        profile.host,
+                        target.name,
+                        reason=f"context {target.context_length} != {profile.context_tokens}",
+                        lease_id=lease,
+                        job_id=job_id,
+                        step_id=step_id,
+                    )
+                    unloaded.append(target.name)
+            except HermclawError as exc:
+                # the switch cannot proceed: never load next to a still-resident group member (VRAM/RAM overcommit)
+                await self._event(
+                    EventType.MODEL_LOAD_FINISHED,
+                    profile,
+                    {
+                        "alias": alias,
+                        "model": profile.model,
+                        "host": profile.host,
+                        "ok": False,
+                        "phase": "unload",
+                        "unloaded": unloaded,
+                        "error_code": exc.code,
+                        "error": DEFAULT_REDACTOR.text(exc.message)[:1000],
+                        "lease_id": lease,
+                        "duration_ms": int((time.monotonic() - t0) * 1000),
+                    },
+                    severity=Severity.error,
                     job_id=job_id,
                     step_id=step_id,
                 )
-                unloaded.append(other)
-            if target is not None and not self._context_ok(profile, target):
-                # resident with a different num_ctx – reload explicitly instead of relying on Ollama's implicit reload
-                await self._unload(
-                    client,
-                    profile.host,
-                    target.name,
-                    reason=f"context {target.context_length} != {profile.context_tokens}",
-                    lease_id=lease,
-                    job_id=job_id,
-                    step_id=step_id,
-                )
-                unloaded.append(target.name)
+                raise
             remaining = [m.name for m in loaded if m.name not in unloaded]
             resident_gb = self._resident_gb(remaining, profile.host) + profile.memory_gb
             capacity_warning = None
@@ -394,6 +417,7 @@ class ModelResidency:
                         "model": profile.model,
                         "host": profile.host,
                         "ok": False,
+                        "phase": "load",
                         "error_code": exc.code,
                         "error": DEFAULT_REDACTOR.text(exc.message)[:1000],
                         "lease_id": lease,

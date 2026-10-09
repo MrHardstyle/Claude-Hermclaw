@@ -102,6 +102,15 @@ class ParsedPatch:
         return list(dedup.values())
 
 
+def diff_section_path(line: str) -> str | None:
+    """Repository path of a ``diff --git a/x b/x`` section header (``b/`` side, prefix stripped), else ``None``."""
+    m = _DIFF_GIT.match(line)
+    if not m:
+        return None
+    path = unquote_git_path(m.group("b"))
+    return path[2:] if path.startswith("b/") else path
+
+
 def strip_prefix(path: str | None, strip: int) -> str | None:
     if path is None or path == DEV_NULL:
         return None
@@ -148,9 +157,7 @@ def parse_patch(text: str) -> ParsedPatch:
             elif line.startswith("deleted file mode "):
                 cur.deleted = True
                 cur.modes.append(line.rsplit(" ", 1)[-1])
-            elif line.startswith(("old mode ", "new mode ")):
-                cur.modes.append(line.rsplit(" ", 1)[-1])
-            elif line.startswith("index ") and " " in line[6:]:
+            elif line.startswith(("old mode ", "new mode ")) or (line.startswith("index ") and " " in line[6:]):
                 cur.modes.append(line.rsplit(" ", 1)[-1])
             elif line.startswith("rename from "):
                 cur.rename, cur.source = True, unquote_git_path(line[12:])

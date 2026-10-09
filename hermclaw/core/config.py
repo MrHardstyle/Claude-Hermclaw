@@ -268,6 +268,7 @@ class CapabilityConfig(_Strict):
     model_role: str | None = None
     resources: list[str] = Field(default_factory=list)
     network: bool = False
+    allow_destructive_commands: bool = False  # tool engine: destructive shell commands need an explicit opt-in
     description: str = ""
 
 

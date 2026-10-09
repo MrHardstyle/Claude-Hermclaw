@@ -45,22 +45,79 @@ def profile(**kw: Any) -> ModelProfileConfig:
 
 def models_config(base_url: str = "http://127.0.0.1:4000", *, timeout: int = 60, **overrides: Any) -> ModelsConfig:
     profiles = [
-        profile(alias="fast-router", role="fast", model="qwen3:8b", context_tokens=16384, max_output_tokens=2048, temperature=0.1,
-                resource_group="small-model-224", exclusive=False, memory_gb=7, priority=30, timeout_seconds=timeout),
-        profile(alias="planner-gemma", role="planner", model="gemma4:26b", context_tokens=32768, max_output_tokens=8192,
-                memory_gb=19, priority=70, timeout_seconds=timeout),
-        profile(alias="planner-gemma-fallback", role="planner_fallback", model="gemma4:12b", fallback_for="planner-gemma",
-                context_tokens=32768, max_output_tokens=8192, memory_gb=10, priority=70, timeout_seconds=timeout),
-        profile(alias="coder-main", role="coder", model="qwen3-coder:30b", context_tokens=32768, max_output_tokens=6144,
-                memory_gb=23, priority=50, timeout_seconds=timeout),
-        profile(alias="heavy-review", role="heavy", model="qwen3.8:27b", context_tokens=24576, max_output_tokens=4096,
-                memory_gb=25, priority=60, timeout_seconds=timeout),
-        profile(alias="embedding", role="embedding", kind="embedding", model="embeddinggemma-2:740m", context_tokens=2048,
-                max_output_tokens=0, resource_group="small-model-224", exclusive=False, memory_gb=2, priority=20,
-                embedding_dimensions=8, timeout_seconds=timeout),
+        profile(
+            alias="fast-router",
+            role="fast",
+            model="qwen3:8b",
+            context_tokens=16384,
+            max_output_tokens=2048,
+            temperature=0.1,
+            resource_group="small-model-224",
+            exclusive=False,
+            memory_gb=7,
+            priority=30,
+            timeout_seconds=timeout,
+        ),
+        profile(
+            alias="planner-gemma",
+            role="planner",
+            model="gemma4:26b",
+            context_tokens=32768,
+            max_output_tokens=8192,
+            memory_gb=19,
+            priority=70,
+            timeout_seconds=timeout,
+        ),
+        profile(
+            alias="planner-gemma-fallback",
+            role="planner_fallback",
+            model="gemma4:12b",
+            fallback_for="planner-gemma",
+            context_tokens=32768,
+            max_output_tokens=8192,
+            memory_gb=10,
+            priority=70,
+            timeout_seconds=timeout,
+        ),
+        profile(
+            alias="coder-main",
+            role="coder",
+            model="qwen3-coder:30b",
+            context_tokens=32768,
+            max_output_tokens=6144,
+            memory_gb=23,
+            priority=50,
+            timeout_seconds=timeout,
+        ),
+        profile(
+            alias="heavy-review",
+            role="heavy",
+            model="qwen3.8:27b",
+            context_tokens=24576,
+            max_output_tokens=4096,
+            memory_gb=25,
+            priority=60,
+            timeout_seconds=timeout,
+        ),
+        profile(
+            alias="embedding",
+            role="embedding",
+            kind="embedding",
+            model="embeddinggemma-2:740m",
+            context_tokens=2048,
+            max_output_tokens=0,
+            resource_group="small-model-224",
+            exclusive=False,
+            memory_gb=2,
+            priority=20,
+            embedding_dimensions=8,
+            timeout_seconds=timeout,
+        ),
     ]
-    data: dict[str, Any] = {"litellm": LiteLLMConfig(base_url=base_url, api_key_ref="literal:" + MASTER_KEY,
-                                                    request_timeout_seconds=900), "profiles": profiles}
+    data: dict[str, Any] = {
+        "litellm": LiteLLMConfig(base_url=base_url, api_key_ref="literal:" + MASTER_KEY, request_timeout_seconds=900),
+        "profiles": profiles,
+    }
     data.update(overrides)
     return ModelsConfig.model_validate(data)
 
@@ -100,15 +157,17 @@ class FakeOllama:
         self.default_content = '{"ok": true, "answer": "hello"}'
         self.context_override: dict[str, int] = {}  # simulate Ollama clamping num_ctx
         self.app = web.Application()
-        self.app.add_routes([
-            web.get("/api/version", self._version),
-            web.get("/api/tags", self._tags),
-            web.get("/api/ps", self._ps),
-            web.post("/api/generate", self._generate),
-            web.post("/api/chat", self._chat),
-            web.post("/api/embed", self._embed),
-            web.post("/api/show", self._show),
-        ])
+        self.app.add_routes(
+            [
+                web.get("/api/version", self._version),
+                web.get("/api/tags", self._tags),
+                web.get("/api/ps", self._ps),
+                web.post("/api/generate", self._generate),
+                web.post("/api/chat", self._chat),
+                web.post("/api/embed", self._embed),
+                web.post("/api/show", self._show),
+            ]
+        )
 
     def b(self, model: str) -> ModelBehaviour:
         return self.behaviour.setdefault(model, ModelBehaviour())
@@ -182,10 +241,19 @@ class FakeOllama:
         message: dict[str, Any] = {"role": "assistant", "content": content}
         if beh.thinking:
             message["thinking"] = beh.thinking
-        return web.json_response({
-            "model": model, "created_at": "2026-10-08T00:00:00Z", "message": message, "done": True, "done_reason": "stop",
-            "prompt_eval_count": 42, "eval_count": 7, "total_duration": 1_000_000, "eval_duration": 500_000,
-        })
+        return web.json_response(
+            {
+                "model": model,
+                "created_at": "2026-10-08T00:00:00Z",
+                "message": message,
+                "done": True,
+                "done_reason": "stop",
+                "prompt_eval_count": 42,
+                "eval_count": 7,
+                "total_duration": 1_000_000,
+                "eval_duration": 500_000,
+            }
+        )
 
     async def _embed(self, request: web.Request) -> web.Response:
         body = await self._record(request)
@@ -217,24 +285,32 @@ class FakeLiteLLM:
         self.ready = ready
         self.aliases = aliases
         self.app = web.Application()
-        self.app.add_routes([
-            web.post("/v1/chat/completions", self._chat),
-            web.post("/v1/embeddings", self._embeddings),
-            web.get("/health/liveliness", self._live),
-            web.get("/health/readiness", self._ready),
-            web.get("/v1/models", self._models),
-        ])
+        self.app.add_routes(
+            [
+                web.post("/v1/chat/completions", self._chat),
+                web.post("/v1/embeddings", self._embeddings),
+                web.get("/health/liveliness", self._live),
+                web.get("/health/readiness", self._ready),
+                web.get("/v1/models", self._models),
+            ]
+        )
 
     def script(self, alias: str, *items: Scripted) -> None:
         self.queues.setdefault(alias, deque()).extend(items)
 
     @staticmethod
-    def completion(content: str | None, *, reasoning: str | None = None, finish: str = "stop", prompt: int = 10, completion: int = 5) -> dict[str, Any]:
+    def completion(
+        content: str | None, *, reasoning: str | None = None, finish: str = "stop", prompt: int = 10, completion: int = 5
+    ) -> dict[str, Any]:
         msg: dict[str, Any] = {"role": "assistant", "content": content}
         if reasoning is not None:
             msg["reasoning_content"] = reasoning
-        return {"id": "x", "object": "chat.completion", "choices": [{"index": 0, "finish_reason": finish, "message": msg}],
-                "usage": {"prompt_tokens": prompt, "completion_tokens": completion, "total_tokens": prompt + completion}}
+        return {
+            "id": "x",
+            "object": "chat.completion",
+            "choices": [{"index": 0, "finish_reason": finish, "message": msg}],
+            "usage": {"prompt_tokens": prompt, "completion_tokens": completion, "total_tokens": prompt + completion},
+        }
 
     async def _respond(self, request: web.Request) -> web.Response:
         body = await request.json()
@@ -243,7 +319,11 @@ class FakeLiteLLM:
         item = queue.popleft() if queue else Scripted(body=self.completion('{"ok": true}'))
         if item.delay:
             await asyncio.sleep(item.delay)
-        return web.json_response(item.body, status=item.status) if not isinstance(item.body, str) else web.Response(text=item.body, status=item.status)
+        return (
+            web.json_response(item.body, status=item.status)
+            if not isinstance(item.body, str)
+            else web.Response(text=item.body, status=item.status)
+        )
 
     async def _chat(self, request: web.Request) -> web.Response:
         return await self._respond(request)
@@ -281,8 +361,12 @@ def litellm_proxy_binary() -> str | None:
             return None
         candidate = Path(found)
     python = candidate.parent / "python"
-    probe = subprocess.run([str(python if python.exists() else sys.executable), "-c", "import backoff, litellm.proxy.proxy_server"],
-                           capture_output=True, timeout=120)
+    probe = subprocess.run(
+        [str(python if python.exists() else sys.executable), "-c", "import backoff, litellm.proxy.proxy_server"],
+        capture_output=True,
+        timeout=120,
+        check=False,
+    )
     return str(candidate) if probe.returncode == 0 else None
 
 
@@ -291,14 +375,21 @@ async def litellm_proxy(binary: str, config_path: Path, *, startup_timeout: floa
     import httpx
 
     port = free_port()
-    env = {**os.environ, "LITELLM_MASTER_KEY": MASTER_KEY, "LITELLM_LOCAL_MODEL_COST_MAP": "True", "LITELLM_LOG": "ERROR",
-           "NO_PROXY": "127.0.0.1,localhost", "no_proxy": "127.0.0.1,localhost"}
+    env = {
+        **os.environ,
+        "LITELLM_MASTER_KEY": MASTER_KEY,
+        "LITELLM_LOCAL_MODEL_COST_MAP": "True",
+        "LITELLM_LOG": "ERROR",
+        "NO_PROXY": "127.0.0.1,localhost",
+        "no_proxy": "127.0.0.1,localhost",
+    }
     for var in ("HTTP_PROXY", "HTTPS_PROXY", "http_proxy", "https_proxy", "DATABASE_URL"):
         env.pop(var, None)
     log_path = config_path.with_suffix(".log")
     log_file = log_path.open("wb")
-    proc = await asyncio.create_subprocess_exec(binary, "--config", str(config_path), "--host", "127.0.0.1", "--port", str(port),
-                                                stdout=log_file, stderr=subprocess.STDOUT, env=env)
+    proc = await asyncio.create_subprocess_exec(
+        binary, "--config", str(config_path), "--host", "127.0.0.1", "--port", str(port), stdout=log_file, stderr=subprocess.STDOUT, env=env
+    )
     url = f"http://127.0.0.1:{port}"
     try:
         loop = asyncio.get_running_loop()

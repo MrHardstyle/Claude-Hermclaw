@@ -158,6 +158,30 @@ Noch keine.
 - Erwartet: ValidationFailed / semantic error
 - Tatsächlich: FIXED. Tests: test_planner_enrich.py::test_invalid_risk_policy_overrides_are_rejected, test_planner_validation.py::test_diff_globs_must_be_repository_relative
 
+### BUG-023 – extract_json let RecursionError escape on deeply nested model output
+- Phase: P08 · Komponente: models · Severity: P2 · blockierend: nein · Status: **behoben** (Regressionstest in den models-Tests)
+- Reproduktion: extract_json('[' * 100000), or structured() where the model answers with 60k '[' characters
+- Erwartet: ValueError, so the output is treated as invalid and a repair call follows
+- Tatsächlich: RecursionError propagated, and the invocation was recorded as INTERNAL_ERROR. FIXED in gateway.py (RecursionError and the int-digit limit now map to ValueError, and the candidate scan is capped at 256 start positions). Regression tests: test_models_gateway.py::test_extract_json_hostile_inputs, test_structured_hostile_nesting_triggers_repair
+
+### BUG-024 – Repair call could hit CONTEXT_OVERFLOW because of the echoed answer
+- Phase: P08 · Komponente: models · Severity: P3 · blockierend: nein · Status: **behoben** (Regressionstest in den models-Tests)
+- Reproduktion: structured() on fast-router with a prompt of about 13.5K tokens where the first answer is invalid and long
+- Erwartet: Repair still possible with the validation error alone
+- Tatsächlich: Repeating the rejected answer (up to 6000 chars) pushed the request over the context window and raised ValidationFailed. FIXED: the echo is dropped when it does not fit (LiteLLMGateway._repair_conversation). Regression tests: test_structured_repair_drops_echo_when_context_is_tight, test_structured_repair_keeps_echo_when_it_fits
+
+### BUG-025 – Failed unload of a conflicting group member left no event
+- Phase: P08 · Komponente: models · Severity: P3 · blockierend: nein · Status: **behoben** (Regressionstest in den models-Tests)
+- Reproduktion: ensure_loaded('coder-main') while gemma4:26b stays resident after keep_alive=0
+- Erwartet: Switch aborted, target not loaded, failure visible in the event log
+- Tatsächlich: ModelError raised with no event recorded. FIXED: model.load.finished is now written with ok=false, phase=unload, error_code and severity error (the load-phase failure event now carries phase=load too). Regression test: test_models_failures.py::test_failed_conflict_unload_blocks_switch_and_is_evented
+
+### BUG-026 – Empirical LiteLLM proxy tests skip in the repo venv
+- Phase: P08 · Komponente: models · Severity: P3 · blockierend: nein · Status: **behoben** (Regressionstest in den models-Tests)
+- Reproduktion: .venv/bin/pytest tests/integration/test_models_litellm_proxy.py
+- Erwartet: Tests run against a real proxy
+- Tatsächlich: 12 tests skip because .venv lacks the litellm[proxy] extras. Test-infrastructure issue only; fix is the shared pyproject change listed above.
+
 ## Template
 
 ### BUG-XXX – Titel
