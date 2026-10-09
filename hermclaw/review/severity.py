@@ -22,8 +22,8 @@ from pydantic import ConfigDict, PrivateAttr, ValidatorFunctionWrapHandler, mode
 from hermclaw.contracts.common import FindingSeverity
 from hermclaw.contracts.review import ReviewContract, ReviewFinding
 from hermclaw.contracts.scope import normalise_path
-from hermclaw.review.types import SEVERITY_RANK
 from hermclaw.review.text import clip, one_line
+from hermclaw.review.types import SEVERITY_RANK
 
 MAX_FINDINGS = 50
 _LIMITS = {"path": 500, "summary": 2000, "evidence": 4000, "suggested_fix": 4000}
@@ -214,9 +214,7 @@ def normalise_raw_review(data: Any) -> tuple[Any, list[str]]:
     fkey, findings = _first(data, _FINDINGS_KEYS)
     if findings is None:
         findings = []
-    elif isinstance(findings, dict):
-        findings = [findings]
-    elif not isinstance(findings, list):
+    elif isinstance(findings, dict) or not isinstance(findings, list):
         findings = [findings]
     cleaned = [_normalise_raw_finding(f, i, notes) for i, f in enumerate(findings)]
     if len(cleaned) > MAX_FINDINGS:
