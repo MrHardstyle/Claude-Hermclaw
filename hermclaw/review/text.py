@@ -9,6 +9,9 @@ from typing import Any
 from hermclaw.core.redaction import DEFAULT_REDACTOR
 
 _BACKTICK_RUN = re.compile(r"`{3,}")
+_REASONING_TAGS = "think|thinking|reasoning|thought|scratchpad"
+_REASONING_BLOCK = re.compile(rf"<(?P<tag>{_REASONING_TAGS})\b[^>]*>.*?(?:</(?P=tag)\s*>|\Z)", re.IGNORECASE | re.DOTALL)
+_REASONING_CLOSE = re.compile(rf"^.*?</(?:{_REASONING_TAGS})\s*>", re.IGNORECASE | re.DOTALL)
 _WS = re.compile(r"\s+")
 _NOTE_RESERVE = 40
 
@@ -16,6 +19,15 @@ _NOTE_RESERVE = 40
 def redact(text: str) -> str:
     """Mask secrets before text reaches a prompt, a database row or an event."""
     return DEFAULT_REDACTOR.text(text) if text else text
+
+
+def strip_reasoning(text: str) -> str:
+    """Remove model reasoning markup (``<think>…</think>`` and friends; an unterminated block runs to the end, a
+    dangling close tag means everything before it was reasoning). Reasoning is never stored or displayed."""
+    if not text or "<" not in text:
+        return text
+    out = _REASONING_BLOCK.sub("", text)
+    return _REASONING_CLOSE.sub("", out).strip()
 
 
 def clip(text: str, limit: int, *, what: str = "chars") -> str:

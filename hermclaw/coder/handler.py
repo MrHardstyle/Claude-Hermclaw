@@ -10,6 +10,7 @@ completely again (23.5 regression rerun). When the correction budget is exhauste
 
 from __future__ import annotations
 
+import dataclasses
 import uuid
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, field
@@ -252,6 +253,11 @@ class ImplementStepHandler:
                 "blocked", error_code="NO_WORKSPACE", error_message="job has no active workspace", replan_reason="missing_dependency"
             )
         ws, handle = found
+        # step baseline: changes of *this* step are measured against the HEAD at step start (earlier steps of the
+        # job are already committed), so scope checks, diffs and verification never attribute them to this step
+        fresh = await self.deps.git.get_workspace(ws.id)
+        if fresh.head_sha and fresh.head_sha != handle.base_sha:
+            handle = dataclasses.replace(handle, base_sha=fresh.head_sha)
         # scope (P15): reuse the active version on retries/corrections, create it on the first attempt
         contract = await self.deps.scope_engine.current_contract(ctx.step_id)
         if contract is None:

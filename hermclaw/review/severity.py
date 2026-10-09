@@ -22,7 +22,7 @@ from pydantic import ConfigDict, PrivateAttr, ValidatorFunctionWrapHandler, mode
 from hermclaw.contracts.common import FindingSeverity
 from hermclaw.contracts.review import ReviewContract, ReviewFinding
 from hermclaw.contracts.scope import normalise_path
-from hermclaw.review.text import clip, one_line
+from hermclaw.review.text import clip, one_line, redact, strip_reasoning
 from hermclaw.review.types import SEVERITY_RANK
 
 MAX_FINDINGS = 50
@@ -154,10 +154,10 @@ def _text(value: object) -> str:
     if value is None:
         return ""
     if isinstance(value, str):
-        return value
+        return strip_reasoning(value)
     if isinstance(value, (list, tuple)):
         return "; ".join(_text(v) for v in value if v is not None)
-    return str(value)
+    return strip_reasoning(str(value))
 
 
 def _first(data: dict[str, Any], keys: Iterable[str]) -> tuple[str | None, Any]:
@@ -255,6 +255,22 @@ class ReviewDraft(ReviewContract):
 
     def to_contract(self) -> ReviewContract:
         return ReviewContract.model_validate(self.model_dump(mode="json"))
+
+
+def redact_review(review: ReviewContract) -> ReviewContract:
+    """Secrets masked in every text field of the review (paths, summaries, evidence, fixes)."""
+    findings = [
+        f.model_copy(
+            update={
+                "path": redact(f.path),
+                "summary": redact(f.summary),
+                "evidence": redact(f.evidence),
+                "suggested_fix": redact(f.suggested_fix),
+            }
+        )
+        for f in review.findings
+    ]
+    return review.model_copy(update={"findings": findings, "summary": redact(review.summary)})
 
 
 def _strip_dot(path: str) -> str:

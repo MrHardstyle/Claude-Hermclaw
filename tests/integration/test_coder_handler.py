@@ -284,3 +284,53 @@ async def test_stagnation_research_recommendation_feeds_research_into_correction
     assert jobs[jid].status == "succeeded", (jobs[jid].error_code, jobs[jid].error_message)
     assert Research.questions and "same error signature" in Research.questions[0]
     assert any("Official docs" in m.content for m in models.coder_prompts[1]), "research result must reach the correction attempt"
+
+
+async def test_two_implement_steps_with_real_verifier_commit_separately(world: World, tmp_path: Path) -> None:
+    """Step baseline: S002 is verified against the HEAD after S001's commit, not against the job base."""
+    from hermclaw.runtime.adapters import VerifierAdapter
+    from tests.unit.test_planner_support import plan, step
+
+    two = plan(
+        "Set VALUE and helper",
+        [
+            step(
+                "S001",
+                "implement",
+                "coding",
+                "Change VALUE in src/module.py from 1 to 2.",
+                repo_hints=["src/module.py"],
+                acceptance=[{"type": "presence", "path_glob": "src/module.py", "pattern": "VALUE = 2"}],
+            ),
+            step(
+                "S002",
+                "implement",
+                "coding",
+                "Make helper() in src/util.py return 'HELP'.",
+                depends_on=["S001"],
+                repo_hints=["src/util.py"],
+                acceptance=[{"type": "presence", "path_glob": "src/util.py", "pattern": "HELP"}],
+            ),
+            step("S003", "review", "review", "Review both changes.", depends_on=["S002"]),
+        ],
+    )
+    util_edit = act("replace_text", path="src/util.py", old="return 'help'", new="return 'HELP'")
+    util_done = act("complete_step", summary="helper upper-cased", changed_files=["src/util.py"], tests_run=[])
+    models = Models([two], [EDIT, DONE, util_edit, util_done])
+    cfg = get_config()
+
+    async def executor_for(ws: WorkspaceHandle, step_c: StepContract | None) -> SubprocessExecutor:
+        return SubprocessExecutor(cfg.policies.sandbox, settings=dev_settings())
+
+    handler = _handler(world, models, ScriptedVerifier(world, []), None)
+    handler.deps.verifier = VerifierAdapter(world.sessionmaker, cfg, world.engine.reader(), executor_for)
+    jid = await _job(world)
+    jobs = await _run(world, _driver(world, models, tmp_path), [handler, ReviewHandler()], [jid])
+    assert jobs[jid].status == "succeeded", (jobs[jid].error_code, jobs[jid].error_message)
+    branch = git("branch", "--list", "hermclaw/*", cwd=world.upstream.bare).strip().lstrip("* ").strip()
+    log = git("log", "--format=%s", f"main..{branch}", cwd=world.upstream.bare).splitlines()
+    assert log == ["S002: Make helper() in src/util.py return 'HELP'.", "S001: Change VALUE in src/module.py from 1 to 2."]
+    assert git("show", f"{branch}:src/util.py", cwd=world.upstream.bare).endswith("return 'HELP'")
+    async with world.sessionmaker() as s:
+        rows = {r.step_key: r for r in (await s.execute(select(Step).where(Step.job_id == jid))).scalars()}
+    assert rows["S001"].result["files"] == ["src/module.py"] and rows["S002"].result["files"] == ["src/util.py"]

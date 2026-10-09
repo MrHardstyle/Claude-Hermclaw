@@ -22,7 +22,7 @@ import asyncio
 import time
 import uuid
 from collections.abc import Sequence
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import UTC, datetime
 from typing import Any
 
@@ -32,16 +32,16 @@ from hermclaw.contracts.common import FindingSeverity, Severity
 from hermclaw.contracts.events import EventType
 from hermclaw.contracts.review import ReviewContract
 from hermclaw.core.config import HermclawConfig, ModelProfileConfig, ReviewPolicy, get_config
-from hermclaw.core.errors import ConfigError, HermclawError, ModelOutputInvalid
+from hermclaw.core.errors import ConfigError, HermclawError, ModelOutputInvalid, ModelTimeout
 from hermclaw.core.logging import get_logger
 from hermclaw.events.store import append_event
-from hermclaw.models.protocols import CallContext, ChatModel
+from hermclaw.models.protocols import CallContext, ChatModel, StructuredResult
 from hermclaw.persistence.models import ReviewFindingRow, ReviewRun
 from hermclaw.review.diff import split_diff
 from hermclaw.review.invariant import apply_review_invariants
 from hermclaw.review.policy import requires_change_evidence, should_review
 from hermclaw.review.prompt import build_review_prompt
-from hermclaw.review.severity import ReviewDraft, normalise_findings
+from hermclaw.review.severity import ReviewDraft, normalise_findings, redact_review
 from hermclaw.review.text import clip, one_line, redact
 from hermclaw.review.types import (
     EMPTY_DIFF,
@@ -107,9 +107,7 @@ class HeavyReviewer:
         return self.config.policies.review
 
     def should_review(self, step_kind: str, verifier_passed: bool) -> bool:
-        return should_review(
-            self.policy, step_kind, verifier_passed, review_failed_verification=self.settings.review_failed_verification
-        )
+        return should_review(self.policy, step_kind, verifier_passed, review_failed_verification=self.settings.review_failed_verification)
 
     def profile(self) -> ModelProfileConfig:
         """The enabled profile of role ``heavy`` (Qwen3.8 27B, alias e.g. ``heavy-review``)."""
@@ -153,13 +151,10 @@ class HeavyReviewer:
             else:
                 outcome = await self._run_model(run_id, inp, profile, changed, started)
         except asyncio.CancelledError:
-            cancelled = self._error_outcome(
-                run_id, REVIEW_CANCELLED, "fail-closed: the review was cancelled", alias=alias, started=started
-            )
+            cancelled = self._error_outcome(run_id, REVIEW_CANCELLED, "fail-closed: the review was cancelled", alias=alias, started=started)
             await asyncio.shield(self._finish_quietly(target, cancelled))
             raise
-        await self._finish(target, outcome)
-        return outcome
+        return await self._finish(target, outcome)
 
     async def fail_closed(
         self,
@@ -176,8 +171,7 @@ class HeavyReviewer:
         target = _Target(job_id, step_id, attempt_id, str(step_kind))
         run_id = await self._start(target, None, {"prepared": False})
         outcome = self._error_outcome(run_id, error_code, reason, alias=None, started=started)
-        await self._finish(target, outcome)
-        return outcome
+        return await self._finish(target, outcome)
 
     # ------------------------------------------------------------------------------------------------ model call
     async def _run_model(
@@ -217,12 +211,24 @@ class HeavyReviewer:
                 started=started,
                 stats=stats,
             )
+        except ModelTimeout as exc:
+            return self._error_outcome(
+                run_id,
+                REVIEW_TIMEOUT,
+                f"fail-closed: heavy review '{alias}' timed out ({exc.code}): {clip(one_line(redact(exc.message)), 500)}",
+                alias=alias,
+                started=started,
+                stats=stats,
+            )
         except ModelOutputInvalid as exc:
             attempts = exc.details.get("attempts", self.settings.max_repairs + 1)
+            errors = exc.details.get("errors") or []
+            last_error = clip(one_line(redact(str(errors[-1]))), 400) if isinstance(errors, list) and errors else ""
             return self._error_outcome(
                 run_id,
                 exc.code,
-                f"fail-closed: heavy review '{alias}' returned no valid ReviewContract after {attempts} attempt(s)",
+                f"fail-closed: heavy review '{alias}' returned no valid ReviewContract after {attempts} attempt(s)"
+                + (f"; last validation error: {last_error}" if last_error else ""),
                 alias=alias,
                 started=started,
                 stats=stats,
@@ -247,10 +253,35 @@ class HeavyReviewer:
                 started=started,
                 stats=stats,
             )
+        try:
+            return self._evaluate(run_id, inp, result, changed=changed, started=started, alias=alias, stats=stats)
+        except Exception as exc:  # defensive: post-processing must never turn into a pass either
+            log.error("heavy review post-processing error (%s): %s", type(exc).__name__, clip(redact(str(exc)), 500))
+            return self._error_outcome(
+                run_id,
+                REVIEW_INTERNAL_ERROR,
+                f"fail-closed: heavy review output could not be evaluated ({type(exc).__name__})",
+                alias=alias,
+                started=started,
+                stats=stats,
+            )
+
+    def _evaluate(
+        self,
+        run_id: uuid.UUID,
+        inp: ReviewInput,
+        result: StructuredResult[ReviewDraft],
+        *,
+        changed: Sequence[str],
+        started: float,
+        alias: str,
+        stats: dict[str, int | str | bool],
+    ) -> ReviewOutcome:
+        """Normalisation (22.4) and deterministic invariants (22.5) of a validated model answer."""
         draft = result.value
         notes = draft.normalisation_notes if isinstance(draft, ReviewDraft) else []
         contract = draft.to_contract() if isinstance(draft, ReviewDraft) else ReviewContract.model_validate(draft.model_dump())
-        normalised, more_notes = normalise_findings(contract, changed)
+        normalised, more_notes = normalise_findings(redact_review(contract), changed)
         inv = apply_review_invariants(normalised, verifier_passed=inp.verification.passed)
         reason = inv.review.summary or (
             "review passed" if inv.review.verdict == "pass" else f"review requires fixes ({len(inv.review.findings)} finding(s))"
@@ -404,8 +435,7 @@ class HeavyReviewer:
                 },
             )
             await session.commit()
-        object.__setattr__(outcome, "finding_ids", tuple(finding_ids))
-        return outcome
+        return replace(outcome, finding_ids=tuple(finding_ids))
 
     async def _finish_quietly(self, target: _Target, outcome: ReviewOutcome) -> None:
         try:

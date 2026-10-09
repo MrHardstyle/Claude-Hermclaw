@@ -64,8 +64,7 @@ Return ONLY one JSON object, no prose, no markdown fences, no reasoning:
 "summary": "<one or two sentences>"}"""
 
 OUTPUT_REMINDER = (
-    "## OUTPUT\nReview the step now. Respond with ONLY the JSON object described in the system message "
-    "(keys: verdict, findings, summary)."
+    "## OUTPUT\nReview the step now. Respond with ONLY the JSON object described in the system message (keys: verdict, findings, summary)."
 )
 _SHRINK_FACTOR = 0.85
 _FIXED_SHARE = 0.4
@@ -338,7 +337,5 @@ def build_review_prompt(
         budget = int(budget * _SHRINK_FACTOR)
         prompt = _build(inp, changed_files, budget, settings, generated_globs=generated_globs, withheld_globs=withheld_globs)
         fit = context_budget(profile, prompt.messages, extra_texts=[schema], reserve_tokens=settings.reserve_tokens)
-    prompt.stats.update(
-        {"estimated_prompt_tokens": fit.prompt_tokens, "fits": fit.fits, "shrink_rounds": rounds, "alias": profile.alias}
-    )
+    prompt.stats.update({"estimated_prompt_tokens": fit.prompt_tokens, "fits": fit.fits, "shrink_rounds": rounds, "alias": profile.alias})
     return prompt

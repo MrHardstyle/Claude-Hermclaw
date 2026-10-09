@@ -195,6 +195,13 @@ Noch keine.
 - Tatsächlich: Debian's /etc/profile overwrites PATH with the standard directories. Workaround: ContainerSandbox(shell=('sh','-c')); this is documented in docs/architecture/sandbox.md section 4
 
 
+### BUG-029 – Folge-Steps eines Jobs sahen die Commits früherer Steps als eigene Änderungen
+- Phase: P23 (Integration) · Komponente: coder/handler + verifier · Severity: P1 · blockierend: ja · Status: **behoben**
+- Reproduktion: Plan mit zwei Implement-Steps (S001 ändert src/module.py, S002 ändert src/util.py); nach dem Commit von S001 meldet der Verifier für S002 eine Scope-Verletzung (src/module.py), weil `changed_files` gegen die Job-Basis gerechnet wird.
+- Erwartet: Jeder Step wird gegen den HEAD zu Step-Beginn geprüft.
+- Fix: ImplementStepHandler setzt die Step-Baseline (`WorkspaceHandle.base_sha = workspace.head_sha`); Regression-Rerun nach Rebase prüft mit der Vereinigung aller Step-Scopes (`merge_scopes`).
+- Regressionstest: tests/integration/test_coder_handler.py::test_two_implement_steps_with_real_verifier_commit_separately (schlägt ohne Fix fehl, verifiziert per Mutation).
+
 ## Template
 
 ### BUG-XXX – Titel
