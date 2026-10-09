@@ -10,7 +10,7 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from hermclaw.contracts.events import EventType
 from hermclaw.core.errors import ExternalServiceError
-from hermclaw.core.interfaces import RepoHit
+from hermclaw.core.interfaces import RepoHit, WorkspaceHandle
 from hermclaw.persistence.models import CommandRun
 from hermclaw.review import REVIEW_CONTEXT_ERROR, HeavyReviewer, WorkspaceReviewer, is_test_path
 from tests.integration.test_review_support import (
@@ -63,7 +63,12 @@ async def test_collects_diff_goal_commands_and_snippets(sessionmaker: SM, tmp_re
     step = make_step(job_id, step_id)
 
     review = await adapter.review(
-        step, handle(tmp_repo, job_id, base), report(changed=("app.py", "tests/test_app.py")), job_id=job_id, step_id=step_id, attempt_id=attempt_id
+        step,
+        handle(tmp_repo, job_id, base),
+        report(changed=("app.py", "tests/test_app.py")),
+        job_id=job_id,
+        step_id=step_id,
+        attempt_id=attempt_id,
     )
 
     assert review.verdict == "pass"
@@ -83,7 +88,9 @@ async def test_collects_diff_goal_commands_and_snippets(sessionmaker: SM, tmp_re
 async def test_review_outcome_persists_run(sessionmaker: SM, tmp_repo: Path) -> None:
     base = _change_repo(tmp_repo)
     job_id, step_id = await make_job_step(sessionmaker)
-    chat = ScriptedChatModel([{"verdict": "fix_required", "findings": [{"severity": "major", "path": "app.py", "summary": "no type hints"}]}])
+    chat = ScriptedChatModel(
+        [{"verdict": "fix_required", "findings": [{"severity": "major", "path": "app.py", "summary": "no type hints"}]}]
+    )
     adapter = WorkspaceReviewer(HeavyReviewer(chat, sessionmaker, config()), GitCliReader())
     outcome = await adapter.review_outcome(
         make_step(job_id, step_id), handle(tmp_repo, job_id, base), report(), job_id=job_id, step_id=step_id, attempt_id=None
@@ -155,3 +162,19 @@ def test_should_review_delegates() -> None:
 )
 def test_is_test_path(path: str, expected: bool) -> None:
     assert is_test_path(path) is expected
+
+
+class _ExplodingReader(GitCliReader):
+    async def changed_files(self, workspace: WorkspaceHandle) -> list[str]:
+        raise RuntimeError("unexpected reader bug")
+
+
+async def test_any_collection_error_fails_closed(sessionmaker: SM, tmp_repo: Path) -> None:
+    base = _change_repo(tmp_repo)
+    job_id, step_id = await make_job_step(sessionmaker)
+    chat = ScriptedChatModel([{"verdict": "pass", "findings": []}])
+    adapter = WorkspaceReviewer(HeavyReviewer(chat, sessionmaker, config()), _ExplodingReader())
+    review = await adapter.review(
+        make_step(job_id, step_id), handle(tmp_repo, job_id, base), report(), job_id=job_id, step_id=step_id, attempt_id=None
+    )
+    assert review.verdict == "fix_required" and "RuntimeError" in review.summary and chat.calls == []

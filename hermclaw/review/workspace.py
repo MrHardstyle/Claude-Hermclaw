@@ -93,7 +93,7 @@ class WorkspaceReviewer:
     ) -> ReviewOutcome:
         try:
             inp = await self.collect(step, workspace, verification, job_id=job_id, step_id=step_id, attempt_id=attempt_id)
-        except (HermclawError, OSError, TimeoutError, ValueError) as exc:
+        except Exception as exc:  # any collection failure fails closed (never a pass); CancelledError propagates
             detail = exc.message if isinstance(exc, HermclawError) else str(exc)
             reason = (
                 f"fail-closed: the review input could not be collected ({type(exc).__name__}): "
@@ -177,7 +177,7 @@ class WorkspaceReviewer:
         try:
             async with asyncio.timeout(settings.context_timeout_seconds):
                 hits = await self.repo.context_for(workspace, query, budget_chars=settings.snippet_budget_chars)
-        except (HermclawError, OSError, TimeoutError, ValueError) as exc:
+        except Exception as exc:  # snippets are optional context: a failing provider only reduces the context
             log.warning("review snippets unavailable (%s): %s", type(exc).__name__, clip(redact(str(exc)), 300))
             return []
         return self._to_snippets(hits, protected)

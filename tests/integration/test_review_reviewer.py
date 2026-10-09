@@ -63,6 +63,8 @@ async def test_pass_is_persisted_with_events(sessionmaker: SM) -> None:
     call = chat.calls[0]
     heavy = reviewer.profile()
     assert call.alias == heavy.alias == "heavy-review"
+    assert heavy.role == "heavy" and heavy.model.startswith("qwen3.8") and heavy.think is False  # 22.2 profile
+    assert 24_000 <= heavy.context_tokens <= 32_768
     assert call.schema is ReviewDraft
     assert call.ctx.purpose == "review" and call.ctx.step_id == inp.step_id and call.ctx.job_id == inp.job_id
     assert call.messages[0].role == "system" and call.messages[0].content == REVIEW_SYSTEM_PROMPT
@@ -213,7 +215,9 @@ async def test_concurrent_reviews_are_isolated(sessionmaker: SM) -> None:
     inputs = [await _input(sessionmaker) for _ in range(4)]
     reviewers = [
         HeavyReviewer(
-            ScriptedChatModel([{"verdict": "fix_required", "findings": [{"severity": "major", "path": "app.py", "summary": f"issue {i}"}]}]),
+            ScriptedChatModel(
+                [{"verdict": "fix_required", "findings": [{"severity": "major", "path": "app.py", "summary": f"issue {i}"}]}]
+            ),
             sessionmaker,
             config(),
         )

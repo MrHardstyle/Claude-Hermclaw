@@ -202,6 +202,12 @@ Noch keine.
 - Fix: ImplementStepHandler setzt die Step-Baseline (`WorkspaceHandle.base_sha = workspace.head_sha`); Regression-Rerun nach Rebase prüft mit der Vereinigung aller Step-Scopes (`merge_scopes`).
 - Regressionstest: tests/integration/test_coder_handler.py::test_two_implement_steps_with_real_verifier_commit_separately (schlägt ohne Fix fehl, verifiziert per Mutation).
 
+### BUG-030 – Cross-member budget queue rule guesses why a waiter is blocked (requests carry no weight or exclusive flag)
+- Phase: P09 · Komponente: resources · Severity: P3 · blockierend: nein · Status: **behoben** (Regressionstest in den resources-Tests)
+- Reproduktion: Budget {large, small}. A high-priority shared request on 'small' waits only because the shared holders there are not exclusive-compatible, not because of capacity. A lower-priority 'large' acquisition that would fit is then held back as budget_queued.
+- Erwartet: A lower-priority request on another budget member is blocked only when the higher waiter actually waits for capacity.
+- Tatsächlich: It is blocked whenever the higher waiter's resource has no exclusive holder. This is safe (it never lets a lower waiter overtake), but it can delay lower-priority work. Fixing it needs the shared schema change (weight and exclusive columns on resource_requests).
+
 ## Template
 
 ### BUG-XXX – Titel

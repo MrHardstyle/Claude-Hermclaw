@@ -408,7 +408,7 @@ def _verifier_failures(report: VerificationReport | None, lim: CorrectionLimits,
 def _failure(check: VerificationCheck, lim: CorrectionLimits) -> VerifierFailure:
     return VerifierFailure(
         check_type=one_line(check.check_type),
-        name=clip(one_line(check.name), 200),
+        name=clip(one_line(redact(check.name)), 200),
         status=check.status,
         message=clip(one_line(redact(check.message)), lim.message_chars),
         evidence=evidence_excerpt(check.evidence, lim.evidence_chars),
@@ -470,10 +470,14 @@ def _review_findings(review: ReviewContract | None, lim: CorrectionLimits) -> li
 
 
 def _finding(f: ReviewFinding, lim: CorrectionLimits) -> CorrectionFinding:
+    path = _canonical(f.path) if f.path else ""
+    summary = one_line(redact(strip_reasoning(f.summary)))
+    if f.path and not path:
+        summary = f"{summary} (cited path {clip(one_line(redact(f.path)), 120)!r} is not a repository path)"
     return CorrectionFinding(
         severity=f.severity,
-        summary=clip(one_line(redact(strip_reasoning(f.summary))), lim.summary_chars),
-        path=_canonical(f.path) if f.path else "",
+        summary=clip(summary, lim.summary_chars),
+        path=path,
         evidence=clip(redact(strip_reasoning(f.evidence)).strip(), lim.evidence_chars),
         suggested_fix=clip(one_line(redact(strip_reasoning(f.suggested_fix))), lim.fix_chars),
     )
@@ -591,11 +595,12 @@ def _tokens(text: str) -> set[str]:
 
 
 def _canonical(path: str) -> str:
+    """Canonical repository-relative path, or ``""`` for anything else (absolute, traversing, empty)."""
     raw = path.strip().replace("\\", "/")
     try:
         return normalise_path(raw)
     except ValueError:
-        return raw
+        return ""
 
 
 def _unique(values: Iterable[str]) -> Iterable[str]:

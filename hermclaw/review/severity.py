@@ -121,6 +121,7 @@ _LINE_KEYS = ("line", "lines", "line_number", "start_line")
 _VERDICT_KEYS = ("verdict", "decision")
 _FINDINGS_KEYS = ("findings", "issues", "problems")
 _SUMMARY_KEYS = ("summary", "overall", "comment")
+_NO_FINDINGS = frozenset({"", "none", "no", "n_a", "na", "null", "nil", "[]", "no_findings", "no_issues", "nothing"})
 _PATH_LINE = re.compile(r"^(?P<path>.+?):(?P<line>\d+)(?:[-:]\d+)?$")
 
 
@@ -213,10 +214,10 @@ def normalise_raw_review(data: Any) -> tuple[Any, list[str]]:
         if changed or vkey != "verdict":
             notes.append(f"verdict {clip(_text(verdict), 30)!r} -> {out['verdict']!r}")
     fkey, findings = _first(data, _FINDINGS_KEYS)
-    if findings is None:
+    if findings is None or (isinstance(findings, str) and _token(findings) in _NO_FINDINGS):
         findings = []
     elif isinstance(findings, dict) or not isinstance(findings, list):
-        findings = [findings]
+        findings = [findings]  # a single object or free text becomes one finding (non-objects: major, fail-closed)
     cleaned = [_normalise_raw_finding(f, i, notes) for i, f in enumerate(findings)]
     if len(cleaned) > MAX_FINDINGS:
         cleaned = sorted(cleaned, key=lambda f: SEVERITY_RANK[FindingSeverity(f["severity"])])[:MAX_FINDINGS]
@@ -280,8 +281,8 @@ def _strip_dot(path: str) -> str:
     return path
 
 
-def _canonical_path(raw: str, changed: set[str]) -> tuple[str, str]:
-    """(path, line) – strips diff prefixes and ``./``, splits ``path:line``. Non-canonical paths stay as given."""
+def _canonical_path(raw: str, changed: set[str]) -> tuple[str | None, str]:
+    """(path, line) – strips diff prefixes and ``./``, splits ``path:line``. ``None`` if not a repository path."""
     p = raw.strip().replace("\\", "/")
     line = ""
     m = _PATH_LINE.match(p)
@@ -291,10 +292,9 @@ def _canonical_path(raw: str, changed: set[str]) -> tuple[str, str]:
         if p.startswith(prefix) and _strip_dot(p[len(prefix) :]) in changed:
             p = p[len(prefix) :]
     try:
-        p = normalise_path(p)
+        return normalise_path(p), line
     except ValueError:
-        return raw.strip(), line
-    return p, line
+        return None, line
 
 
 def normalise_findings(review: ReviewContract, changed_files: Sequence[str] = ()) -> tuple[ReviewContract, list[str]]:
@@ -304,10 +304,14 @@ def normalise_findings(review: ReviewContract, changed_files: Sequence[str] = ()
     merged: dict[tuple[str, str], tuple[int, ReviewFinding]] = {}
     outside = 0
     for idx, f in enumerate(review.findings):
-        path, line = _canonical_path(f.path, changed) if f.path else ("", "")
+        canonical, line = _canonical_path(f.path, changed) if f.path else ("", "")
         evidence = f.evidence
         if line and line not in evidence:
             evidence = clip(f"line {line}: {evidence}".rstrip(": "), _LIMITS["evidence"])
+        if canonical is None:  # absolute, traversing or otherwise invalid: never kept as a path (no file access by it)
+            evidence = clip(f"cited path {clip(f.path, 200)!r} is not a repository path; {evidence}".rstrip("; "), _LIMITS["evidence"])
+            notes.append(f"finding[{idx}]: non-repository path {clip(f.path, 60)!r} removed")
+        path = canonical or ""
         finding = f.model_copy(update={"path": path, "evidence": evidence}) if (path != f.path or evidence != f.evidence) else f
         if path and changed and path not in changed:
             outside += 1

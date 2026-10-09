@@ -193,9 +193,7 @@ class StaticRepoContext:
     async def find_symbol(self, workspace: WorkspaceHandle, name: str, *, k: int = 20) -> list[RepoHit]:
         return []
 
-    async def read(
-        self, workspace: WorkspaceHandle, path: str, start: int = 1, end: int | None = None, *, max_chars: int = 12_000
-    ) -> str:
+    async def read(self, workspace: WorkspaceHandle, path: str, start: int = 1, end: int | None = None, *, max_chars: int = 12_000) -> str:
         return ""
 
     async def context_for(self, workspace: WorkspaceHandle, goal: str, *, budget_chars: int = 24_000) -> list[RepoHit]:
@@ -249,7 +247,9 @@ SIMPLE_DIFF = (
 )
 
 
-def config(*, timeout_seconds: int | None = None, required_for_kinds: list[str] | None = None, heavy_enabled: bool = True) -> HermclawConfig:
+def config(
+    *, timeout_seconds: int | None = None, required_for_kinds: list[str] | None = None, heavy_enabled: bool = True
+) -> HermclawConfig:
     cfg = get_config()
     review = cfg.policies.review
     updates: dict[str, Any] = {}

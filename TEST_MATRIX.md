@@ -49,3 +49,8 @@
 | P21 | Deterministic Verifier | `pytest tests/*/test_verifier_*.py` | 124 passed (echte pytest/go/cargo/tsc/php/node/bash) | – |
 | P19/P23 | Coder-Loop + Implement-Handler | `pytest tests/integration/test_coder_loop.py tests/integration/test_coder_handler.py` | 12 passed | Live-Coder über LiteLLM `coder-main` |
 | – | Operator-CLI | `pytest tests/integration/test_cli.py` | 3 passed | – |
+| P20 | Stagnation Detection | `pytest tests/*/test_stagnation_*.py` | 145 passed | – |
+| P22 | Heavy Review | `pytest tests/*/test_review_*.py` | 112 passed | Live-Review über LiteLLM `heavy-review` (Qwen3.8 27B) |
+| P09 | Resource Manager | `pytest tests/*/test_resources_*.py` | 55 passed (Advisory Locks, Preemption, Recovery) | – |
+| P29 | Media Worker | `pytest tests/integration/test_media_worker.py` | 4 passed (echtes ffmpeg/ffprobe) | NVENC + ComfyUI auf `.224` |
+| P18/D-005 | Remote-Executor | `pytest tests/integration/test_tools_remote_executor.py` | 5 passed | gegen `.222` |

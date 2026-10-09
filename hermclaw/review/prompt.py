@@ -153,7 +153,7 @@ def render_scope(scope: ScopeContract | None, settings: ReviewSettings) -> str:
 def _check_line(c: VerificationCheck, settings: ReviewSettings, *, with_evidence: bool) -> str:
     flag = "blocking" if c.blocking else "advisory"
     msg = clip(one_line(redact(c.message)), settings.check_message_chars) if c.message else ""
-    line = f"- [{c.status.upper()}][{flag}] {c.check_type}:{one_line(c.name)}" + (f" – {msg}" if msg else "")
+    line = f"- [{c.status.upper()}][{flag}] {c.check_type}:{clip(one_line(redact(c.name)), 200)}" + (f" – {msg}" if msg else "")
     if with_evidence and c.evidence:
         line += f"\n  evidence: {compact_json(c.evidence, settings.evidence_excerpt_chars)}"
     return line

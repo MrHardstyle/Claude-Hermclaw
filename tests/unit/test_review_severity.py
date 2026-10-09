@@ -8,7 +8,14 @@ from pydantic import ValidationError
 from hermclaw.contracts.common import FindingSeverity
 from hermclaw.contracts.review import ReviewContract, ReviewFinding
 from hermclaw.core.config import ReviewPolicy
-from hermclaw.review import ReviewDraft, apply_review_invariants, normalise_findings, normalise_severity, requires_change_evidence, should_review
+from hermclaw.review import (
+    ReviewDraft,
+    apply_review_invariants,
+    normalise_findings,
+    normalise_severity,
+    requires_change_evidence,
+    should_review,
+)
 from hermclaw.review.severity import MAX_FINDINGS, normalise_verdict, redact_review
 from hermclaw.review.text import clip, clip_lines, fence, strip_reasoning
 from hermclaw.review.types import OVERRIDE_BLOCKING_FINDING, OVERRIDE_VERIFIER_FAILED
@@ -41,7 +48,13 @@ def test_normalise_severity(raw: object, expected: FindingSeverity, changed: boo
 
 @pytest.mark.parametrize(
     ("raw", "expected"),
-    [("pass", "pass"), ("Approved", "pass"), ("LGTM-not-a-verdict", "LGTM-not-a-verdict"), ("changes requested", "fix_required"), ("fail", "fix_required")],
+    [
+        ("pass", "pass"),
+        ("Approved", "pass"),
+        ("LGTM-not-a-verdict", "LGTM-not-a-verdict"),
+        ("changes requested", "fix_required"),
+        ("fail", "fix_required"),
+    ],
 )
 def test_normalise_verdict(raw: str, expected: str) -> None:
     assert normalise_verdict(raw)[0] == expected
@@ -52,7 +65,14 @@ def test_draft_accepts_aliases_and_drops_unknown_fields() -> None:
         {
             "decision": "Request Changes",
             "issues": [
-                {"level": "HIGH", "file": "src/a.py", "description": "wrong sign", "quote": "+ return b - a", "fix": "swap operands", "line": 7},
+                {
+                    "level": "HIGH",
+                    "file": "src/a.py",
+                    "description": "wrong sign",
+                    "quote": "+ return b - a",
+                    "fix": "swap operands",
+                    "line": 7,
+                },
                 {"severity": "nit", "filename": "src/b.py", "title": "naming", "confidence": 0.3},
             ],
             "overall": "needs work",
@@ -61,7 +81,12 @@ def test_draft_accepts_aliases_and_drops_unknown_fields() -> None:
     )
     assert draft.verdict == "fix_required" and draft.summary == "needs work"
     first, second = draft.findings
-    assert (first.severity, first.path, first.summary, first.suggested_fix) == (FindingSeverity.major, "src/a.py", "wrong sign", "swap operands")
+    assert (first.severity, first.path, first.summary, first.suggested_fix) == (
+        FindingSeverity.major,
+        "src/a.py",
+        "wrong sign",
+        "swap operands",
+    )
     assert first.evidence.startswith("line 7")
     assert second.severity == FindingSeverity.minor and second.path == "src/b.py"
     notes = draft.normalisation_notes
@@ -107,7 +132,9 @@ def test_draft_strips_reasoning_markup_and_caps_findings() -> None:
 
 
 def test_draft_clips_overlong_text() -> None:
-    draft = ReviewDraft.model_validate({"verdict": "pass", "findings": [{"severity": "minor", "summary": "x" * 5000, "evidence": "y" * 9000}]})
+    draft = ReviewDraft.model_validate(
+        {"verdict": "pass", "findings": [{"severity": "minor", "summary": "x" * 5000, "evidence": "y" * 9000}]}
+    )
     f = draft.findings[0]
     assert len(f.summary) <= 2000 and len(f.evidence) <= 4000 and "omitted" in f.summary
 
@@ -127,10 +154,12 @@ def test_normalise_findings_paths_dedupe_and_order() -> None:
     assert [(f.severity.value, f.path) for f in out.findings] == [
         ("blocker", "src/app.py"),  # merged duplicate keeps the higher severity and the first position within it
         ("major", "src/app.py"),
-        ("minor", "../etc/passwd"),  # not canonicalisable → kept verbatim (never resolved on disk)
+        ("minor", ""),  # not a repository path → removed from the path field, kept as evidence text
         ("minor", "other.py"),
     ]
     assert out.findings[1].evidence == "line 12: x"
+    assert out.findings[2].evidence.startswith("cited path '../etc/passwd' is not a repository path")
+    assert any("non-repository path" in n for n in notes)
     assert any("duplicate finding merged" in n for n in notes)
     assert any("outside the changed files" in n for n in notes)
 
@@ -139,7 +168,9 @@ def test_redact_review_masks_secrets() -> None:
     token = "ghp_" + "Z" * 36
     review = ReviewContract(
         verdict="fix_required",
-        findings=[ReviewFinding(severity=FindingSeverity.blocker, path="a.py", summary=f"token {token}", evidence=token, suggested_fix=token)],
+        findings=[
+            ReviewFinding(severity=FindingSeverity.blocker, path="a.py", summary=f"token {token}", evidence=token, suggested_fix=token)
+        ],
         summary=token,
     )
     out = redact_review(review)
@@ -205,3 +236,20 @@ def test_text_helpers() -> None:
     assert strip_reasoning("<reasoning>never closed") == ""
     assert strip_reasoning("leak</think>answer") == "answer"
     assert strip_reasoning("a < b and c > d") == "a < b and c > d"
+
+
+@pytest.mark.parametrize("raw", ["none", "N/A", "", "no findings", "[]"])
+def test_textual_no_findings_means_empty(raw: str) -> None:
+    assert ReviewDraft.model_validate({"verdict": "pass", "findings": raw}).findings == []
+
+
+def test_free_text_findings_become_one_major_finding() -> None:
+    draft = ReviewDraft.model_validate({"verdict": "pass", "findings": "the loop never terminates"})
+    assert [(f.severity, f.summary) for f in draft.findings] == [(FindingSeverity.major, "the loop never terminates")]
+
+
+@pytest.mark.parametrize("bad", ["/etc/passwd", "../../secret.txt", "src/../../x.py"])
+def test_absolute_and_traversing_paths_are_not_kept(bad: str) -> None:
+    review = ReviewContract(verdict="fix_required", findings=[ReviewFinding(severity=FindingSeverity.major, path=bad, summary="look here")])
+    out, _ = normalise_findings(review, ["app.py"])
+    assert out.findings[0].path == "" and bad in out.findings[0].evidence

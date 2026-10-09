@@ -133,15 +133,15 @@ Legende: `[x]` erledigt mit Evidence · `[~]` erledigt, Live-Verifikation auf Zi
 
 ## P09 – Resource Manager
 
-- [ ] 9.1 lease table. — Evidence: –
-- [ ] 9.2 acquisition. — Evidence: –
-- [ ] 9.3 release. — Evidence: –
-- [ ] 9.4 heartbeat/expiry. — Evidence: –
-- [ ] 9.5 priority. — Evidence: –
-- [ ] 9.6 safe preemption. — Evidence: –
-- [ ] 9.7 large-model exclusivity. — Evidence: –
-- [ ] 9.8 video priority. — Evidence: –
-- [ ] 9.9 crash recovery. — Evidence: –
+- [x] 9.1 lease table. — Evidence: The resource_leases/resource_requests tables from the P03 migration are used as the only state store (manager.py). Tests: tests/integration/test_resources_concurrency.py::test_unique_index_rejects_second_exclusive_lease (partial unique index proven), tests/integration/test_resources_manager.py::test
+- [x] 9.2 acquisition. — Evidence: ResourceManager.acquire/try_acquire/_attempt_tx: advisory xact locks on a sorted lock set, unique-index backstop, budgets, exclusive and shared leases. Tests: test_resources_manager.py::test_exclusive_lease_blocks_until_release, ::test_shared_and_exclusive_interplay, ::test_wait_timeout_cancels_requ
+- [x] 9.3 release. — Evidence: release/release_many (idempotent; NotFoundError for unknown ids; RESOURCE_RELEASED with reason/released_by/held_seconds), hold() releases with completed/preempted/error/cancelled. Tests: test_resources_manager.py::test_acquire_release_roundtrip_emits_events, ::test_release_unknown_lease_raises_not_f
+- [x] 9.4 heartbeat/expiry. — Evidence: heartbeat (DB clock, owner check, capped at the preemption deadline, LeaseLost), status/should_yield, sweep_expired, expiry inside every acquire, run_maintenance, LeaseKeeper. Tests: test_resources_manager.py::test_heartbeat_extends_expiry_and_checks_owner, ::test_expired_lease_is_swept_with_event_a
+- [x] 9.5 priority. — Evidence: PRIORITIES/OwnerKind/priority_for (Bauplan §4), queue in resource_requests ordered by priority, then FIFO created_at (clock_timestamp), then id; budget_queued rule across budget members; stale waiter requests expire. Tests: test_resources_policy.py::test_priorities_match_bauplan_section_4; test_reso
+- [x] 9.6 safe preemption. — Evidence: request_preemption / acquire(preempt=True) / _preempt_for (minimal budget set) / _mark_preempting (expires_at capped at now+grace, RESOURCE_PREEMPT_REQUESTED) / withdraw_preemption plus auto-withdraw on abandon / forced expiry with reason preemption_grace_timeout; LeaseKeeper on_preempt callback. Te
+- [x] 9.7 large-model exclusivity. — Evidence: acquire_model/hold_model (profile.resource_group/exclusive/memory_gb/priority), model_host_budgets(models) with capacity models.model_host_capacity_gb, validate_model_resources, worst_case_resident_gb. Tests: test_resources_preemption.py::test_large_model_exclusivity_and_model_budget, ::test_model_p
+- [x] 9.8 video priority. — Evidence: acquire_gpu_for_media/hold_media/release_media: gpu-224 (+video-224) leases at 100/90, non-preemptible, taken in sorted order; concurrent exclusive drain leases on large-model-224/small-model-224 with preempt=True; partial rollback. Tests: test_resources_preemption.py::test_video_preempts_ai_model_l
+- [x] 9.9 crash recovery. — Evidence: recover(holder_id): releases leases of earlier incarnations (reason holder_restarted), cancels leftover requests except live ones, sweeps stale leases; leases persist in the DB; a cancellation after commit cannot leak a lease; purge_finished_requests. Tests: test_resources_recovery.py::test_leases_s
 
 ## P10 – Wake-on-LAN
 
@@ -307,12 +307,12 @@ Legende: `[x]` erledigt mit Evidence · `[~]` erledigt, Live-Verifikation auf Zi
 
 ## P22 – Heavy Review
 
-- [ ] 22.1 review prompt. — Evidence: –
-- [ ] 22.2 Qwen3.8 profile. — Evidence: –
-- [ ] 22.3 structured findings. — Evidence: –
-- [ ] 22.4 severity. — Evidence: –
-- [ ] 22.5 major/blocker invariant. — Evidence: –
-- [ ] 22.6 correction request. — Evidence: –
+- [x] 22.1 review prompt. — Evidence: hermclaw/review/prompt.py (REVIEW_SYSTEM_PROMPT, build_review_prompt sized to the context window, shrink loop) + hermclaw/review/diff.py (split_diff, max-min fair per-file budget, withheld/generated/file-limit handling). Tests in tests/unit/test_review_prompt.py: test_prompt_contains_all_sections_in
+- [~] 22.2 Qwen3.8 profile. — Evidence: HeavyReviewer.profile() resolves config models.by_role('heavy') (alias heavy-review, qwen3.8:27b, think false, 24K context) and calls ChatModel.structured(alias, ..., ReviewDraft, max_tokens/temperature from the profile, per-call timeout = min(profile, policy), overall asyncio.timeout(policies.revie
+- [x] 22.3 structured findings. — Evidence: severity.ReviewDraft has the same JSON schema as ReviewContract (title, properties, required) and parses tolerantly; review_runs and review_findings rows plus review.started / review.finding.created / review.finished events are written in reviewer._start/_finish. Tests: test_review_severity.py::test
+- [x] 22.4 severity. — Evidence: severity.normalise_severity/normalise_verdict map synonyms; unknown severities become major (fail-closed). normalise_findings canonicalises paths (splits path:line, removes absolute or traversing paths), dedupes, and orders blocker > major > minor; reasoning markup is stripped and texts redacted. Te
+- [x] 22.5 major/blocker invariant. — Evidence: invariant.apply_review_invariants enforces: a major/blocker finding means no pass, and a failed verifier means no pass. The model's verdict is persisted as raw_verdict, the effective one as verdict, plus invariant_override. Every error is fail-closed: status 'error', verdict fix_required. Tests: tes
+- [x] 22.6 correction request. — Evidence: correction.build_correction_request returns a CorrectionRequest with: verifier_failures (check type, name, status, message, evidence excerpt, path), review_findings (blocker/major first, deduplicated among themselves and against verifier facts, keeping the suggested fix), required_changes, constrain
 
 ## P23 – Correction Pipeline
 

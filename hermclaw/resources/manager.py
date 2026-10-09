@@ -32,6 +32,7 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
+import math
 import uuid
 from collections.abc import AsyncIterator, Awaitable, Callable, Iterable, Mapping, Sequence
 from contextlib import asynccontextmanager
@@ -39,7 +40,7 @@ from dataclasses import dataclass, field
 from datetime import datetime, timedelta
 from typing import Any, TypeVar
 
-from sqlalchemy import and_, func, or_, select, text
+from sqlalchemy import and_, delete, func, or_, select, text
 from sqlalchemy.exc import DBAPIError, IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
@@ -96,6 +97,8 @@ LOCK_PREFIX = "hermclaw.resource:"
 RETRYABLE_SQLSTATES = frozenset({"40P01", "40001", "55P03"})
 MAX_TX_RETRIES = 6
 MAX_DETAIL_CHARS = 500
+#: finished (granted/cancelled) queue rows are kept this long for diagnosis
+REQUEST_RETENTION_SECONDS = 24 * 3600.0
 
 #: blocked reasons reported by an acquisition attempt
 BLOCK_QUEUED = "queued"  # a live request for the same resource is ahead
@@ -217,7 +220,9 @@ class ResourceManager:
         self._live_requests: set[uuid.UUID] = set()
 
     @classmethod
-    def from_config(cls, sessionmaker: async_sessionmaker[AsyncSession], config: HermclawConfig, holder_id: str, **kw: Any) -> ResourceManager:
+    def from_config(
+        cls, sessionmaker: async_sessionmaker[AsyncSession], config: HermclawConfig, holder_id: str, **kw: Any
+    ) -> ResourceManager:
         """Manager with ``policies.leases`` and the model host budgets of ``models.yaml``."""
         kw.setdefault("budgets", model_host_budgets(config.models))
         return cls(sessionmaker, config.policies.leases, holder_id, **kw)
@@ -262,12 +267,13 @@ class ResourceManager:
 
     @staticmethod
     async def _now(s: AsyncSession) -> datetime:
-        return (await s.execute(select(func.clock_timestamp()))).scalar_one()
+        now: datetime = (await s.execute(select(func.clock_timestamp()))).scalar_one()
+        return now
 
     async def _emit(
         self,
         s: AsyncSession,
-        event_type: EventType,
+        event_type: str,
         *,
         job_id: uuid.UUID | None,
         step_id: uuid.UUID | None,
@@ -309,7 +315,7 @@ class ResourceManager:
         if not ttl > 0:
             raise ValidationFailed("ttl_seconds must be > 0", code="RESOURCE_TTL_INVALID")
         w = float(weight)
-        if not w >= 0 or w != w or w == float("inf"):
+        if not math.isfinite(w) or w < 0:
             raise ValidationFailed("weight must be a finite number >= 0", code="RESOURCE_WEIGHT_INVALID")
         for b in self.budgets_for(resource):
             if not b.fits(0.0, w):
@@ -439,7 +445,7 @@ class ResourceManager:
         lock_set = self.lock_set(spec.resource)
         await self._lock(s, lock_set)
         now = await self._now(s)
-        await self._expire_due(s, lock_set, now)
+        await self._expire_due(s, lock_set, now, keep_request=request_id)
 
         req = await s.get(ResourceRequest, request_id, with_for_update=True, populate_existing=True)
         if req is None:
@@ -529,13 +535,33 @@ class ResourceManager:
 
     async def _lease_for_request(self, s: AsyncSession, request_id: uuid.UUID) -> ResourceLease | None:
         stmt = select(ResourceLease).where(
-            ResourceLease.metadata_["request_id"].astext == str(request_id),
+            ResourceLease.metadata_.op("->>")("request_id") == str(request_id),
             ResourceLease.state.in_(HOLDING_STATES),
         )
         return (await s.execute(stmt)).scalars().first()
 
     async def _blocked_reason(self, s: AsyncSession, spec: _Spec, req: ResourceRequest, now: datetime) -> str | None:
         r = ResourceRequest
+        lease = ResourceLease
+        if spec.step_id is not None:
+            # leases are not re-entrant: waiting for a lease the same step holds would never end
+            own = await s.scalar(
+                select(func.count())
+                .select_from(lease)
+                .where(
+                    lease.resource == spec.resource,
+                    lease.state.in_(HOLDING_STATES),
+                    lease.holder == self.holder_id,
+                    lease.owner_step_id == spec.step_id,
+                    *([] if spec.exclusive else [lease.exclusive.is_(True)]),
+                )
+            )
+            if own:
+                raise ConflictError(
+                    f"step already holds a lease on '{spec.resource}' (leases are not re-entrant)",
+                    code="RESOURCE_ALREADY_HELD",
+                    details={"resource": spec.resource, "step_id": str(spec.step_id)},
+                )
         ahead = await s.scalar(
             select(func.count())
             .select_from(r)
@@ -546,14 +572,15 @@ class ResourceManager:
                 r.id != req.id,
                 or_(
                     r.priority > spec.priority,
-                    and_(r.priority == spec.priority, or_(r.created_at < req.created_at, and_(r.created_at == req.created_at, r.id < req.id))),
+                    and_(
+                        r.priority == spec.priority, or_(r.created_at < req.created_at, and_(r.created_at == req.created_at, r.id < req.id))
+                    ),
                 ),
             )
         )
         if ahead:
             return BLOCK_QUEUED
 
-        lease = ResourceLease
         budgets = self.budgets_for(spec.resource)
         for b in budgets:
             others = sorted(b.members - {spec.resource})
@@ -585,23 +612,6 @@ class ResourceManager:
         ).all()
         counts = {bool(ex): int(n) for ex, n in holders}
         if spec.exclusive and sum(counts.values()) > 0:
-            if spec.step_id is not None:
-                own = await s.scalar(
-                    select(func.count())
-                    .select_from(lease)
-                    .where(
-                        lease.resource == spec.resource,
-                        lease.state.in_(HOLDING_STATES),
-                        lease.holder == self.holder_id,
-                        lease.owner_step_id == spec.step_id,
-                    )
-                )
-                if own:
-                    raise ConflictError(
-                        f"step already holds a lease on '{spec.resource}' (leases are not re-entrant)",
-                        code="RESOURCE_ALREADY_HELD",
-                        details={"resource": spec.resource, "step_id": str(spec.step_id)},
-                    )
             return BLOCK_HELD
         if not spec.exclusive and counts.get(True):
             return BLOCK_HELD_EXCLUSIVE
@@ -711,7 +721,9 @@ class ResourceManager:
                 await self._expire_rows(s, [row], now)
             if row.state not in HOLDING_STATES:
                 return self._status(row)
-            ttl = float(ttl_seconds if ttl_seconds is not None else (row.metadata_ or {}).get("ttl_seconds") or self.policy.default_ttl_seconds)
+            ttl = float(
+                ttl_seconds if ttl_seconds is not None else (row.metadata_ or {}).get("ttl_seconds") or self.policy.default_ttl_seconds
+            )
             if not ttl > 0:
                 raise ValidationFailed("ttl_seconds must be > 0", code="RESOURCE_TTL_INVALID")
             new_exp = now + timedelta(seconds=ttl)
@@ -765,8 +777,12 @@ class ResourceManager:
         except NotFoundError:
             return True
 
-    async def _expire_due(self, s: AsyncSession, resources: Sequence[str], now: datetime) -> tuple[list[Lease], list[Lease], list[uuid.UUID]]:
-        """Expire overdue leases and cancel stale waiting requests on ``resources`` (caller holds their locks)."""
+    async def _expire_due(
+        self, s: AsyncSession, resources: Sequence[str], now: datetime, *, keep_request: uuid.UUID | None = None
+    ) -> tuple[list[Lease], list[Lease], list[uuid.UUID]]:
+        """Expire overdue leases and cancel stale waiting requests on ``resources`` (caller holds their locks).
+
+        ``keep_request`` is the caller's own request, which it refreshes in the same transaction."""
         rows = list(
             (
                 await s.execute(
@@ -791,6 +807,7 @@ class ResourceManager:
                         ResourceRequest.resource.in_(list(resources)),
                         ResourceRequest.state == REQUEST_WAITING,
                         ResourceRequest.expires_at <= now,
+                        *([ResourceRequest.id != keep_request] if keep_request is not None else []),
                     )
                     .order_by(ResourceRequest.id)
                     .with_for_update()
@@ -829,7 +846,9 @@ class ResourceManager:
             }
             if was_preempting:
                 p = _preempt_meta(row)
-                payload["preemption"] = {k: p.get(k) for k in ("reason", "requester_kind", "requester_priority", "requested_at", "deadline")}
+                payload["preemption"] = {
+                    k: p.get(k) for k in ("reason", "requester_kind", "requester_priority", "requested_at", "deadline")
+                }
             await self._emit(
                 s,
                 EventType.RESOURCE_EXPIRED,
@@ -864,12 +883,28 @@ class ResourceManager:
             stale += r
         return SweepReport(expired=expired, grace_timeouts=grace, stale_requests=stale)
 
+    async def purge_finished_requests(self, *, older_than_seconds: float = REQUEST_RETENTION_SECONDS) -> int:
+        """Delete ``granted``/``cancelled`` queue rows older than the retention (the leases themselves are kept)."""
+
+        async def run(s: AsyncSession) -> int:
+            cutoff = await self._now(s) - timedelta(seconds=max(0.0, older_than_seconds))
+            res = await s.execute(
+                delete(ResourceRequest).where(
+                    ResourceRequest.state.in_([REQUEST_GRANTED, REQUEST_CANCELLED]), ResourceRequest.created_at < cutoff
+                )
+            )
+            return int(getattr(res, "rowcount", 0) or 0)
+
+        return await self._retrying(run)
+
     async def run_maintenance(self, stop: asyncio.Event, *, interval: float | None = None) -> None:
-        """Background sweeper loop (runtime service); returns when ``stop`` is set."""
+        """Background sweeper loop (runtime service): expire leases/requests, purge old queue rows; returns when
+        ``stop`` is set."""
         period = interval if interval is not None else max(0.5, float(self.policy.heartbeat_seconds))
         while not stop.is_set():
             try:
                 await self.sweep_expired()
+                await self.purge_finished_requests()
             except asyncio.CancelledError:
                 raise
             except Exception as exc:
@@ -1022,8 +1057,7 @@ class ResourceManager:
                     "reason": reason,
                     "deadline": _iso(deadline),
                     "grace_seconds": grace,
-                    **{k: v for k, v in requester.items() if k != "requester_holder"},
-                    "requester_holder": self.holder_id,
+                    **requester,
                 },
             )
             log.warning("preemption requested resource=%s lease=%s reason=%s", row.resource, row.id, reason)
@@ -1059,7 +1093,7 @@ class ResourceManager:
                     .where(
                         ResourceLease.resource.in_(list(resources)),
                         ResourceLease.state == LEASE_PREEMPTING,
-                        ResourceLease.metadata_["preempt"]["request_id"].astext == str(request_id),
+                        ResourceLease.metadata_.op("->")("preempt").op("->>")("request_id") == str(request_id),
                     )
                     .order_by(ResourceLease.id)
                     .with_for_update()
@@ -1094,7 +1128,7 @@ class ResourceManager:
         (default: this manager's holder) left behind, then expire stale leases of all holders."""
         holder = validate_holder_id(holder_id) if holder_id else self.holder_id
         live = sorted(self._live_requests) if holder == self.holder_id else []
-        foreign_incarnation = ResourceLease.metadata_["incarnation"].astext.is_distinct_from(self.incarnation)
+        foreign_incarnation = ResourceLease.metadata_.op("->>")("incarnation").is_distinct_from(self.incarnation)
         async with self._sm() as s:
             lease_res = select(ResourceLease.resource).where(
                 ResourceLease.holder == holder, ResourceLease.state.in_(HOLDING_STATES), foreign_incarnation
