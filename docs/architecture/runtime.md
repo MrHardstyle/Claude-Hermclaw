@@ -7,7 +7,7 @@
 
 1. **inventory** (only with a repository): `GitEngine.create_workspace` – isolated clone on the job branch (re-used if it exists).
 2. **discovering**: fast-router triage (`fast-router`, Qwen3 8B, structured `TriageResult`: intent, needs_research, risk, summary;
-   failures are non-fatal and reported as status event), repository inventory and goal-related context via the `RepoIntel` port.
+   failures are non-fatal and reported as status event), repository inventory and goal-related context via `RepoContextProvider.inventory_summary/context_for`.
 3. **planning**: `Planner.create_plan(job_id, PlannerInput)` with inventory, known paths, retrieved snippets, test hints and
    a research hint from triage. An existing plan (crash after planning) is reused – never planned twice.
 4. Result `next_status=running`. Errors become job failures with stable codes (`PLANNER_INVALID_OUTPUT`, git/model codes).
@@ -30,7 +30,7 @@ fallback `step_failed`). `Replanner.replan` builds the failure package, preserve
 
 ## Ports (`runtime/ports.py`)
 
-- `RepoIntel.inventory(workspace)`, `RepoIntel.context_for(workspace, goal, budget_chars)` – adapter over repository intelligence (P11)
+- repository intelligence via the shared `RepoContextProvider` (`inventory_summary`, `context_for`)
 - `RegressionCheck.rerun(job_id, workspace)` – adapter over the deterministic verifier (P21)
 
 ## Tests

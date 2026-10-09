@@ -23,6 +23,7 @@ from hermclaw.contracts.common import JobStatus, Severity
 from hermclaw.contracts.events import EventType
 from hermclaw.core.config import HermclawConfig
 from hermclaw.core.errors import GitError, HermclawError, MergeConflictError, ModelError
+from hermclaw.core.interfaces import RepoContextProvider
 from hermclaw.core.logging import get_logger
 from hermclaw.core.redaction import DEFAULT_REDACTOR
 from hermclaw.core.settings import get_settings
@@ -31,7 +32,7 @@ from hermclaw.models.protocols import CallContext, ChatMessage, ChatModel
 from hermclaw.persistence.models import Job, Step
 from hermclaw.planner import ContextSnippet, PlanConflict, PlannerError, PlannerInput, ReplanLimitReached, ReplanTrigger
 from hermclaw.planner.replan_contract import REPLAN_REASONS
-from hermclaw.runtime.ports import RegressionCheck, RepoIntel
+from hermclaw.runtime.ports import RegressionCheck
 from hermclaw.runtime.report import collect_report_data, render_report, write_report_artifact
 from hermclaw.runtime.state_machines import can_transition_job
 from hermclaw.runtime.transitions import emit_status, transition_job
@@ -138,7 +139,7 @@ class RuntimeJobDriver:
         planner: Planner,
         replanner: Replanner,
         git: GitEngine | None = None,
-        repo_intel: RepoIntel | None = None,
+        repo_intel: RepoContextProvider | None = None,
         chat: ChatModel | None = None,
         regression: RegressionCheck | None = None,
         settings: DriverSettings | None = None,
@@ -233,8 +234,8 @@ class RuntimeJobDriver:
         hits: list[ContextSnippet] = []
         if ws is not None and self.repo_intel is not None and self.git is not None:
             handle = await self.git.handle(ws)
-            inventory = await self.repo_intel.inventory(handle, job_id=job.id)
-            found = await self.repo_intel.context_for(handle, job.prompt, budget_chars=self.settings.context_budget_chars, job_id=job.id)
+            inventory = await self.repo_intel.inventory_summary(handle)
+            found = await self.repo_intel.context_for(handle, job.prompt, budget_chars=self.settings.context_budget_chars)
             hits = [ContextSnippet.from_hit(h) for h in found]
         cmd, framework, test_files = _test_hints(inventory)
         constraints: list[str] = []  # user constraints come from job_inputs inside the planner

@@ -53,7 +53,16 @@ class FakeIntel:
     def __init__(self) -> None:
         self.calls: list[str] = []
 
-    async def inventory(self, workspace: WorkspaceHandle, *, job_id: uuid.UUID | None = None) -> dict[str, Any]:
+    async def search(self, workspace: WorkspaceHandle, query: str, *, k: int = 20) -> list[RepoHit]:
+        return []
+
+    async def find_symbol(self, workspace: WorkspaceHandle, name: str, *, k: int = 20) -> list[RepoHit]:
+        return []
+
+    async def read(self, workspace: WorkspaceHandle, path: str, start: int = 1, end: int | None = None, *, max_chars: int = 12_000) -> str:
+        return Path(workspace.path, path).read_text(encoding="utf-8")[:max_chars]
+
+    async def inventory_summary(self, workspace: WorkspaceHandle) -> dict[str, Any]:
         self.calls.append("inventory")
         assert Path(workspace.path, "src/module.py").is_file()
         return {
