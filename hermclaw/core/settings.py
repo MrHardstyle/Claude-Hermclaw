@@ -37,6 +37,10 @@ class Settings(BaseSettings):
     # auto = remote in production, local otherwise
     execution_mode: Literal["auto", "remote", "local"] = "auto"
     wake_on_lan: bool = True  # wake sleeping workers before dispatch (hosts.yaml wake_on_lan)
+    # free space of data_dir paths: warning event below warn, no new job preparation below critical (P35.9)
+    disk_warn_free_mb: int = 10 * 1024
+    disk_critical_free_mb: int = 2 * 1024
+    disk_check_seconds: float = 60.0
 
     @property
     def workspaces_dir(self) -> Path:

@@ -51,6 +51,7 @@ from hermclaw.review.workspace import WorkspaceReviewer
 from hermclaw.runtime.adapters import VerifierAdapter
 from hermclaw.runtime.driver import DriverSettings, RuntimeJobDriver
 from hermclaw.runtime.handlers import RepoInfoStepHandler, ReviewStepHandler, VerifyStepHandler, _workspace
+from hermclaw.runtime.health import DiskMonitor
 from hermclaw.runtime.research_step import ResearchRunner, ResearchStepHandler
 from hermclaw.scheduler.handlers import StepHandler, StepRunContext
 from hermclaw.scope.audit import ScopeAuditor
@@ -201,11 +202,16 @@ class RuntimeServices:
     handlers: list[StepHandler]
     holder_id: str
     wake: WakePort | None = None
+    disk: DiskMonitor | None = None
     _closers: list[Callable[[], Awaitable[Any]]] = field(default_factory=list)
 
     @property
     def handled_kinds(self) -> list[str]:
         return sorted({k for h in self.handlers for k in h.kinds})
+
+    def admission_block(self) -> str | None:
+        """Scheduler gate: why no new job may start preparing right now (``None`` = admit)."""
+        return self.disk.admission_block() if self.disk is not None else None
 
     async def aclose(self) -> None:
         for close in reversed(self._closers):
@@ -363,6 +369,14 @@ def build_services(
         regression=verifier,
         settings=ov.driver_settings or DriverSettings(artifacts_dir=artifacts),
     )
+    disk = DiskMonitor(
+        sessionmaker,
+        [Path(settings.workspaces_dir), Path(settings.repos_cache_dir), artifacts],
+        warn_free_mb=settings.disk_warn_free_mb,
+        critical_free_mb=settings.disk_critical_free_mb,
+        interval_seconds=settings.disk_check_seconds,
+        source_id=holder,
+    )
     return RuntimeServices(
         config=config,
         settings=settings,
@@ -381,6 +395,7 @@ def build_services(
         handlers=handlers,
         holder_id=holder,
         wake=ov.wake,
+        disk=disk,
         _closers=closers,
     )
 

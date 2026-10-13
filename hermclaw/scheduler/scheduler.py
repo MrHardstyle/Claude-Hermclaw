@@ -154,6 +154,7 @@ class Scheduler:
         self._running: dict[uuid.UUID, _Running] = {}
         self._job_tasks: dict[uuid.UUID, _JobTask] = {}
         self._stop = asyncio.Event()
+        self._admission_reason: str | None = None
 
     # ------------------------------------------------------------------ lifecycle
     async def run_forever(self) -> None:
@@ -339,11 +340,32 @@ class Scheduler:
         job.lock_expires_at = _now() + timedelta(seconds=self.settings.job_lock_seconds)
         return True
 
+    def _admission_block(self) -> str | None:
+        """A reason from the runtime services (e.g. disk almost full) why no new job may start preparing."""
+        gate = getattr(self.services, "admission_block", None)
+        if not callable(gate):
+            return None
+        try:
+            reason = gate()
+        except Exception as exc:  # a broken gate must not stop the scheduler
+            log.warning("admission gate failed", extra={"error": f"{type(exc).__name__}: {exc}"})
+            return None
+        return str(reason) if reason else None
+
     async def _start_queued_jobs(self) -> int:
         started = 0
         free = max(0, self.settings.concurrency - len(self._job_tasks))
         if free == 0:
             return 0
+        blocked = self._admission_block()
+        if blocked:
+            if blocked != self._admission_reason:
+                log.warning("job admission paused", extra={"reason": blocked})
+            self._admission_reason = blocked
+            return 0
+        if self._admission_reason:
+            log.info("job admission resumed")
+            self._admission_reason = None
         async with self.sm() as s:
             jobs = (
                 (

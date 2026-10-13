@@ -121,6 +121,9 @@ class SchedulerProcess:
         recovered = await services.resources.recover()
         monitor = OfflineMonitor(self.sm, services.registry)
         monitor.start()
+        if services.disk is not None:
+            await services.disk.check_once()  # admission state is known before the first tick
+            services.disk.start()
         maintenance = asyncio.create_task(services.resources.run_maintenance(self._stop), name="resource-maintenance")
         self.scheduler = Scheduler(
             self.sm,
@@ -152,6 +155,8 @@ class SchedulerProcess:
             with contextlib.suppress(asyncio.CancelledError, Exception):
                 await maintenance
             await monitor.stop()
+            if services.disk is not None:
+                await services.disk.stop()
             await services.aclose()
             await self.engine.dispose()
             log.info("scheduler stopped", extra={"instance": services.holder_id})

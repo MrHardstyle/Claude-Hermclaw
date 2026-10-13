@@ -64,7 +64,7 @@ Legende: `[x]` erledigt mit Evidence · `[~]` erledigt, Live-Verifikation auf Zi
 - [x] 3.2 Alembic. — Evidence: alembic.ini, migrations/env.py (async), 0001_initial_schema
 - [x] 3.3 all core tables. — Evidence: 39 Tabellen inkl. aller §10-Tabellen (test_all_required_tables_exist)
 - [x] 3.4 indexes/constraints. — Evidence: FK/Check/Unique/partial unique (test_constraints_enforced)
-- [ ] 3.5 repositories. — Evidence: –
+- [x] 3.5 repositories. — Evidence: repositories table (persistence/models.Repository) + RepositoryRegistry (hermclaw/gitops/registry.py: register/get/resolve/list, protected branches, URL validation); CLI repo-add/repo-list; tests/integration/test_gitops_engine.py::test_registry_register_get_list_and_protection, ::test_registry_rejects_unsafe_urls, tests/integration/test_cli.py
 - [x] 3.6 transaction boundary. — Evidence: session_scope() commit/rollback
 - [x] 3.7 migration tests. — Evidence: test_migration_matches_models (Autogenerate-Diff leer)
 - [x] 3.8 rollback tests. — Evidence: test_migration_downgrade_and_upgrade_roundtrip
@@ -448,25 +448,25 @@ Legende: `[x]` erledigt mit Evidence · `[~]` erledigt, Live-Verifikation auf Zi
 
 ## P35 – Failure Injection
 
-- [ ] 35.1 Planner timeout — Evidence: –
-- [ ] 35.2 invalid Planner JSON — Evidence: –
-- [ ] 35.3 Coder timeout — Evidence: –
-- [ ] 35.4 Worker offline — Evidence: –
-- [ ] 35.5 Ollama unavailable — Evidence: –
-- [ ] 35.6 GitLab unavailable — Evidence: –
-- [ ] 35.7 DB reconnect — Evidence: –
-- [ ] 35.8 process crash — Evidence: –
-- [ ] 35.9 full disk warning — Evidence: –
-- [ ] 35.10 scope violation — Evidence: –
-- [ ] 35.11 secret found — Evidence: –
-- [ ] 35.12 merge conflict — Evidence: –
-- [ ] 35.13 stale base SHA — Evidence: –
-- [ ] 35.14 verifier crash — Evidence: –
-- [ ] 35.15 reviewer timeout — Evidence: –
-- [ ] 35.16 WOL timeout — Evidence: –
-- [ ] 35.17 research source unavailable — Evidence: –
-- [ ] 35.18 network failure — Evidence: –
-- [ ] 35.19 video preemption — Evidence: –
+- [x] 35.1 Planner timeout — Evidence: tests/failure/test_runtime_failures.py::test_planner_timeout_fails_preparation_with_a_timeout_code; gateway fallback gemma4:12b tests/integration/test_planner_repos.py::test_gateway_fallback_is_recorded
+- [x] 35.2 invalid Planner JSON — Evidence: tests/integration/test_planner_repos.py::test_schema_invalid_answer_is_repaired, ::test_failure_after_two_repairs_raises_planner_error; tests/integration/test_runtime_driver.py::test_invalid_planner_output_fails_preparation
+- [x] 35.3 Coder timeout — Evidence: tests/integration/test_coder_loop.py::test_invalid_model_output_twice_fails_and_timeout_is_model_failure; scheduler step timeout tests/integration/test_scheduler.py::test_step_timeout_is_retryable_failure
+- [x] 35.4 Worker offline — Evidence: tests/failure/test_workers_failures.py::test_killed_daemon_is_detected_by_offline_sweep; tests/integration/test_runtime_dispatch.py (offline worker woken, drained skipped); tests/integration/test_runtime_services.py::test_remote_execution_without_a_ready_worker_is_reported_not_run_locally
+- [x] 35.5 Ollama unavailable — Evidence: tests/failure/test_models_failures.py::test_unreachable_litellm_tries_fallback_then_fails, ::test_ollama_error_bodies_are_redacted; tests/failure/test_wol_failures.py::test_model_service_error_status
+- [x] 35.6 GitLab unavailable — Evidence: tests/failure/test_gitops_failures.py::test_gitlab_down_raises_gitlab_error; tests/integration/test_gitops_push.py::test_merge_request_failure_does_not_fail_push
+- [x] 35.7 DB reconnect — Evidence: tests/failure/test_runtime_failures.py::test_db_connections_killed_mid_job_are_reestablished_and_the_job_finishes (pg_terminate_backend of every backend during planning/running, pool_pre_ping); tests/failure/test_repo_intelligence_failures.py::test_database_down_degrades_to_live_retrieval
+- [x] 35.8 process crash — Evidence: tests/failure/test_recovery_process_kill.py (SIGKILL of the scheduler process, 2 scenarios); tests/failure/test_workers_failures.py::test_killed_daemon_is_detected_by_offline_sweep
+- [x] 35.9 full disk warning — Evidence: hermclaw/runtime/health.py DiskMonitor (system.disk events, admission pause while critical): tests/failure/test_runtime_failures.py::test_disk_monitor_warns_once_per_level_change_and_reports_recovery, ::test_critical_disk_pauses_job_admission_until_space_returns; worker heartbeat disk_free_mb
+- [x] 35.10 scope violation — Evidence: tests/failure/test_scope_failures.py (8 tests); tests/integration/test_coder_loop.py::test_out_of_scope_write_is_refused_and_reported_to_the_model; gitops StagingGuard tests
+- [x] 35.11 secret found — Evidence: tests/unit/test_verifier_secrets.py; tests/failure/test_models_failures.py::test_echoed_secrets_never_persisted; tests/failure/test_context_builder_failures.py::test_secrets_are_redacted_everywhere_in_the_prompt
+- [x] 35.12 merge conflict — Evidence: tests/failure/test_gitops_failures.py::test_update_to_base_conflict_aborts_cleanly, ::test_update_to_base_autostash_conflict_restores_everything; tests/integration/test_runtime_driver.py::test_conflicting_base_change_fails_with_merge_conflict
+- [x] 35.13 stale base SHA — Evidence: tests/failure/test_gitops_failures.py::test_stale_base_detected_with_details, ::test_push_with_require_current_base_refuses_stale; tests/integration/test_runtime_driver.py::test_base_moved_during_job_is_rebased_and_regression_rerun
+- [x] 35.14 verifier crash — Evidence: tests/failure/test_verifier_failures.py::test_verifier_crash_is_persisted_as_error, ::test_crashing_check_group_does_not_abort_the_run
+- [x] 35.15 reviewer timeout — Evidence: tests/failure/test_review_failures.py::test_review_timeout_fails_closed, ::test_gateway_timeout_fails_closed
+- [x] 35.16 WOL timeout — Evidence: tests/failure/test_wol_failures.py::test_ping_timeout_with_bounded_resends, ::test_ssh_timeout, ::test_overall_deadline_caps_every_stage
+- [x] 35.17 research source unavailable — Evidence: tests/integration/test_research_step.py::test_research_without_sources_retries_then_blocks_for_the_replanner; tests/integration/test_research_engine.py::test_failed_blocked_unsupported_and_tiny_sources_are_recorded_and_run_continues; tests/failure/test_research_failures.py::test_unexpected_fetcher_and_search_exceptions_are_isolated
+- [x] 35.18 network failure — Evidence: tests/failure/test_workers_failures.py::test_heartbeat_sender_backs_off_when_orchestrator_unreachable; tests/failure/test_wol_failures.py::test_socket_errors_are_retried_up_to_max_attempts; tests/integration/test_research_engine.py::test_no_usable_source_marks_run_failed
+- [x] 35.19 video preemption — Evidence: tests/integration/test_media_handler.py::test_video_preempts_running_ai_lease; tests/integration/test_coder_handler.py::test_video_preemption_checkpoints_the_coder_and_the_step_resumes; tests/integration/test_resources_preemption.py
 
 ## P36 – Security Hardening
 

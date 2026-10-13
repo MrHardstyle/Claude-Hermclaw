@@ -89,6 +89,7 @@ class EventType:
     MEDIA_FINISHED = "media.finished"
     SSH_COMMAND = "ssh.command"
     DB_TOOL = "db.tool"
+    SYSTEM_DISK = "system.disk"  # free space of a runtime data path crossed a warning/critical threshold (P35.9)
     ERROR = "error"
     STATUS = "status"  # human-readable live status line for the UI
 
