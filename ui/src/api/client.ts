@@ -56,7 +56,7 @@ export function errorFromBody(status: number, body: unknown): ApiError {
     const err = b.error;
     if (err && typeof err === "object") {
       const e = err as Record<string, unknown>;
-      return new ApiError(status, String(e.code ?? "ERROR"), String(e.message ?? `HTTP ${status}`), e.details);
+      return new ApiError(status, typeof e.code === "string" ? e.code : "ERROR", typeof e.message === "string" ? e.message : `HTTP ${String(status)}`, e.details);
     }
     const detail = b.detail;
     if (Array.isArray(detail)) {
@@ -65,7 +65,7 @@ export function errorFromBody(status: number, body: unknown): ApiError {
           if (d && typeof d === "object") {
             const dd = d as Record<string, unknown>;
             const loc = Array.isArray(dd.loc) ? dd.loc.filter((x) => x !== "body").join(".") : "";
-            return `${loc ? `${loc}: ` : ""}${String(dd.msg ?? "")}`;
+            return `${loc ? `${loc}: ` : ""}${typeof dd.msg === "string" ? dd.msg : ""}`;
           }
           return String(d);
         })
@@ -147,6 +147,12 @@ export const api = {
   workers: (signal?: AbortSignal) => request<Worker[]>("/workers", { signal }),
   worker: (id: string, signal?: AbortSignal) =>
     request<WorkerDetail>(`/workers/${encodeURIComponent(id)}`, { query: { health_limit: 10 }, signal }),
+  /** admin: stop (drain=true) or resume handing new work to a worker; running work is not interrupted */
+  drainWorker: (id: string, drain: boolean, reason: string) =>
+    request<Omit<WorkerDetail, "health">>(`/workers/${encodeURIComponent(id)}/drain`, {
+      method: "POST",
+      body: { drain, reason: (reason || "operator").slice(0, 200) },
+    }),
   models: (signal?: AbortSignal) => request<ModelsResponse>("/models", { signal }),
   resources: (signal?: AbortSignal) => request<ResourcesResponse>("/resources", { signal }),
   repositories: (signal?: AbortSignal) => request<Repository[]>("/repositories", { signal }),

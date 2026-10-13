@@ -4,6 +4,7 @@ import type { Json } from "../api/types";
 import {
   jobStatusLabel,
   jobTone,
+  resultLabel,
   resultTone,
   severityLabel,
   severityTone,
@@ -51,8 +52,12 @@ export function SeverityBadge({ severity }: { severity: string }) {
   return <Badge tone={severityTone(severity)}>{severityLabel(severity)}</Badge>;
 }
 
-export function ResultBadge({ status, label }: { status: string; label?: string }) {
-  return <Badge tone={resultTone(status)}>{label ?? status}</Badge>;
+export function ResultBadge({ status, label, testId }: { status: string; label?: string; testId?: string }) {
+  return (
+    <Badge tone={resultTone(status)} title={status} testId={testId}>
+      {label ?? resultLabel(status)}
+    </Badge>
+  );
 }
 
 export function Section({

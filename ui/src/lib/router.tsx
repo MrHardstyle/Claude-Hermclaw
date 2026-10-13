@@ -1,3 +1,4 @@
+/* eslint-disable react-refresh/only-export-components -- the router module intentionally exports navigate/useRouter next to Link */
 import { createContext, useCallback, useContext, useMemo, useSyncExternalStore, type AnchorHTMLAttributes, type MouseEvent, type ReactNode } from "react";
 import { stripBase, withBase } from "./routes";
 

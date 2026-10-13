@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { diffStats, parseUnifiedDiff, stripPrefix } from "../../src/lib/diff";
+import { codePointCount, diffStats, isDiffTruncated, parseUnifiedDiff, SERVER_DIFF_CHAR_LIMIT, stripPrefix } from "../../src/lib/diff";
 
 const GIT_DIFF = `diff --git a/src/api.py b/src/api.py
 index 1111111..2222222 100644
@@ -113,5 +113,32 @@ describe("parseUnifiedDiff", () => {
     expect(stripPrefix("a/src/x.py")).toBe("src/x.py");
     expect(stripPrefix("/dev/null")).toBeNull();
     expect(stripPrefix("plain.txt\t2026")).toBe("plain.txt");
+  });
+});
+
+describe("isDiffTruncated", () => {
+  it("is false for normal diffs and true at the server limit", () => {
+    expect(isDiffTruncated(GIT_DIFF)).toBe(false);
+    expect(isDiffTruncated("x".repeat(9), undefined, 10)).toBe(false);
+    expect(isDiffTruncated("x".repeat(10), undefined, 10)).toBe(true);
+    expect(isDiffTruncated("x".repeat(SERVER_DIFF_CHAR_LIMIT))).toBe(true);
+  });
+
+  it("counts code points like the Python server, not UTF-16 units", () => {
+    // 6 astral characters = 12 UTF-16 units but only 6 code points: below a limit of 10
+    const astral = "😀".repeat(6);
+    expect(astral.length).toBe(12);
+    expect(codePointCount(astral)).toBe(6);
+    expect(isDiffTruncated(astral, undefined, 10)).toBe(false);
+    expect(isDiffTruncated("😀".repeat(10), undefined, 10)).toBe(true);
+    // a lone surrogate counts as one code point
+    expect(codePointCount("a\ud800b")).toBe(3);
+    expect(codePointCount("x".repeat(50), 5)).toBe(5);
+  });
+
+  it("an explicit API flag wins", () => {
+    expect(isDiffTruncated("short", true)).toBe(true);
+    expect(isDiffTruncated("x".repeat(10), false, 10)).toBe(false);
+    expect(isDiffTruncated("x".repeat(10), null, 10)).toBe(true);
   });
 });

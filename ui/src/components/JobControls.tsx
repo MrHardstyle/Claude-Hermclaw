@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { api, describeError } from "../api/client";
+import { api, ApiError, describeError } from "../api/client";
 import type { ControlAction, Job } from "../api/types";
 import { CONTROL_CONFIRM_TEXT, CONTROL_ORDER, controlStates } from "../lib/controls";
 import { CONTROL_LABELS } from "../lib/labels";
@@ -22,6 +22,8 @@ export function JobControls({ job, onDone }: { job: Job; onDone: () => void }) {
       onDone();
     } catch (e) {
       setError(describeError(e));
+      // 409: the job changed meanwhile (runtime transition) – reload so buttons reflect the real state
+      if (e instanceof ApiError && e.status === 409) onDone();
     } finally {
       setBusy(false);
     }
@@ -71,6 +73,7 @@ export function JobControls({ job, onDone }: { job: Job; onDone: () => void }) {
         destructive={current?.destructive}
         askReason={current?.askReason}
         busy={busy}
+        confirmDisabled={current ? !current.enabled : false}
         error={error}
         onCancel={() => {
           setPending(null);

@@ -105,3 +105,24 @@ export function useNow(intervalMs = 5000): number {
   }, [intervalMs]);
   return now;
 }
+
+/**
+ * Returns `value`, but changes at most every `ms` milliseconds (trailing update guaranteed).
+ * Used to turn bursts of live events into a bounded number of refetches.
+ */
+export function useThrottled<T>(value: T, ms: number): T {
+  const [shown, setShown] = useState(value);
+  const last = useRef(0);
+  useEffect(() => {
+    if (Object.is(value, shown)) return;
+    const wait = Math.max(0, last.current + ms - Date.now());
+    const id = window.setTimeout(() => {
+      last.current = Date.now();
+      setShown(value);
+    }, wait);
+    return () => {
+      window.clearTimeout(id);
+    };
+  }, [value, shown, ms]);
+  return shown;
+}

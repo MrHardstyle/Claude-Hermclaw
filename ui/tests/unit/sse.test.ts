@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { backoffDelay, buildStreamUrl, ReconnectingEventStream, type EventSourceLike } from "../../src/lib/sse";
+import { backoffDelay, buildStreamUrl, ReconnectingEventStream, undeliveredSequence, type EventSourceLike } from "../../src/lib/sse";
 import type { HermEvent } from "../../src/api/types";
 
 class FakeEventSource implements EventSourceLike {
@@ -10,7 +10,9 @@ class FakeEventSource implements EventSourceLike {
   onmessage: ((ev: MessageEvent) => unknown) | null = null;
   listeners = new Map<string, ((ev: MessageEvent) => void)[]>();
   closed = false;
-  constructor(public url: string) {
+  url: string;
+  constructor(url: string) {
+    this.url = url;
     FakeEventSource.instances.push(this);
   }
   addEventListener(type: string, l: (ev: MessageEvent) => void): void {
@@ -150,5 +152,62 @@ describe("ReconnectingEventStream", () => {
     es?.listeners.get("status")?.[0]?.({ data: "not json" } as MessageEvent);
     es?.emit("status", { foo: 1 });
     expect(received).toEqual([]);
+  });
+});
+
+describe("stale stream detection", () => {
+  const listened = new Set(["status", "job.transition"]);
+
+  it("undeliveredSequence reports the newest listened-for event beyond what the stream covered", () => {
+    const evs = [
+      { sequence: 8, event_type: "status" },
+      { sequence: 11, event_type: "status" },
+      { sequence: 12, event_type: "custom.unknown" }, // no listener: the stream can never deliver it
+      { sequence: 10, event_type: "job.transition" },
+    ];
+    expect(undeliveredSequence(evs, 9, listened)).toBe(11);
+    expect(undeliveredSequence(evs, 11, listened)).toBeNull();
+    expect(undeliveredSequence([], 0, listened)).toBeNull();
+    expect(undeliveredSequence([{ sequence: 3, event_type: "custom.unknown" }], 0, listened)).toBeNull();
+  });
+
+  it("seen counts duplicates and the connect cursor, so REST-advanced events are not reported as missing", () => {
+    const { stream } = setup(0);
+    stream.start();
+    const es = FakeEventSource.instances[0];
+    es?.open();
+    es?.emit("status", envelope(3));
+    expect(stream.seen).toBe(3);
+    // REST delivered 4 and 5 first (cursor advanced); the stream then sends 5 as a duplicate
+    stream.advanceTo(5);
+    expect(stream.seen).toBe(3);
+    es?.emit("status", envelope(5));
+    expect(stream.seen).toBe(5);
+    expect(stream.lastEventId).toBe(5);
+  });
+
+  it("reconnectNow replaces a silent connection and resumes from the cursor", () => {
+    const { stream, received, states, timers } = setup(0);
+    stream.start();
+    const first = FakeEventSource.instances[0];
+    first?.open();
+    first?.emit("status", envelope(2));
+    stream.advanceTo(7); // REST saw events up to 7, the half-open stream did not deliver them
+    stream.reconnectNow();
+    expect(first?.closed).toBe(true);
+    const second = FakeEventSource.instances[1];
+    expect(second?.url).toContain("last_event_id=7");
+    expect(stream.seen).toBe(7); // the server replays everything after the cursor
+    // late messages of the replaced connection are ignored
+    first?.emit("status", envelope(9));
+    expect(received.map((e) => e.sequence)).toEqual([2]);
+    second?.open();
+    second?.emit("status", envelope(8));
+    expect(received.map((e) => e.sequence)).toEqual([2, 8]);
+    expect(states).toEqual(["connecting", "open", "reconnecting", "open"]);
+    expect(timers).toHaveLength(0); // immediate, not via backoff
+    stream.stop();
+    stream.reconnectNow(); // no-op after stop
+    expect(FakeEventSource.instances).toHaveLength(2);
   });
 });

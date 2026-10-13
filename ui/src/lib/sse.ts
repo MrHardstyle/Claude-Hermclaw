@@ -6,6 +6,10 @@
  *   (HTTP error, proxy failure) we reconnect ourselves with exponential backoff and pass the last seen
  *   sequence as `?last_event_id=` so the server replays everything we missed.
  * - Events are delivered at most once (sequence-based de-duplication).
+ * - Half-open connections (a proxy keeps the browser side open after the upstream died) are invisible to
+ *   EventSource – heartbeats are SSE comments, which the API does not expose. `seen` tracks what the stream
+ *   itself covered, so callers that also poll REST can detect a silent stream (`undeliveredSequence`) and
+ *   force a fresh connection with `reconnectNow()`.
  */
 import type { HermEvent } from "../api/types";
 import { KNOWN_EVENT_TYPES, normalizeEvent } from "./events";
@@ -30,6 +34,23 @@ export interface BackoffOptions {
 }
 
 export const DEFAULT_BACKOFF: BackoffOptions = { initialMs: 1000, maxMs: 30000, factor: 2 };
+
+/**
+ * Highest sequence among `events` that the stream should already have delivered but did not: an event of a type
+ * the stream listens for, newer than everything the stream has covered (`seen`). `null` when nothing is missing.
+ * Pure (no clocks involved, so client/server clock skew cannot cause false alarms).
+ */
+export function undeliveredSequence(
+  events: readonly Pick<HermEvent, "sequence" | "event_type">[],
+  seen: number,
+  listened: ReadonlySet<string>,
+): number | null {
+  let max: number | null = null;
+  for (const e of events) {
+    if (e.sequence > seen && listened.has(e.event_type) && (max === null || e.sequence > max)) max = e.sequence;
+  }
+  return max;
+}
 
 /** Delay before reconnect attempt `attempt` (0-based); deterministic so it can be unit tested. */
 export function backoffDelay(attempt: number, opts: BackoffOptions = DEFAULT_BACKOFF): number {
@@ -67,6 +88,7 @@ export class ReconnectingEventStream {
   private attempt = 0;
   private stopped = false;
   private _lastEventId: number;
+  private _seen = 0;
   private _state: StreamState = "closed";
   private readonly opts: ReconnectingStreamOptions;
   private readonly factory: EventSourceFactory;
@@ -76,7 +98,7 @@ export class ReconnectingEventStream {
   constructor(opts: ReconnectingStreamOptions) {
     this.opts = opts;
     this._lastEventId = opts.initialLastEventId ?? 0;
-    this.factory = opts.factory ?? ((url) => new EventSource(url) as unknown as EventSourceLike);
+    this.factory = opts.factory ?? ((url) => new EventSource(url));
     this.setTimer = opts.setTimer ?? ((fn, ms) => window.setTimeout(fn, ms));
     this.clearTimer = opts.clearTimer ?? ((h) => { window.clearTimeout(h as number); });
   }
@@ -87,6 +109,25 @@ export class ReconnectingEventStream {
 
   get state(): StreamState {
     return this._state;
+  }
+
+  /**
+   * Everything up to this sequence is covered by the stream: received on it (duplicates included) or below the
+   * cursor the current connection was opened with (the server replays everything after that cursor).
+   */
+  get seen(): number {
+    return this._seen;
+  }
+
+  /** Drop the current connection and open a new one right away (cursor = last seen sequence). */
+  reconnectNow(): void {
+    if (this.stopped) return;
+    if (this.timer !== null) this.clearTimer(this.timer);
+    this.timer = null;
+    this.es?.close();
+    this.es = null;
+    this.attempt = 0;
+    this.connect("reconnecting");
   }
 
   start(): void {
@@ -116,6 +157,7 @@ export class ReconnectingEventStream {
   private connect(state: StreamState): void {
     if (this.stopped) return;
     this.setState(state, null);
+    this._seen = Math.max(this._seen, this._lastEventId);
     const es = this.factory(this.opts.url(this._lastEventId));
     this.es = es;
     const handle = (msg: MessageEvent) => {
@@ -161,6 +203,7 @@ export class ReconnectingEventStream {
     }
     const ev = normalizeEvent(parsed);
     if (!ev) return;
+    if (ev.sequence > this._seen) this._seen = ev.sequence;
     if (ev.sequence <= this._lastEventId) return; // duplicate after reconnect/replay
     this._lastEventId = ev.sequence;
     this.opts.onEvent(ev);

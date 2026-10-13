@@ -398,21 +398,21 @@ Legende: `[x]` erledigt mit Evidence · `[~]` erledigt, Live-Verifikation auf Zi
 
 ## P31 – UI
 
-- [ ] 31.1 layout. — Evidence: –
-- [ ] 31.2 dashboard. — Evidence: –
-- [ ] 31.3 jobs. — Evidence: –
-- [ ] 31.4 DAG. — Evidence: –
-- [ ] 31.5 live events. — Evidence: –
-- [ ] 31.6 diff. — Evidence: –
-- [ ] 31.7 tests. — Evidence: –
-- [ ] 31.8 verifier. — Evidence: –
-- [ ] 31.9 review. — Evidence: –
-- [ ] 31.10 sources. — Evidence: –
-- [ ] 31.11 workers. — Evidence: –
-- [ ] 31.12 resources. — Evidence: –
-- [ ] 31.13 media. — Evidence: –
-- [ ] 31.14 errors. — Evidence: –
-- [ ] 31.15 controls. — Evidence: –
+- [x] 31.1 layout. — Evidence: ui/src/components/Layout.tsx, App.tsx, lib/router.tsx, pages/Login.tsx; E2E auth.spec.ts ('ungültiges Token wird abgewiesen…', 'abgelaufenes Token führt zurück zur Anmeldung', 'Skip-Link springt zum Hauptinhalt'), pages.spec.ts 'Hauptnavigation markiert die aktive Seite…', job-detail.spec.ts 'Kopf, 
+- [x] 31.2 dashboard. — Evidence: ui/src/pages/Dashboard.tsx, lib/aggregate.ts; E2E dashboard.spec.ts 'zeigt Jobs, Warteschlange, Worker, Modelle, GPU, Fehler, Research und Bugs' and 'Live-Statuszeilen kommen über den globalen SSE-Stream'
+- [x] 31.3 jobs. — Evidence: ui/src/pages/Jobs.tsx, components/JobCreateForm.tsx, lib/jobForm.ts; E2E jobs.spec.ts 'Liste zeigt die Jobs und filtert nach Status', 'Formular validiert Eingaben und legt einen Job über die API an', 'Serverfehler werden angezeigt'; unit helpers.test.ts
+- [x] 31.4 DAG. — Evidence: ui/src/lib/dag.ts (longest-path layers, barycenter ordering, cycle/missing-dependency tolerance), components/DagView.tsx, pages/job/PlanTab.tsx; unit dag.test.ts (6 tests); E2E job-detail.spec.ts 'Plan-Tab zeigt den DAG mit Status-Farben und Planversionen'
+- [x] 31.5 live events. — Evidence: ui/src/lib/sse.ts (ReconnectingEventStream: backoff, Last-Event-ID cursor, de-dup, half-open watchdog), lib/useEvents.ts (REST history + SSE + 500-sequence reconcile window), pages/job/EventsTab.tsx, StepsTab.tsx + components/StepDetailView.tsx; unit sse.test.ts (11); E2E live-events.spec.ts ('neue 
+- [x] 31.6 diff. — Evidence: ui/src/lib/diff.ts (parseUnifiedDiff, isDiffTruncated), components/DiffViewer.tsx, pages/job/EvidenceTabs.tsx ChangesTab; unit diff.test.ts (11 incl. new isDiffTruncated tests); E2E job-detail.spec.ts 'Änderungen: Diff-Viewer mit Dateiköpfen und +/- Färbung' and new 'Änderungen: gekürzter Diff wird 
+- [x] 31.7 tests. — Evidence: ui/src/pages/job/EvidenceTabs.tsx TestsTab, components/Evidence.tsx TestRunsTable, lib/aggregate.ts collectTests; E2E job-detail.spec.ts 'Tests-, Verifier- und Review-Tab aggregieren über alle Schritte'
+- [x] 31.8 verifier. — Evidence: ui/src/pages/job/EvidenceTabs.tsx VerifierTab, components/Evidence.tsx VerificationRunView, lib/aggregate.ts collectVerifications; E2E job-detail.spec.ts 'Tests-, Verifier- und Review-Tab…' + 'Schritt-Detail…'
+- [x] 31.9 review. — Evidence: ui/src/pages/job/EvidenceTabs.tsx ReviewTab, components/Evidence.tsx ReviewRunView, lib/aggregate.ts collectReviews; E2E job-detail.spec.ts 'Tests-, Verifier- und Review-Tab…'
+- [x] 31.10 sources. — Evidence: ui/src/pages/job/ResearchTab.tsx (runs, sources sorted by authority/relevance, claims with [n] links to sources, contradictions; only http(s) URLs linked via safeExternalUrl, rel=noopener noreferrer); E2E job-detail.spec.ts 'Research-Quellen: Läufe, Quellen mit Autorität/Relevanz, Aussagen, Widerspr
+- [x] 31.11 workers. — Evidence: ui/src/pages/Workers.tsx (state badges STARTING/WAKING/READY/BUSY/ERROR/SLEEPING/OFFLINE/DRAINING, detail with GPU + loaded models, drain); E2E workers.spec.ts 'Liste mit Zustands-Badges, Detail mit GPU und geladenen Modellen', 'Drain mit Bestätigung setzt den Worker auf DRAINING und wieder zurück'
+- [x] 31.12 resources. — Evidence: ui/src/pages/Resources.tsx, pages/job/MiscTabs.tsx (job resources tab); E2E pages.spec.ts 'aktive Leases und wartende Anfragen mit Job-Verweisen', job-detail.spec.ts 'Repository, Ressourcen, Artefakte, Medien, Git, Fehler'
+- [x] 31.13 media. — Evidence: ui/src/pages/Media.tsx, components/MediaGallery.tsx, components/Artifacts.tsx (authenticated blob preview for image/video, download); E2E pages.spec.ts 'Job wählen zeigt Bild-Vorschau über die Artefakt-Download-URL und Medien-Events'
+- [x] 31.14 errors. — Evidence: ui/src/pages/job/MiscTabs.tsx Errors tab (error/warning events + job error), Git tab, Artifacts tab; E2E job-detail.spec.ts 'Repository, Ressourcen, Artefakte, Medien, Git, Fehler' and 'Fehler-Tab eines fehlgeschlagenen Jobs zeigt den Job-Fehler'
+- [x] 31.15 controls. — Evidence: ui/src/components/JobControls.tsx, ConfirmDialog.tsx, lib/controls.ts (rules verified to match hermclaw/api/jobs.py::_control and state_machines: retry only from failed/blocked); E2E controls.spec.ts 'Pausieren und Fortsetzen…', 'Neuplanung mit Begründung', 'Abbrechen eines wartenden Jobs…; danach s
 
 ## P32 – Deployment
 

@@ -198,8 +198,60 @@ export function severityTone(sev: string): Tone {
 export function resultTone(status: string): Tone {
   const s = status.toLowerCase();
   if (["passed", "ok", "succeeded", "completed", "read", "approve", "approved", "pass", "success"].includes(s)) return "success";
-  if (["failed", "error", "refused", "reject", "rejected", "fail"].includes(s)) return "danger";
-  if (["skipped", "warning", "changes_requested", "request_changes", "needs_changes"].includes(s)) return "warning";
+  if (["failed", "error", "refused", "reject", "rejected", "fail", "blocker"].includes(s)) return "danger";
+  if (["skipped", "skip", "warning", "fix_required", "changes_requested", "timeout"].includes(s)) return "warning";
   if (["running", "started"].includes(s)) return "active";
   return "neutral";
+}
+
+/** German labels for result-like status values (tests, checks, reviews, sources, attempts). */
+export const RESULT_LABELS: Record<string, string> = {
+  pass: "bestanden",
+  passed: "bestanden",
+  ok: "ok",
+  fail: "fehlgeschlagen",
+  failed: "fehlgeschlagen",
+  error: "Fehler",
+  skip: "übersprungen",
+  skipped: "übersprungen",
+  timeout: "Zeitüberschreitung",
+  running: "läuft",
+  started: "gestartet",
+  pending: "ausstehend",
+  completed: "abgeschlossen",
+  succeeded: "erfolgreich",
+  fix_required: "Korrektur nötig",
+  read: "gelesen",
+  refused: "abgelehnt",
+  active: "aktiv",
+  preempting: "wird verdrängt",
+  waiting: "wartend",
+  granted: "erteilt",
+  released: "freigegeben",
+  expired: "abgelaufen",
+  cancelled: "abgebrochen",
+  open: "offen",
+  fixed: "behoben",
+  wontfix: "wird nicht behoben",
+  verified: "verifiziert",
+};
+
+export function resultLabel(s: string): string {
+  return RESULT_LABELS[s.toLowerCase()] ?? s;
+}
+
+export const CLOSED_BUG_STATUSES: ReadonlySet<string> = new Set(["fixed", "verified", "closed", "resolved", "wontfix"]);
+
+/** Bug severities P0 (critical) … P3 (cosmetic), see BUGS.md. */
+export function bugSeverityTone(sev: string): Tone {
+  switch (sev.toUpperCase()) {
+    case "P0":
+      return "danger";
+    case "P1":
+      return "warning";
+    case "P2":
+      return "info";
+    default:
+      return "neutral";
+  }
 }

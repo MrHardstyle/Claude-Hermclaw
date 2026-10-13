@@ -155,7 +155,7 @@ export function parseUnifiedDiff(text: string): DiffFile[] {
     }
 
     if (line.startsWith("\\") && hunk) {
-      (hunk as DiffHunk).lines.push({ kind: "note", content: line, oldNo: null, newNo: null });
+      hunk.lines.push({ kind: "note", content: line, oldNo: null, newNo: null });
       continue;
     }
 
@@ -171,7 +171,7 @@ export function parseUnifiedDiff(text: string): DiffFile[] {
       // plain unified diff (or the ---/+++ pair of a git diff)
       const oldPath = stripPrefix(line.slice(4));
       const newPath = stripPrefix((lines[i + 1] ?? "").slice(4));
-      if (!cur || (cur as DiffFile).hunks.length > 0) {
+      if (!cur || cur.hunks.length > 0) {
         push();
         cur = newFile(oldPath, newPath);
       } else {
@@ -240,4 +240,36 @@ export function diffStats(files: readonly DiffFile[]): { files: number; addition
     (acc, f) => ({ files: acc.files + 1, additions: acc.additions + f.additions, deletions: acc.deletions + f.deletions }),
     { files: 0, additions: 0, deletions: 0 },
   );
+}
+
+/**
+ * `GET /api/jobs/{id}/diff` returns at most this many characters (Python code points) of the diff artifact.
+ * Mirrors `hermclaw/api/jobs.py::get_diff` (`_read_text_limited(..., 2_000_000)`).
+ */
+export const SERVER_DIFF_CHAR_LIMIT = 2_000_000;
+
+/** Number of Unicode code points in `text`, stopping early once `stopAt` is reached. */
+export function codePointCount(text: string, stopAt = Number.POSITIVE_INFINITY): number {
+  let n = 0;
+  for (let i = 0; i < text.length && n < stopAt; i += 1) {
+    const unit = text.charCodeAt(i);
+    // a high surrogate followed by a low surrogate is one code point
+    if (unit >= 0xd800 && unit <= 0xdbff && i + 1 < text.length) {
+      const next = text.charCodeAt(i + 1);
+      if (next >= 0xdc00 && next <= 0xdfff) i += 1;
+    }
+    n += 1;
+  }
+  return n;
+}
+
+/**
+ * Whether the server cut the diff off. An explicit `truncated` flag from the API wins; otherwise a diff that
+ * reaches the server limit exactly is treated as truncated (the API slices to the limit without saying so).
+ */
+export function isDiffTruncated(diff: string, flag?: boolean | null, limit = SERVER_DIFF_CHAR_LIMIT): boolean {
+  if (typeof flag === "boolean") return flag;
+  // UTF-16 length is an upper bound for the code point count – cheap pre-check for normal-sized diffs
+  if (diff.length < limit) return false;
+  return codePointCount(diff, limit) >= limit;
 }

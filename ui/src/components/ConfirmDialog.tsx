@@ -1,4 +1,4 @@
-import { useEffect, useId, useRef, useState, type FormEvent } from "react";
+import { useEffect, useId, useRef, useState, type SyntheticEvent } from "react";
 
 /** Modal confirmation built on the native <dialog> (focus trap, Esc to close, inert background). */
 export function ConfirmDialog({
@@ -9,6 +9,7 @@ export function ConfirmDialog({
   destructive,
   askReason,
   busy,
+  confirmDisabled,
   error,
   onConfirm,
   onCancel,
@@ -20,6 +21,8 @@ export function ConfirmDialog({
   destructive?: boolean;
   askReason?: boolean;
   busy?: boolean;
+  /** the action is no longer allowed (job state changed while the dialog was open) */
+  confirmDisabled?: boolean;
   error?: string | null;
   onConfirm: (reason: string) => void;
   onCancel: () => void;
@@ -41,8 +44,9 @@ export function ConfirmDialog({
     }
   }, [open]);
 
-  const submit = (e: FormEvent) => {
+  const submit = (e: SyntheticEvent) => {
     e.preventDefault();
+    if (busy || confirmDisabled) return;
     onConfirm(reason.trim());
   };
 
@@ -78,7 +82,7 @@ export function ConfirmDialog({
           <button type="button" className="btn" onClick={onCancel} disabled={busy}>
             Zurück
           </button>
-          <button type="submit" className={`btn ${destructive ? "btn-danger" : "btn-primary"}`} disabled={busy} data-testid="confirm-action">
+          <button type="submit" className={`btn ${destructive ? "btn-danger" : "btn-primary"}`} disabled={busy || confirmDisabled} data-testid="confirm-action">
             {busy ? "Wird ausgeführt …" : confirmLabel}
           </button>
         </div>

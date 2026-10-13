@@ -83,6 +83,9 @@ function DiffFileView({ file, index, defaultOpen }: { file: DiffFile; index: num
   );
 }
 
+/** Files with more rendered lines than this start collapsed (rendering stays responsive for huge diffs). */
+const LARGE_FILE_LINES = 3000;
+
 export function DiffViewer({ diff }: { diff: string }) {
   const files = useMemo(() => parseUnifiedDiff(diff), [diff]);
   const stats = useMemo(() => diffStats(files), [files]);
@@ -104,7 +107,12 @@ export function DiffViewer({ diff }: { diff: string }) {
         </ul>
       </nav>
       {files.map((f, i) => (
-        <DiffFileView key={`${f.path}-${i}`} file={f} index={i} defaultOpen={files.length <= 30} />
+        <DiffFileView
+          key={`${f.path}-${i}`}
+          file={f}
+          index={i}
+          defaultOpen={files.length <= 30 && f.hunks.reduce((n, h) => n + h.lines.length, 0) <= LARGE_FILE_LINES}
+        />
       ))}
     </div>
   );

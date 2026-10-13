@@ -90,3 +90,17 @@ describe("format", () => {
     expect(formatRelative("2026-10-08T10:00:00Z", Date.parse("2026-10-08T10:05:00Z"))).toBe("vor 5 min");
   });
 });
+
+describe("safeExternalUrl", () => {
+  it("links only http(s) URLs from fetched research content", async () => {
+    const { safeExternalUrl } = await import("../../src/lib/aggregate");
+    expect(safeExternalUrl("https://docs.python.org/3/library/asyncio.html")).toBe("https://docs.python.org/3/library/asyncio.html");
+    expect(safeExternalUrl("http://example.org/a b")).toBe("http://example.org/a%20b");
+    expect(safeExternalUrl("javascript:alert(1)")).toBeNull();
+    expect(safeExternalUrl("JavaScript:alert(1)")).toBeNull();
+    expect(safeExternalUrl("data:text/html,<script>alert(1)</script>")).toBeNull();
+    expect(safeExternalUrl("file:///etc/passwd")).toBeNull();
+    expect(safeExternalUrl("/relative/path")).toBeNull();
+    expect(safeExternalUrl("")).toBeNull();
+  });
+});

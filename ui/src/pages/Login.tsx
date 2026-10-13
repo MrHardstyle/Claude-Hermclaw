@@ -1,4 +1,4 @@
-import { useId, useState, type FormEvent } from "react";
+import { useId, useState, type SyntheticEvent } from "react";
 import { api, ApiError, describeError } from "../api/client";
 
 export function Login({ onLogin, notice }: { onLogin: (token: string) => void; notice?: string | null }) {
@@ -8,7 +8,7 @@ export function Login({ onLogin, notice }: { onLogin: (token: string) => void; n
   const inputId = useId();
   const hintId = useId();
 
-  const submit = async (e: FormEvent) => {
+  const submit = async (e: SyntheticEvent) => {
     e.preventDefault();
     const t = token.trim();
     if (!t) {

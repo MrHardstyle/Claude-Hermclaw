@@ -202,6 +202,8 @@ export interface DiffResponse {
   artifact_id: Uuid | null;
   step_id?: Uuid | null;
   created_at?: IsoDate;
+  /** not sent by the current API; honoured when present (see lib/diff.ts::isDiffTruncated) */
+  truncated?: boolean | null;
 }
 
 // ---------------------------------------------------------------- step detail (/api/steps/{id})
@@ -420,15 +422,27 @@ export interface WorkerHealthSample {
   uptime_seconds: number;
 }
 
+/** `GET /api/workers/{id}` (hermclaw/workers/schemas.py::WorkerDetail, admin scope). */
 export interface WorkerDetail {
   id: string;
   hostname: string;
+  address: string;
+  kind: string;
   state: string;
+  api_url?: string | null;
+  worker_version?: string | null;
+  protocol_version?: number | null;
+  compatible?: boolean;
+  last_heartbeat_at?: IsoDate | null;
   state_reason?: string | null;
+  state_changed_at?: IsoDate | null;
   heartbeat_age_seconds?: number | null;
+  active_job?: string | null;
+  active_step?: string | null;
   admin_drain?: boolean;
   wol_enabled?: boolean;
   service_versions?: Record<string, string>;
+  capabilities?: string[];
   declared_capabilities?: string[];
   health: WorkerHealthSample[];
 }
@@ -445,8 +459,12 @@ export interface ModelProfile {
   role: string;
   model: string;
   kind?: string;
-  host_worker_id?: string | null;
+  host?: string | null;
   context_tokens?: number;
+  temperature?: number;
+  think?: boolean;
+  timeout_seconds?: number;
+  fallback_for?: string | null;
   max_output_tokens?: number;
   resource_group?: string;
   exclusive?: boolean;

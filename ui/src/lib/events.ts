@@ -29,6 +29,7 @@ export const KNOWN_EVENT_TYPES: readonly string[] = [
   "research.query.started",
   "research.source.read",
   "research.claim.created",
+  "research.decision.linked",
   "research.finished",
   "planner.invoked",
   "planner.repair",
@@ -60,6 +61,7 @@ export const KNOWN_EVENT_TYPES: readonly string[] = [
   "model.unloaded",
   "model.invocation.started",
   "model.invocation.finished",
+  "context.built",
   "tool.call.started",
   "tool.call.finished",
   "command.run",
@@ -207,6 +209,7 @@ export const CATEGORY_LABELS: Record<string, string> = {
   media: "Medien",
   ssh: "SSH",
   db: "Datenbank",
+  context: "Kontext",
   error: "Fehler",
 };
 
