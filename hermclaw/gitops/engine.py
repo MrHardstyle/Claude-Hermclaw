@@ -18,9 +18,11 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
+import hashlib
 import os
+import stat
 import uuid
-from collections.abc import AsyncIterator, Sequence
+from collections.abc import AsyncIterator, Iterable, Mapping, Sequence
 from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
@@ -67,7 +69,7 @@ from hermclaw.gitops.errors import (
 from hermclaw.gitops.gitlab import GitLabClient
 from hermclaw.gitops.locks import KeyedLocks, combined_lock
 from hermclaw.gitops.naming import job_branch_name, safe_dir_name, validate_branch_name
-from hermclaw.gitops.parsing import parse_name_status, parse_push_porcelain
+from hermclaw.gitops.parsing import parse_name_status, parse_push_porcelain, split_nul
 from hermclaw.gitops.reader import WorkspaceGitReader
 from hermclaw.gitops.registry import RepoRef, RepositoryRegistry
 from hermclaw.gitops.runner import GitRunner, GitSshOptions
@@ -161,6 +163,154 @@ def _verified_paths(changed: Any) -> set[str]:
 
 def _cap(items: Sequence[Any], limit: int = MAX_LISTED_PATHS) -> list[Any]:
     return list(items[:limit])
+
+
+# ================================================================================== exact verification binding
+#: content of a path that does not exist (deleted, or not addable because a parent is a symlink / not a directory)
+CONTENT_DELETED = "deleted"
+#: working tree only – a directory/special file/unsafe path; never equals an index value, so it never matches
+CONTENT_UNHASHABLE = "unhashable"
+#: index only – an unmerged entry or a path that is not a safe repository path; never matches either
+CONTENT_CONFLICTED = "conflicted"
+CONTENT_INVALID_PATH = "invalid-path"
+#: git mode of a plain (non-executable) regular file – the only mode whose token is the bare blob sha
+REGULAR_FILE_MODE = "100644"
+_DIGEST_CHUNK = 500
+
+
+def content_token(blob: str, mode: str) -> str:
+    """Digest token of a path git records as ``mode``/``blob``: the bare blob sha for a regular file (``100644``),
+    ``<blob sha> <mode>`` for every other mode (``100755`` executable, ``120000`` symlink, ``160000`` gitlink) – a type
+    or exec-bit change after the verification alters what the commit records although the blob stays the same."""
+    return blob if mode == REGULAR_FILE_MODE else f"{blob} {mode}"
+
+
+def content_digest(blobs: Mapping[str, str]) -> str:
+    """sha256 over the sorted lines ``<path>\\0<token>`` (each terminated by ``\\n``); the token is the git blob sha
+    of a regular file, ``<blob sha> <mode>`` for any other git mode (:func:`content_token`) and ``deleted`` for a
+    path that does not exist.
+
+    ``verification_runs.content_digest`` is this digest of the verified working tree (:func:`worktree_content_digest`);
+    :meth:`GitEngine.commit_verified` recomputes it from the staged index for the same paths."""
+    h = hashlib.sha256()
+    for line in sorted(f"{path}\0{blob}" for path, blob in blobs.items()):
+        h.update(line.encode("utf-8", "surrogateescape") + b"\n")
+    return h.hexdigest()
+
+
+def _safe_rel(rel: str) -> bool:
+    parts = rel.split("/")
+    return bool(rel) and "\x00" not in rel and not rel.startswith("/") and not any(p in ("", ".", "..", ".git") for p in parts)
+
+
+def _worktree_kind(root: Path, rel: str) -> str:
+    """``file`` / ``executable`` / ``symlink`` / ``missing`` / ``other`` – what ``git add`` would see (``core.fileMode``:
+    the owner exec bit makes a regular file ``100755``); symlinked parents are not followed."""
+    if not _safe_rel(rel):
+        return "other"
+    parts = rel.split("/")
+    current = root
+    for i, part in enumerate(parts):
+        current = current / part
+        try:
+            st = os.lstat(current)
+        except (FileNotFoundError, NotADirectoryError):
+            return "missing"
+        except OSError:
+            return "other"
+        if i < len(parts) - 1:
+            if not stat.S_ISDIR(st.st_mode):
+                return "missing"  # behind a symlink or a file: git cannot add it, the path is gone for git
+            continue
+        if stat.S_ISLNK(st.st_mode):
+            return "symlink"
+        if not stat.S_ISREG(st.st_mode):
+            return "other"
+        return "executable" if st.st_mode & stat.S_IXUSR else "file"
+    return "other"  # pragma: no cover - parts is never empty
+
+
+async def worktree_blobs(runner: GitRunner, root: Path, paths: Iterable[str]) -> dict[str, str]:
+    """Per path the :func:`content_token` of what ``git add`` would record from the working tree (``git hash-object``
+    with the repository's filters; a symlink's target text; the mode from ``lstat``), ``deleted`` for a missing path,
+    ``unhashable`` otherwise.
+
+    ``hash-object`` runs the clean filters the repository config names, so (like every runtime git call in a
+    workspace) it only runs in a workspace whose git metadata is intact – a ``filter.*`` driver planted from the
+    sandbox would otherwise execute on the orchestrator. Raises :class:`WorkspaceTamperedError` otherwise."""
+    problems = await ops.integrity_problems(runner, root)
+    if problems:
+        raise WorkspaceTamperedError(
+            "workspace git metadata was modified outside the runtime; refusing to hash its content",
+            details={"problems": _cap(problems, 20)},
+        )
+    wanted = sorted(set(paths))
+    kinds = await asyncio.to_thread(lambda: {rel: _worktree_kind(root, rel) for rel in wanted})
+    out: dict[str, str] = {}
+    files: list[str] = []
+    for rel in wanted:
+        kind = kinds[rel]
+        if kind == "missing":
+            out[rel] = CONTENT_DELETED
+        elif kind in ("file", "executable"):
+            files.append(rel)
+        elif kind == "symlink":
+            target = await asyncio.to_thread(os.readlink, root / rel)
+            res = await runner.run(["hash-object", "--stdin"], cwd=root, input_data=os.fsencode(target))
+            if not ops.is_sha(res.first_line):
+                raise GitCommandError("unexpected git hash-object output", details={"files": 1})
+            out[rel] = content_token(res.first_line, "120000")
+        else:
+            out[rel] = CONTENT_UNHASHABLE
+    for i in range(0, len(files), _DIGEST_CHUNK):
+        chunk = files[i : i + _DIGEST_CHUNK]
+        res = await runner.run(["hash-object", "--", *chunk], cwd=root)
+        shas = res.text.split()
+        if len(shas) != len(chunk) or not all(ops.is_sha(x) for x in shas):
+            raise GitCommandError("unexpected git hash-object output", details={"files": len(chunk), "lines": len(shas)})
+        for rel, sha in zip(chunk, shas, strict=True):
+            out[rel] = content_token(sha, "100755" if kinds[rel] == "executable" else REGULAR_FILE_MODE)
+    return out
+
+
+async def index_blobs(runner: GitRunner, root: Path, paths: Iterable[str]) -> dict[str, str]:
+    """Per path the :func:`content_token` of the entry the index (= the next commit) holds (``git ls-files
+    --stage``); ``deleted`` if absent."""
+    wanted = sorted(set(paths))
+    found: dict[str, list[tuple[str, str, str]]] = {rel: [] for rel in wanted if _safe_rel(rel)}
+    queried = sorted(found)
+    for i in range(0, len(queried), _DIGEST_CHUNK):
+        chunk = queried[i : i + _DIGEST_CHUNK]
+        res = await runner.run(["ls-files", "--stage", "-z", "--", *chunk], cwd=root)  # literal pathspecs (runner env)
+        for record in split_nul(res.stdout):
+            meta, sep, name = record.partition("\t")
+            fields = meta.split(" ")
+            if sep and len(fields) == 3 and name in found:  # a pathspec also matches files below a directory
+                found[name].append((fields[0], fields[1], fields[2]))  # mode, blob, stage
+    out: dict[str, str] = {}
+    for rel in wanted:
+        entries = found.get(rel)
+        if entries is None:
+            out[rel] = CONTENT_INVALID_PATH
+        elif not entries:
+            out[rel] = CONTENT_DELETED
+        elif len(entries) == 1 and entries[0][2] == "0":
+            out[rel] = content_token(entries[0][1], entries[0][0])
+        else:
+            out[rel] = CONTENT_CONFLICTED
+    return out
+
+
+async def worktree_content_digest(root: Path, paths: Iterable[str], *, runner: GitRunner) -> str:
+    """:func:`content_digest` of the working tree for ``paths`` (what a verification run judged)."""
+    return content_digest(await worktree_blobs(runner, root, paths))
+
+
+@dataclass(frozen=True, slots=True)
+class _VerifiedRun:
+    paths: set[str]  # every path the run covered (incl. rename sources)
+    changed_files: list[str]  # the run's changed files as the verifier stored them (digest input)
+    content_digest: str | None
 
 
 class GitEngine:
@@ -751,9 +901,16 @@ class GitEngine:
     ) -> CommitResult:
         """Commit the staged changes – only with a passed, unused verification run of this workspace's job.
 
-        Refused (``COMMIT_NOT_VERIFIED``) if the run is missing, belongs to another job/step, did not pass, was
-        already used for a commit, or did not cover a staged path. ``always_forbidden`` paths (and, if
+        Refused (``COMMIT_NOT_VERIFIED``) if the run is missing, belongs to another job/step/workspace, did not
+        pass, was already used for a commit, or did not cover a staged path. ``always_forbidden`` paths (and, if
         ``scope`` is given, any out-of-scope path) in the index are refused as scope violations.
+
+        Exact binding: a run that carries a ``content_digest`` (the verified working-tree content of its changed
+        files) is compared with the same digest computed from the *index* for those files – the content the commit
+        would record. Any difference (a file edited, re-staged, restored or deleted after the verification) is
+        refused with ``VERIFICATION_STALE``. A run bound to a workspace (``workspace_id``) without a digest – the
+        verifier could not compute it – is refused (``COMMIT_NOT_VERIFIED``); runs with neither (written before both
+        columns existed) keep the rules above.
         """
         async with self._locked(ws) as (info, _repo, path), self._verification_lock(verification_run_id):
             rec = OpRecord(
@@ -766,7 +923,8 @@ class GitEngine:
                 details={"verification_run_id": str(verification_run_id)},
             )
             async with self._audited(rec):
-                verified = await self._check_verification(info, verification_run_id, step_id, rec)
+                run = await self._check_verification(info, verification_run_id, step_id, rec)
+                verified = run.paths
                 await self._assert_on_branch(info, path)
                 if self.registry.protected_match(_repo_or_placeholder(_repo, info), info.branch) is not None:
                     raise ProtectedBranchError(f"refusing to commit on protected branch '{info.branch}'", details={"branch": info.branch})
@@ -777,13 +935,16 @@ class GitEngine:
                     raise NothingToCommitError("nothing is staged", details={"workspace_id": str(info.id)})
                 self._check_commit_scope(changes, scope)
                 staged = sorted(changes)
-                if verified:
+                if verified or run.content_digest is not None:  # a digest run covers exactly its changed files
                     unverified = sorted(set(staged) - verified)
                     if unverified:
                         raise CommitNotVerifiedError(
                             "staged paths were not covered by the verification run",
                             details={"unverified_paths": _cap(unverified), "verification_run_id": str(verification_run_id)},
                         )
+                if run.content_digest is not None:
+                    await self._check_content_binding(path, run, verification_run_id)
+                    rec.details["content_digest"] = run.content_digest
                 msg = build_commit_message(message, job_id=info.job_id, step_id=rec.step_id, verification_run_id=verification_run_id)
                 await self.runner.run(
                     ["commit", "--quiet", "--no-verify", "--cleanup=whitespace", "--file=-"], cwd=path, input_data=msg.encode("utf-8")
@@ -814,11 +975,11 @@ class GitEngine:
 
     async def _check_verification(
         self, info: WorkspaceInfo, verification_run_id: uuid.UUID, step_id: uuid.UUID | None, rec: OpRecord
-    ) -> set[str]:
+    ) -> _VerifiedRun:
         async with self._sm() as session:
             run = await session.get(VerificationRun, verification_run_id)
             problems: list[str] = []
-            verified: set[str] = set()
+            verified = _VerifiedRun(paths=set(), changed_files=[], content_digest=None)
             if run is None:
                 problems.append("verification run does not exist")
             else:
@@ -827,6 +988,12 @@ class GitEngine:
                     problems.append("verification run belongs to a different job")
                 if step_id is not None and run.step_id != step_id:
                     problems.append("verification run belongs to a different step")
+                if run.workspace_id is not None and run.workspace_id != info.id:
+                    problems.append("verification run verified a different workspace")
+                if run.workspace_id is not None and run.content_digest is None:
+                    # bound to a workspace but the verifier could not fix the content (e.g. tampered git metadata):
+                    # nothing ties the run to the staged content – fail closed instead of the timestamp rules
+                    problems.append("verification run has no content digest of the verified files (verify again)")
                 if not (run.passed and run.status == "passed"):
                     problems.append(f"verification run did not pass (status={run.status}, passed={run.passed})")
                 used = (
@@ -843,13 +1010,39 @@ class GitEngine:
                 state_since = await self._workspace_state_since(session, info.id)
                 if state_since is not None and run.created_at < state_since:
                     problems.append("verification run predates the current workspace state (workspace created or rebased after it)")
-                verified = _verified_paths(run.changed_files)
+                verified = _VerifiedRun(
+                    paths=_verified_paths(run.changed_files),
+                    changed_files=[p for p in run.changed_files or [] if isinstance(p, str)],
+                    content_digest=run.content_digest,
+                )
         if problems:
             raise CommitNotVerifiedError(
                 "commit refused: " + "; ".join(problems),
                 details={"verification_run_id": str(verification_run_id), "problems": problems},
             )
         return verified
+
+    async def _check_content_binding(self, path: Path, run: _VerifiedRun, verification_run_id: uuid.UUID) -> None:
+        """The index must hold exactly the content the run verified for each of its changed files."""
+        staged = content_digest(await index_blobs(self.runner, path, run.changed_files))
+        if staged == run.content_digest:
+            return
+        details: dict[str, Any] = {
+            "verification_run_id": str(verification_run_id),
+            "verified_digest": run.content_digest,
+            "staged_digest": staged,
+            "verified_paths": _cap(sorted(run.changed_files)),
+        }
+        with contextlib.suppress(Exception):  # diagnosis only: was the working tree changed, or just the index?
+            details["worktree_matches_verification"] = (
+                await worktree_content_digest(path, run.changed_files, runner=self.runner) == run.content_digest
+            )
+        raise CommitNotVerifiedError(
+            "commit refused: the staged content differs from the content the verification run checked "
+            "(files changed after verification) – verify again",
+            code="VERIFICATION_STALE",
+            details=details,
+        )
 
     @staticmethod
     async def _workspace_state_since(session: AsyncSession, workspace_id: uuid.UUID) -> datetime | None:

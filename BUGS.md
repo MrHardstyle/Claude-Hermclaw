@@ -203,7 +203,7 @@ Noch keine.
 - Regressionstest: tests/integration/test_coder_handler.py::test_two_implement_steps_with_real_verifier_commit_separately (schlägt ohne Fix fehl, verifiziert per Mutation).
 
 ### BUG-030 – Cross-member budget queue rule guesses why a waiter is blocked (requests carry no weight or exclusive flag)
-- Phase: P09 · Komponente: resources · Severity: P3 · blockierend: nein · Status: **behoben** (Regressionstest in den resources-Tests)
+- Phase: P09 · Komponente: resources · Severity: P3 · blockierend: nein · Status: **behoben** in P39 (`tests/integration/test_resources_budget_queue.py`: Requests speichern weight/exclusive/metadata, Migration 0002; abgebrochene/abgelaufene Requests emittieren `resource.request.cancelled`, zurückgezogene Preemption `resource.preempt.withdrawn`)
 - Reproduktion: Budget {large, small}. A high-priority shared request on 'small' waits only because the shared holders there are not exclusive-compatible, not because of capacity. A lower-priority 'large' acquisition that would fit is then held back as budget_queued.
 - Erwartet: A lower-priority request on another budget member is blocked only when the higher waiter actually waits for capacity.
 - Tatsächlich: It is blocked whenever the higher waiter's resource has no exclusive holder. This is safe (it never lets a lower waiter overtake), but it can delay lower-priority work. Fixing it needs the shared schema change (weight and exclusive columns on resource_requests).
@@ -390,6 +390,22 @@ Noch keine.
 - Erwartet: the release migrates its database; the rollback in `docs/runbooks/upgrade.md` uses `<venv>/share/hermclaw/alembic.ini`
 - Tatsächlich: the wheel contained only the packages; `cmd_migrate` looked for `migrations/` next to the installed package (site-packages) and found nothing
 - Fix: pyproject `[tool.setuptools.data-files]` ships `alembic.ini` + `migrations/` to `<venv>/share/hermclaw/`; `hermclaw.persistence.migrate` resolves checkout → installed data files (`HERMCLAW_MIGRATIONS_DIR` overrides)
+
+### BUG-061 – Verification binding ignored the git file mode (symlink swap / chmod +x after verification was committed)
+- Phase: P39 · Komponente: gitops/verifier · Severity: P2 · blockierend: nein · Status: **behoben** (`tests/integration/test_verification_binding.py`, 3 Tests rot ohne Fix)
+- Reproduktion: verify a change with the regular file `src/alias.txt` (content `module.py`); replace it by a symlink to `module.py` or `chmod +x` a verified file; `stage_allowed` + `commit_verified`
+- Erwartet: refused with `VERIFICATION_STALE` – the commit would record another type/mode than the verified one
+- Tatsächlich: committed as `120000`/`100755`; the content digest covered blob shas only
+- Fix: `gitops.engine.content_token` includes the mode for non-regular files (worktree: lstat, index: `ls-files --stage`); new columns `verification_runs.workspace_id` + `content_digest` (migration 0002)
+
+### BUG-062 – The verifier hashed with its own GitRunner instead of the GitEngine runner that re-computes the digest at commit
+- Phase: P39 · Komponente: runtime/verifier · Severity: P3 · blockierend: nein · Status: **behoben** (`tests/integration/test_verification_binding.py::test_adapter_hashes_with_the_git_runner_of_the_engine_reader`)
+- Erwartet: verifier and `commit_verified` hash with the same git binary/environment · Tatsächlich: the verifier built `GitRunner("git")` · Fix: `VerifierAdapter` passes the reader's runner
+
+### BUG-063 – Five event types had no live SSE listener in the UI (arrived only through the 15 s REST reconciliation)
+- Phase: P39 · Komponente: ui · Severity: P4 · blockierend: nein · Status: **behoben** (siehe Commit; `ui/tests/unit/events.test.ts`)
+- Reproduktion: compare `EventType` with `KNOWN_EVENT_TYPES` in `ui/src/lib/events.ts`: `resource.preempt.withdrawn`, `resource.request.cancelled`, `system.disk`, `worker.sleep`, `workspace.cleaned` missing
+- Fix: listeners added; a unit test compares the UI list with `docs/contracts` event types
 
 ## Template
 

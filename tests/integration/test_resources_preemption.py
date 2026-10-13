@@ -158,7 +158,9 @@ async def test_preemption_withdrawn_when_requester_gives_up(sessionmaker) -> Non
     assert row is not None and row.state == "active" and row.preemption is None
     assert (row.expires_at - datetime.now(row.expires_at.tzinfo)).total_seconds() > 30  # TTL restored, not the grace cap
     actions = [e.payload["action"] for e in await lease_events(sessionmaker, lease.id, EventType.RESOURCE_PREEMPT_REQUESTED)]
-    assert actions == ["requested", "withdrawn"]
+    assert actions == ["requested"]
+    [withdrawn] = await lease_events(sessionmaker, lease.id, EventType.RESOURCE_PREEMPT_WITHDRAWN)
+    assert withdrawn.payload["action"] == "withdrawn" and withdrawn.payload["reason"] == "requester_gone"
 
 
 async def test_budget_preemption_picks_minimal_lowest_priority_set(sessionmaker) -> None:
@@ -353,8 +355,8 @@ async def test_media_acquire_timeout_releases_partial_leases(sessionmaker) -> No
     soft_row = await pre_ai.get_lease(soft.id)
     assert soft_row is not None and soft_row.state == "active"
     assert soft_row.preemption is None  # the drain preempted it, the abandoned media request withdrew that again
-    actions = [e.payload["action"] for e in await lease_events(sessionmaker, soft.id, EventType.RESOURCE_PREEMPT_REQUESTED)]
-    assert actions == ["requested", "withdrawn"]
+    types = [e.event_type for e in await lease_events(sessionmaker, soft.id)]
+    assert types == [EventType.RESOURCE_ACQUIRED, EventType.RESOURCE_PREEMPT_REQUESTED, EventType.RESOURCE_PREEMPT_WITHDRAWN]
     assert await media_mgr.waiting_requests(large) == [] and await media_mgr.waiting_requests(gpu) == []
     with pytest.raises(Exception, match="media kind"):
         await media_mgr.acquire_gpu_for_media("audio")

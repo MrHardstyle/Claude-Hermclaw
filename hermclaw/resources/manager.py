@@ -14,16 +14,20 @@ treated as contention and the attempt is retried. All time comparisons use the d
 
 Queue
 -----
-``acquire`` registers a ``resource_requests`` row (``waiting``) and polls. A request is granted only if no live
-waiting request for the same resource is ahead of it (higher priority, then FIFO by ``created_at``, then id) and, for
-budget members, no higher-priority request on another member of the same budget is waiting for capacity. Waiters
-refresh ``expires_at`` on every poll; requests of crashed waiters go stale and are cancelled.
+``acquire`` registers a ``resource_requests`` row (``waiting``, with the requested ``weight``/``exclusive``) and polls.
+A request is granted only if no live waiting request for the same resource is ahead of it (higher priority, then FIFO
+by ``created_at``, then id) and, for budget members, granting it would not take capacity that higher-priority waiters
+on other members of the same budget wait for: a higher waiter counts only while it is not blocked by exclusivity on
+its own resource (judged from its stored ``exclusive`` flag and the holders there), with its stored ``weight``
+(BUG-030). Waiters refresh ``expires_at`` on every poll; requests of crashed waiters go stale and are cancelled
+(``resource.request.cancelled``, like requests whose waiter timed out or was cancelled).
 
 Preemption
 ----------
 Only the manager preempts (``request_preemption`` / ``acquire(preempt=True)``): a preemptible, strictly
 lower-priority ``active`` lease is set to ``preempting`` (``resource.preempt.requested``), its expiry is capped at
-``now + policies.leases.preemption_grace_seconds``. The holder sees it via ``heartbeat``/``should_yield`` (or the
+``now + policies.leases.preemption_grace_seconds``; a request that is taken back returns the lease to ``active``
+(``resource.preempt.withdrawn``). The holder sees it via ``heartbeat``/``should_yield`` (or the
 :class:`~hermclaw.resources.keeper.LeaseKeeper` callback), checkpoints and releases. If it does not, the lease is
 force-expired at the deadline with ``reason=preemption_grace_timeout`` – never silently.
 """
@@ -102,7 +106,7 @@ REQUEST_RETENTION_SECONDS = 24 * 3600.0
 
 #: blocked reasons reported by an acquisition attempt
 BLOCK_QUEUED = "queued"  # a live request for the same resource is ahead
-BLOCK_BUDGET_QUEUED = "budget_queued"  # a higher-priority request on another member of a budget waits for capacity
+BLOCK_BUDGET_QUEUED = "budget_queued"  # granting would take capacity higher-priority waiters on other budget members need
 BLOCK_HELD = "held"  # exclusive request, resource has holders
 BLOCK_HELD_EXCLUSIVE = "held_exclusive"  # shared request, resource has an exclusive holder
 BLOCK_BUDGET = "budget"  # capacity of a budget would be exceeded
@@ -142,6 +146,8 @@ def _request_payload(row: ResourceRequest) -> dict[str, Any]:
         "owner_kind": row.owner_kind,
         "holder": row.holder,
         "priority": row.priority,
+        "exclusive": bool(row.exclusive),
+        "weight": float(row.weight or 0.0),
     }
 
 
@@ -460,6 +466,9 @@ class ResourceManager:
                 state=REQUEST_WAITING,
                 expires_at=now + timedelta(seconds=self.request_ttl_seconds),
                 created_at=now,
+                weight=spec.weight,
+                exclusive=spec.exclusive,
+                metadata_=self._request_meta(spec),
             )
             s.add(req)
             await s.flush()
@@ -468,7 +477,7 @@ class ResourceManager:
                 EventType.RESOURCE_REQUESTED,
                 job_id=spec.job_id,
                 step_id=spec.step_id,
-                payload={**_request_payload(req), "exclusive": spec.exclusive, "weight": spec.weight, "preempt": spec.preempt},
+                payload={**_request_payload(req), "preempt": spec.preempt},
             )
         elif req.state == REQUEST_GRANTED:
             # the grant committed but the caller never saw it (e.g. lost connection after COMMIT): hand it out now
@@ -489,6 +498,9 @@ class ResourceManager:
                 payload={**_request_payload(req), "requeued": True},
             )
         req.expires_at = now + timedelta(seconds=self.request_ttl_seconds)
+        # the queue rule of other waiters reads these: keep them exact (also for rows written before they existed)
+        req.weight = spec.weight
+        req.exclusive = spec.exclusive
 
         blocked = await self._blocked_reason(s, spec, req, now)
         if blocked is None:
@@ -532,6 +544,17 @@ class ResourceManager:
         if spec.preempt and blocked in (BLOCK_HELD, BLOCK_HELD_EXCLUSIVE, BLOCK_BUDGET):
             await self._preempt_for(s, spec, request_id, blocked, now)
         return _Attempt(None, blocked)
+
+    def _request_meta(self, spec: _Spec) -> dict[str, Any]:
+        return {
+            "incarnation": self.incarnation,
+            "resource_group": spec.resource_group,
+            "ttl_seconds": spec.ttl_seconds,
+            "preemptible": spec.preemptible,
+            "preempt": spec.preempt,
+            "reason": spec.reason,
+            "info": spec.metadata,
+        }
 
     async def _lease_for_request(self, s: AsyncSession, request_id: uuid.UUID) -> ResourceLease | None:
         stmt = select(ResourceLease).where(
@@ -582,26 +605,14 @@ class ResourceManager:
             return BLOCK_QUEUED
 
         budgets = self.budgets_for(spec.resource)
-        for b in budgets:
-            others = sorted(b.members - {spec.resource})
-            if not others:
-                continue
-            exclusively_held = select(lease.resource).where(
-                lease.resource.in_(others), lease.exclusive.is_(True), lease.state.in_(HOLDING_STATES)
-            )
-            higher = await s.scalar(
-                select(func.count())
-                .select_from(r)
-                .where(
-                    r.resource.in_(others),
-                    r.state == REQUEST_WAITING,
-                    r.expires_at > now,
-                    r.priority > spec.priority,
-                    r.resource.not_in(exclusively_held),
-                )
-            )
-            if higher:
-                return BLOCK_BUDGET_QUEUED
+        if spec.weight > EPSILON:  # a weightless lease takes no capacity from anybody
+            for b in budgets:
+                others = sorted(b.members - {spec.resource})
+                if not others:
+                    continue
+                demand = await self._capacity_demand(s, others, spec.priority, now)
+                if demand > EPSILON and not b.fits(await self._used(s, b), spec.weight + demand):
+                    return BLOCK_BUDGET_QUEUED
 
         holders = (
             await s.execute(
@@ -621,6 +632,54 @@ class ResourceManager:
             if not b.fits(used, spec.weight):
                 return BLOCK_BUDGET
         return None
+
+    @staticmethod
+    async def _capacity_demand(s: AsyncSession, resources: Sequence[str], priority: int, now: datetime) -> float:
+        """Capacity that live waiters with a priority above ``priority`` on ``resources`` are about to claim.
+
+        Per resource the waiters are walked in grant order (priority desc, FIFO); a waiter counts with its stored
+        ``weight`` while it is not blocked by exclusivity – an exclusive waiter needs a resource without holders, a
+        shared one a resource without an exclusive holder. The first waiter that is blocked by exclusivity ends the walk
+        for its resource (everything behind it is queued behind it), and so does a counted exclusive waiter (once
+        granted it excludes the rest). Waiters blocked only by exclusivity do not wait for capacity (BUG-030)."""
+        r = ResourceRequest
+        lease = ResourceLease
+        waiters = (
+            await s.execute(
+                select(r.resource, r.exclusive, r.weight)
+                .where(r.resource.in_(list(resources)), r.state == REQUEST_WAITING, r.expires_at > now, r.priority > priority)
+                .order_by(r.resource, r.priority.desc(), r.created_at, r.id)
+            )
+        ).all()
+        if not waiters:
+            return 0.0
+        rows = (
+            await s.execute(
+                select(lease.resource, lease.exclusive, func.count())
+                .where(lease.resource.in_(sorted({w.resource for w in waiters})), lease.state.in_(HOLDING_STATES))
+                .group_by(lease.resource, lease.exclusive)
+            )
+        ).all()
+        exclusive_held: set[str] = set()
+        occupied: set[str] = set()
+        for name, exclusive, count in rows:
+            if count:
+                occupied.add(str(name))
+                if exclusive:
+                    exclusive_held.add(str(name))
+        demand = 0.0
+        done: set[str] = set()
+        for name, exclusive, weight in waiters:
+            if name in done:
+                continue
+            if (exclusive and name in occupied) or (not exclusive and name in exclusive_held):
+                done.add(name)  # waits for exclusivity, not for capacity
+                continue
+            demand += float(weight or 0.0)
+            occupied.add(name)
+            if exclusive:
+                done.add(name)
+        return demand
 
     @staticmethod
     async def _used(s: AsyncSession, budget: ResourceBudget) -> float:
@@ -647,7 +706,7 @@ class ResourceManager:
                 await s.flush()
                 await self._emit(
                     s,
-                    EventType.RESOURCE_EXPIRED,
+                    EventType.RESOURCE_REQUEST_CANCELLED,
                     job_id=req.owner_job_id,
                     step_id=req.owner_step_id,
                     severity=Severity.warning,
@@ -820,7 +879,7 @@ class ResourceManager:
             await s.flush()
             await self._emit(
                 s,
-                EventType.RESOURCE_EXPIRED,
+                EventType.RESOURCE_REQUEST_CANCELLED,
                 job_id=req.owner_job_id,
                 step_id=req.owner_step_id,
                 severity=Severity.warning,
@@ -1116,7 +1175,7 @@ class ResourceManager:
         await s.flush()
         await self._emit(
             s,
-            EventType.RESOURCE_PREEMPT_REQUESTED,
+            EventType.RESOURCE_PREEMPT_WITHDRAWN,
             job_id=row.owner_job_id,
             step_id=row.owner_step_id,
             payload={**_lease_payload(row), "action": "withdrawn", "reason": reason},
@@ -1180,7 +1239,7 @@ class ResourceManager:
                     await s.flush()
                     await self._emit(
                         s,
-                        EventType.RESOURCE_EXPIRED,
+                        EventType.RESOURCE_REQUEST_CANCELLED,
                         job_id=req.owner_job_id,
                         step_id=req.owner_step_id,
                         severity=Severity.warning,

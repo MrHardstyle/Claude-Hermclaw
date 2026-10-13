@@ -178,8 +178,10 @@ async def test_wait_timeout_cancels_request_with_event(sessionmaker) -> None:
         await b.acquire(res, owner_kind=OwnerKind.PLANNER, wait_timeout=0.3)
     assert ei.value.code == "RESOURCE_WAIT_TIMEOUT" and ei.value.details["blocked"] == "held"
     assert await b.waiting_requests(res) == []
-    evs = await events_for(sessionmaker, res, EventType.RESOURCE_EXPIRED)
+    evs = await events_for(sessionmaker, res, EventType.RESOURCE_REQUEST_CANCELLED)
     assert [e.payload["reason"] for e in evs] == ["wait_timeout"] and evs[0].payload["subject"] == "request"
+    assert evs[0].severity == "warning" and evs[0].payload["blocked"] == "held"
+    assert not await events_for(sessionmaker, res, EventType.RESOURCE_EXPIRED)  # no lease expired
 
 
 async def test_cancelled_waiter_leaves_no_request(sessionmaker) -> None:

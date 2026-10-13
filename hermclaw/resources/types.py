@@ -106,6 +106,9 @@ class WaitingRequest:
     expires_at: datetime
     job_id: uuid.UUID | None = None
     step_id: uuid.UUID | None = None
+    exclusive: bool = True
+    weight: float = 0.0
+    metadata: Mapping[str, Any] = field(default_factory=dict)
 
     @classmethod
     def from_row(cls, row: ResourceRequest) -> WaitingRequest:
@@ -120,6 +123,9 @@ class WaitingRequest:
             expires_at=row.expires_at,
             job_id=row.owner_job_id,
             step_id=row.owner_step_id,
+            exclusive=bool(row.exclusive),
+            weight=float(row.weight or 0.0),
+            metadata=dict(row.metadata_ or {}),
         )
 
 

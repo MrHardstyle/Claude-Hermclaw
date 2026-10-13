@@ -356,6 +356,11 @@ class ResourceRequest(CreatedMixin, Base):
     priority: Mapped[int] = mapped_column(Integer, nullable=False)
     state: Mapped[str] = mapped_column(String(32), nullable=False, default="waiting")  # waiting|granted|cancelled
     expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    # what the waiter asks for: lets the queue tell a capacity waiter from one blocked by exclusivity (BUG-030)
+    weight: Mapped[float] = mapped_column(Float, nullable=False, default=0.0, server_default=text("0"))
+    exclusive: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True, server_default=text("true"))
+    metadata_: Mapped[dict[str, Any]] = mapped_column("metadata", JSONB, nullable=False, default=dict, server_default=text("'{}'::jsonb"))
+    __table_args__ = (Index("ix_resource_requests_queue", "resource", "state", text("priority DESC"), "created_at"),)
 
 
 # ============================================================================================= workspaces / artifacts
@@ -467,6 +472,9 @@ class VerificationRun(CreatedMixin, Base):
     summary: Mapped[str | None] = mapped_column(Text)
     changed_files: Mapped[list[Any]] = _json(list)
     finished_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    # exact binding (gitops commit_verified): the workspace that was verified and a digest of the verified content
+    workspace_id: Mapped[uuid.UUID | None] = _fk("workspaces.id", ondelete="SET NULL")
+    content_digest: Mapped[str | None] = mapped_column(String(64))
 
 
 class VerificationCheckRow(Base):
@@ -642,6 +650,8 @@ class RepoIndexRun(CreatedMixin, Base):
     inventory: Mapped[dict[str, Any]] = _json(dict)
     stats: Mapped[dict[str, Any]] = _json(dict)
     finished_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    # latest_run / index lookups filter on stats->>'repository_key'
+    __table_args__ = (Index("ix_repo_index_runs_repository_key", text("(stats ->> 'repository_key')")),)
 
 
 class CodeSymbol(Base):
@@ -657,7 +667,11 @@ class CodeSymbol(Base):
     end_line: Mapped[int] = mapped_column(Integer, nullable=False)
     parent: Mapped[str | None] = mapped_column(String(300))
     references: Mapped[list[Any]] = _json(list)
-    __table_args__ = (Index("ix_code_symbols_repo_path", "repository_key", "path"),)
+    __table_args__ = (
+        Index("ix_code_symbols_repo_path", "repository_key", "path"),
+        # containment lookups (references @> '["name"]') in large repositories
+        Index("ix_code_symbols_references_gin", "references", postgresql_using="gin", postgresql_ops={"references": "jsonb_path_ops"}),
+    )
 
 
 class CodeChunk(CreatedMixin, Base):
@@ -676,6 +690,8 @@ class CodeChunk(CreatedMixin, Base):
     embedding_model: Mapped[str | None] = mapped_column(String(100))
     __table_args__ = (
         Index("ix_code_chunks_repo_path", "repository_key", "path"),
+        # embedding re-use by content hash (repo_intelligence.embeddings.reusable_embeddings)
+        Index("ix_code_chunks_repo_content_hash", "repository_key", "content_hash"),
         Index(
             "ix_code_chunks_embedding_hnsw",
             "embedding",

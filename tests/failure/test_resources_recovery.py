@@ -144,7 +144,9 @@ async def test_stale_request_of_crashed_waiter_does_not_block(sessionmaker) -> N
         assert (await s.get(ResourceRequest, stale)).state == "cancelled"  # type: ignore[union-attr]
         ev = (
             await s.execute(
-                select(Event).where(Event.event_type == EventType.RESOURCE_EXPIRED, Event.payload["request_id"].astext == str(stale))
+                select(Event).where(
+                    Event.event_type == EventType.RESOURCE_REQUEST_CANCELLED, Event.payload["request_id"].astext == str(stale)
+                )
             )
         ).scalar_one()
     assert ev.payload["reason"] == "request_stale" and ev.payload["subject"] == "request"

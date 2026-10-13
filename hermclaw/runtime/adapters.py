@@ -15,6 +15,7 @@ from hermclaw.contracts.scope import ScopeContract
 from hermclaw.contracts.step import StepContract
 from hermclaw.core.config import HermclawConfig
 from hermclaw.core.interfaces import CommandExecutor, GitReader, WorkspaceHandle
+from hermclaw.gitops.runner import GitRunner
 from hermclaw.persistence.models import Step
 from hermclaw.verifier import Verifier
 from hermclaw.verifier.types import VerificationStep, load_step
@@ -65,7 +66,16 @@ class VerifierAdapter:
         self.executor_for = executor_for
 
     async def _verifier(self, workspace: WorkspaceHandle, step: StepContract | None) -> Verifier:
-        return Verifier(self.sm, self.config, await self.executor_for(workspace, step), self.git)
+        # the content digest of a run (verification_runs.content_digest) is hashed with the runner of the GitEngine
+        # reader – the same git binary/environment GitEngine.commit_verified recomputes it with from the index
+        runner = getattr(self.git, "runner", None)
+        return Verifier(
+            self.sm,
+            self.config,
+            await self.executor_for(workspace, step),
+            self.git,
+            git_runner=runner if isinstance(runner, GitRunner) else None,
+        )
 
     async def verify(
         self, step: StepContract, workspace: WorkspaceHandle, *, job_id: uuid.UUID, step_id: uuid.UUID, attempt_id: uuid.UUID

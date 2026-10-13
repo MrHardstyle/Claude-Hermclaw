@@ -14,6 +14,10 @@ Order of evaluation:
    afterwards, so the verified content is exactly what gitops may commit;
 4. the implement-step test requirement (21.12) and the mirrored scope/security criteria; report + persistence.
 
+Still inside the per-workspace lock the content digest of the changed files (``git hash-object`` of what ``git add``
+would record plus its git mode, ``deleted`` for removed files) is computed and stored with the run together with the
+workspace id: ``GitEngine.commit_verified`` refuses to commit content that differs from it.
+
 A crash of one check group becomes an ``error`` check of that group – the run still finishes and is persisted.
 """
 
@@ -45,6 +49,8 @@ from hermclaw.core.config import HermclawConfig, PoliciesConfig
 from hermclaw.core.interfaces import CommandExecutor, GitReader, WorkspaceHandle
 from hermclaw.core.logging import get_logger
 from hermclaw.core.redaction import DEFAULT_REDACTOR, Redactor
+from hermclaw.gitops.engine import worktree_content_digest
+from hermclaw.gitops.runner import GitRunner
 from hermclaw.tools.gitlocal import LocalGit
 from hermclaw.tools.snapshot import DEFAULT_GENERATED_GLOBS, WorkspaceSnapshot, WorkspaceTracker
 from hermclaw.tools.workspace import WorkspaceFS
@@ -55,7 +61,7 @@ from hermclaw.verifier.commands import CommandRunner
 from hermclaw.verifier.context import VerifyContext, make_check
 from hermclaw.verifier.report import build_report, run_status
 from hermclaw.verifier.secrets import SecretScanner
-from hermclaw.verifier.store import abort_run, finish_run, start_run
+from hermclaw.verifier.store import abort_run, finish_run, start_run, stored_changed_files
 from hermclaw.verifier.types import ArtifactLookup, VerificationOutcome, VerificationStep, db_artifact_lookup
 
 log = get_logger(__name__)
@@ -102,9 +108,12 @@ class Verifier:
         artifacts: ArtifactLookup | None = None,
         redactor: Redactor = DEFAULT_REDACTOR,
         scanner: SecretScanner | None = None,
+        git_runner: GitRunner | None = None,
     ) -> None:
         self.sessionmaker = sessionmaker
         self.policies = config.policies if isinstance(config, HermclawConfig) else config
+        # read-only plumbing (hash-object) with the same hardened git environment/filters as the gitops engine
+        self.git_runner = git_runner or GitRunner(author_name=self.policies.git.author_name, author_email=self.policies.git.author_email)
         self.executor = executor
         self.git = git
         self.artifacts = artifacts or db_artifact_lookup(sessionmaker)
@@ -136,13 +145,17 @@ class Verifier:
         artifacts: ArtifactLookup | None = None,
     ) -> VerificationOutcome:
         started = time.monotonic()
-        run_id = await start_run(self.sessionmaker, job_id=job_id, step_id=step_id, attempt_id=attempt_id, step=step)
+        run_id = await start_run(
+            self.sessionmaker, job_id=job_id, step_id=step_id, attempt_id=attempt_id, step=step, workspace_id=workspace.id
+        )
         runner = CommandRunner(self.executor, workspace, job_id, step_id, attempt_id, redactor=self.redactor)
+        digest: str | None = None
         try:
             async with self._locks.hold(workspace.id):
                 report = await self._evaluate(
                     step, workspace, runner, job_id=job_id, step_id=step_id, attempt_id=attempt_id, artifacts=artifacts or self.artifacts
                 )
+                digest = await self._content_digest(workspace, report, run_id)
         except asyncio.CancelledError:
             with contextlib.suppress(Exception):
                 await asyncio.shield(abort_run(self.sessionmaker, run_id=run_id, reason="verification was cancelled"))
@@ -165,6 +178,7 @@ class Verifier:
                 commands=runner.records,
                 tests=runner.tests,
                 duration_ms=duration_ms,
+                content_digest=digest,
             )
         except Exception:
             log.exception("could not persist the verification result", extra={"verification_run_id": str(run_id)})
@@ -172,6 +186,22 @@ class Verifier:
                 await abort_run(self.sessionmaker, run_id=run_id, reason="verification result could not be persisted")
             raise
         return VerificationOutcome(run_id=run_id, report=report, status=status, duration_ms=duration_ms)
+
+    async def _content_digest(self, workspace: WorkspaceHandle, report: VerificationReport, run_id: uuid.UUID) -> str | None:
+        """Digest of the verified content of the run's changed files; ``None`` if git cannot compute it (e.g. the
+        workspace's git metadata was tampered with) – ``commit_verified`` then refuses a run bound to a workspace."""
+        if not workspace.path.is_dir():
+            return None
+        try:
+            return await worktree_content_digest(workspace.path, stored_changed_files(report), runner=self.git_runner)
+        except asyncio.CancelledError:
+            raise
+        except Exception as exc:
+            log.warning(
+                "verifier could not compute the content digest",
+                extra={"verification_run_id": str(run_id), "error": f"{type(exc).__name__}: {exc}"[:500]},
+            )
+            return None
 
     # ------------------------------------------------------------------------------------------- evaluation
     async def _evaluate(
