@@ -550,10 +550,10 @@ Legende: `[x]` erledigt mit Evidence · `[~]` erledigt, Live-Verifikation auf Zi
 
 ## P42 – CUTOVER PLAN
 
-- [ ] 42.1 altes Hermclaw read-only. — Evidence: –
-- [ ] 42.2 keine Daten löschen. — Evidence: –
-- [ ] 42.3 neues System produktiv. — Evidence: –
-- [ ] 42.4 Rollback dokumentieren. — Evidence: –
-- [ ] 42.5 Monitoring. — Evidence: –
-- [ ] 42.6 erst nach stabiler Laufzeit Altkomponenten stilllegen. — Evidence: –
+- [~] 42.1 altes Hermclaw read-only. — Evidence: docs/runbooks/cutover.md §1: old WebUI read-only (limit_except), patch watcher stopped/disabled (not removed), GitLab project archived; execution on the hosts pending (BLOCKER-001)
+- [~] 42.2 keine Daten löschen. — Evidence: docs/runbooks/cutover.md §1/§5: no rm/DROP/branch deletion during cutover, legacy snapshot to .60; execution pending (BLOCKER-001)
+- [~] 42.3 neues System produktiv. — Evidence: docs/runbooks/cutover.md §0/§2: go/no-go checklist + single nginx site switch on .223 (own webroot/units/DB/branches); execution pending (BLOCKER-001)
+- [x] 42.4 Rollback dokumentieren. — Evidence: docs/runbooks/cutover.md §4: complete rollback commands (nginx site back, watcher re-enabled, project un-archived, new runtime stopped; no data loss)
+- [x] 42.5 Monitoring. — Evidence: GET /api/metrics (hermclaw/api/metrics.py, tests/integration/test_api_metrics.py) + alert suggestions, liveness, health – docs/runbooks/cutover.md §3
+- [~] 42.6 erst nach stabiler Laufzeit Altkomponenten stilllegen. — Evidence: docs/runbooks/cutover.md §5: decommission criteria (14 days without P0/P1, 20 jobs, 2 restore tests) and order; execution after stable operation
 
