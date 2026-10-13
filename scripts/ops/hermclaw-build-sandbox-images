@@ -1,0 +1,72 @@
+#!/usr/bin/env bash
+# hermclaw-build-sandbox-images – build the sandbox toolchain images (and optional project images) on .222.
+#
+# Usage:
+#   hermclaw-build-sandbox-images [--engine podman|docker] [--version N] [--only python,node,php,generic] [--dry-run]
+#   hermclaw-build-sandbox-images --project NAME --base python --requirements FILE [--version N]
+#   hermclaw-build-sandbox-images --project NAME --base node --package-dir DIR      (package.json + lock → npm cache)
+#
+# Toolchain images: localhost/hermclaw-sandbox-<lang>:<version>; project images: localhost/hermclaw-sbx-<name>:<version>.
+# Project images bake the dependencies in, so tests run offline in the network-less sandbox:
+#   python – pip install -r FILE into the image's site-packages
+#   node   – npm ci into /opt/hermclaw-deps/node_modules + NODE_PATH, and a pre-filled npm cache for `npm ci --offline`
+set -euo pipefail
+HERE="$(cd "$(dirname "$0")/../.." && pwd)"
+CTX="${HERMCLAW_SANDBOX_IMAGES_DIR:-$HERE/infra/sandbox-images}"
+ENGINE=podman VERSION=1 ONLY="python,node,php,generic" DRY=0 PROJECT="" BASE="" REQ="" PKGDIR=""
+while [ $# -gt 0 ]; do
+  case "$1" in
+    --engine) ENGINE="$2"; shift ;;
+    --version) VERSION="$2"; shift ;;
+    --only) ONLY="$2"; shift ;;
+    --dry-run) DRY=1 ;;
+    --project) PROJECT="$2"; shift ;;
+    --base) BASE="$2"; shift ;;
+    --requirements) REQ="$2"; shift ;;
+    --package-dir) PKGDIR="$2"; shift ;;
+    -h|--help) sed -n '2,15p' "$0"; exit 0 ;;
+    *) echo "unknown option: $1" >&2; exit 2 ;;
+  esac
+  shift
+done
+run() { if [ "$DRY" = 1 ]; then echo "+ $*"; else "$@"; fi; }
+
+if [ -z "$PROJECT" ]; then
+  IFS=, read -r -a langs <<< "$ONLY"
+  for lang in "${langs[@]}"; do
+    [ -f "$CTX/$lang/Containerfile" ] || { echo "no Containerfile for $lang in $CTX" >&2; exit 2; }
+    run "$ENGINE" build --pull=newer -t "localhost/hermclaw-sandbox-$lang:$VERSION" -f "$CTX/$lang/Containerfile" "$CTX/$lang"
+  done
+  echo "built: ${ONLY} (version $VERSION)"
+  exit 0
+fi
+
+case "$PROJECT" in ''|*[!a-z0-9._-]*) echo "invalid --project name (lowercase, digits, . _ -)" >&2; exit 2;; esac
+tmp="$(mktemp -d)"; trap 'rm -rf "$tmp"' EXIT
+base_image="localhost/hermclaw-sandbox-$BASE:$VERSION"
+case "$BASE" in
+  python)
+    [ -f "$REQ" ] || { echo "--requirements FILE required for python projects" >&2; exit 2; }
+    cp "$REQ" "$tmp/requirements.txt"
+    cat > "$tmp/Containerfile" <<CF
+FROM $base_image
+COPY requirements.txt /opt/hermclaw-deps/requirements.txt
+RUN pip install -r /opt/hermclaw-deps/requirements.txt
+LABEL org.hermclaw.sandbox.project="$PROJECT"
+CF
+    ;;
+  node)
+    [ -f "$PKGDIR/package.json" ] || { echo "--package-dir with package.json required for node projects" >&2; exit 2; }
+    cp "$PKGDIR/package.json" "$tmp/"; [ -f "$PKGDIR/package-lock.json" ] && cp "$PKGDIR/package-lock.json" "$tmp/"
+    cat > "$tmp/Containerfile" <<CF
+FROM $base_image
+COPY package*.json /opt/hermclaw-deps/
+RUN cd /opt/hermclaw-deps && npm ci --cache /opt/hermclaw-npm-cache && chmod -R a+rX /opt/hermclaw-npm-cache
+ENV NODE_PATH=/opt/hermclaw-deps/node_modules NPM_CONFIG_CACHE=/opt/hermclaw-npm-cache
+LABEL org.hermclaw.sandbox.project="$PROJECT"
+CF
+    ;;
+  *) echo "--base must be python or node for project images" >&2; exit 2 ;;
+esac
+run "$ENGINE" build -t "localhost/hermclaw-sbx-$PROJECT:$VERSION" -f "$tmp/Containerfile" "$tmp"
+echo "built localhost/hermclaw-sbx-$PROJECT:$VERSION – add it to policies.sandbox.images and: hermclaw repo-add $PROJECT <url> --update --sandbox-image $PROJECT"

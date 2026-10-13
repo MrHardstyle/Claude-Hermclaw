@@ -1,0 +1,8 @@
+# Hermclaw sandbox toolchain: PHP 8.3 CLI + Composer (R-022). phpunit comes from the project (composer.json).
+FROM docker.io/library/composer:2 AS composer
+FROM docker.io/library/php:8.3-cli
+COPY --from=composer /usr/bin/composer /usr/bin/composer
+RUN apt-get update && apt-get install -y --no-install-recommends unzip && rm -rf /var/lib/apt/lists/* \
+ && php --version && composer --version
+ENV HOME=/tmp COMPOSER_HOME=/tmp/composer
+LABEL org.hermclaw.sandbox="php"

@@ -1,0 +1,7 @@
+# Hermclaw sandbox toolchain: generic shell / config / admin tasks (R-022).
+FROM docker.io/library/debian:trixie-slim
+RUN apt-get update && apt-get install -y --no-install-recommends \
+      bash ca-certificates make gcc g++ file jq shellcheck yamllint sqlite3 postgresql-client python3 \
+ && rm -rf /var/lib/apt/lists/* && shellcheck --version && yamllint --version
+ENV HOME=/tmp
+LABEL org.hermclaw.sandbox="generic"

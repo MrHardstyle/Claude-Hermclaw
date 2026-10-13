@@ -7,7 +7,8 @@ Subcommands
   config-check            load + validate the YAML config and print a summary (no secrets)
   token-create NAME       create an API token (printed once) with --scopes read,control,admin
   token-revoke NAME       revoke an API token
-  repo-add NAME URL       register a repository (--default-branch, --provider gitlab|generic, --project-id, --protected)
+  repo-add NAME URL       register a repository (--default-branch, --provider gitlab|generic, --project-id, --protected,
+                          --sandbox-image ALIAS)
   repo-list               list registered repositories
   job-submit PROMPT       create a job (--title, --repo NAME, --base-branch, --constraint …)
   litellm-config OUT      generate the LiteLLM proxy config from config/models.yaml
@@ -135,6 +136,7 @@ def cmd_repo_add(ns: argparse.Namespace) -> int:
             provider=ns.provider,
             gitlab_project_id=ns.project_id,
             protected_branches=tuple(ns.protected or ()),
+            metadata={"sandbox_image": ns.sandbox_image} if ns.sandbox_image else None,
             update=ns.update,
         )
         return info.model_dump()
@@ -238,6 +240,7 @@ def build_parser() -> argparse.ArgumentParser:
     r.add_argument("--project-id", default=None)
     r.add_argument("--protected", action="append", help="protected branch glob (repeatable)")
     r.add_argument("--update", action="store_true", help="update an existing registration")
+    r.add_argument("--sandbox-image", default=None, help="sandbox image alias/image for this repository (policies.sandbox.images, R-022)")
     r.set_defaults(fn=cmd_repo_add)
     sub.add_parser("repo-list", help="list repositories").set_defaults(fn=cmd_repo_list)
     j = sub.add_parser("job-submit", help="create a job")

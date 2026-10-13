@@ -52,6 +52,7 @@ from hermclaw.runtime.adapters import VerifierAdapter
 from hermclaw.runtime.driver import DriverSettings, RuntimeJobDriver
 from hermclaw.runtime.handlers import RepoInfoStepHandler, ReviewStepHandler, VerifyStepHandler, _workspace
 from hermclaw.runtime.health import DiskMonitor
+from hermclaw.runtime.images import ImageDefaultingExecutor, SandboxImageSelector
 from hermclaw.runtime.research_step import ResearchRunner, ResearchStepHandler
 from hermclaw.scheduler.handlers import StepHandler, StepRunContext
 from hermclaw.scope.audit import ScopeAuditor
@@ -291,12 +292,17 @@ def build_services(
     closers += [exec_workers.aclose, media_workers.aclose]
     resources = ResourceManager.from_config(sessionmaker, config, holder)
     execution = ExecutionPool(config, settings, mode=execution_mode, workers=exec_workers)
-    executor_factory: ExecutorFactory = ov.executor_factory or execution.executor
+    images = SandboxImageSelector(sessionmaker, config.policies.sandbox, repo)  # toolchain image per job (R-022)
 
     async def executor_for(ws: WorkspaceHandle, step: StepContract | None) -> CommandExecutor:
         if ov.executor_factory is not None:  # test seam: also for the step-less regression rerun
-            return await ov.executor_factory(ws, step)  # type: ignore[arg-type]
-        return await execution.executor(ws, step)
+            base = await ov.executor_factory(ws, step)  # type: ignore[arg-type]
+        else:
+            base = await execution.executor(ws, step)
+        return ImageDefaultingExecutor(base, await images.image_for(ws))
+
+    async def executor_factory(ws: WorkspaceHandle, step: StepContract) -> CommandExecutor:
+        return await executor_for(ws, step)
 
     verifier = VerifierAdapter(sessionmaker, config, git.reader(), executor_for)
     reviewer = WorkspaceReviewer(HeavyReviewer(chat, sessionmaker, config), git.reader(), repo)
