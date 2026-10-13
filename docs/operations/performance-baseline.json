@@ -1,0 +1,65 @@
+{
+  "38.1_concurrent_jobs": {
+    "job_s_max": 12.52,
+    "job_s_p50": 11.2905,
+    "jobs": 6,
+    "scheduler_concurrency": 4,
+    "wall_s": 12.56
+  },
+  "38.2_event_volume": {
+    "append_per_s": 572,
+    "events": 20000,
+    "replay_per_s": 29116,
+    "replay_s": 0.69,
+    "write_s": 34.95
+  },
+  "38.3_db_load": {
+    "jobs": 5,
+    "steps": 125,
+    "tick_ms_p50": 105.6,
+    "tick_ms_p95": 227.3,
+    "ticks": 29,
+    "wall_s": 4.04
+  },
+  "38.4_context_build": {
+    "build_cold_s": 0.86,
+    "build_warm_s_max": 0.963,
+    "build_warm_s_p50": 0.8275,
+    "files": 1501,
+    "inventory_s": 3.548,
+    "prompt_chars": 7302
+  },
+  "38.5_model_load_unload": {
+    "contended_8x50ms_total_s": 2.17,
+    "contended_max_wait_s": 2.17,
+    "lease_acquire_release_ms_p50": 21.9,
+    "lease_acquire_release_ms_p95": 31.0,
+    "note": "FakeOllama: excludes real model load time of the GTX 1080 (live: BLOCKER-001)",
+    "worker_switch_ms_p50": 3.6
+  },
+  "38.6_worker_wake": {
+    "already_ready_probe_s": 0.061,
+    "simulated_boot_delay_s": 0.3,
+    "stages": [
+      "detect",
+      "wol_send",
+      "ping",
+      "ssh",
+      "worker_api",
+      "services",
+      "capabilities",
+      "ready"
+    ],
+    "wake_from_offline_s": 0.405
+  },
+  "38.7_video_preemption": {
+    "ai_release_to_grant_s": 0.149,
+    "request_to_gpu_grant_s": 0.339,
+    "request_to_yield_request_s": 0.12
+  },
+  "38.8_memory": {
+    "exit_code": 0,
+    "job_status": "succeeded",
+    "scheduler_peak_rss_mb": 104.2
+  }
+}
