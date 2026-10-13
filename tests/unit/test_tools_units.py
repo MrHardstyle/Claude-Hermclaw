@@ -7,13 +7,13 @@ from pathlib import Path
 
 import pytest
 
-from hermclaw.contracts.tools import MUTATING_TOOLS, TERMINAL_TOOLS, ToolName
+from hermclaw.contracts.tools import CONTAINER_TOOLS, DB_TOOLS, MUTATING_TOOLS, OPS_TOOLS, SSH_TOOLS, TERMINAL_TOOLS, ToolName
 from hermclaw.core.config import CapabilityConfig, CommandPolicy, load_config
 from hermclaw.core.errors import ConfigError
 from hermclaw.core.redaction import Redactor
 from hermclaw.tools import errors as E
 from hermclaw.tools.classify import CommandClassifier, command_segments, git_mutation
-from hermclaw.tools.context import READ_ONLY_TOOLS, ToolPermissions
+from hermclaw.tools.context import BASE_TOOLS, READ_ONLY_TOOLS, ToolPermissions
 from hermclaw.tools.errors import ToolError, ToolProtocolError
 from hermclaw.tools.output import clip_head, clip_middle, strip_ansi
 from hermclaw.tools.patch import diff_section_path, parse_numstat, parse_patch, unquote_git_path
@@ -26,7 +26,7 @@ ROOT = Path(__file__).resolve().parents[2]
 
 # ------------------------------------------------------------------------------------------------ registry
 def test_registry_covers_all_tools_with_flags() -> None:
-    assert set(TOOL_SPECS) == set(ToolName) and len(TOOL_SPECS) == 19
+    assert set(TOOL_SPECS) == set(ToolName) and len(TOOL_SPECS) == 19 + len(OPS_TOOLS)
     for name, spec in TOOL_SPECS.items():
         assert spec.mutating == (name in MUTATING_TOOLS)
         assert spec.terminal == (name in TERMINAL_TOOLS)
@@ -66,8 +66,21 @@ def test_permissions_for_step() -> None:
     p = ToolPermissions.for_step(
         kind="implement", turn_budget=7, capability=CapabilityConfig(name="research", worker_kind="orchestrator", network=True)
     )
-    assert p.allowed_tools is None and p.max_turns == 7 and p.network and not p.allow_destructive_commands
+    assert p.allowed_tools == BASE_TOOLS and p.max_turns == 7 and p.network and not p.allow_destructive_commands
     assert ToolPermissions.for_step(kind="database", allow_destructive_commands=True).allow_destructive_commands
+
+
+def test_operations_tools_are_granted_per_capability() -> None:
+    def cap(name: str) -> CapabilityConfig:
+        return CapabilityConfig(name=name, worker_kind="orchestrator")
+
+    assert ToolPermissions.for_step(kind="ssh", capability=cap("ssh")).allowed_tools == BASE_TOOLS | SSH_TOOLS
+    assert ToolPermissions.for_step(kind="deploy", capability=cap("deploy")).allowed_tools == BASE_TOOLS | SSH_TOOLS | CONTAINER_TOOLS
+    assert ToolPermissions.for_step(kind="database", capability=cap("database")).allowed_tools == BASE_TOOLS | DB_TOOLS
+    coding = ToolPermissions.for_step(kind="implement", capability=cap("coding"))
+    assert not any(coding.allows(t) for t in OPS_TOOLS), "no SSH/DB/container tools for ordinary coding steps"
+    review = ToolPermissions.for_step(kind="review", capability=cap("ssh"))
+    assert not review.allows(ToolName.ssh_command), "non-mutating steps never get operations tools"
 
 
 def test_compact_arguments_redacts_and_bounds() -> None:

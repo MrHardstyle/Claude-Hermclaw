@@ -18,6 +18,7 @@ and pushes are runtime-controlled (gitops).
 from __future__ import annotations
 
 import asyncio
+import functools
 import json
 import shlex
 import stat
@@ -34,7 +35,7 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 from hermclaw.contracts.common import Severity
 from hermclaw.contracts.events import EventType
 from hermclaw.contracts.scope import Operation, ScopeExpansionRequest
-from hermclaw.contracts.tools import TERMINAL_TOOLS, BlockReport, CoderAction, CompletionReport, ToolName, ToolResult
+from hermclaw.contracts.tools import OPS_TOOLS, TERMINAL_TOOLS, BlockReport, CoderAction, CompletionReport, ToolName, ToolResult
 from hermclaw.contracts.worker import CommandResult
 from hermclaw.core.config import PoliciesConfig
 from hermclaw.core.interfaces import CommandExecutor, ExecutionRequest, GitReader, RepoContextProvider, RepoHit, WorkspaceHandle
@@ -46,6 +47,7 @@ from hermclaw.tools.classify import CommandClassification, CommandClassifier
 from hermclaw.tools.context import CallContext, NullCallbacks, ScopeExpansionOutcome, ToolCallbacks, ToolPermissions
 from hermclaw.tools.errors import ToolError, ToolProtocolError
 from hermclaw.tools.gitlocal import LocalGit
+from hermclaw.tools.ops import OpsCall, OpsResult, OpsToolProvider
 from hermclaw.tools.output import clip_head, clip_middle, strip_ansi
 from hermclaw.tools.patch import diff_section_path, parse_numstat, parse_patch
 from hermclaw.tools.recorder import PendingEvent, ToolRecorder
@@ -153,6 +155,8 @@ class ToolEngine:
         worker_id: str | None = None,
         execution_target: str = "sandbox",
         max_read_bytes: int = MAX_READ_BYTES,
+        ops: OpsToolProvider | None = None,
+        capability: str | None = None,
     ) -> None:
         self.policies = policies
         self.workspace = workspace
@@ -166,6 +170,8 @@ class ToolEngine:
         self.worker_id = worker_id
         self.execution_target = execution_target
         self.max_read_bytes = max_read_bytes
+        self.ops = ops
+        self.capability = capability
         self.output_limit = max(500, policies.coder.tool_output_chars)
         self.fs = WorkspaceFS(workspace.path, read_forbidden=policies.scope.always_forbidden)
         self.lgit = LocalGit(self.fs.root)
@@ -202,6 +208,8 @@ class ToolEngine:
             ToolName.complete_step: self._complete_step,
             ToolName.block_step: self._block_step,
         }
+        for op_tool in OPS_TOOLS:
+            self._handlers[op_tool] = functools.partial(self._ops_tool, op_tool)
 
     # ============================================================================================ public API
     @property
@@ -220,8 +228,11 @@ class ToolEngine:
     def max_turns(self) -> int:
         return self.permissions.max_turns or self.policies.coder.max_turns
 
+    def _provided(self, tool: ToolName) -> bool:
+        return tool not in OPS_TOOLS or (self.ops is not None and self.ops.provides(tool))
+
     def available_tools(self) -> list[ToolName]:
-        return [t for t in ToolName if self.permissions.allows(t)]
+        return [t for t in ToolName if self.permissions.allows(t) and self._provided(t)]
 
     def tool_catalog(self) -> list[dict[str, Any]]:
         """JSON schemas of the tools this step may use (for the coder prompt)."""
@@ -313,6 +324,8 @@ class ToolEngine:
         if not self.permissions.allows(spec.name):
             allowed = ", ".join(t.value for t in self.available_tools())
             raise ToolError(E.TOOL_NOT_ALLOWED, f"tool '{spec.name.value}' is not allowed for this step; allowed: {allowed}")
+        if not self._provided(spec.name):
+            raise ToolError(E.OPS_TOOL_UNAVAILABLE, f"tool '{spec.name.value}' is not available on this runtime")
         if ctx.turn > self.max_turns and spec.name not in TERMINAL_TOOLS:
             raise ToolError(
                 E.TURN_BUDGET_EXHAUSTED,
@@ -990,6 +1003,36 @@ class ToolEngine:
             parts.append("(no output)")
         parts += footer
         return "\n".join(parts), truncated or t1 or t2
+
+    async def _ops_tool(self, tool: ToolName, args: BaseModel, ctx: CallContext, events: list[PendingEvent]) -> ToolResult:
+        """Operations tool via the runtime provider; workspace side effects are audited against the scope."""
+        assert self.ops is not None  # _precheck guarantees a provider
+        await self._load_base()
+        before = await self.tracker.snapshot()
+        call = OpsCall(tool, args, self.workspace, self.capability, ctx.job_id, ctx.step_id, ctx.attempt_id, ctx.turn)
+        try:
+            res = await self.ops.call(call)
+        except Exception as exc:  # the provider may have partially run: the audit below still applies
+            log.warning("operations tool failed", extra={"tool": tool.value, "error_type": type(exc).__name__})
+            res = OpsResult(False, f"{tool.value} failed: {type(exc).__name__}: {exc}", error_code=E.OPS_TOOL_FAILED)
+        audit = await self.tracker.audit(before, self._decide())
+        if audit.violations:
+            self._scope_violation_event(tool, audit, events)
+        changed = [{"path": c.path, "operation": c.operation} for c in audit.allowed]
+        self._note_created([(c.path, c.operation) for c in audit.allowed])
+        self._file_changed(tool, changed, events)
+        error_code = E.COMMAND_SCOPE_VIOLATION if audit.violations else res.error_code
+        data = dict(res.data)
+        if audit.violations:
+            data["violations"] = [v.to_dict() for v in audit.violations[:50]]
+        return ToolResult(
+            tool=tool,
+            ok=res.ok and not audit.violations,
+            output=res.output,
+            error_code=None if res.ok and not audit.violations else (error_code or E.OPS_TOOL_FAILED),
+            mutated_paths=sorted({c.path for c in audit.allowed}),
+            data=data,
+        )
 
     async def _run_command(self, args: RunCommandArgs, ctx: CallContext, events: list[PendingEvent]) -> ToolResult:
         run = await self._sandbox_run(

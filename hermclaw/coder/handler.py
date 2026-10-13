@@ -41,6 +41,7 @@ from hermclaw.runtime.transitions import emit_status
 from hermclaw.scheduler.handlers import StepOutcome, StepRunContext
 from hermclaw.tools.context import ScopeExpansionOutcome, ToolPermissions
 from hermclaw.tools.engine import ToolEngine
+from hermclaw.tools.ops import OpsToolProvider
 
 if TYPE_CHECKING:
     from hermclaw.gitops.engine import GitEngine
@@ -121,6 +122,7 @@ class ImplementDeps:
     lease_wait_seconds: float = 3600.0
     lease_ttl_seconds: float = 600.0
     lease_keeper_interval: float | None = None  # None: resource manager default (heartbeat-derived)
+    ops: OpsToolProvider | None = None  # P26–P28 operations tools (SSH/DB/container), gated by step capability
 
 
 # ----------------------------------------------------------------------------- helpers
@@ -303,6 +305,8 @@ class ImplementStepHandler:
             self.deps.repo,
             _Callbacks(self.deps, ctx, handle),
             permissions=ToolPermissions.for_step(kind=row.kind, network=row.network, turn_budget=row.turn_budget, capability=capability),
+            ops=self.deps.ops,
+            capability=row.capability,
         )
         builder = ContextBuilder(self.deps.repo, self.deps.git.reader(), ContextBuilderConfig.from_config(self.config))
         settings = CoderSettings(

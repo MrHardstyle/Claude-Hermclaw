@@ -67,3 +67,5 @@ REPLAN_FAILED = "REPLAN_FAILED"
 STEP_REQUIRED = "STEP_REQUIRED"
 STEP_NOT_FOUND = "STEP_NOT_FOUND"
 TOOL_INTERNAL_ERROR = "TOOL_INTERNAL_ERROR"
+OPS_TOOL_UNAVAILABLE = "OPS_TOOL_UNAVAILABLE"  # the runtime has no provider for this operations tool
+OPS_TOOL_FAILED = "OPS_TOOL_FAILED"  # the provider raised; side effects on the workspace were still audited

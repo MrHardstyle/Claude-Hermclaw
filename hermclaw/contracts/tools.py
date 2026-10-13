@@ -30,10 +30,60 @@ class ToolName(StrEnum):
     checkpoint = "checkpoint"
     complete_step = "complete_step"
     block_step = "block_step"
+    # runtime operations tools (Bauplan §29–31): offered only to steps of the matching capability and only when the
+    # runtime provides them; they act on registered hosts/databases/containers, never via the coder shell
+    ssh_read = "ssh_read"
+    ssh_command = "ssh_command"
+    ssh_upload = "ssh_upload"
+    ssh_service_status = "ssh_service_status"
+    db_introspect = "db_introspect"
+    db_query_readonly = "db_query_readonly"
+    db_migration_generate = "db_migration_generate"
+    db_migration_apply_sandbox = "db_migration_apply_sandbox"
+    db_backup = "db_backup"
+    db_restore_test = "db_restore_test"
+    container_list = "container_list"
+    container_inspect = "container_inspect"
+    compose_validate = "compose_validate"
+    compose_up_sandbox = "compose_up_sandbox"
+    nginx_test = "nginx_test"
+    proxy_config_validate = "proxy_config_validate"
 
 
 MUTATING_TOOLS = frozenset({ToolName.write_file, ToolName.replace_text, ToolName.apply_patch})
 TERMINAL_TOOLS = frozenset({ToolName.complete_step, ToolName.block_step, ToolName.request_replan})
+
+SSH_TOOLS = frozenset({ToolName.ssh_read, ToolName.ssh_command, ToolName.ssh_upload, ToolName.ssh_service_status})
+DB_TOOLS = frozenset(
+    {
+        ToolName.db_introspect,
+        ToolName.db_query_readonly,
+        ToolName.db_migration_generate,
+        ToolName.db_migration_apply_sandbox,
+        ToolName.db_backup,
+        ToolName.db_restore_test,
+    }
+)
+CONTAINER_TOOLS = frozenset(
+    {
+        ToolName.container_list,
+        ToolName.container_inspect,
+        ToolName.compose_validate,
+        ToolName.compose_up_sandbox,
+        ToolName.nginx_test,
+        ToolName.proxy_config_validate,
+    }
+)
+OPS_TOOLS = SSH_TOOLS | DB_TOOLS | CONTAINER_TOOLS
+# which step capabilities may use which operations tools (Bauplan §26.8: SSH only for ssh/deploy)
+OPS_TOOLS_BY_CAPABILITY: dict[str, frozenset[ToolName]] = {
+    "ssh": SSH_TOOLS,
+    "deploy": SSH_TOOLS | CONTAINER_TOOLS,
+    "database": DB_TOOLS,
+    "docker": CONTAINER_TOOLS,
+}
+# operations tools that change a remote system (approval policy of the provider applies)
+REMOTE_MUTATING_TOOLS = frozenset({ToolName.ssh_command, ToolName.ssh_upload})
 
 
 class CoderAction(Contract):

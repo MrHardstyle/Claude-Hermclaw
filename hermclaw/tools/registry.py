@@ -130,7 +130,94 @@ class CheckpointArgs(ToolArgs):
         return self
 
 
-ToolKind = Literal["read", "git", "write", "exec", "request", "control"]
+# ------------------------------------------------------------------------- operations tools (Bauplan §29–31)
+_HOST = Field(min_length=1, max_length=100, pattern=r"^[A-Za-z0-9][A-Za-z0-9._-]*$", description="registered host id, e.g. webui-223")
+_TARGET = Field(min_length=1, max_length=100, pattern=r"^[A-Za-z0-9][A-Za-z0-9._-]*$", description="registered database target name")
+_RELPATH = Field(min_length=1, max_length=1000, description="path relative to the repository root")
+
+
+class SshReadArgs(ToolArgs):
+    host: str = _HOST
+    command: str = Field(min_length=1, max_length=4000, description="read-only command (classified by the SSH policy)")
+    timeout_seconds: int | None = Field(default=None, ge=1, le=3600)
+
+
+class SshCommandArgs(ToolArgs):
+    host: str = _HOST
+    command: str = Field(min_length=1, max_length=4000)
+    approval_token: str | None = Field(default=None, max_length=200, description="approval token from a previous refusal")
+    timeout_seconds: int | None = Field(default=None, ge=1, le=3600)
+
+
+class SshUploadArgs(ToolArgs):
+    host: str = _HOST
+    path: str = _RELPATH
+    remote_path: str = Field(min_length=1, max_length=1000, description="absolute target path on the host")
+    mode: str = Field(default="0644", pattern=r"^0[0-7]{3}$")
+    approval_token: str | None = Field(default=None, max_length=200)
+
+
+class SshServiceStatusArgs(ToolArgs):
+    host: str = _HOST
+    unit: str = Field(min_length=1, max_length=200, pattern=r"^[A-Za-z0-9@._:-]+$")
+
+
+class DbTargetArgs(ToolArgs):
+    target: str = _TARGET
+
+
+class DbQueryArgs(ToolArgs):
+    target: str = _TARGET
+    sql: str = Field(min_length=1, max_length=20_000, description="a single read-only statement")
+    params: dict[str, Any] | list[Any] | None = None
+    row_limit: int = Field(default=100, ge=1, le=5000)
+    timeout_seconds: int = Field(default=30, ge=1, le=600)
+
+
+class DbMigrationGenerateArgs(ToolArgs):
+    description: str = Field(min_length=3, max_length=200)
+    path: str = Field(default=".", max_length=1000, description="project directory relative to the repository root")
+
+
+class DbMigrationApplyArgs(ToolArgs):
+    path: str = Field(default=".", max_length=1000)
+    target_kind: Literal["postgresql", "sqlite"] = "postgresql"
+    seed_schema_from: str | None = Field(default=None, max_length=100, description="target whose schema seeds the sandbox DB")
+
+
+class DbRestoreTestArgs(ToolArgs):
+    artifact_id: str = Field(min_length=8, max_length=64, description="backup artifact id from db_backup")
+
+
+class ContainerQueryArgs(ToolArgs):
+    host: str | None = Field(default=None, max_length=100, description="registered host id; omitted = the execution sandbox host")
+    engine: Literal["auto", "podman", "docker"] = "auto"
+    all: bool = False
+
+
+class ContainerInspectArgs(ToolArgs):
+    name: str = Field(min_length=1, max_length=200, pattern=r"^[A-Za-z0-9][A-Za-z0-9._-]*$")
+    host: str | None = Field(default=None, max_length=100)
+    engine: Literal["auto", "podman", "docker"] = "auto"
+
+
+class ComposeArgs(ToolArgs):
+    path: str = _RELPATH
+    timeout_seconds: int = Field(default=300, ge=10, le=3600)
+
+
+class ConfigSourceArgs(ToolArgs):
+    path: str | None = Field(default=None, max_length=1000, description="config file relative to the repository root")
+    config: str | None = Field(default=None, max_length=200_000, description="config text (alternative to path)")
+
+    @model_validator(mode="after")
+    def _one(self) -> ConfigSourceArgs:
+        if (self.path is None) == (self.config is None):
+            raise ValueError("give exactly one of path or config")
+        return self
+
+
+ToolKind = Literal["read", "git", "write", "exec", "request", "control", "ops"]
 
 
 @dataclass(frozen=True)
@@ -195,6 +282,53 @@ _SPECS: list[ToolSpec] = [
     _spec(ToolName.checkpoint, CheckpointArgs, "control", "Persist progress notes so the step can resume later."),
     _spec(ToolName.complete_step, CompletionReport, "control", "Finish the step with a summary, changed files and tests run (terminal)."),
     _spec(ToolName.block_step, BlockReport, "control", "Stop the step because it cannot be completed (terminal)."),
+    # operations tools – only listed for steps of the matching capability when the runtime provides them
+    _spec(ToolName.ssh_read, SshReadArgs, "ops", "Run a read-only command on a registered host via the SSH policy (audited)."),
+    _spec(
+        ToolName.ssh_command,
+        SshCommandArgs,
+        "ops",
+        "Run a mutating command on a registered host; mutations may need approval (a refusal returns the approval token).",
+    ),
+    _spec(ToolName.ssh_upload, SshUploadArgs, "ops", "Upload a workspace file to a registered host (audited, approval policy applies)."),
+    _spec(ToolName.ssh_service_status, SshServiceStatusArgs, "ops", "Show systemd status and active state of a unit on a host."),
+    _spec(ToolName.db_introspect, DbTargetArgs, "ops", "Describe the schema of a registered database target (tables, columns, keys)."),
+    _spec(ToolName.db_query_readonly, DbQueryArgs, "ops", "Run one read-only SQL statement (enforced read-only, row limit, timeout)."),
+    _spec(
+        ToolName.db_migration_generate,
+        DbMigrationGenerateArgs,
+        "ops",
+        "Create the next migration skeleton of the project's framework (alembic/django/raw SQL) in the workspace.",
+    ),
+    _spec(
+        ToolName.db_migration_apply_sandbox,
+        DbMigrationApplyArgs,
+        "ops",
+        "Apply the project's migrations to a throw-away sandbox database (upgrade, downgrade, upgrade) and report.",
+    ),
+    _spec(ToolName.db_backup, DbTargetArgs, "ops", "Back up a registered database target into the artifact store (verified checksum)."),
+    _spec(
+        ToolName.db_restore_test,
+        DbRestoreTestArgs,
+        "ops",
+        "Restore a backup artifact into a sandbox database and verify tables/row counts.",
+    ),
+    _spec(ToolName.container_list, ContainerQueryArgs, "ops", "List containers (podman/docker) on the sandbox host or a registered host."),
+    _spec(ToolName.container_inspect, ContainerInspectArgs, "ops", "Inspect one container (image, state, ports, labels, health)."),
+    _spec(ToolName.compose_validate, ComposeArgs, "ops", "Validate a compose file (engine check + structural/security rules)."),
+    _spec(
+        ToolName.compose_up_sandbox,
+        ComposeArgs,
+        "ops",
+        "Start a compose project in a sandbox (remapped ports, no host network), collect logs, always tear down.",
+    ),
+    _spec(ToolName.nginx_test, ConfigSourceArgs, "ops", "Test an nginx configuration with nginx -t in a temporary prefix."),
+    _spec(
+        ToolName.proxy_config_validate,
+        ConfigSourceArgs,
+        "ops",
+        "Check a reverse-proxy config (SSE locations unbuffered, duplicate server/listen, upstream allow-list, TLS sanity).",
+    ),
 ]
 
 TOOL_SPECS: dict[ToolName, ToolSpec] = {s.name: s for s in _SPECS}

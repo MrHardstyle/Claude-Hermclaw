@@ -15,13 +15,14 @@ from typing import Any, Protocol, runtime_checkable
 
 from hermclaw.contracts.common import MUTATING_STEP_KINDS
 from hermclaw.contracts.scope import ScopeContract, ScopeExpansionRequest
-from hermclaw.contracts.tools import MUTATING_TOOLS, ToolName
+from hermclaw.contracts.tools import MUTATING_TOOLS, OPS_TOOLS, OPS_TOOLS_BY_CAPABILITY, ToolName
 from hermclaw.core.config import CapabilityConfig
 from hermclaw.tools import errors as E
 from hermclaw.tools.errors import ToolError
 
 ALL_TOOLS: frozenset[ToolName] = frozenset(ToolName)
-READ_ONLY_TOOLS: frozenset[ToolName] = ALL_TOOLS - MUTATING_TOOLS
+BASE_TOOLS: frozenset[ToolName] = ALL_TOOLS - OPS_TOOLS  # workspace tools every mutating step gets
+READ_ONLY_TOOLS: frozenset[ToolName] = BASE_TOOLS - MUTATING_TOOLS
 
 
 @dataclass(frozen=True)
@@ -59,7 +60,8 @@ class ToolPermissions:
         image: str | None = None,
         allow_destructive_commands: bool | None = None,
     ) -> ToolPermissions:
-        """Permissions for a step: non-mutating step kinds never get write tools.
+        """Permissions for a step: non-mutating step kinds never get write tools; operations tools are granted per
+        capability (``OPS_TOOLS_BY_CAPABILITY``).
 
         Destructive commands are only allowed when the capability explicitly opts in
         (``allow_destructive_commands`` on the capability config) or the caller passes it explicitly.
@@ -68,8 +70,10 @@ class ToolPermissions:
         destructive = allow_destructive_commands
         if destructive is None:
             destructive = bool(getattr(capability, "allow_destructive_commands", False))
+        # operations tools (SSH/DB/container) only for mutating steps of the matching capability (§26.8)
+        ops = OPS_TOOLS_BY_CAPABILITY.get(capability.name, frozenset()) if capability is not None and mutating else frozenset()
         return cls(
-            allowed_tools=None if mutating else READ_ONLY_TOOLS,
+            allowed_tools=(BASE_TOOLS | ops) if mutating else READ_ONLY_TOOLS,
             allow_destructive_commands=destructive,
             network=bool(network or (capability.network if capability is not None else False)),
             image=image,
