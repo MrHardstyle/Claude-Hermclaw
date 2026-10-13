@@ -336,9 +336,9 @@ Legende: `[x]` erledigt mit Evidence · `[~]` erledigt, Live-Verifikation auf Zi
 
 - [x] 25.1 DAG scheduler. — Evidence: hermclaw/scheduler/scheduler.py; tests/integration/test_scheduler.py::test_dag_runs_in_dependency_order_and_finalizes
 - [x] 25.2 ready steps. — Evidence: hermclaw/scheduler/scheduler.py; tests/integration/test_scheduler.py::test_dag_runs_in_dependency_order_and_finalizes
-- [ ] 25.3 capabilities. — Evidence: –
+- [x] 25.3 capabilities. — Evidence: capability registry (config/capabilities.yaml: step_kind_capability + worker_kind/resources) validated by the planner; workers report capabilities in signed heartbeats and are selected per capability (WorkerRegistry.select_worker via runtime/services.WorkerPool) – tests/integration/test_runtime_dispatch.py::test_ready_worker_is_selected_and_runs_the_command_remotely
 - [x] 25.4 resource leases. — Evidence: ImplementStepHandler._model: coder lease during the loop (preemptible -> checkpoint), heavy lease during review; MediaStepHandler hold_media; test_coder_handler.py::test_video_preemption_checkpoints_the_coder_and_the_step_resumes
-- [ ] 25.5 worker dispatch. — Evidence: –
+- [x] 25.5 worker dispatch. — Evidence: runtime/services.ExecutionPool + WorkerPool: remote sandbox on the selected execution worker (signed client, workspace sync), Wake-on-LAN before dispatch, drained/offline workers skipped, WorkerUnreachable when none – tests/integration/test_runtime_dispatch.py (2 tests), tests/integration/test_runtime_services.py::test_remote_execution_without_a_ready_worker_is_reported_not_run_locally
 - [x] 25.6 retries. — Evidence: Scheduler._apply_outcome retry/backoff; test_retry_with_backoff_then_success, test_backoff_delays_redispatch
 - [x] 25.7 timeouts. — Evidence: SchedulerSettings.step_timeout_seconds; test_step_timeout_is_retryable_failure
 - [x] 25.8 parallel steps. — Evidence: parallel read-only steps, serialised mutating steps; test_mutating_steps_are_serialised_per_job, test_priority_and_concurrency_limit
@@ -438,13 +438,13 @@ Legende: `[x]` erledigt mit Evidence · `[~]` erledigt, Live-Verifikation auf Zi
 
 ## P34 – Recovery
 
-- [ ] 34.1 kill runtime during job. — Evidence: –
-- [ ] 34.2 restart. — Evidence: –
-- [ ] 34.3 reconstruct. — Evidence: –
-- [ ] 34.4 leased worker recovery. — Evidence: –
-- [ ] 34.5 model load recovery. — Evidence: –
-- [ ] 34.6 workspace recovery. — Evidence: –
-- [ ] 34.7 Git state recovery. — Evidence: –
+- [x] 34.1 kill runtime during job. — Evidence: tests/failure/test_recovery_process_kill.py::test_kill_during_coder_step_restart_recovers_and_finishes (real SchedulerProcess child SIGKILLed while the coder works on S001), ::test_kill_during_planning_is_reentrant
+- [x] 34.2 restart. — Evidence: restart with the same stable instance id scheduler@<instance> (runtime/services.resource_holder_id): startup_recovery reclaims own step leases immediately; restarted process exits 0 on SIGTERM – tests/failure/test_recovery_process_kill.py::test_kill_during_coder_step_restart_recovers_and_finishes
+- [x] 34.3 reconstruct. — Evidence: Scheduler.startup_recovery: lost attempt -> status lost / WORKER_LOST, step ready (no checkpoint) or checkpointed, prepare-phase jobs re-entered with job.recovered event – tests/failure/test_recovery_process_kill.py (both tests); tests/integration/test_scheduler.py::test_crash_recovery_requeues_in_flight_steps
+- [x] 34.4 leased worker recovery. — Evidence: orchestrator side: step leases of the dead incarnation reclaimed on restart (tests/failure/test_recovery_process_kill.py); execution worker side: worker/execution recover_for_sandbox on daemon start – tests/integration/test_workers_execution_daemon.py::test_startup_recovery_removes_leftovers, ::test_container_recovery_with_real_podman
+- [x] 34.5 model load recovery. — Evidence: coder model lease (large-model budget) of the killed process released by ResourceManager.recover() at SchedulerProcess start – tests/failure/test_recovery_process_kill.py asserts held lease of scheduler@<instance> before the kill and no active/preempting lease after; tests/failure/test_resources_recovery.py::test_leases_survive_crash_and_recover_releases_previous_incarnation
+- [x] 34.6 workspace recovery. — Evidence: same workspace reused after the crash (uncommitted edit preserved, no re-clone), integrity-checked by GitEngine – tests/failure/test_recovery_process_kill.py::test_kill_during_coder_step_restart_recovers_and_finishes
+- [x] 34.7 Git state recovery. — Evidence: exactly one verified commit on the job branch after kill+restart (no duplicate/partial commit), pushed – tests/failure/test_recovery_process_kill.py (_branch_commits == 1 in both scenarios); tests/failure/test_gitops_failures.py::test_interrupted_rebase_is_detected_and_recovered
 
 ## P35 – Failure Injection
 

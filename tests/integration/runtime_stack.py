@@ -63,12 +63,14 @@ def checked_plan() -> dict[str, Any]:
 class StackModels(ScriptedChat):
     """Gemma plans from ``plans`` (chat); the other roles answer structurally by alias.
 
-    ``hang_marker``: when set, the coder's *second* call writes this file and then blocks forever – the moment a
-    recovery test kills the process (the edit of the first call is already in the workspace)."""
+    ``hang_marker``: when set, the process blocks forever at ``hang_on`` after writing this file – the moment a
+    recovery test kills it: ``coder`` = the coder's *second* call (the edit of the first call is already in the
+    workspace), ``plan`` = Gemma's planning call (job in the preparation phase)."""
 
-    def __init__(self, plans: list[Any] | None = None, *, hang_marker: Path | None = None) -> None:
+    def __init__(self, plans: list[Any] | None = None, *, hang_marker: Path | None = None, hang_on: str = "coder") -> None:
         super().__init__(list(plans or []))
         self.hang_marker = hang_marker
+        self.hang_on = hang_on  # "coder" (2nd coder call) or "plan" (Gemma planning call)
         self.coder_calls = 0
         self.review_calls = 0
         self.aliases: list[str] = []
@@ -84,12 +86,18 @@ class StackModels(ScriptedChat):
             return self._ok(schema, {"verdict": "pass", "summary": "change is minimal and correct", "findings": []}, alias, "qwen3.8:27b")
         assert alias == "coder-main", alias
         self.coder_calls += 1
-        if self.hang_marker is not None and self.coder_calls >= 2:
+        if self.hang_marker is not None and self.hang_on == "coder" and self.coder_calls >= 2:
             self.hang_marker.write_text(str(os.getpid()), encoding="utf-8")
             await asyncio.Event().wait()  # killed here
         prompt = "\n".join(m.content for m in messages)
         edited = "+VALUE = 2" in prompt  # CURRENT DIFF of the step (also after a restart: the edit is uncommitted)
         return self._ok(schema, DONE if edited else EDIT, alias, "qwen3-coder:30b")
+
+    async def chat(self, alias: str, messages: list[ChatMessage], *, ctx: CallContext, **kw: Any) -> ChatResult:  # type: ignore[override]
+        if self.hang_marker is not None and self.hang_on == "plan":
+            self.hang_marker.write_text(str(os.getpid()), encoding="utf-8")
+            await asyncio.Event().wait()  # killed while Gemma plans
+        return await super().chat(alias, messages, ctx=ctx, **kw)
 
     @staticmethod
     def _ok(schema: type[T], data: dict[str, Any], alias: str, model: str) -> StructuredResult[T]:
