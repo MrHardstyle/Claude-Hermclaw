@@ -481,21 +481,21 @@ Legende: `[x]` erledigt mit Evidence · `[~]` erledigt, Live-Verifikation auf Zi
 
 ## P37 – Generalization E2E
 
-- [ ] 37.1 Python FastAPI Feature. — Evidence: –
-- [ ] 37.2 SQLite Schema Migration. — Evidence: –
+- [x] 37.1 Python FastAPI Feature. — Evidence: tests/e2e/test_e2e_code_tasks.py::test_37_1_python_fastapi_feature (full runtime: triage, plan, scope, coder tools, real pytest acceptance, heavy review, commit, push, report)
+- [x] 37.2 SQLite Schema Migration. — Evidence: tests/e2e/test_e2e_code_tasks.py::test_37_2_sqlite_schema_migration (new migration + test, 001 untouched via diff evidence)
 - [ ] 37.3 PostgreSQL Migration. — Evidence: –
 - [ ] 37.4 Docker Compose Service. — Evidence: –
-- [ ] 37.5 React/CSS Navigation. — Evidence: –
-- [ ] 37.6 PHP Backend Form. — Evidence: –
-- [ ] 37.7 TypeScript Utility. — Evidence: –
-- [ ] 37.8 YAML-only Config. — Evidence: –
-- [ ] 37.9 Shell/Linux Admin. — Evidence: –
-- [ ] 37.10 Research-only Task. — Evidence: –
-- [ ] 37.11 Image Job. — Evidence: –
-- [ ] 37.12 Video Job. — Evidence: –
-- [ ] 37.13 Wake-on-LAN Job. — Evidence: –
-- [ ] 37.14 Worker failure/recovery. — Evidence: –
-- [ ] 37.15 planner replan after failure. — Evidence: –
+- [x] 37.5 React/CSS Navigation. — Evidence: tests/e2e/test_e2e_code_tasks.py::test_37_5_react_css_navigation (TSX via tsc + node --test, CSS presence)
+- [x] 37.6 PHP Backend Form. — Evidence: tests/e2e/test_e2e_code_tasks.py::test_37_6_php_backend_form (php -l + php test script)
+- [x] 37.7 TypeScript Utility. — Evidence: tests/e2e/test_e2e_code_tasks.py::test_37_7_typescript_utility (tsc + node --test; found BUG-042)
+- [x] 37.8 YAML-only Config. — Evidence: tests/e2e/test_e2e_code_tasks.py::test_37_8_yaml_only_config (YAML JSON-schema evidence, max_changed_files 1)
+- [x] 37.9 Shell/Linux Admin. — Evidence: tests/e2e/test_e2e_code_tasks.py::test_37_9_shell_linux_admin (bash -n + behavioural shell test)
+- [x] 37.10 Research-only Task. — Evidence: tests/e2e/test_e2e_platform.py::test_37_10_research_only_task (job without repo, real ResearchEngine, sources in final report)
+- [x] 37.11 Image Job. — Evidence: tests/e2e/test_e2e_platform.py::test_37_11_image_job (real media daemon + ffmpeg thumbnail, PNG artifact, leases released)
+- [x] 37.12 Video Job. — Evidence: tests/e2e/test_e2e_platform.py::test_37_12_video_job (real media daemon + ffmpeg VP9 transcode, verified artifact)
+- [x] 37.13 Wake-on-LAN Job. — Evidence: tests/e2e/test_e2e_platform.py::test_37_13_wake_on_lan_job_runs_on_the_woken_remote_worker (sleeping execution worker woken before dispatch, commands on the remote daemon copy, .git never synced); live magic packet: tests/integration/test_wol_live.py (BLOCKER-001)
+- [x] 37.14 Worker failure/recovery. — Evidence: tests/e2e/test_e2e_platform.py::test_37_14_worker_restart_and_connection_loss_are_recovered (daemon restarted mid-job with empty state, transient connection reset retried, workspace re-synced); process kill: tests/failure/test_recovery_process_kill.py
+- [x] 37.15 planner replan after failure. — Evidence: tests/e2e/test_e2e_code_tasks.py::test_37_15_planner_replan_after_failure (coder request_replan -> Gemma replan -> new steps succeed, replan_count 1)
 
 ## P38 – Performance / Load
 

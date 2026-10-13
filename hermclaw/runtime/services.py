@@ -98,6 +98,7 @@ class ServiceOverrides:
     driver_settings: DriverSettings | None = None
     media_settings: MediaSettings | None = None
     lease_keeper_interval: float | None = None
+    worker_client_kwargs: dict[str, Any] | None = None  # e.g. an ASGI transport for in-process worker daemons
 
 
 # ----------------------------------------------------------------------------------------------- worker pools
@@ -280,8 +281,13 @@ def build_services(
     # workers, resources, execution
     registry = WorkerRegistry()
     token_store = ov.token_store or RefTokenStore(settings.worker_token_refs)
-    exec_workers = WorkerPool(sessionmaker, registry, token_store, kind="execution", client_cls=ExecutionWorkerClient, wake=ov.wake)
-    media_workers = WorkerPool(sessionmaker, registry, token_store, kind="model", client_cls=MediaWorkerClient, wake=ov.wake)
+    ckw = ov.worker_client_kwargs
+    exec_workers = WorkerPool(
+        sessionmaker, registry, token_store, kind="execution", client_cls=ExecutionWorkerClient, wake=ov.wake, client_kwargs=ckw
+    )
+    media_workers = WorkerPool(
+        sessionmaker, registry, token_store, kind="model", client_cls=MediaWorkerClient, wake=ov.wake, client_kwargs=ckw
+    )
     closers += [exec_workers.aclose, media_workers.aclose]
     resources = ResourceManager.from_config(sessionmaker, config, holder)
     execution = ExecutionPool(config, settings, mode=execution_mode, workers=exec_workers)
