@@ -365,10 +365,10 @@ Noch keine.
 - Tatsächlich: They say the origin is dropped. The tests still pass because they build their entries by hand.
 
 ### BUG-057 – A file literally named with a backslash is audited under the slash path
-- Phase: P39 · Komponente: scope · Severity: P3 · blockierend: nein · Status: **offen** (nicht ausnutzbar: gitops-Staging verweigert Backslash-Pfade; Nacharbeit P39.7)
+- Phase: P39 · Komponente: scope · Severity: P2 · blockierend: nein · Status: **behoben** (`tests/integration/test_scope_audit_backslash.py`, 3 Tests – vor dem Fix alle rot; auch eine gestagte Umbenennung von `legacy\old_module.py` wurde als designierte Löschung von `legacy/old_module.py` akzeptiert)
 - Reproduktion: A shell command creates the root-level file 'src\a.py'; git status reports '?? src\a.py'; audit_status with src/a.py in scope
 - Erwartet: Refused, or judged as its literal name
-- Tatsächlich: normalise_path turns '\' into '/', so the audit allows it as 'src/a.py'. gitops staging (normalise_repo_path) still refuses backslash paths, so it cannot be committed. Not changed, because backslash conversion is part of contract parsing.
+- Tatsächlich: normalise_path turns '\' into '/', so the audit allows it as 'src/a.py'. gitops staging (normalise_repo_path) still refuses backslash paths, so it cannot be committed. Fix: `ScopeAuditor.audit_changes` meldet solche Namen als Verletzung unter ihrem wörtlichen Namen (`_display` wandelt `\` nicht mehr um); Contract-/Tool-Parsing unverändert.
 
 ### BUG-058 – GET /api/workers was registered twice (system read route and workers admin route)
 - Phase: P39 · Komponente: api/workers · Severity: P3 · blockierend: nein · Status: **behoben** (`tests/unit/test_api_routes_unique.py`)

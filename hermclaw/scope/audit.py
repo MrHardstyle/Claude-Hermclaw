@@ -15,6 +15,10 @@ closed).
 
 A contract-level ``delete`` operation only covers the paths the scope version designates for deletion
 (:func:`~hermclaw.scope.engine.designated_deletes`): deleting any other target is a violation.
+
+Audited paths are real file names (git reports them literally). A name containing a backslash is a violation (fail
+closed): the scope path normalisation reads ``\\`` as a directory separator, so the root-level file ``src\\a.py``
+would otherwise be judged - and recorded as allowed - as ``src/a.py``. gitops staging refuses such names as well.
 """
 
 from __future__ import annotations
@@ -51,6 +55,10 @@ log = get_logger(__name__)
 SOURCE_ID = "scope_audit"
 _MAX_AUDIT_RECORDS = 20
 _MAX_RECORDED_VIOLATIONS = 50
+_BACKSLASH_REASON = (
+    "the file name contains a backslash: scope paths are POSIX, so this real name cannot be judged against the scope "
+    "(it is not the path its '/' spelling denotes); rename or remove it"
+)
 
 
 # ============================================================================================= git status mapping
@@ -177,7 +185,7 @@ class ScopeAuditor:
         """Check ``changes`` with ScopeGuard, persist the audit into the scope evidence, emit ``scope.violation``.
 
         ``unauditable`` lists ``(path, reason)`` changes the caller could not map to a checkable operation; each is
-        a violation (fail closed).
+        a violation (fail closed). ``changes`` are real file names: one containing a backslash is a violation too.
         """
         unaudited = list(dict.fromkeys(unauditable))
         unique: list[tuple[str, Operation]] = []
@@ -204,6 +212,9 @@ class ScopeAuditor:
             allowed: list[tuple[str, Operation]] = []
             violations: list[dict[str, str]] = []
             for path, op in unique:
+                if "\\" in path:  # never through normalise_path, which would turn it into another (scoped) path
+                    violations.append({"path": _display(path), "operation": op, "reason": _BACKSLASH_REASON})
+                    continue
                 ok, reason = guard.decide(path, op)
                 if ok and op == "delete" and delete_guard is not None and not delete_guard.allowed(path, "delete"):
                     ok = False
@@ -312,6 +323,9 @@ class ScopeAuditor:
 
 
 def _display(path: str) -> str:
+    """Canonical form of an audited path; a name with a backslash is shown literally (it is not its '/' spelling)."""
+    if "\\" in path:
+        return str(path)[:300]
     try:
         return normalise_path(path)
     except ValueError:

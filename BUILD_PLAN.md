@@ -79,7 +79,7 @@ Legende: `[x]` erledigt mit Evidence · `[~]` erledigt, Live-Verifikation auf Zi
 - [x] 4.5 SSE endpoint. — Evidence: hermclaw/api/events.py stream_job_events (fastapi.sse) + X-Accel-Buffering
 - [x] 4.6 reconnect/last-event-id. — Evidence: stream_events Replay ab Last-Event-ID (test_sse_stream_replay_then_live_and_reconnect)
 - [x] 4.7 event retention. — Evidence: purge_events (test_retention_keeps_active_jobs)
-- [ ] 4.8 UI test client. — Evidence: –
+- [x] 4.8 UI test client. — Evidence: ui/src/lib/sse.ts (EventStreamClient: Last-Event-ID/last_event_id resume, heartbeat watchdog, reconnect); ui/tests/unit/sse.test.ts; Playwright ui/tests/e2e/live-events.spec.ts (live events, reconnect with Last-Event-ID replay, half-open detection) against real uvicorn + PostgreSQL
 
 ## P05 – State Machines
 
