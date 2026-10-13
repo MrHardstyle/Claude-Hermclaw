@@ -58,7 +58,11 @@ class CommandRequest(Contract):
     request_id: str
     job_id: str
     step_id: str
-    workspace: str = Field(description="workspace id on the execution worker")
+    # defense in depth: the daemon (``workspace_dir``) and the client (``_workspace_segment``) enforce the same
+    # pattern (``hermclaw.workers.schemas.WORKSPACE_ID_PATTERN``); a body with ``/``, ``..`` or ``.`` never validates
+    workspace: str = Field(
+        pattern=r"^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$", max_length=128, description="workspace id on the execution worker"
+    )
     command: str = Field(min_length=1, max_length=8000)
     image: str | None = None
     timeout_seconds: int = Field(default=600, ge=1, le=7200)

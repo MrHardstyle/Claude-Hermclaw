@@ -306,7 +306,7 @@ class FakeGitLab:
         self.server.server_close()
 
 
-async def test_support_upstream_and_world(sessionmaker, tmp_path):
+async def test_support_upstream_and_world(sessionmaker: Any, tmp_path: Path) -> None:
     world = await make_world(sessionmaker, tmp_path)
     assert world.upstream.head() is not None
     sha = world.upstream.commit({"README.md": "# changed\n"})

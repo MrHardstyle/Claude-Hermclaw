@@ -225,13 +225,15 @@ class ResearchPolicy(_Strict):
     browser_executable: str | None = None
 
 
-
 class GitPolicy(_Strict):
     branch_prefix: str = "hermclaw/"
     protected_branches: list[str] = Field(default_factory=lambda: ["main", "master", "release/*"])
     author_name: str = "Hermclaw Runtime"
     author_email: str = "hermclaw@localhost"
     create_merge_request: bool = False
+    # job workspaces (and their workspace-scoped code index) of finished jobs are removed this many hours after
+    # the job ended (hermclaw.runtime.maintenance.WorkspaceJanitor); 0 keeps them forever
+    workspace_retention_hours: int = Field(default=72, ge=0)
 
 
 class EventPolicy(_Strict):
@@ -251,6 +253,19 @@ class SshPolicy(_Strict):
     require_approval_for_mutations: bool = True
 
 
+class WakeOnLanPolicy(_Strict):
+    """Global Wake-on-LAN / idle sleep tuning (``hermclaw.wol``). MAC, broadcast, per-host ping/service timeouts
+    and attempts stay in ``hosts.yaml`` (``wake_on_lan``), the sleep command in ``hosts.yaml`` ``idle_sleep_command``.
+    Mapped by ``hermclaw.runtime.main.wake_settings_from_policy`` / ``idle_settings_from_policy``."""
+
+    # a ready worker without any work for this long is put to sleep by the idle hook
+    idle_after_minutes: float = Field(default=30.0, gt=0)
+    # timeout of one idle sleep command (the SSH session often drops when the host suspends)
+    idle_command_timeout_seconds: float = Field(default=60.0, gt=0, le=3600)
+    # pause between two failed readiness probes while a woken host boots
+    probe_interval_seconds: float = Field(default=2.0, gt=0, le=60)
+
+
 class PoliciesConfig(_Strict):
     commands: CommandPolicy = Field(default_factory=CommandPolicy)
     sandbox: SandboxPolicy = Field(default_factory=SandboxPolicy)
@@ -265,6 +280,7 @@ class PoliciesConfig(_Strict):
     events: EventPolicy = Field(default_factory=EventPolicy)
     leases: LeasePolicy = Field(default_factory=LeasePolicy)
     ssh: SshPolicy = Field(default_factory=SshPolicy)
+    wake_on_lan: WakeOnLanPolicy = Field(default_factory=WakeOnLanPolicy)
 
 
 # ----------------------------------------------------------------------------------------------- capabilities

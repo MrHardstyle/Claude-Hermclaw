@@ -18,7 +18,8 @@ active work or a heartbeat/wake moved it out of ``sleeping``), then the command 
 definite failure restores ``ready``; an ambiguous result (timeout, transport error, ssh exit 255 – the
 connection often drops when the host suspends) keeps ``sleeping`` – a host that is still awake corrects
 this with its next heartbeat. Every decision that acts is recorded as ``wake_events`` row (stage
-``sleep``) and ``status`` event; state changes emit ``worker.state``.
+``sleep``) and ``status`` event; state changes emit ``worker.state``; a confirmed suspend (exit 0) also emits
+``worker.sleep``.
 """
 
 from __future__ import annotations
@@ -412,6 +413,11 @@ class IdleSleepPolicy:
             }[result]
             severity = Severity.info if result == SleepResult.slept else Severity.warning
             await self._record(s, decision, result, text, severity=severity, extra=extra)
+            if result == SleepResult.slept:  # only a confirmed suspend (exit 0); ``unknown`` stays a status line
+                d = decision.to_dict()
+                payload = {k: d[k] for k in ("worker_id", "reason", "idle_seconds", "last_activity_at")}
+                payload.update({"text": text, "idle_after_minutes": self.settings.idle_after_minutes, "exit_code": exit_code})
+                await append_event(s, EventType.WORKER_SLEEP, source_type=SOURCE_TYPE, source_id=worker_id, payload=payload)
             await s.commit()
         log.info("idle sleep", extra={"worker_id": worker_id, "result": result.value, "exit_code": exit_code})
         return IdleSleepOutcome(decision, result, exit_code=exit_code, error=extra.get("error"))

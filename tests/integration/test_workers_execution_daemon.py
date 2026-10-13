@@ -365,15 +365,19 @@ async def test_command_workspace_id_cannot_escape_workspaces_root(tmp_path: Path
     async with lifespan(app), _signed_raw(app) as raw:
         (tmp_path / "data" / "workspaces").mkdir(parents=True, exist_ok=True)
         for bad_ws in ("/", "..", ".", "../data", "/etc", "ws1/../..", ".incoming-x"):
-            body = cmd("pwd", workspace=bad_ws).model_dump(mode="json")
+            # the contract itself rejects these ids (pattern on CommandRequest.workspace), so the raw body is
+            # built by hand; the daemon answers with its body validation error before any directory is resolved
+            body = cmd("pwd").model_dump(mode="json") | {"workspace": bad_ws}
             resp = await raw.post("/v1/commands", json=body)
-            assert resp.status_code == 400, (bad_ws, resp.text)
-            assert resp.json()["error"]["code"] == "WORKSPACE_ID_INVALID"
+            assert resp.status_code == 422, (bad_ws, resp.text)
+            err = resp.json()["error"]
+            assert err["code"] == "VALIDATION_FAILED"
+            assert any(e["loc"][-1] == "workspace" for e in err["details"]["errors"]), err
         assert runner.calls == []
-    # the typed client refuses to send such a request at all
+    # the typed client refuses to send such a request at all (model_construct skips the contract's own check)
     async with lifespan(app), _client(app) as c:
         with pytest.raises(ValueError, match="workspace id"):
-            await c.run_command(cmd("pwd", workspace="/"))
+            await c.run_command(CommandRequest.model_construct(**(cmd("pwd").model_dump() | {"workspace": "/"})))
 
 
 async def test_rwlock_waiting_reader_keeps_lock_registered(tmp_path: Path) -> None:

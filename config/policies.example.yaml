@@ -89,9 +89,21 @@ git:
   author_name: Hermclaw Runtime
   author_email: hermclaw@localhost
   create_merge_request: false
+  # hours after a job finished (succeeded/failed/cancelled) until the scheduler removes its workspace clone and the
+  # workspace-scoped code index; 0 = keep forever. Workspaces with verified but unpushed commits are never discarded.
+  workspace_retention_hours: 72
 events: {retention_days: 90, heartbeat_seconds: 15}
 leases: {default_ttl_seconds: 300, heartbeat_seconds: 30, preemption_grace_seconds: 120}
 ssh:
   allowed_hosts: [webui-223, exec-222, model-224]
   default_timeout_seconds: 120
   require_approval_for_mutations: true
+# global Wake-on-LAN / idle sleep tuning (per host: hosts.yaml wake_on_lan {mac, broadcast, port, ping_timeout_seconds,
+# service_timeout_seconds, max_attempts} and idle_sleep_command)
+wake_on_lan:
+  # a ready worker host without steps, attempts, leases or queued requests for this long is put to sleep
+  idle_after_minutes: 30
+  # timeout of one idle sleep command over SSH (a dropped session while the host suspends counts as "unknown")
+  idle_command_timeout_seconds: 60
+  # pause between two failed readiness probes (TCP/HTTP/SSH) while a woken host boots
+  probe_interval_seconds: 2

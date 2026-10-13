@@ -190,7 +190,26 @@ class RepoIntelligence:
         target = self.target_of(workspace)
         if target.repository_key == target.base_repository:
             return {"symbols": 0, "chunks": 0}  # a shared repository index is kept
-        return await self.purge(target)
+        counts = await self.purge(target)
+        self._forget_workspace(target)
+        return counts
+
+    def _forget_workspace(self, target: IndexTarget) -> None:
+        """Release the in-memory state of a removed workspace key/root. The scheduler process is long-lived and
+        the workspace janitor drops one key per finished job: a finished index task (with its stats), the
+        freshness lock, the embedding retry clock and the cached listings must not stay behind forever."""
+        key, root = target.repository_key, str(Path(target.root))
+        for tkey in [t for t, task in self._index_tasks.items() if t[0] == key and task.done()]:
+            del self._index_tasks[tkey]
+        lock = self._fresh_locks.get(key)
+        if lock is not None and not lock.locked():
+            del self._fresh_locks[key]
+        self._embed_attempt.pop(key, None)
+        self._state_cache.pop(root, None)
+        for ck in [ck for ck in self._inventory_cache if ck[0] == root]:
+            del self._inventory_cache[ck]
+        for pk in [pk for pk in self._parse_cache if pk[0] == root]:
+            del self._parse_cache[pk]
 
     async def purge(self, target: IndexTarget) -> dict[str, int]:
         counts = await self.indexer.purge(target)

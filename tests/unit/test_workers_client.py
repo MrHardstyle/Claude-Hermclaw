@@ -226,7 +226,8 @@ async def test_client_rejects_unsafe_workspace_ids_without_sending(workspace: st
             c.workspace_info(workspace),
             c.delete_paths(workspace, ["a"]),
             c.delete_workspace(workspace),
-            c.run_command(CommandRequest(request_id="r1", job_id="j", step_id="s", workspace=workspace, command="true")),
+            # model_construct bypasses the contract's own workspace pattern: the client check is tested on its own
+            c.run_command(CommandRequest.model_construct(request_id="r1", job_id="j", step_id="s", workspace=workspace, command="true")),
         ):
             with pytest.raises(ValueError):
                 await call

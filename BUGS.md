@@ -281,7 +281,7 @@ Noch keine.
 - Tatsächlich: semantic repair "repo_hint 'src/strings.ts' does not exist in repository_inventory/retrieved_context", plan rejected; only files that retrieval happened to return were known
 
 ### BUG-043 – POST /api/jobs: repository auto-registration by URL crashes (HTTP 500) on a name collision and bypasses the registry validation
-- Phase: P40 (found by the local soak) · Komponente: api/jobs · Severity: P2 · blockierend: nein · Status: **offen** (Fix nach Abschluss der laufenden API-Härtung in P39)
+- Phase: P40 (found by the local soak) · Komponente: api/jobs · Severity: P2 · blockierend: nein · Status: **behoben** in P39 (`tests/integration/test_api_repository_registration.py`: `validate_remote_url`, eindeutige Namen bei gleichem URL-Ende, file:// nur mit admin)
 - Reproduktion: two jobs with different repository URLs that share the basename, e.g. file:///a/remote.git and file:///b/remote.git → second POST /api/jobs fails with UniqueViolation uq_repositories_name (HTTP 500)
 - Erwartet: the repository is registered through RepositoryRegistry (URL validation: no userinfo, allowed schemes) with a unique name (collision → suffix), or a clear 409/422
 - Tatsächlich: _slug_name(url) is used as the unique name directly and the row is inserted without RepositoryRegistry checks
@@ -406,6 +406,43 @@ Noch keine.
 - Phase: P39 · Komponente: ui · Severity: P4 · blockierend: nein · Status: **behoben** (siehe Commit; `ui/tests/unit/events.test.ts`)
 - Reproduktion: compare `EventType` with `KNOWN_EVENT_TYPES` in `ui/src/lib/events.ts`: `resource.preempt.withdrawn`, `resource.request.cancelled`, `system.disk`, `worker.sleep`, `workspace.cleaned` missing
 - Fix: listeners added; a unit test compares the UI list with `docs/contracts` event types
+
+### BUG-064 – Any control principal could register file:// or local-path repositories through POST /api/jobs
+- Phase: P39 · Komponente: api/jobs · Severity: P1 · blockierend: nein · Status: **behoben** (`tests/integration/test_api_repository_registration.py::test_control_principal_cannot_register_local_repository`)
+- Reproduktion: control-scoped token, `POST /api/jobs {"repository": {"url": "file:///etc/..."}}` → registered; the runtime would clone anything the orchestrator user can read
+- Fix: local repositories (file://, absolute paths) need the admin scope (403 FORBIDDEN otherwise); already registered ones stay usable
+
+### BUG-065 – Repository URLs with embedded credentials were stored and emitted; same-tail remotes collided on the repository name
+- Phase: P39 · Komponente: api/jobs · Severity: P2 · blockierend: nein · Status: **behoben** (`tests/integration/test_api_repository_registration.py`)
+- Fix: remote URLs go through `gitops.urls.validate_remote_url` (422 for userinfo/transport helpers), distinct names for `a/demo.git` / `b/demo.git`
+
+### BUG-066 – Finished jobs' workspaces and their code index were never removed (no retention)
+- Phase: P39 · Komponente: runtime · Severity: P2 · blockierend: nein · Status: **behoben** (`tests/integration/test_runtime_maintenance.py`, `tests/integration/test_runtime_janitor_process.py`)
+- Fix: `hermclaw/runtime/maintenance.py` WorkspaceJanitor (policies.git.workspace_retention_hours, default 72): drops the workspace index first, then `GitEngine.cleanup`, emits `workspace.cleaned`; unpushed verified commits are kept; runs in `SchedulerProcess`
+
+### BUG-067 – CommandRequest.workspace accepted '/', '..', '.' (no contract-level pattern)
+- Phase: P39 · Komponente: contracts/worker · Severity: P2 · blockierend: nein · Status: **behoben** (`tests/unit/test_contracts_command_workspace.py`) – defense in depth next to the daemon/client checks; raw bad ids now get 422 VALIDATION_FAILED
+
+### BUG-068 – worker.sleep was never emitted by the idle sleep hook
+- Phase: P39 · Komponente: wol · Severity: P3 · blockierend: nein · Status: **behoben** (`tests/integration/test_wol_idle.py::test_sleep_success` + negative cases)
+
+### BUG-069 – RepoIntelligence kept per-workspace in-memory state after drop_workspace_index (unbounded growth)
+- Phase: P39 · Komponente: repo_intelligence · Severity: P3 · blockierend: nein · Status: **behoben** (`tests/integration/test_repo_intelligence_drop_state.py`)
+
+### BUG-070 – Janitor crash window left orphaned index rows (directory removed before the index was dropped)
+- Phase: P39 · Komponente: runtime/maintenance · Severity: P3 · blockierend: nein · Status: **behoben** (`tests/integration/test_runtime_maintenance.py::test_crash_right_after_the_directory_removal_leaves_no_orphaned_index`)
+
+### BUG-071 – IdleSleepPolicy (P10.9 idle sleep) is never instantiated by any process
+- Phase: P39 · Komponente: wol/runtime · Severity: P2 · blockierend: nein · Status: **offen** – needs the SSH runner of P26 (`hermclaw.sshtools`); wiring with the operations providers
+- Reproduktion: `grep -rn 'IdleSleepPolicy(' hermclaw worker` → only the class itself
+
+### BUG-072 – Scheduler fails a job permanently (PREPARE_CRASHED) on a transient DB OperationalError during preparation
+- Phase: P39 · Komponente: scheduler · Severity: P2 · blockierend: nein · Status: **offen** (Fix folgt)
+- Reproduktion: `tests/failure/test_runtime_failures.py -k db_connections_killed` fails ~2 of 3 runs: AdminShutdown inside `driver.prepare` is caught in `Scheduler._run_prepare` as PREPARE_CRASHED
+- Erwartet: killed DB connections are re-established and the job finishes (35.7)
+
+### BUG-073 – Test hygiene: test_api_skeleton pinned schema revision 0001; untyped helper in test_gitops_support
+- Phase: P39 · Komponente: tests · Severity: P4 · blockierend: nein · Status: **behoben** (assert against `hermclaw.persistence.migrate.head_revision()`; annotations)
 
 ## Template
 

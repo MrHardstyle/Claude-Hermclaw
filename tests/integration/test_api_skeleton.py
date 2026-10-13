@@ -2,11 +2,12 @@ import pytest
 from httpx import ASGITransport, AsyncClient
 
 from hermclaw.api.app import create_app
+from hermclaw.persistence.migrate import head_revision
 
 pytestmark = pytest.mark.integration
 
 
-async def test_health_and_version(engine):
+async def test_health_and_version(engine: object) -> None:
     app = create_app(lifespan_hooks=False)
     from hermclaw.api.state import AppState
 
@@ -16,4 +17,4 @@ async def test_health_and_version(engine):
         h = (await c.get("/api/health")).json()
     assert v["version"] and v["protocol_version"] == 1
     assert h["status"] == "ok" and h["database"]["pgvector"]
-    assert h["database"]["schema_revision"] == "0001"
+    assert h["database"]["schema_revision"] == head_revision(), "migrated to the release head"

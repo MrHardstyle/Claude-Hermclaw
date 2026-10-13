@@ -256,6 +256,11 @@ async def test_sleep_success(sessionmaker: async_sessionmaker[AsyncSession]) -> 
     status = await events(sessionmaker, w, EventType.STATUS)
     assert [e.payload["result"] for e in status] == ["requested", "slept"]
     assert all(e.payload["action"] == "idle_sleep" for e in status)
+    # the confirmed suspend has its own event type (worker.sleep) next to worker.state/status
+    slept = await events(sessionmaker, w, EventType.WORKER_SLEEP)
+    assert len(slept) == 1 and slept[0].source_type == "idle_sleep"
+    assert slept[0].payload["worker_id"] == w and slept[0].payload["reason"] == "idle_timeout" and slept[0].payload["exit_code"] == 0
+    assert slept[0].payload["idle_seconds"] > 3600 and slept[0].payload["idle_after_minutes"] == 30
     # a sleeping worker is not evaluated again
     again = await policy(sessionmaker, [cfg], runner).maybe_sleep(w)
     assert again.result == SleepResult.skipped and again.decision.reason == IdleReason.state_not_ready
@@ -272,6 +277,7 @@ async def test_definite_failure_restores_ready_and_redacts_output(sessionmaker: 
     assert await state_of(sessionmaker, w) == "ready"
     transitions = [(e.payload["from"], e.payload["to"], e.payload["reason"]) for e in await events(sessionmaker, w, EventType.WORKER_STATE)]
     assert ("sleeping", "ready", "idle_sleep_failed") in transitions
+    assert await events(sessionmaker, w, EventType.WORKER_SLEEP) == [], "a failed suspend is no worker.sleep"
     async with sessionmaker() as s:
         row = (await s.execute(select(WakeEvent).where(WakeEvent.worker_id == w, WakeEvent.status == "failed"))).scalar_one()
     assert "hunter2secret" not in str(row.details) and "REDACTED" in row.details["stderr"]
@@ -296,6 +302,7 @@ async def test_ambiguous_results_keep_sleeping(sessionmaker: async_sessionmaker[
     assert out.result == SleepResult.unknown and out.error
     assert await state_of(sessionmaker, w) == "sleeping"
     assert await sleep_rows(sessionmaker, w) == ["requested", "unknown"]
+    assert await events(sessionmaker, w, EventType.WORKER_SLEEP) == [], "an unconfirmed suspend is no worker.sleep"
 
 
 async def test_heartbeat_after_failed_suspend_self_corrects(sessionmaker: async_sessionmaker[AsyncSession]) -> None:
@@ -332,6 +339,7 @@ async def test_work_arriving_during_sleep_request_aborts(sessionmaker: async_ses
     assert runner.calls == []
     assert await state_of(sessionmaker, w) == "ready"
     assert await sleep_rows(sessionmaker, w) == ["requested", "aborted"]
+    assert await events(sessionmaker, w, EventType.WORKER_SLEEP) == []
 
 
 async def test_concurrent_policies_sleep_a_worker_once(sessionmaker: async_sessionmaker[AsyncSession]) -> None:
@@ -343,6 +351,7 @@ async def test_concurrent_policies_sleep_a_worker_once(sessionmaker: async_sessi
     outs = await asyncio.gather(p1.maybe_sleep(w), p2.maybe_sleep(w))
     assert sorted(o.result.value for o in outs) == ["skipped", "slept"]
     assert len(runner.calls) == 1
+    assert len(await events(sessionmaker, w, EventType.WORKER_SLEEP)) == 1
 
 
 async def test_run_once_and_run_forever(sessionmaker: async_sessionmaker[AsyncSession]) -> None:

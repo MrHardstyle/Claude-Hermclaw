@@ -19,9 +19,11 @@ from hermclaw.api.schemas import ArtifactOut, ControlOut, JobDetailOut, JobListO
 from hermclaw.contracts.common import JobStatus
 from hermclaw.contracts.events import EventType
 from hermclaw.contracts.job import JobCreate
-from hermclaw.core.errors import ConflictError, NotFoundError, ValidationFailed
+from hermclaw.core.errors import ConflictError, NotFoundError, PolicyViolation, ValidationFailed
 from hermclaw.core.settings import get_settings
 from hermclaw.events.store import append_event
+from hermclaw.gitops.errors import InvalidRemoteUrl
+from hermclaw.gitops.urls import validate_remote_url
 from hermclaw.persistence.db import get_sessionmaker
 from hermclaw.persistence.models import (
     Artifact,
@@ -77,7 +79,32 @@ def _slug_name(url: str) -> str:
     return re.sub(r"[^A-Za-z0-9._-]+", "-", tail)[:150] or f"repo-{uuid.uuid4().hex[:6]}"
 
 
-async def _resolve_repository(session: AsyncSession, body: JobCreate) -> Repository | None:
+_REGISTRABLE_URL = re.compile(r"^(ssh://|git@|https?://|file://|/)")
+
+
+def _is_local_repository_url(url: str) -> bool:
+    """``file://`` URLs and absolute paths address the orchestrator's own filesystem (admin only)."""
+    return url.startswith(("file://", "/"))
+
+
+async def _free_repository_name(session: AsyncSession, base: str) -> str:
+    """``base`` or ``base-<suffix>``: two remotes with the same tail (``a/demo.git``, ``b/demo.git``) must not
+    collide on the unique repository name."""
+    name = base
+    for _ in range(5):
+        if (await session.execute(select(Repository.id).where(Repository.name == name))).first() is None:
+            return name
+        name = f"{base[:140]}-{uuid.uuid4().hex[:6]}"
+    return name
+
+
+async def _resolve_repository(session: AsyncSession, body: JobCreate, principal: Principal) -> Repository | None:
+    """Registered repository by name/url, or register ``url`` on the fly.
+
+    Registering a local repository (``file://`` URL or absolute path) needs the ``admin`` scope: it lets the
+    runtime clone anything the orchestrator user can read. Already registered repositories can be used by every
+    ``control`` principal. Remote URLs go through the Git engine's URL validation (no ``transport::`` helpers,
+    no embedded credentials) before they are stored or emitted in an event."""
     if body.repository is None:
         return None
     ref = body.repository
@@ -88,15 +115,29 @@ async def _resolve_repository(session: AsyncSession, body: JobCreate) -> Reposit
         if repo is not None:
             return repo
     if ref.url:
-        repo = (await session.execute(select(Repository).where(Repository.url == ref.url))).scalar_one_or_none()
+        url = ref.url.strip()
+        repo = (await session.execute(select(Repository).where(Repository.url == url))).scalar_one_or_none()
         if repo is not None:
             return repo
-        if not re.match(r"^(ssh://|git@|https?://|file://)", ref.url):
-            raise ValidationFailed("repository url must be ssh://, git@, http(s):// or file://")
-        repo = Repository(name=ref.name or _slug_name(ref.url), url=ref.url, default_branch=ref.base_branch or "main")
+        if not _REGISTRABLE_URL.match(url):
+            raise ValidationFailed("repository url must be ssh://, git@, http(s)://, file:// or an absolute path")
+        if _is_local_repository_url(url) and not principal.has("admin"):
+            raise PolicyViolation("registering a local repository (file:// URL or path) requires the admin scope", code="FORBIDDEN")
+        try:
+            url = validate_remote_url(url)
+        except InvalidRemoteUrl as exc:
+            raise ValidationFailed(f"invalid repository url: {exc.message}") from exc
+        name = ref.name or await _free_repository_name(session, _slug_name(url))
+        repo = Repository(name=name, url=url, default_branch=ref.base_branch or "main")
         session.add(repo)
         await session.flush()
-        await append_event(session, "repository.registered", source_type="api", payload={"repository": repo.name, "url": ref.url})
+        await append_event(
+            session,
+            "repository.registered",
+            source_type="api",
+            source_id=principal.name,
+            payload={"repository": repo.name, "url": url, "local": _is_local_repository_url(url)},
+        )
         return repo
     return None
 
@@ -105,7 +146,7 @@ async def _resolve_repository(session: AsyncSession, body: JobCreate) -> Reposit
 async def create_job(
     body: JobCreate, principal: Principal = Depends(require("control")), session: AsyncSession = Depends(get_session)
 ) -> JobOut:
-    repo = await _resolve_repository(session, body)
+    repo = await _resolve_repository(session, body, principal)
     title = body.title or (body.prompt.strip().splitlines()[0][:120] if body.prompt.strip() else "Job")
     job = Job(
         title=title,

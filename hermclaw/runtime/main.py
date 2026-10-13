@@ -7,7 +7,9 @@ Start sequence:
 2. composition root (:func:`hermclaw.runtime.services.build_services`);
 3. workers from ``hosts.yaml`` are registered/refreshed; the offline monitor sweeps stale heartbeats;
 4. resource recovery: leases of a previous incarnation of *this* instance are released
-   (:meth:`ResourceManager.recover`), expired leases swept periodically (``run_maintenance``);
+   (:meth:`ResourceManager.recover`), expired leases swept periodically (``run_maintenance``); the disk monitor
+   and the workspace janitor (retention cleanup of finished jobs' workspaces, :mod:`hermclaw.runtime.maintenance`)
+   start;
 5. :meth:`Scheduler.run_forever` – startup recovery of in-flight steps/jobs (P34), then the dispatch loop.
 
 SIGTERM/SIGINT stop the loop gracefully: running coder loops are asked to checkpoint, the rest is recovered by the
@@ -23,19 +25,24 @@ import contextlib
 import dataclasses
 import signal
 from collections.abc import Sequence
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
-from hermclaw.core.config import HermclawConfig, get_config
+from hermclaw.core.config import HermclawConfig, WakeOnLanPolicy, get_config
 from hermclaw.core.errors import HermclawError
 from hermclaw.core.logging import configure_logging, get_logger
 from hermclaw.core.settings import Settings, get_settings
 from hermclaw.persistence.db import make_engine
+from hermclaw.runtime.maintenance import WorkspaceJanitor
 from hermclaw.runtime.services import RuntimeServices, ServiceOverrides, build_services
 from hermclaw.scheduler.scheduler import Scheduler, SchedulerSettings
 from hermclaw.workers.monitor import OfflineMonitor
+
+if TYPE_CHECKING:
+    from hermclaw.wol.idle import IdleSleepSettings
+    from hermclaw.wol.readiness import WakeSettings
 
 log = get_logger(__name__)
 
@@ -51,6 +58,24 @@ async def check_database(sm: async_sessionmaker[AsyncSession]) -> str | None:
     return str(rev) if rev else None
 
 
+def wake_settings_from_policy(policy: WakeOnLanPolicy) -> WakeSettings:
+    """``policies.wake_on_lan`` -> :class:`hermclaw.wol.readiness.WakeSettings` (the remaining fields keep their
+    code defaults; per-host timeouts/attempts come from ``hosts.yaml``)."""
+    from hermclaw.wol.readiness import WakeSettings
+
+    return WakeSettings(probe_interval_seconds=float(policy.probe_interval_seconds))
+
+
+def idle_settings_from_policy(policy: WakeOnLanPolicy) -> IdleSleepSettings:
+    """``policies.wake_on_lan`` -> :class:`hermclaw.wol.idle.IdleSleepSettings`."""
+    from hermclaw.wol.idle import IdleSleepSettings
+
+    return IdleSleepSettings(
+        idle_after_minutes=float(policy.idle_after_minutes),
+        command_timeout_seconds=float(policy.idle_command_timeout_seconds),
+    )
+
+
 def _build_wake(config: HermclawConfig, settings: Settings, sm: async_sessionmaker[AsyncSession]) -> Any:
     if not settings.wake_on_lan or not any(h.wake_on_lan and h.wake_on_lan.enabled for h in config.hosts.hosts):
         return None
@@ -58,7 +83,7 @@ def _build_wake(config: HermclawConfig, settings: Settings, sm: async_sessionmak
         from hermclaw.wol.readiness import WakeController
     except ImportError:  # pragma: no cover - partial installation
         return None
-    return WakeController(sm, config)
+    return WakeController(sm, config, settings=wake_settings_from_policy(config.policies.wake_on_lan))
 
 
 class SchedulerProcess:
@@ -84,6 +109,7 @@ class SchedulerProcess:
         self.sm = async_sessionmaker(self.engine, expire_on_commit=False, class_=AsyncSession)
         self.services: RuntimeServices | None = None
         self.scheduler: Scheduler | None = None
+        self.janitor: WorkspaceJanitor | None = None
         self._stop = asyncio.Event()
 
     def stop(self) -> None:
@@ -124,6 +150,10 @@ class SchedulerProcess:
         if services.disk is not None:
             await services.disk.check_once()  # admission state is known before the first tick
             services.disk.start()
+        janitor = self.janitor = WorkspaceJanitor(
+            self.sm, services.git, services.repo, policy=self.config.policies.git, source_id=services.holder_id
+        )
+        janitor.start()  # workspace retention (policies.git.workspace_retention_hours)
         maintenance = asyncio.create_task(services.resources.run_maintenance(self._stop), name="resource-maintenance")
         self.scheduler = Scheduler(
             self.sm,
@@ -157,6 +187,7 @@ class SchedulerProcess:
             await monitor.stop()
             if services.disk is not None:
                 await services.disk.stop()
+            await janitor.stop()
             await services.aclose()
             await self.engine.dispose()
             log.info("scheduler stopped", extra={"instance": services.holder_id})
@@ -189,4 +220,4 @@ def main(argv: Sequence[str] | None = None) -> int:  # pragma: no cover - proces
     return asyncio.run(run(argv))
 
 
-__all__ = ["SchedulerProcess", "check_database", "main", "run"]
+__all__ = ["SchedulerProcess", "check_database", "idle_settings_from_policy", "main", "run", "wake_settings_from_policy"]
