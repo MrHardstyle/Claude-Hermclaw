@@ -232,11 +232,17 @@ class RuntimeJobDriver:
     async def _planner_input(self, job: Job, ws: WorkspaceInfo | None, triage: dict[str, Any] | None) -> PlannerInput:
         inventory: dict[str, Any] = {}
         hits: list[ContextSnippet] = []
+        known: list[str] = []
         if ws is not None and self.repo_intel is not None and self.git is not None:
             handle = await self.git.handle(ws)
             inventory = await self.repo_intel.inventory_summary(handle)
             found = await self.repo_intel.context_for(handle, job.prompt, budget_chars=self.settings.context_budget_chars)
             hits = [ContextSnippet.from_hit(h) for h in found]
+            # the prompt-sized summary carries no file list: hint validation needs the complete one (BUG-042)
+            lister = getattr(self.repo_intel, "known_paths", None)
+            if callable(lister):
+                known = list(await lister(handle, limit=self.settings.max_known_paths))
+        known = known or _paths_from_inventory(inventory, self.settings.max_known_paths)
         cmd, framework, test_files = _test_hints(inventory)
         constraints: list[str] = []  # user constraints come from job_inputs inside the planner
         if triage and triage.get("needs_research"):
@@ -246,7 +252,7 @@ class RuntimeJobDriver:
             retrieved_context=hits,
             constraints=constraints,
             existing_tests=test_files,
-            known_paths=_paths_from_inventory(inventory, self.settings.max_known_paths),
+            known_paths=known,
             test_command=cmd,
             test_framework=framework,  # type: ignore[arg-type]
         )

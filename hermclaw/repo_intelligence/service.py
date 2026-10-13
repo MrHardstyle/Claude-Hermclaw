@@ -207,6 +207,11 @@ class RepoIntelligence:
         summary["index"] = await self._index_summary(target)
         return summary
 
+    async def known_paths(self, workspace: WorkspaceHandle, *, limit: int = 20_000) -> list[str]:
+        """Complete file list of the workspace (cached inventory) for planner hint validation – not for prompts."""
+        inv = await self.inventory(self.target_of(workspace))
+        return [f.path for f in inv.files[:limit]]
+
     async def search(self, workspace: WorkspaceHandle, query: str, *, k: int = 20) -> list[RepoHit]:
         target = self.target_of(workspace)
         out = await self.search_files(target, query, k=k)

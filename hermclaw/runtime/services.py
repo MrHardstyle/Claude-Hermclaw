@@ -288,8 +288,8 @@ def build_services(
     executor_factory: ExecutorFactory = ov.executor_factory or execution.executor
 
     async def executor_for(ws: WorkspaceHandle, step: StepContract | None) -> CommandExecutor:
-        if ov.executor_factory is not None and step is not None:
-            return await ov.executor_factory(ws, step)
+        if ov.executor_factory is not None:  # test seam: also for the step-less regression rerun
+            return await ov.executor_factory(ws, step)  # type: ignore[arg-type]
         return await execution.executor(ws, step)
 
     verifier = VerifierAdapter(sessionmaker, config, git.reader(), executor_for)

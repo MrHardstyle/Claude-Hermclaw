@@ -274,6 +274,12 @@ Noch keine.
 - Erwartet: no finding – the value is a path to the credential, not the credential
 - Tatsächlich: secret_assignment finding; likewise for "api_token_ref: cred:…" and documentation placeholders like "token=ghp_..."
 
+### BUG-042 – Planner rejected correct repo_hints as "invented": the driver took known paths from the prompt-sized inventory summary, which has no file list
+- Phase: P37 · Komponente: runtime driver / repo_intelligence · Severity: P1 · blockierend: ja (any job whose goal text does not lexically hit the files it names failed preparation) · Status: **behoben** (RepoIntelligence.known_paths + driver uses it; regression: tests/e2e/test_e2e_code_tasks.py::test_37_7_typescript_utility)
+- Reproduktion: TypeScript repo with src/strings.ts, job "Add a slugify(s) utility", Gemma plan with repo_hints ["src/strings.ts"]
+- Erwartet: hint accepted (file exists)
+- Tatsächlich: semantic repair "repo_hint 'src/strings.ts' does not exist in repository_inventory/retrieved_context", plan rejected; only files that retrieval happened to return were known
+
 ## Template
 
 ### BUG-XXX – Titel
