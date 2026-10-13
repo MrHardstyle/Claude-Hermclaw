@@ -286,6 +286,90 @@ Noch keine.
 - Erwartet: the repository is registered through RepositoryRegistry (URL validation: no userinfo, allowed schemes) with a unique name (collision → suffix), or a clear 409/422
 - Tatsächlich: _slug_name(url) is used as the unique name directly and the row is inserted without RepositoryRegistry checks
 
+### BUG-044 – Staged renames reported as unexplained changes (reader dropped the rename origin)
+- Phase: P39 · Komponente: scope · Severity: P1 · blockierend: nein · Status: **behoben** (Regressionstest: tests/integration/test_scope_rename_audit.py)
+- Reproduktion: git mv legacy/old_module.py src/app/feature/old_module.py; ScopeAuditor.audit_status(step, await WorkspaceGitReader(...).status(ws))
+- Erwartet: Rename judged by both paths: (legacy/old_module.py, delete) and (src/app/feature/old_module.py, create)
+- Tatsächlich: Before 74ef977: violation 'staged rename without a known origin'. The source fix was already in HEAD; only the real-git regression test was missing (added now).
+
+### BUG-045 – Escaped literal '[[]' in _glob_regex caused FutureWarning 'Possible nested set'
+- Phase: P39 · Komponente: scope · Severity: P2 · blockierend: nein · Status: **behoben** (Regressionstest: tests/unit/test_scope_guard.py::test_escaped_bracket_file_names_match_only_themselves)
+- Reproduktion: path_matches('routes/[id].tsx', glob_escape('routes/[id].tsx')) with -W error::FutureWarning, using the pre-review guard.py
+- Erwartet: Matches, no warning
+- Tatsächlich: FutureWarning (an error under -W error). Already fixed in HEAD; regression tests added.
+
+### BUG-046 – Odd path segments ('src//a.py', 'src/./a.py') were not canonicalised
+- Phase: P39 · Komponente: scope · Severity: P1 · blockierend: nein · Status: **behoben** (Regressionstest: tests/unit/test_scope_guard.py::test_odd_spelling_never_bypasses_a_forbidden_path (plus the related odd_spelling and normalise_path tests))
+- Reproduktion: ScopeGuard(forbidden_paths=['lib/secret.py']).decide('lib//secret.py', 'modify') with the pre-review contracts/scope.py
+- Erwartet: Judged as lib/secret.py, i.e. forbidden
+- Tatsächlich: Pre-review: not recognised as the forbidden path. The path collapse was already in HEAD; tests added.
+
+### BUG-047 – normalise_path('./') returned the absolute path '/', and ScopeGuard.decide('./') raised ValueError
+- Phase: P39 · Komponente: scope · Severity: P2 · blockierend: nein · Status: **behoben** (Regressionstest: tests/unit/test_scope_guard.py::test_normalise_path_rejects_invalid_paths, ::test_contract_rejects_root_and_nul_entries, ::test_invalid_paths_are_refused_not_raised)
+- Reproduktion: normalise_path('./'); ScopeContract(allowed_new_paths=['./']); ScopeGuard(c).decide('./', 'create')
+- Erwartet: ValueError from normalise_path; decide returns (False, reason)
+- Tatsächlich: Returned '/' (not idempotent). The contract stored '/'. decide raised ValueError from is_forbidden instead of refusing.
+
+### BUG-048 – normalise_path accepted NUL bytes
+- Phase: P39 · Komponente: scope · Severity: P3 · blockierend: nein · Status: **behoben** (Regressionstest: tests/unit/test_scope_guard.py::test_normalise_path_rejects_invalid_paths[src/a\x00.py])
+- Reproduktion: normalise_path('src/a\x00.py')
+- Erwartet: ValueError
+- Tatsächlich: Returned 'src/a\x00.py'
+
+### BUG-049 – Malformed glob classes raised re.error and crashed ScopeGuard
+- Phase: P39 · Komponente: scope · Severity: P2 · blockierend: nein · Status: **behoben** (Regressionstest: tests/unit/test_scope_guard.py::test_malformed_classes_in_a_contract_never_crash_the_guard, ::test_character_class_semantics)
+- Reproduktion: ScopeGuard(ScopeContract(target_paths=['a[]'])).decide('a[]', 'modify'); also path_matches(']', '[]]') and path_matches('a', '[z-a]')
+- Erwartet: A decision: a class that is never closed is literal, a leading ']' is a member, an inverted range is empty
+- Tatsächlich: re.error: unterminated character set / bad character range. re.error is not a ValueError, so the gitops first_match and review _safe_any_match guards do not catch it either.
+
+### BUG-050 – Glob negation '[!..]' was treated as a literal '!' (inverted semantics)
+- Phase: P39 · Komponente: scope · Severity: P2 · blockierend: nein · Status: **behoben** (Regressionstest: tests/unit/test_scope_guard.py::test_character_class_semantics[[!a]x-*])
+- Reproduktion: path_matches('bx', '[!a]x'); path_matches('ax', '[!a]x')
+- Erwartet: True / False (glob negation)
+- Tatsächlich: False / True
+
+### BUG-051 – Character classes could match '/' and cross a path segment
+- Phase: P39 · Komponente: scope · Severity: P2 · blockierend: nein · Status: **behoben** (Regressionstest: tests/unit/test_scope_guard.py::test_character_classes_never_cross_a_path_segment)
+- Reproduktion: path_matches('x/y', 'x[^a]y'), path_matches('x/y', 'x[/]y'), path_matches('x/y', 'x[+-0]y')
+- Erwartet: False (a class stays within one segment, as documented)
+- Tatsächlich: True
+
+### BUG-052 – Scope patterns were not canonicalised (policy globs with odd segments never matched)
+- Phase: P39 · Komponente: scope · Severity: P2 · blockierend: nein · Status: **behoben** (Regressionstest: tests/unit/test_scope_guard.py::test_patterns_are_compared_in_canonical_form_too)
+- Reproduktion: ScopeGuard(ScopeContract(target_paths=['**'], allowed_operations=['modify']), ScopePolicy(always_forbidden=['./vault//**'])).allowed('vault/k.txt', 'modify')
+- Erwartet: False (forbidden)
+- Tatsächlich: True. Only a leading './' was stripped from patterns, so a 'vault//**' pattern never matched.
+
+### BUG-053 – Creating an explicitly listed but glob-escaped target was refused
+- Phase: P39 · Komponente: scope · Severity: P3 · blockierend: nein · Status: **behoben** (Regressionstest: tests/unit/test_scope_guard.py::test_escaped_bracket_target_guards_modify_and_explicit_create)
+- Reproduktion: ScopeGuard(ScopeContract(target_paths=[glob_escape('routes/[id].tsx'), 'src/a.py'])).allowed('routes/[id].tsx', 'create')
+- Erwartet: True, the same as for the explicitly listed src/a.py
+- Tatsächlich: False, because the raw check 'p in target_paths' misses the escaped spelling
+
+### BUG-054 – Replanner left 'unavailable' scope rows of superseded steps open (24.6 invariant broken)
+- Phase: P39 · Komponente: scope · Severity: P2 · blockierend: nein · Status: **behoben** (Regressionstest: tests/integration/test_planner_replan_scope.py::test_replan_supersedes_unavailable_scope_versions)
+- Reproduktion: Superseded step with current scope v2 status 'unavailable'; Replanner.replan(...)
+- Erwartet: v2 marked superseded; at most one non-superseded scope row per step
+- Tatsächlich: v2 stayed 'unavailable'; only 'active' rows were updated
+
+### BUG-055 – mypy --strict errors in tests/unit/test_scope_guard.py (missing annotations / '-> None')
+- Phase: P39 · Komponente: scope · Severity: P3 · blockierend: nein · Status: **behoben** (Regressionstest: mypy run on the file)
+- Reproduktion: .venv/bin/mypy tests/unit/test_scope_guard.py
+- Erwartet: No issues
+- Tatsächlich: 2 errors [no-untyped-def]
+
+### BUG-056 – Stale comments in non-owned tests claim GitReader.status drops the rename origin
+- Phase: P39 · Komponente: scope · Severity: P3 · blockierend: nein · Status: **behoben** (Kommentare im Integrations-Commit korrigiert)
+- Reproduktion: tests/unit/test_scope_hardening_units.py:146 and tests/integration/test_scope_hardening.py:205
+- Erwartet: Comments describe the current reader, which fills orig_path
+- Tatsächlich: They say the origin is dropped. The tests still pass because they build their entries by hand.
+
+### BUG-057 – A file literally named with a backslash is audited under the slash path
+- Phase: P39 · Komponente: scope · Severity: P3 · blockierend: nein · Status: **offen** (nicht ausnutzbar: gitops-Staging verweigert Backslash-Pfade; Nacharbeit P39.7)
+- Reproduktion: A shell command creates the root-level file 'src\a.py'; git status reports '?? src\a.py'; audit_status with src/a.py in scope
+- Erwartet: Refused, or judged as its literal name
+- Tatsächlich: normalise_path turns '\' into '/', so the audit allows it as 'src/a.py'. gitops staging (normalise_repo_path) still refuses backslash paths, so it cannot be committed. Not changed, because backslash conversion is part of contract parsing.
+
 ## Template
 
 ### BUG-XXX – Titel

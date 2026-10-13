@@ -143,7 +143,7 @@ class _EntryWithOrigin:
 
 
 def test_rename_without_origin_is_unresolved() -> None:
-    # exactly what hermclaw.gitops.reader.GitReader.status produces for a staged rename (origin dropped)
+    # a hand-built status without the origin (WorkspaceGitReader.status fills orig_path; this pins the fail-closed fallback)
     entries = [GitStatusEntry("src/new.py", "R "), GitStatusEntry("src/copy.py", "C "), GitStatusEntry("a.py", " M")]
     assert derive_changes_from_status(entries) == [("src/new.py", "create"), ("src/copy.py", "create"), ("a.py", "modify")]
     assert unresolved_renames(entries) == ["src/new.py"]

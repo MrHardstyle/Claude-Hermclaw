@@ -2,11 +2,13 @@
 
 Matching semantics (shared by tools, verifier, git staging):
 - patterns are repository-relative POSIX globs; ``**`` matches any number of directories,
-  ``*`` / ``?`` / ``[..]`` match within one path segment; a pattern without glob characters matches the
-  exact path or (if it ends with ``/``) everything below that directory.
+  ``*`` / ``?`` / ``[..]`` match within one path segment (``[!..]`` / ``[^..]`` negate, ``[[]`` is a literal ``[``);
+  a pattern without glob characters matches the exact path or (if it ends with ``/``) everything below that directory.
+- paths and patterns are compared in canonical form (:func:`~hermclaw.contracts.scope.normalise_path`: ``'.'`` and
+  empty segments dropped), so ``src//a.py`` is judged exactly like ``src/a.py``; an invalid path is refused.
 - forbidden (policy ``always_forbidden`` + contract ``forbidden_paths``) always wins.
 - ``modify``/``delete`` require a match in ``target_paths``; ``create`` requires a match in
-  ``allowed_new_paths`` (or ``target_paths`` when the file is explicitly listed there).
+  ``allowed_new_paths`` (or ``target_paths`` when the file is explicitly listed there, also glob-escaped).
 - operations not in ``allowed_operations`` are refused.
 """
 
@@ -21,6 +23,42 @@ from hermclaw.core.config import ScopePolicy
 from hermclaw.core.errors import ScopeViolation
 
 Operation = Literal["create", "modify", "delete"]
+
+
+def _class_regex(pattern: str, start: int) -> tuple[str, int] | None:
+    """Regex for the glob character class opening at ``pattern[start] == '['`` and the index of its closing ``]``.
+
+    Glob semantics: ``[!..]`` / ``[^..]`` negate, a ``]`` right after the opening (or the negation mark) is a member,
+    ``a-z`` is a range (an inverted range is empty) and every other member is literal – ``[[]`` matches ``[``. A class
+    never matches ``/`` (it stays within one path segment). ``None`` when the class is not closed: the ``[`` is then a
+    literal character. Members are escaped, so the result always compiles and never warns (no nested sets).
+    """
+    i = start + 1
+    negate = i < len(pattern) and pattern[i] in "!^"
+    if negate:
+        i += 1
+    body_start = i
+    if i < len(pattern) and pattern[i] == "]":
+        i += 1
+    end = pattern.find("]", i)
+    if end == -1:
+        return None
+    body = pattern[body_start:end]
+    members: list[str] = []
+    k = 0
+    while k < len(body):
+        if k + 2 < len(body) and body[k + 1] == "-":
+            low, high = body[k], body[k + 2]
+            if low <= high:
+                members.append(f"{re.escape(low)}-{re.escape(high)}")
+            k += 3
+        else:
+            members.append(re.escape(body[k]))
+            k += 1
+    content = "".join(members)
+    if negate:
+        return f"[^/{content}]", end
+    return (f"(?!/)[{content}]" if content else "(?!)"), end
 
 
 @lru_cache(maxsize=4096)
@@ -42,13 +80,9 @@ def _glob_regex(pattern: str) -> re.Pattern[str]:
             out.append("[^/]*")
         elif c == "?":
             out.append("[^/]")
-        elif c == "[":
-            j = pattern.find("]", i + 1)
-            if j == -1:
-                out.append(re.escape(c))
-            else:
-                out.append("[" + pattern[i + 1 : j].replace("\\", "\\\\").replace("[", "\\[") + "]")
-                i = j
+        elif c == "[" and (cls := _class_regex(pattern, i)) is not None:
+            out.append(cls[0])
+            i = cls[1]
         else:
             out.append(re.escape(c))
         i += 1
@@ -56,12 +90,23 @@ def _glob_regex(pattern: str) -> re.Pattern[str]:
     return re.compile("".join(out))
 
 
+@lru_cache(maxsize=4096)
+def _canonical_pattern(pattern: str) -> str | None:
+    """A pattern in the canonical path form (``'src//*.py'`` -> ``'src/*.py'``); ``None`` if it can match no path."""
+    try:
+        return normalise_path(pattern)
+    except ValueError:  # absolute, '..', NUL or empty: no canonical repository path can match it
+        return None
+
+
 def path_matches(path: str, pattern: str) -> bool:
+    """Whether ``path`` matches the scope glob ``pattern``; both are compared in canonical form (``normalise_path``).
+
+    Raises :class:`ValueError` for an invalid ``path`` (absolute, ``..``, NUL, empty); an invalid pattern matches nothing.
+    """
     p = normalise_path(path)
-    pat = pattern.strip()
-    while pat.startswith("./"):
-        pat = pat[2:]
-    if not pat:
+    pat = _canonical_pattern(pattern)
+    if pat is None:
         return False
     if not any(ch in pat for ch in "*?[") and not pat.endswith("/"):
         return p == pat
@@ -70,6 +115,17 @@ def path_matches(path: str, pattern: str) -> bool:
 
 def any_match(path: str, patterns: list[str]) -> bool:
     return any(path_matches(path, pat) for pat in patterns)
+
+
+_ESCAPED_GLOB_CHAR_RE = re.compile(r"\[([\[*?])\]")
+
+
+def _lists_file(pattern: str, path: str) -> bool:
+    """Whether ``pattern`` explicitly lists the single file ``path`` (``'src/a.py'`` or glob-escaped ``'r/[[]id].ts'``)."""
+    pat = _canonical_pattern(pattern)
+    if pat is None or pat.endswith("/") or any(c in "*?[" for c in _ESCAPED_GLOB_CHAR_RE.sub("", pat)):
+        return False
+    return _ESCAPED_GLOB_CHAR_RE.sub(r"\1", pat) == path
 
 
 class ScopeGuard:
@@ -100,7 +156,7 @@ class ScopeGuard:
                 return True, "non-strict scope: allowed new path"
             return False, f"path '{p}' is not a target path of scope v{self.contract.version}"
         # create
-        if any_match(p, self.contract.allowed_new_paths) or p in self.contract.target_paths:
+        if any_match(p, self.contract.allowed_new_paths) or any(_lists_file(pat, p) for pat in self.contract.target_paths):
             return True, "allowed new path"
         return False, f"creating '{p}' is outside allowed_new_paths of scope v{self.contract.version}"
 

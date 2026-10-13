@@ -12,15 +12,17 @@ Operation = Literal["create", "modify", "delete"]
 
 
 def normalise_path(path: str) -> str:
+    """Canonical repository-relative POSIX form of a scope path or pattern (idempotent).
+
+    ``'.'`` and empty segments are dropped (``'src/./a.py'``, ``'src//a.py'``, ``'./src/a.py'`` -> ``'src/a.py'``) and a
+    trailing directory slash is kept. Absolute paths, ``'..'`` segments, NUL bytes and paths without any real segment
+    (``''``, ``'.'``, ``'./'``) raise :class:`ValueError`.
+    """
     q = path.strip().replace("\\", "/")
-    if q.startswith("/"):
-        raise ValueError(f"scope paths must be non-empty, repository-relative and without '..': {path!r}")
-    trailing = q.endswith("/") and q.strip("/") != ""
-    # canonical form: drop '.' and empty segments ('src/./a.py', 'src//a.py' -> 'src/a.py'); keep a directory slash
-    q = "/".join(seg for seg in q.split("/") if seg not in ("", ".")) + ("/" if trailing else "")
-    if not q or ".." in q.split("/"):
-        raise ValueError(f"scope paths must be non-empty, repository-relative and without '..': {path!r}")
-    return q
+    segments = [seg for seg in q.split("/") if seg not in ("", ".")]
+    if q.startswith("/") or "\x00" in q or not segments or ".." in segments:
+        raise ValueError(f"scope paths must be non-empty, repository-relative and without '..' or NUL bytes: {path!r}")
+    return "/".join(segments) + ("/" if q.endswith("/") else "")
 
 
 def normalise_paths(paths: list[str]) -> list[str]:

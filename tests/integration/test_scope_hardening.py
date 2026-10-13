@@ -202,7 +202,7 @@ async def test_delete_is_limited_to_designated_paths(sessionmaker: SM, repo: Pat
 
 async def test_rename_without_origin_fails_closed(sessionmaker: SM, repo: Path) -> None:
     step, _ = await _delete_scoped(sessionmaker, repo)
-    # a real staged rename of a forbidden file; hermclaw.gitops.reader.GitReader.status reports only the new path
+    # a real staged rename of a forbidden file, read with --no-renames (no origin available): must fail closed
     git(repo, "mv", ".env", "src/app/core_env.py")
     out = git(repo, "status", "--porcelain", "--no-renames", "--untracked-files=all")
     assert "D  .env" in out  # what actually happened: the forbidden .env was deleted

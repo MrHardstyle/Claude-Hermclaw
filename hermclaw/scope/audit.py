@@ -7,9 +7,11 @@ After (or during) an attempt the runtime checks every real change against the st
 contract, so no change can pass silently.
 
 :func:`derive_changes_from_status` maps ``git status --porcelain`` XY codes (``GitReader.status``) to
-create / modify / delete operations. A staged rename whose origin the status entry does not carry is reported by
-:func:`unresolved_renames`; :meth:`ScopeAuditor.audit_status` treats it as a violation (the deletion of the source
-cannot be audited – fail closed).
+create / modify / delete operations. A staged rename is judged by both of its paths: the deletion of the origin
+(``GitStatusEntry.orig_path``, filled by :meth:`hermclaw.gitops.reader.WorkspaceGitReader.status`) and the creation of
+the destination. A rename whose origin the status entry does not carry is reported by :func:`unresolved_renames`;
+:meth:`ScopeAuditor.audit_status` treats it as a violation (the deletion of the source cannot be audited – fail
+closed).
 
 A contract-level ``delete`` operation only covers the paths the scope version designates for deletion
 (:func:`~hermclaw.scope.engine.designated_deletes`): deleting any other target is a violation.
@@ -103,9 +105,8 @@ def derive_changes_from_status(entries: Iterable[GitStatusEntry]) -> list[tuple[
 
 
 def _rename_parts(entry: GitStatusEntry) -> tuple[str | None, str]:
-    orig = getattr(entry, "orig_path", None)  # forward compatible with producers that keep the origin
-    if isinstance(orig, str) and orig:
-        return orig, entry.path
+    if entry.orig_path:
+        return entry.orig_path, entry.path
     if " -> " in entry.path:
         old, new = entry.path.split(" -> ", 1)
         return old, new
@@ -280,7 +281,11 @@ class ScopeAuditor:
         attempt_id: uuid.UUID | None = None,
         phase: str = "attempt",
     ) -> ScopeAuditReport:
-        """Audit ``GitReader.status`` entries; renames with an unknown origin are violations (fail closed)."""
+        """Audit ``GitReader.status`` entries.
+
+        A staged rename needs both a permitted deletion of its origin and a permitted creation of its destination;
+        a rename with an unknown origin is a violation (fail closed).
+        """
         listed = list(entries)
         unknown = [
             (p, "staged rename without a known origin: the deletion of its source path cannot be audited")

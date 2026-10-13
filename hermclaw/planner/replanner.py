@@ -13,8 +13,9 @@
    ``rerun_reason`` is re-run (old row superseded, new row pending). All other old steps are superseded: in-flight
    or pending ones are cancelled through the step state machine, failed ones keep ``failed`` as history;
 5. (24.5) dependencies of new steps may reference kept completed steps – they are mapped to the existing rows;
-6. (24.6) new steps have no scope yet (the scope engine creates it); active scope contracts of superseded steps
-   are marked ``superseded``.
+6. (24.6) new steps have no scope yet (the scope engine creates it); every not yet superseded scope contract of a
+   superseded step (``active`` or ``unavailable``) is marked ``superseded`` – its evidence keeps the former status
+   and reason – so each step keeps at most one non-superseded scope row.
 
 ``jobs.replan_count`` is incremented and ``replan.created`` emitted in the same transaction. A concurrent change of
 the plan (other version, other completed set) aborts with ``PLAN_CHANGED`` instead of overwriting.
@@ -26,10 +27,11 @@ import json
 import uuid
 from collections.abc import Callable
 from dataclasses import dataclass, field
+from datetime import UTC, datetime
 from typing import Any
 
 from pydantic import ValidationError
-from sqlalchemy import update
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from hermclaw.contracts.common import StepStatus
@@ -429,12 +431,30 @@ class Replanner(PlannerBase):
 
             scopes_superseded = 0
             if superseded:
-                res = await session.execute(
-                    update(ScopeContractRow)
-                    .where(ScopeContractRow.step_id.in_([s.id for s in superseded]), ScopeContractRow.status == "active")
-                    .values(status="superseded", reason=reason_text)
-                )
-                scopes_superseded = int(res.rowcount or 0)  # type: ignore[attr-defined]
+                # 24.6: active *and* unavailable versions (anything not yet superseded); same lock order as the scope
+                # engine (step rows above, then their scope rows)
+                open_scopes = (
+                    await session.execute(
+                        select(ScopeContractRow)
+                        .where(ScopeContractRow.step_id.in_([s.id for s in superseded]), ScopeContractRow.status != "superseded")
+                        .order_by(ScopeContractRow.step_id, ScopeContractRow.version)
+                        .with_for_update()
+                    )
+                ).scalars()
+                at = datetime.now(UTC).isoformat()
+                for scope_row in open_scopes:
+                    scope_row.evidence = {
+                        **(scope_row.evidence or {}),
+                        "superseded": {
+                            "by_plan_version": new_version_no,
+                            "previous_status": scope_row.status,
+                            "previous_reason": scope_row.reason,
+                            "at": at,
+                        },
+                    }  # reassign: JSONB columns are not mutation-tracked
+                    scope_row.status = "superseded"
+                    scope_row.reason = reason_text
+                    scopes_superseded += 1
 
             version = await insert_version(
                 session,
