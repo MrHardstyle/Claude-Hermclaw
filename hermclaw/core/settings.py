@@ -32,6 +32,11 @@ class Settings(BaseSettings):
     worker_token_refs: dict[str, str] = Field(default_factory=dict)
     scheduler_poll_seconds: float = 1.0
     scheduler_concurrency: int = 4
+    scheduler_step_timeout_seconds: int = 4 * 3600
+    # where sandbox commands run: remote = execution worker .222 (production), local = in-process sandbox (dev/test),
+    # auto = remote in production, local otherwise
+    execution_mode: Literal["auto", "remote", "local"] = "auto"
+    wake_on_lan: bool = True  # wake sleeping workers before dispatch (hosts.yaml wake_on_lan)
 
     @property
     def workspaces_dir(self) -> Path:

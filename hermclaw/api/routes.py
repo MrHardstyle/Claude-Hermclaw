@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import importlib
 from typing import Any
 
 from fastapi import FastAPI
@@ -41,12 +40,10 @@ def register_routes(app: FastAPI) -> None:
     app.include_router(system.router)
     app.include_router(jobs.router)
     app.include_router(events.router)
-    # optional routers contributed by other packages (mounted when present)
-    for module, attr in (("hermclaw.workers.api", "router"),):
-        try:
-            mod = importlib.import_module(module)
-        except ImportError:
-            continue
-        router = getattr(mod, attr, None)
-        if router is not None:
-            app.include_router(router)
+    # orchestrator worker API (P07): signed heartbeats from .222/.224; the read/admin views need the admin scope
+    from fastapi import Depends
+
+    from hermclaw.api.auth import require
+    from hermclaw.workers.api import create_workers_router
+
+    app.include_router(create_workers_router(admin_dependencies=[Depends(require("admin"))]))

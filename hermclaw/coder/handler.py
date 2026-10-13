@@ -36,6 +36,7 @@ from hermclaw.core.redaction import DEFAULT_REDACTOR
 from hermclaw.events.store import append_event
 from hermclaw.models.protocols import ChatModel
 from hermclaw.persistence.models import Step, StepAttempt
+from hermclaw.research.findings import research_findings
 from hermclaw.runtime.transitions import emit_status
 from hermclaw.scheduler.handlers import StepOutcome, StepRunContext
 from hermclaw.tools.context import ScopeExpansionOutcome, ToolPermissions
@@ -283,6 +284,9 @@ class ImplementStepHandler:
                 )
             contract = decision.contract
         step = step_contract(row, contract)
+        findings = await research_findings(self.sm, ctx.step_id)
+        if findings:  # cited results of the research steps this step depends on (P12 → P17)
+            step = step.model_copy(update={"constraints": [*step.constraints, *findings]})
         try:
             capability = self.config.capabilities.get(row.capability)
         except ConfigError:

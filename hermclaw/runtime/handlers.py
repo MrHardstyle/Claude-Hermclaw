@@ -1,4 +1,5 @@
-"""Step handlers for verification-only and job-level review steps (plan kinds ``test``, ``verify``, ``review``).
+"""Step handlers for verification-only, job-level review and read-only repository steps (plan kinds ``test``,
+``verify``, ``review``, ``inventory``, ``discover``).
 
 ``test`` / ``verify`` – the deterministic verifier evaluates the step's acceptance evidence on the current workspace
                        state (HEAD baseline: earlier steps are committed). Failure → blocked with the failing checks
@@ -21,7 +22,7 @@ from hermclaw.coder.handler import CODE_STEP_KINDS, ModelLeaser, ReviewerPort, s
 from hermclaw.contracts.review import enforce_review_invariant
 from hermclaw.core.config import HermclawConfig
 from hermclaw.core.errors import ResourceUnavailable
-from hermclaw.core.interfaces import WorkspaceHandle
+from hermclaw.core.interfaces import RepoContextProvider, WorkspaceHandle
 from hermclaw.persistence.models import ScopeContractRow, Step
 from hermclaw.runtime.adapters import VerifierAdapter, merge_scopes
 from hermclaw.runtime.transitions import emit_status
@@ -155,3 +156,39 @@ class ReviewStepHandler:
             replan_reason="step_failed",
             replan_evidence={"findings": findings, "invariant_override": overridden, "verifier_passed": verification.report.passed},
         )
+
+
+class RepoInfoStepHandler:
+    """Plan kinds ``inventory`` (deterministic repository inventory) and ``discover`` (repository intelligence
+    retrieval for the step goal). Read-only: nothing is written to the workspace; the findings are the step result
+    (visible in the UI and in the planner's failure package)."""
+
+    kinds = frozenset({"inventory", "discover"})
+
+    def __init__(
+        self,
+        sessionmaker: async_sessionmaker[AsyncSession],
+        config: HermclawConfig,
+        *,
+        git: GitEngine,
+        repo: RepoContextProvider,
+        budget_chars: int = 16_000,
+        max_hits: int = 25,
+    ) -> None:
+        self.sm, self.config, self.git, self.repo = sessionmaker, config, git, repo
+        self.budget_chars, self.max_hits = budget_chars, max_hits
+
+    async def run(self, ctx: StepRunContext) -> StepOutcome:
+        async with self.sm() as s:
+            row = (await s.execute(select(Step).where(Step.id == ctx.step_id))).scalar_one()
+        handle = await _workspace(self.git, ctx.job_id, step_baseline=True)
+        if handle is None:
+            return StepOutcome("completed", summary="no repository attached – nothing to inspect", result={"repository": False})
+        if row.kind == "inventory":
+            summary = await self.repo.inventory_summary(handle)
+            return StepOutcome("completed", summary="Repository-Inventar erstellt", result={"inventory": summary})
+        hits = await self.repo.context_for(handle, row.goal, budget_chars=self.budget_chars)
+        files = [
+            {"path": h.path, "start_line": h.start_line, "end_line": h.end_line, "score": round(h.score, 4)} for h in hits[: self.max_hits]
+        ]
+        return StepOutcome("completed", summary=f"{len(files)} relevante Stellen gefunden", result={"hits": files})
