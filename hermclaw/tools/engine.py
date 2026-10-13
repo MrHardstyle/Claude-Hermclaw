@@ -19,6 +19,7 @@ from __future__ import annotations
 
 import asyncio
 import functools
+import hashlib
 import json
 import shlex
 import stat
@@ -27,6 +28,7 @@ import uuid
 from collections.abc import Awaitable, Callable, Mapping
 from dataclasses import dataclass
 from datetime import UTC, datetime
+from pathlib import Path
 from typing import Any
 
 from pydantic import BaseModel
@@ -157,6 +159,7 @@ class ToolEngine:
         max_read_bytes: int = MAX_READ_BYTES,
         ops: OpsToolProvider | None = None,
         capability: str | None = None,
+        artifacts_dir: Path | None = None,
     ) -> None:
         self.policies = policies
         self.workspace = workspace
@@ -172,6 +175,8 @@ class ToolEngine:
         self.max_read_bytes = max_read_bytes
         self.ops = ops
         self.capability = capability
+        self.artifacts_dir = artifacts_dir  # ops tool outputs are stored as ``ops_output`` artifacts (acceptance evidence)
+        self._sm = sessionmaker
         self.output_limit = max(500, policies.coder.tool_output_chars)
         self.fs = WorkspaceFS(workspace.path, read_forbidden=policies.scope.always_forbidden)
         self.lgit = LocalGit(self.fs.root)
@@ -1025,6 +1030,10 @@ class ToolEngine:
         data = dict(res.data)
         if audit.violations:
             data["violations"] = [v.to_dict() for v in audit.violations[:50]]
+        elif res.ok:
+            artifact = await self._record_ops_output(tool, res, ctx)
+            if artifact is not None:
+                data["artifact"] = artifact
         return ToolResult(
             tool=tool,
             ok=res.ok and not audit.violations,
@@ -1033,6 +1042,45 @@ class ToolEngine:
             mutated_paths=sorted({c.path for c in audit.allowed}),
             data=data,
         )
+
+    async def _record_ops_output(self, tool: ToolName, res: OpsResult, ctx: CallContext) -> str | None:
+        """Successful operations tool output → artifact ``ops_output`` / ``<tool>-t<turn>.txt`` of the step (redacted).
+
+        Remote steps (``ssh``/``deploy``) change nothing in the workspace; their machine-checkable acceptance is this
+        recorded evidence (``{"type": "artifact", "kind": "ops_output", "name_glob": "ssh_service_status*"}``)."""
+        if self.artifacts_dir is None or ctx.job_id is None:
+            return None
+        from hermclaw.persistence.models import Artifact  # local: keeps the tool engine importable without the ORM
+
+        body = self.redactor.text(res.output).encode("utf-8", errors="replace")
+        name = f"{tool.value}-t{ctx.turn}.txt"
+        target = Path(self.artifacts_dir) / str(ctx.job_id) / str(ctx.step_id or "job") / "ops" / name
+
+        def _write() -> None:
+            target.parent.mkdir(parents=True, exist_ok=True)
+            target.write_bytes(body)
+
+        try:
+            await asyncio.to_thread(_write)
+            async with self._sm() as s:
+                s.add(
+                    Artifact(
+                        job_id=ctx.job_id,
+                        step_id=ctx.step_id,
+                        kind="ops_output",
+                        name=name,
+                        path=str(target),
+                        media_type="text/plain",
+                        size_bytes=len(body),
+                        sha256=hashlib.sha256(body).hexdigest(),
+                        metadata_={"tool": tool.value, "capability": self.capability, "turn": ctx.turn, "attempt_id": str(ctx.attempt_id)},
+                    )
+                )
+                await s.commit()
+        except Exception as exc:  # evidence recording must not turn a successful remote call into a failure
+            log.warning("ops output artifact not recorded", extra={"tool": tool.value, "error_type": type(exc).__name__})
+            return None
+        return name
 
     async def _run_command(self, args: RunCommandArgs, ctx: CallContext, events: list[PendingEvent]) -> ToolResult:
         run = await self._sandbox_run(

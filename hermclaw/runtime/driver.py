@@ -42,6 +42,7 @@ if TYPE_CHECKING:
     from hermclaw.gitops.engine import GitEngine
     from hermclaw.gitops.types import WorkspaceInfo
     from hermclaw.planner import Planner, Replanner
+    from hermclaw.runtime.scratch import ScratchWorkspaces
 
 log = get_logger(__name__)
 
@@ -143,8 +144,10 @@ class RuntimeJobDriver:
         chat: ChatModel | None = None,
         regression: RegressionCheck | None = None,
         settings: DriverSettings | None = None,
+        scratch: ScratchWorkspaces | None = None,
     ) -> None:
         self.sm = sessionmaker
+        self.scratch = scratch  # R-026: finalize pushes a repository-less job's scratch branch into its local scratch repo
         self.config = config
         self.planner = planner
         self.replanner = replanner
@@ -295,6 +298,11 @@ class RuntimeJobDriver:
         notes: list[str] = []
         extra: dict[str, Any] = {"triage": (job.metadata_ or {}).get("triage"), "notes": notes}
         ws = await self._workspace(job)
+        scratch = ws is None and self.scratch is not None and job.repository_id is None
+        if scratch and self.scratch is not None:
+            ws = await self.scratch.existing(job_id)
+            if ws is not None:
+                notes.append(f"Ergebnisse im lokalen Scratch-Repository {ws.repository_name} (Job ohne Repository)")
         result = JobPhaseResult(ok=True)
         if ws is not None and self.git is not None:
             try:
@@ -315,7 +323,7 @@ class RuntimeJobDriver:
                     if await self.git.changed_files(ws) or (await self._has_commits(ws)):
                         push = await self.git.push_job_branch(
                             ws,
-                            create_merge_request=self.settings.create_merge_request,
+                            create_merge_request=False if scratch else self.settings.create_merge_request,
                             title=job.title,
                             description=f"Hermclaw job {job.id}",
                         )

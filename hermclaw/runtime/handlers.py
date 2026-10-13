@@ -18,7 +18,7 @@ from typing import TYPE_CHECKING, Any
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
-from hermclaw.coder.handler import CODE_STEP_KINDS, ModelLeaser, ReviewerPort, step_contract
+from hermclaw.coder.handler import TOOL_STEP_KINDS, ModelLeaser, ReviewerPort, step_contract
 from hermclaw.contracts.review import enforce_review_invariant
 from hermclaw.core.config import HermclawConfig
 from hermclaw.core.errors import ResourceUnavailable
@@ -31,6 +31,7 @@ from hermclaw.scheduler.handlers import StepOutcome, StepRunContext
 if TYPE_CHECKING:
     from hermclaw.contracts.scope import ScopeContract
     from hermclaw.gitops.engine import GitEngine
+    from hermclaw.runtime.scratch import ScratchWorkspaces
 
 
 async def _workspace(git: GitEngine, job_id: uuid.UUID, *, step_baseline: bool) -> WorkspaceHandle | None:
@@ -50,14 +51,22 @@ class VerifyStepHandler:
     kinds = frozenset({"test", "verify"})
 
     def __init__(
-        self, sessionmaker: async_sessionmaker[AsyncSession], config: HermclawConfig, *, git: GitEngine, verifier: VerifierAdapter
+        self,
+        sessionmaker: async_sessionmaker[AsyncSession],
+        config: HermclawConfig,
+        *,
+        git: GitEngine,
+        verifier: VerifierAdapter,
+        scratch: ScratchWorkspaces | None = None,
     ) -> None:
-        self.sm, self.config, self.git, self.verifier = sessionmaker, config, git, verifier
+        self.sm, self.config, self.git, self.verifier, self.scratch = sessionmaker, config, git, verifier, scratch
 
     async def run(self, ctx: StepRunContext) -> StepOutcome:
         async with self.sm() as s:
             row = (await s.execute(select(Step).where(Step.id == ctx.step_id))).scalar_one()
         handle = await _workspace(self.git, ctx.job_id, step_baseline=True)
+        if handle is None and self.scratch is not None and await self.scratch.ensure(ctx.job_id) is not None:
+            handle = await _workspace(self.git, ctx.job_id, step_baseline=True)  # repository-less job (R-026)
         if handle is None:
             return StepOutcome(
                 "blocked", error_code="NO_WORKSPACE", error_message="job has no active workspace", replan_reason="missing_dependency"
@@ -109,7 +118,7 @@ class ReviewStepHandler:
                     await s.execute(
                         select(ScopeContractRow)
                         .join(Step, Step.id == ScopeContractRow.step_id)
-                        .where(ScopeContractRow.job_id == job_id, ScopeContractRow.status == "active", Step.kind.in_(list(CODE_STEP_KINDS)))
+                        .where(ScopeContractRow.job_id == job_id, ScopeContractRow.status == "active", Step.kind.in_(list(TOOL_STEP_KINDS)))
                     )
                 )
                 .scalars()

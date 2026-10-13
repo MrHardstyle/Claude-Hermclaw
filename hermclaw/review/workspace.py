@@ -18,17 +18,18 @@ import asyncio
 import re
 import uuid
 from collections.abc import Sequence
-from typing import Literal
+from typing import Any, Literal
 
 from sqlalchemy import select
 
 from hermclaw.contracts.review import ReviewContract
 from hermclaw.contracts.step import StepContract
+from hermclaw.contracts.tools import OPS_TOOLS
 from hermclaw.contracts.verification import VerificationReport
 from hermclaw.core.errors import HermclawError
 from hermclaw.core.interfaces import GitReader, RepoContextProvider, RepoHit, WorkspaceHandle
 from hermclaw.core.logging import get_logger
-from hermclaw.persistence.models import CommandRun, Job
+from hermclaw.persistence.models import CommandRun, Job, ToolCallRow
 from hermclaw.review.reviewer import HeavyReviewer
 from hermclaw.review.text import clip, one_line, redact
 from hermclaw.review.types import REVIEW_CONTEXT_ERROR, CodeSnippet, ReviewInput, ReviewOutcome
@@ -154,17 +155,33 @@ class WorkspaceReviewer:
         async with self.reviewer.sessionmaker() as session:
             rows = (
                 await session.execute(
-                    select(CommandRun.command, CommandRun.exit_code, CommandRun.timed_out, CommandRun.target)
+                    select(CommandRun.command, CommandRun.exit_code, CommandRun.timed_out, CommandRun.target, CommandRun.created_at)
                     .where(cond)
                     .order_by(CommandRun.created_at.desc())
                     .limit(limit)
                 )
             ).all()
-        out: list[str] = []
-        for command, exit_code, timed_out, target in reversed(rows):
+        out: list[tuple[Any, str]] = []
+        for command, exit_code, timed_out, target, created in rows:
             status = "timeout" if timed_out else f"exit {exit_code if exit_code is not None else '?'}"
-            out.append(f"[{status}] {target}: {clip(one_line(redact(command)), 600)}")
-        return out
+            out.append((created, f"[{status}] {target}: {clip(one_line(redact(command)), 600)}"))
+        # operations tools (SSH/DB/container) are the executed-command evidence of remote steps (ssh/deploy)
+        tcond = ToolCallRow.attempt_id == attempt_id if attempt_id is not None else ToolCallRow.step_id == step_id
+        async with self.reviewer.sessionmaker() as session:
+            ops = (
+                await session.execute(
+                    select(ToolCallRow.tool, ToolCallRow.arguments, ToolCallRow.status, ToolCallRow.result_summary, ToolCallRow.started_at)
+                    .where(tcond, ToolCallRow.tool.in_([t.value for t in OPS_TOOLS]), ToolCallRow.status != "running")
+                    .order_by(ToolCallRow.started_at.desc())
+                    .limit(limit)
+                )
+            ).all()
+        for tool, arguments, status, summary, started in ops:
+            args = " ".join(f"{k}={v}" for k, v in sorted((arguments or {}).items()) if v is not None)
+            result = f" → {clip(one_line(redact(summary)), 300)}" if summary else ""
+            out.append((started, f"[{status}] ops {tool}: {clip(one_line(redact(args)), 400)}{result}"))
+        out.sort(key=lambda item: item[0])
+        return [text for _, text in out[-limit:]]
 
     async def _snippets(self, step: StepContract, workspace: WorkspaceHandle, changed: Sequence[str]) -> list[CodeSnippet]:
         if self.repo is None:

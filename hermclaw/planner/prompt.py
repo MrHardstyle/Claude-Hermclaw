@@ -390,6 +390,7 @@ def _evidence_examples() -> str:
             '  {"type":"schema","path":"config/app.yaml","format":"json|yaml|toml"}',
             '  {"type":"security","secret_scan":true,"conflict_markers":true}',
             '  {"type":"artifact","kind":"image|video|report|...","name_glob":"*.png"}',
+            '  {"type":"artifact","kind":"ops_output","name_glob":"ssh_service_status*"}  (output of an operations tool call)',
         ]
     )
 
@@ -412,6 +413,11 @@ def _base_rules(kind_capability: dict[str, str], capability_names: Sequence[str]
         "Use ONLY paths and symbols that appear in repository_inventory, retrieved_context or existing_tests. "
         "Never invent paths and never use absolute paths or '..'. Files a step creates go into allowed_new_paths "
         "(repository-relative). Host paths of remote systems belong in goal/constraints, not in repo_hints.",
+        "Steps of kind ssh or deploy act on registered remote hosts only through the runtime operations tools; they "
+        "change no repository files. The runtime stores the output of every successful operations tool call as an "
+        "artifact of kind ops_output named <tool>-t<turn>.txt (e.g. ssh_read-t1.txt); use that artifact evidence as "
+        "their acceptance. A job without a repository runs in a runtime scratch workspace: files it writes "
+        "(reports) go into allowed_new_paths like in any repository.",
         "If information is missing and must be researched first, add an entry to research_needed "
         "(question + reason); the runtime schedules research before the dependent work. A research step "
         "(kind research) must be a dependency of the steps that need its result.",

@@ -54,12 +54,14 @@ from hermclaw.runtime.handlers import RepoInfoStepHandler, ReviewStepHandler, Ve
 from hermclaw.runtime.health import DiskMonitor
 from hermclaw.runtime.images import ImageDefaultingExecutor, SandboxImageSelector
 from hermclaw.runtime.research_step import ResearchRunner, ResearchStepHandler
+from hermclaw.runtime.scratch import ScratchWorkspaces
 from hermclaw.scheduler.handlers import StepHandler, StepRunContext
 from hermclaw.scope.audit import ScopeAuditor
 from hermclaw.scope.engine import ScopeEngine
 from hermclaw.scope.expansion import ScopeExpansionHandler
 from hermclaw.stagnation.monitor import make_stagnation_factory
 from hermclaw.tools.executors import LocalSandboxExecutor
+from hermclaw.tools.ops import OpsToolProvider
 from hermclaw.tools.remote import RemoteSandboxExecutor
 from hermclaw.workers.auth import RefTokenStore, TokenStore
 from hermclaw.workers.client import ExecutionWorkerClient, MediaWorkerClient, WorkerClient
@@ -100,6 +102,7 @@ class ServiceOverrides:
     media_settings: MediaSettings | None = None
     lease_keeper_interval: float | None = None
     worker_client_kwargs: dict[str, Any] | None = None  # e.g. an ASGI transport for in-process worker daemons
+    ops: OpsToolProvider | None = None  # operations tools provider (SSH/DB/container, P26–P28)
 
 
 # ----------------------------------------------------------------------------------------------- worker pools
@@ -325,6 +328,9 @@ def build_services(
     async def workspace_for(ctx: StepRunContext) -> WorkspaceHandle | None:
         return await _workspace(git, ctx.job_id, step_baseline=True)
 
+    scratch = ScratchWorkspaces(sessionmaker, git, Path(settings.data_dir) / "scratch")  # repository-less jobs (R-026)
+    artifacts = artifacts_dir or Path(settings.artifacts_dir)
+
     deps = ImplementDeps(
         git=git,
         scope_engine=ScopeEngine(sessionmaker, config, repo),
@@ -341,6 +347,9 @@ def build_services(
         ),
         coder_settings=ov.coder_settings or CoderSettings(),
         resources=resources,
+        scratch=scratch,
+        ops=ov.ops,
+        artifacts_dir=artifacts,
     )
     if ov.lease_keeper_interval is not None:
         deps = dataclasses.replace(deps, lease_keeper_interval=ov.lease_keeper_interval)
@@ -350,10 +359,9 @@ def build_services(
             return await ov.media_client_factory()
         return await media_workers.client(MEDIA_CAPABILITIES)
 
-    artifacts = artifacts_dir or Path(settings.artifacts_dir)
     handlers: list[StepHandler] = [
         ImplementStepHandler(sessionmaker, config, deps),
-        VerifyStepHandler(sessionmaker, config, git=git, verifier=verifier),
+        VerifyStepHandler(sessionmaker, config, git=git, verifier=verifier, scratch=scratch),
         ReviewStepHandler(sessionmaker, config, git=git, verifier=verifier, reviewer=reviewer, resources=resources),
         RepoInfoStepHandler(sessionmaker, config, git=git, repo=repo),
         MediaStepHandler(
@@ -380,6 +388,7 @@ def build_services(
         chat=chat,
         regression=verifier,
         settings=ov.driver_settings or DriverSettings(artifacts_dir=artifacts),
+        scratch=scratch,
     )
     disk = DiskMonitor(
         sessionmaker,

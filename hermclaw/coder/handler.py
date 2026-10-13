@@ -15,6 +15,7 @@ import dataclasses
 import uuid
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, field
+from pathlib import Path
 from typing import TYPE_CHECKING, Any, Protocol
 
 from sqlalchemy import select, update
@@ -45,6 +46,7 @@ from hermclaw.tools.ops import OpsToolProvider
 
 if TYPE_CHECKING:
     from hermclaw.gitops.engine import GitEngine
+    from hermclaw.runtime.scratch import ScratchWorkspaces
     from hermclaw.scope.audit import ScopeAuditor
     from hermclaw.scope.engine import ScopeEngine
     from hermclaw.scope.expansion import ScopeExpansionHandler
@@ -52,6 +54,10 @@ if TYPE_CHECKING:
 log = get_logger(__name__)
 
 CODE_STEP_KINDS = frozenset({StepKind.implement.value, StepKind.documentation.value})
+#: operations steps (P26–P28): the same coder loop with the capability's operations tools (SSH/DB/container) and the
+#: scope engine's rule for the kind (``ssh``/``deploy`` read-only deny-all-write, ``database``/``docker`` scoped files)
+OPS_STEP_KINDS = frozenset({StepKind.ssh.value, StepKind.database.value, StepKind.docker.value, StepKind.deploy.value})
+TOOL_STEP_KINDS = CODE_STEP_KINDS | OPS_STEP_KINDS
 _BLOCK_REASONS = {
     "scope_unavailable": "scope_unavailable",
     "missing_dependency": "missing_dependency",
@@ -123,6 +129,8 @@ class ImplementDeps:
     lease_ttl_seconds: float = 600.0
     lease_keeper_interval: float | None = None  # None: resource manager default (heartbeat-derived)
     ops: OpsToolProvider | None = None  # P26–P28 operations tools (SSH/DB/container), gated by step capability
+    scratch: ScratchWorkspaces | None = None  # R-026: scratch workspace for jobs without a repository
+    artifacts_dir: Path | None = None  # ops tool outputs are stored as ``ops_output`` step artifacts
 
 
 # ----------------------------------------------------------------------------- helpers
@@ -198,7 +206,7 @@ class _Callbacks:
 
 # ----------------------------------------------------------------------------- handler
 class ImplementStepHandler:
-    kinds = CODE_STEP_KINDS
+    kinds = TOOL_STEP_KINDS
 
     def __init__(self, sessionmaker: async_sessionmaker[AsyncSession], config: HermclawConfig, deps: ImplementDeps) -> None:
         self.sm = sessionmaker
@@ -262,6 +270,10 @@ class ImplementStepHandler:
     async def run(self, ctx: StepRunContext) -> StepOutcome:
         row = await self._load(ctx.step_id)
         found = await self._workspace(ctx.job_id)
+        if found is None and self.deps.scratch is not None:
+            scratch = await self.deps.scratch.ensure(ctx.job_id)  # None for jobs with a repository (no workspace yet)
+            if scratch is not None:
+                found = scratch, await self.deps.git.handle(scratch)
         if found is None:
             return StepOutcome(
                 "blocked", error_code="NO_WORKSPACE", error_message="job has no active workspace", replan_reason="missing_dependency"
@@ -307,6 +319,7 @@ class ImplementStepHandler:
             permissions=ToolPermissions.for_step(kind=row.kind, network=row.network, turn_budget=row.turn_budget, capability=capability),
             ops=self.deps.ops,
             capability=row.capability,
+            artifacts_dir=self.deps.artifacts_dir,
         )
         builder = ContextBuilder(self.deps.repo, self.deps.git.reader(), ContextBuilderConfig.from_config(self.config))
         settings = CoderSettings(
