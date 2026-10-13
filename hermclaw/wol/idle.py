@@ -12,7 +12,8 @@ A worker host is put to sleep when *all* of the following hold:
   ``idle_after_minutes`` old.
 
 Execution: under the worker row lock the state becomes ``sleeping`` (the scheduler never selects a sleeping
-worker), the active-work check is repeated, then the command runs through the injected
+worker), the active-work check is repeated under the row lock (abort if work appeared, the worker reports
+active work or a heartbeat/wake moved it out of ``sleeping``), then the command runs through the injected
 :class:`RemoteCommandRunner` (the SSH admin tool of P26 in production). Exit code 0 keeps ``sleeping``; a
 definite failure restores ``ready``; an ambiguous result (timeout, transport error, ssh exit 255 – the
 connection often drops when the host suspends) keeps ``sleeping`` – a host that is still awake corrects
@@ -321,6 +322,28 @@ class IdleSleepPolicy:
             payload={"text": text[:500], "action": "idle_sleep", **details},
         )
 
+    async def _recheck(self, s: AsyncSession, worker_id: str) -> dict[str, Any] | None:
+        """Second look under the worker row lock once ``sleeping`` is committed. ``None`` = still idle, else
+        the abort details (``why`` + counts): work appeared, the worker reports active work, or a heartbeat /
+        wake moved it out of ``sleeping``."""
+        stmt = select(Worker).where(Worker.id == worker_id).with_for_update().execution_options(populate_existing=True)
+        row = (await s.execute(stmt)).scalar_one_or_none()
+        steps, attempts, leases, requests = await self._active_counts(s, worker_id, _aware(self._now()))
+        state_now = row.state if row is not None else None
+        reports_work = row is not None and bool(row.active_job_id or row.active_step_id)
+        work = bool(reports_work or steps or attempts or leases or requests)
+        if state_now == WorkerState.sleeping.value and not work:
+            return None
+        return {
+            "why": "new work arrived" if work else f"worker is now {state_now}",
+            "active_steps": steps,
+            "active_attempts": attempts,
+            "active_leases": leases,
+            "pending_requests": requests,
+            "state_now": state_now,
+            "worker_reports_active_work": reports_work,
+        }
+
     async def maybe_sleep(self, worker_id: str) -> IdleSleepOutcome:
         """Evaluate and, if idle, put the worker to sleep. Never sleeps a worker with active work."""
         host_cmd = ""
@@ -335,15 +358,16 @@ class IdleSleepPolicy:
             await self._record(s, decision, "requested", f"Worker {worker_id}: idle for {idle_min} min, going to sleep")
             await s.commit()
 
-        # dispatch may have raced the decision: re-check after the sleeping state is visible to the scheduler
+        # dispatch or a heartbeat may have raced the decision: re-check after the sleeping state is visible
+        # to the scheduler
         async with self._sm() as s:
-            steps, attempts, leases, requests = await self._active_counts(s, worker_id, _aware(self._now()))
-            if steps or attempts or leases or requests:
+            abort = await self._recheck(s, worker_id)
+            if abort is not None:
                 await force_worker_state(
                     s, worker_id, WorkerState.ready, reason="idle_sleep_aborted", only_from={WorkerState.sleeping}, source_type=SOURCE_TYPE
                 )
-                counts = {"active_steps": steps, "active_attempts": attempts, "active_leases": leases, "pending_requests": requests}
-                await self._record(s, decision, SleepResult.aborted, f"Worker {worker_id}: sleep aborted, new work arrived", extra=counts)
+                why = abort.pop("why")
+                await self._record(s, decision, SleepResult.aborted, f"Worker {worker_id}: sleep aborted, {why}", extra=abort)
                 await s.commit()
                 return IdleSleepOutcome(decision, SleepResult.aborted)
             await s.commit()

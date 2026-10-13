@@ -18,7 +18,7 @@ import os
 import pytest
 
 from hermclaw.core.config import load_config
-from hermclaw.wol import Probes, WakeController, send_magic_packet
+from hermclaw.wol import IssueSeverity, Probes, WakeController, assert_wake_config, send_magic_packet
 from hermclaw.wol.probes import build_http_url
 
 pytestmark = [pytest.mark.live, pytest.mark.integration]
@@ -34,6 +34,8 @@ def _worker_id() -> str:
 async def test_live_magic_packet_and_probes() -> None:
     cfg = load_config()
     host = cfg.hosts.by_id(_worker_id())
+    issues = assert_wake_config(cfg)  # 10.1 on the production hosts.yaml: no errors (raises otherwise)
+    assert all(i.severity == IssueSeverity.warning for i in issues)
     wol = host.wake_on_lan
     assert wol.enabled and wol.mac, "host has no Wake-on-LAN configuration"
     assert await send_magic_packet(wol.mac, wol.broadcast, wol.port) == 102

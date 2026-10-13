@@ -7,17 +7,23 @@ Stages (each recorded as a ``wake_events`` row and a ``worker.wake.stage`` event
 * ``detect``       – registry row state + a quick TCP probe of the worker API port. A reachable host skips
   ``wol_send`` and ``ping`` (recorded as ``skipped``).
 * ``wol_send``     – magic packet to the host's broadcast address; failed sends are retried, all sends
-  (including the re-sends during ``ping``) are bounded by ``wake_on_lan.max_attempts``. ``worker.wake.sent``
-  per packet; the registry state becomes ``waking``.
+  (including the re-sends during ``ping``) are bounded by ``wake_on_lan.max_attempts`` and the overall
+  deadline. ``worker.wake.sent`` per packet; the registry state becomes ``waking`` unless the row still
+  carries a live heartbeat state (``starting``/``ready``/``busy``/``draining``).
 * ``ping``         – ICMP (``ping`` binary) or TCP fallback to the SSH port, within ``ping_timeout_seconds``.
 * ``ssh``          – SSH identification banner on the configured SSH port.
 * ``worker_api``   – ``GET <worker_api>/health`` → 200 (and ``status`` ``ok``/``degraded`` if JSON).
 * ``services``     – every further configured host service (e.g. Ollama ``/api/version``).
 * ``capabilities`` – the capability registry is current: compatible worker in ``ready``/``busy``, a heartbeat
-  newer than the wake when the host was down, and all required capabilities reported.
+  newer than the wake when the host was down, and all required capabilities reported. An incompatible or
+  ``draining`` worker fails at once (waiting cannot make it dispatchable).
 
 ``ssh`` … ``capabilities`` share one budget of ``service_timeout_seconds`` that starts when the host is
 reachable. An overall deadline caps everything. Failure codes: :class:`WakeFailureCode`.
+
+Concurrency: identical calls (same worker, same capability set) share one in-flight run; runs for the same
+worker with different capability sets are serialised, so a worker is woken once and its state has one
+writer. Each run's budget starts when it owns the worker.
 """
 
 from __future__ import annotations
@@ -201,6 +207,7 @@ class _Run:
     started: float
     started_wall: datetime
     deadline: float
+    budget: float = 0.0
     stages: list[StageResult] = field(default_factory=list)
     packets_sent: int = 0
     send_attempts: int = 0
@@ -277,6 +284,8 @@ class WakeController:
         self._sleep = sleep
         self._now = now
         self._inflight: dict[tuple[str, frozenset[str]], asyncio.Task[ReadyResult]] = {}
+        # runs for one worker with different capability sets are serialised (one wake, one state writer)
+        self._worker_locks: dict[str, asyncio.Lock] = {}
 
     async def aclose(self) -> None:
         """Cancel in-flight runs and close owned HTTP resources."""
@@ -371,11 +380,24 @@ class WakeController:
             started=start,
             started_wall=_aware(self._now()),
             deadline=start + budget,
+            budget=budget,
         )
         ctx.services, ctx.services_skipped = self._service_targets(ctx)
         return ctx
 
+    def _restart_clock(self, ctx: _Run) -> None:
+        """The budget counts from the moment this run owns the worker, not from when it queued."""
+        ctx.started = self._clock()
+        ctx.started_wall = _aware(self._now())
+        ctx.deadline = ctx.started + ctx.budget
+
     async def _run(self, ctx: _Run) -> ReadyResult:
+        lock = self._worker_locks.setdefault(ctx.worker_id, asyncio.Lock())
+        async with lock:
+            self._restart_clock(ctx)
+            return await self._pipeline(ctx)
+
+    async def _pipeline(self, ctx: _Run) -> ReadyResult:
         try:
             host_up = await self._detect(ctx)
             if host_up:
@@ -437,9 +459,11 @@ class WakeController:
                 duration_ms=self._ms(t0),
             )
         async with self._sm() as s:
-            if (await s.get(Worker, ctx.worker_id)) is not None:
+            row = await s.get(Worker, ctx.worker_id, with_for_update=True)
+            # a worker with a live heartbeat state keeps it (a failed quick probe alone proves nothing)
+            if row is not None and WorkerState(row.state) not in LIVE_STATES:
                 await self._registry.set_state(s, ctx.worker_id, WorkerState.waking, reason="wake_on_lan")
-                await s.commit()
+            await s.commit()
         max_attempts = max(1, wol.max_attempts)
         errors: list[str] = []
         while ctx.send_attempts < max_attempts:
@@ -458,8 +482,12 @@ class WakeController:
             errors.append(clip(err.message, 200))
             if str(err.details.get("reason", "")).startswith("invalid_"):
                 break  # invalid MAC/broadcast/port: retrying cannot help
+            remaining = ctx.deadline - self._clock()
+            if remaining <= 0:
+                errors.append("overall deadline reached")
+                break
             if ctx.send_attempts < max_attempts:
-                await self._sleep(self.settings.send_retry_backoff_seconds)
+                await self._sleep(min(self.settings.send_retry_backoff_seconds, remaining))
         raise _StageFailed(
             WakeStage.wol_send,
             f"magic packet could not be sent: {errors[-1] if errors else 'unknown error'}",
@@ -673,6 +701,9 @@ class WakeController:
             data: dict[str, Any] = {"state": snap.state.value, "missing": missing, "required": sorted(ctx.required)}
             if not snap.compatible:
                 return ProbeOutcome(False, f"worker {ctx.worker_id} is incompatible (protocol/kind mismatch)", data, fatal=True)
+            if snap.state == WorkerState.draining:
+                # sticky operator drain / worker shutting down: it will not accept work while we wait
+                return ProbeOutcome(False, f"worker {ctx.worker_id} is draining and takes no new work", data, fatal=True)
             if fresh_since is not None and (snap.last_heartbeat_at is None or _aware(snap.last_heartbeat_at) < fresh_since):
                 return ProbeOutcome(False, f"no heartbeat from {ctx.worker_id} since the wake started", data)
             if snap.state not in DISPATCHABLE_STATES:

@@ -19,7 +19,9 @@ hosts:
     role: execution_worker
     worker_kind: execution
     worker_api: http://192.168.178.222:8787
-    ssh: {user: hermclaw-admin}
+    ssh: {user: hermclaw-admin, allow_sudo_commands: ["/usr/bin/systemctl suspend"]}
+    idle_sleep_command: "sudo /usr/bin/systemctl suspend"   # idle sleep hook (P10.9); must be in allow_sudo_commands
+    labels: {lease_resources: "code-executor-222"}           # leases that count as activity for idle sleep
     wake_on_lan:
       enabled: true
       mac: "00:00:00:00:02:22"          # TODO: replace with real MAC (inventory)
@@ -33,7 +35,9 @@ hosts:
     role: model_worker
     worker_kind: model
     worker_api: http://192.168.178.224:8787
-    ssh: {user: hermclaw-admin}
+    ssh: {user: hermclaw-admin, allow_sudo_commands: ["/usr/bin/systemctl suspend"]}
+    idle_sleep_command: "sudo /usr/bin/systemctl suspend"
+    labels: {lease_resources: "gpu-224,video-224"}
     wake_on_lan:
       enabled: true
       mac: "00:00:00:00:02:24"          # TODO: replace with real MAC (inventory)

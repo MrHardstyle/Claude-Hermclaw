@@ -363,3 +363,62 @@ async def test_run_once_and_run_forever(sessionmaker: async_sessionmaker[AsyncSe
     stop.set()
     await asyncio.wait_for(task, 2)
     assert [call[0] for call in runner.calls] == [a]  # a sleeps, c still busy, b not configured
+
+
+class _HeartbeatRace(IdleSleepPolicy):
+    """A heartbeat arrives after ``sleeping`` was committed and before the second look (self-review regression)."""
+
+    def __init__(self, *args: Any, cfg: HostConfig, state: WorkerState, **kw: Any) -> None:
+        super().__init__(*args, **kw)
+        self.cfg, self.hb_state = cfg, state
+
+    async def _recheck(self, s: AsyncSession, worker_id: str) -> dict[str, Any] | None:
+        await make_ready(self._sm, self.cfg, state=self.hb_state)  # own session; the first tx is committed
+        return await super()._recheck(s, worker_id)
+
+
+@pytest.mark.parametrize("hb_state", [WorkerState.ready, WorkerState.busy])
+async def test_heartbeat_between_decision_and_command_aborts(sessionmaker: async_sessionmaker[AsyncSession], hb_state: WorkerState) -> None:
+    w = wid()
+    cfg = host(w)
+    await make_ready(sessionmaker, cfg)
+    runner = Runner()
+    settings = IdleSleepSettings(idle_after_minutes=30, command_timeout_seconds=0.5)
+    p = _HeartbeatRace(
+        sessionmaker, HostsConfig(hosts=[cfg]), runner, cfg=cfg, state=hb_state, settings=settings, now=lambda: datetime.now(UTC) + LATER
+    )
+    out = await p.maybe_sleep(w)
+    assert out.result == SleepResult.aborted and runner.calls == []
+    assert await state_of(sessionmaker, w) == hb_state.value  # the heartbeat's state wins, nothing forced
+    assert await sleep_rows(sessionmaker, w) == ["requested", "aborted"]
+    aborted = [e for e in await events(sessionmaker, w, EventType.STATUS) if e.payload.get("result") == "aborted"]
+    assert aborted and aborted[0].payload["state_now"] == hb_state.value
+
+
+async def test_heartbeat_reporting_active_job_aborts(sessionmaker: async_sessionmaker[AsyncSession]) -> None:
+    """The worker reports an active job (``ready`` state) right after the decision: the sleep is aborted and the
+    state restored to ``ready`` by the policy."""
+    w = wid()
+    cfg = host(w)
+    await make_ready(sessionmaker, cfg)
+    runner = Runner()
+
+    class _ActiveJobRace(IdleSleepPolicy):
+        async def _recheck(self, s: AsyncSession, worker_id: str) -> dict[str, Any] | None:
+            # the heartbeat lands while the row says sleeping; simulate the row reporting work without a
+            # state change (e.g. registry keeps the orchestrator-owned state until the next sweep)
+            async with self._sm() as other:
+                row = await other.get(Worker, worker_id)
+                assert row is not None and row.state == "sleeping"
+                row.active_job_id = "job-1"
+                await other.commit()
+            return await super()._recheck(s, worker_id)
+
+    settings = IdleSleepSettings(idle_after_minutes=30, command_timeout_seconds=0.5)
+    p = _ActiveJobRace(sessionmaker, HostsConfig(hosts=[cfg]), runner, settings=settings, now=lambda: datetime.now(UTC) + LATER)
+    out = await p.maybe_sleep(w)
+    assert out.result == SleepResult.aborted and runner.calls == []
+    assert await state_of(sessionmaker, w) == "ready"
+    aborted = [e for e in await events(sessionmaker, w, EventType.STATUS) if e.payload.get("result") == "aborted"]
+    assert aborted[0].payload["worker_reports_active_work"] is True
+    assert "new work arrived" in aborted[0].payload["text"]

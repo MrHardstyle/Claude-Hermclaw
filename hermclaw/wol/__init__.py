@@ -5,8 +5,16 @@
 * :mod:`hermclaw.wol.readiness` – :class:`WakeController` ``ensure_worker_ready(worker_id)``
 * :mod:`hermclaw.wol.idle`      – :class:`IdleSleepPolicy` idle sleep hooks
 * :mod:`hermclaw.wol.status`    – UI status values
+* :mod:`hermclaw.wol.config`    – semantic checks of the hosts' ``wake_on_lan`` configuration
 """
 
+from hermclaw.wol.config import (
+    IssueSeverity,
+    WakeConfigIssue,
+    assert_wake_config,
+    validate_host_wake_config,
+    validate_wake_config,
+)
 from hermclaw.wol.errors import WakeFailureCode, WolError
 from hermclaw.wol.idle import (
     IdleDecision,
@@ -40,6 +48,7 @@ __all__ = [
     "IdleSleepOutcome",
     "IdleSleepPolicy",
     "IdleSleepSettings",
+    "IssueSeverity",
     "ProbeOutcome",
     "Probes",
     "ReadyResult",
@@ -49,16 +58,20 @@ __all__ = [
     "SleepResult",
     "StageResult",
     "StageStatus",
+    "WakeConfigIssue",
     "WakeController",
     "WakeFailureCode",
     "WakeSettings",
     "WakeStage",
     "WolError",
     "WorkerUiStatus",
+    "assert_wake_config",
     "build_magic_packet",
     "default_registry_lookup",
     "ensure_workers_ready",
     "normalize_mac",
     "send_magic_packet",
     "ui_status_for",
+    "validate_host_wake_config",
+    "validate_wake_config",
 ]

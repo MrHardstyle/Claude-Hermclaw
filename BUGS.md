@@ -238,6 +238,36 @@ Noch keine.
 - Erwartet: the literal is masked
 - Tatsächlich: returned unchanged (\bpassword\b does not match inside DB_PASSWORD). Repo intelligence works around it with hermclaw/repo_intelligence/redact.py::redact_code; other components using DEFAULT_REDACTOR on code are still affected.
 
+### BUG-036 – Draining worker waited the whole service_timeout before CAPABILITY_MISSING
+- Phase: P10 · Komponente: wol · Severity: P2 · blockierend: nein · Status: **behoben** (Regressionstest tests/failure/test_wol_regressions.py)
+- Reproduktion: ensure_worker_ready for a worker in state draining that lacks the required capability
+- Erwartet: immediate failure CAPABILITY_MISSING, worker stays draining
+- Tatsächlich: waited service_timeout_seconds (180 s default) before failing
+
+### BUG-037 – Concurrent wake runs for one worker with different capability sets sent double magic packets and raced on state writes
+- Phase: P10 · Komponente: wol · Severity: P2 · blockierend: nein · Status: **behoben** (per-worker asyncio.Lock; regression test in tests/failure/test_wol_regressions.py)
+- Reproduktion: two ensure_worker_ready calls for the same worker with different required_capabilities at the same time
+- Erwartet: one wake, one state writer; each run's budget starts when it acquires the worker
+- Tatsächlich: two parallel runs, duplicate packets, interleaved state transitions
+
+### BUG-038 – Failed quick probe on an awake worker with a live heartbeat flipped it to waking and then error
+- Phase: P10 · Komponente: wol · Severity: P2 · blockierend: nein · Status: **behoben** (regression test in tests/failure/test_wol_regressions.py)
+- Reproduktion: worker API crashed on an awake host (heartbeat state still live), ensure_worker_ready
+- Erwartet: live state is kept, failure reported without a wake state change
+- Tatsächlich: state set to waking, then error
+
+### BUG-039 – wol_send retry loop ignored the overall deadline
+- Phase: P10 · Komponente: wol · Severity: P3 · blockierend: nein · Status: **behoben** (regression test in tests/failure/test_wol_regressions.py)
+- Reproduktion: deadline_seconds shorter than the packet retry schedule
+- Erwartet: retries stop at the deadline
+- Tatsächlich: retries continued past the deadline
+
+### BUG-040 – Idle re-check after committing 'sleeping' ignored a heartbeat that moved the worker or reported active work
+- Phase: P10 · Komponente: wol · Severity: P2 · blockierend: nein · Status: **behoben** (row-locked _recheck aborts the sleep; regression test in tests/integration/test_wol_idle.py)
+- Reproduktion: heartbeat with an active job arrives between the idle decision and the sleep command
+- Erwartet: sleep aborted
+- Tatsächlich: worker was put to sleep anyway
+
 ## Template
 
 ### BUG-XXX – Titel

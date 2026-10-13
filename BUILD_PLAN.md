@@ -145,15 +145,15 @@ Legende: `[x]` erledigt mit Evidence · `[~]` erledigt, Live-Verifikation auf Zi
 
 ## P10 – Wake-on-LAN
 
-- [ ] 10.1 config. — Evidence: –
-- [ ] 10.2 WOL send. — Evidence: –
-- [ ] 10.3 ping wait. — Evidence: –
-- [ ] 10.4 SSH wait. — Evidence: –
-- [ ] 10.5 worker API wait. — Evidence: –
-- [ ] 10.6 Ollama wait. — Evidence: –
-- [ ] 10.7 failure states. — Evidence: –
-- [ ] 10.8 UI events. — Evidence: –
-- [ ] 10.9 idle sleep hooks. — Evidence: –
+- [~] 10.1 config. — Evidence: hermclaw/wol/config.py: validate_host_wake_config / validate_wake_config / assert_wake_config check WOL semantics (unicast MAC, IPv4 broadcast, port, timeouts > 0, max_attempts >= 1), probe targets and idle_sleep_command. readiness._context raises ConfigError/WorkerNotFound before any stage runs. Te
+- [~] 10.2 WOL send. — Evidence: hermclaw/wol/magic.py build_magic_packet/normalize_mac/send_magic_packet (asyncio datagram endpoint, allow_broadcast=True, raises WolError WOL_SEND_FAILED); readiness._wake/_send_once (retries bounded by max_attempts and the overall deadline, emits WORKER_WAKE_SENT). Tests: test_wol_magic.py::test_p
+- [~] 10.3 ping wait. — Evidence: probes.Probes.ping (ping -n -c 1 -W, validated address, TCP fallback to SSH port where a refused connection counts as host alive); readiness._wait_ping with bounded re-sends inside ping_timeout_seconds. Tests: test_wol_probes.py::test_ping_uses_icmp_binary_with_safe_arguments, ::test_ping_without_bi
+- [~] 10.4 SSH wait. — Evidence: probes.Probes.ssh_banner (RFC 4253 identification line, also after earlier lines); readiness._wait_ssh. Tests: test_wol_probes.py::test_ssh_banner_detected_even_after_pre_banner_lines, ::test_ssh_banner_wrong_protocol_and_silent_server; test_wol_failures.py::test_ssh_timeout; test_wol_readiness.py::
+- [~] 10.5 worker API wait. — Evidence: readiness._wait_api: GET <worker_api>/health must return 2xx with status ok/degraded; a mismatching worker_id fails at once; redirects are not followed. Tests: test_wol_failures.py::test_worker_api_unhealthy, ::test_worker_api_answers_as_another_worker_fails_fast, ::test_worker_api_reporting_unknown
+- [~] 10.6 Ollama wait. — Evidence: readiness._wait_services: every configured host service (e.g. ollama /api/version) is probed over HTTP or TCP within service_timeout_seconds and yields MODEL_SERVICE_TIMEOUT on failure; readiness._wait_capabilities checks registry freshness, compatibility, draining state and required capabilities, y
+- [x] 10.7 failure states. — Evidence: errors.WakeFailureCode has exactly the six codes; STAGE_FAILURE maps each stage to its code; WakeController._fail writes a wake_events row (error_code), WORKER_WAKE_STAGE(failed) and WORKER_WAKE_FAILED, and sets the worker to error only when its state is not live; ReadyResult.raise_for_failure raise
+- [x] 10.8 UI events. — Evidence: status.WorkerUiStatus/ui_status_for (STARTING/WAKING/READY/BUSY/ERROR/SLEEPING); every stage emits WORKER_WAKE_STAGE with ui_status plus WORKER_WAKE_SENT, WORKER_READY and WORKER_WAKE_FAILED; job STATUS lines; WakeController.ui_statuses()/worker_ui_status(). Tests: test_wol_readiness.py::test_full_w
+- [~] 10.9 idle sleep hooks. — Evidence: idle.IdleSleepPolicy (evaluate/maybe_sleep/run_once/run_forever), RemoteCommandRunner Protocol run(host_id, command, timeout) -> (rc, out, err). Never sleeps a worker with active steps, attempts, leases or waiting requests, or one that reports active work. Uses a row lock plus a re-check (_recheck) 
 
 ## P11 – Repository Intelligence
 

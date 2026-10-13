@@ -29,6 +29,7 @@ from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from hermclaw.core.config import HermclawConfig, get_config
+from hermclaw.core.errors import HermclawError
 from hermclaw.core.logging import configure_logging, get_logger
 from hermclaw.core.settings import Settings, get_settings
 from hermclaw.persistence.db import make_engine
@@ -91,6 +92,15 @@ class SchedulerProcess:
             self.scheduler.stop()
 
     async def run(self) -> int:
+        try:  # P10.1: unusable Wake-on-LAN host configuration is fatal, warnings are logged
+            from hermclaw.wol.config import assert_wake_config
+
+            for issue in assert_wake_config(self.config):
+                log.warning("wake-on-lan config", extra={"host": issue.host_id, "field": issue.field, "issue": issue.message})
+        except HermclawError as exc:
+            log.error("invalid configuration", extra={"error": exc.message})
+            await self.engine.dispose()
+            return 3
         revision = await check_database(self.sm)
         if revision is None:
             log.error("database schema missing – run 'hermclaw migrate' first")

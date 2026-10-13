@@ -17,6 +17,7 @@ recorded as a `wake_events` row and as an event.
 | `idle.py` | `IdleSleepPolicy`, `IdleSleepSettings`, `IdleDecision`, `IdleReason`, `IdleSleepOutcome`, `SleepResult`, `RemoteCommandRunner`, `worker_resource_names` |
 | `status.py` | `WorkerUiStatus` (`STARTING`, `WAKING`, `READY`, `BUSY`, `ERROR`, `SLEEPING`), `ui_status_for` |
 | `recording.py` | `record_wake_event`, `force_worker_state` (shared persistence helpers) |
+| `config.py` | `validate_host_wake_config`, `validate_wake_config`, `assert_wake_config`, `WakeConfigIssue`, `IssueSeverity` (10.1) |
 
 The package has no external dependencies beyond the existing stack: asyncio UDP/TCP, `httpx`, SQLAlchemy and the
 `ping` binary when it is installed.
@@ -24,6 +25,11 @@ The package has no external dependencies beyond the existing stack: asyncio UDP/
 ## 2. Public interfaces
 
 ```python
+# configuration checks (10.1)
+validate_host_wake_config(host: HostConfig) -> list[WakeConfigIssue]       # WakeConfigIssue(host_id, field, message, severity)
+validate_wake_config(config: HermclawConfig | HostsConfig) -> list[WakeConfigIssue]
+assert_wake_config(config) -> list[WakeConfigIssue]   # raises ConfigError (CONFIG_INVALID) on any error, returns warnings
+
 # magic packet (10.2)
 normalize_mac(mac: str) -> str                      # "aa:bb:cc:dd:ee:ff"; accepts ':'/'-', dotted, bare hex
 build_magic_packet(mac: str) -> bytes               # b"\xff"*6 + mac*16 == 102 bytes
@@ -76,12 +82,12 @@ detect ─▶ wol_send ─▶ ping ─▶ ssh ─▶ worker_api ─▶ services 
 | stage | check | failure code |
 |---|---|---|
 | `detect` | `workers.state` and a TCP connect to the worker API port (`quick_probe_timeout_seconds`) | – |
-| `wol_send` | Sends the magic packet to `wake_on_lan.broadcast:port` and sets the registry state to `waking`. Socket errors are retried. An invalid MAC or broadcast address is not retried. Fails at once if the host is down and WOL is disabled or has no MAC. | `WOL_SEND_FAILED` |
+| `wol_send` | Sends the magic packet to `wake_on_lan.broadcast:port` and sets the registry state to `waking` (unless the row still carries a live heartbeat state). Socket errors are retried, bounded by `max_attempts` and the overall deadline. An invalid MAC or broadcast address is not retried. Fails at once if the host is down and WOL is disabled or has no MAC. | `WOL_SEND_FAILED` |
 | `ping` | `ping -n -c 1 -W <s> <addr>` when the binary exists. Otherwise, or when ICMP gets no reply, a TCP connect to the SSH port; a refused connection also proves that the host is up. While it waits, the packet is re-sent every `ping_timeout/max_attempts` (or `resend_interval_seconds`). Total packets ≤ `max_attempts`. | `PING_TIMEOUT` |
 | `ssh` | The `SSH-…` identification line (RFC 4253 §4.2) on `ssh.port` (default 22) | `SSH_TIMEOUT` |
 | `worker_api` | `GET <worker_api>/health` → 2xx. If the body is JSON, `status` must be `ok` or `degraded`. A `worker_id` that differs from the expected one fails at once. | `WORKER_API_TIMEOUT` |
 | `services` | Every other `hosts.yaml` service, for example Ollama `/api/version`. A service with `http_path` needs an HTTP 2xx or 3xx answer; one without needs a TCP connect. Services on the worker API port or the SSH port are skipped because earlier stages already checked them. | `MODEL_SERVICE_TIMEOUT` |
-| `capabilities` | The registry is current: the worker is compatible (otherwise the stage fails at once), its state is `ready` or `busy`, its heartbeat is newer than the wake start when the host was not demonstrably live, and `required_capabilities` ⊆ its reported capabilities | `CAPABILITY_MISSING` |
+| `capabilities` | The registry is current: the worker is compatible and not `draining` (otherwise the stage fails at once), its state is `ready` or `busy`, its heartbeat is newer than the wake start when the host was not demonstrably live, and `required_capabilities` ⊆ its reported capabilities | `CAPABILITY_MISSING` |
 
 **Timeouts.**
 
@@ -107,7 +113,9 @@ Further events:
 
 **Worker state.**
 
-* Sending a packet sets the state to `waking` (`WorkerRegistry.set_state`, reason `wake_on_lan`).
+* Sending a packet sets the state to `waking` (`WorkerRegistry.set_state`, reason `wake_on_lan`) when the row is
+  `offline|sleeping|waking|error`. A row with a live heartbeat state keeps it: a failed quick probe alone (for
+  example a crashed worker API on an awake host) does not take the worker out of the registry's view.
 * On success, the state is normally already `ready`/`busy` from the heartbeat. A row still in
   `offline|sleeping|waking|error` is promoted to `ready` (`worker.state`, reason `wake_ready`).
 * On failure, a row that is not live becomes `error` (reason is the failure code in lower case). A live state
@@ -135,6 +143,9 @@ While the pipeline runs, stage events carry the progress status:
 **Concurrency.**
 
 * Concurrent calls for the same worker and the same capability set share one in-flight run (single flight).
+* Runs for the same worker with different capability sets are serialised by a per-worker lock: the host is
+  woken once, the next run finds it reachable and skips `wol_send`/`ping`, and the worker state has a single
+  writer. Each run's budget starts when it acquires the worker, not when it queued.
 * A cancelled waiter does not cancel the shared run (`asyncio.shield`). The run is bounded by its deadline.
 * `aclose()` cancels the in-flight runs. A run cancelled mid-way leaves `waking`, which the registry sweep turns
   into `offline` after `waking_timeout_seconds`.
@@ -172,9 +183,11 @@ The last activity is the latest of these timestamps:
 1. **Transaction A.** Lock the worker row (`FOR UPDATE`), decide, set the state to `sleeping` (`worker.state`,
    reason `idle_sleep`) and write the `wake_events` row `sleep/requested` with a `status` event. Then commit. From
    now on the scheduler does not select the worker, and a second policy process sees `sleeping` and skips it.
-2. **Transaction B.** Check again for active work, because dispatch can race the decision. If there is any, set
-   the state back to `ready` (reason `idle_sleep_aborted`) and record the result `aborted`. The command is not
-   run.
+2. **Transaction B.** Lock the row again and check again, because dispatch or a heartbeat can race the
+   decision: active steps, attempts, leases or waiting requests, a heartbeat reporting `active_job`/`active_step`,
+   or a state that is no longer `sleeping` (a heartbeat or a wake moved it). In any of these cases a row still in
+   `sleeping` is set back to `ready` (reason `idle_sleep_aborted`; a state a heartbeat reported is kept) and the
+   result `aborted` is recorded with `state_now` and the counts. The command is not run.
 3. Run the command through `RemoteCommandRunner.run(host_id, command, timeout)`, guarded by `wait_for`.
 4. Record the result:
 
@@ -219,6 +232,22 @@ Code-level tuning:
 
 There is no `policies.yaml` section for these yet (see shared changes below).
 
+**Validation (10.1).** `hermclaw.core.config` checks types and MAC syntax when the YAML is loaded.
+`validate_wake_config` adds the semantic checks the pipeline relies on, so a broken host is reported at startup
+(for example by `hermclaw doctor`) and not on its first wake:
+
+* errors, for a host with `wake_on_lan.enabled`: missing MAC, multicast/broadcast/all-zero MAC, a broadcast
+  that is not an IPv4 address (or is `0.0.0.0`), a port outside 1–65535, `ping_timeout_seconds` or
+  `service_timeout_seconds` ≤ 0, `max_attempts` < 1;
+* errors, for every host: an invalid `address`, `worker_api` (credentials, query, non-http scheme), SSH port,
+  service port or `http_path`, and a multi-line or empty `idle_sleep_command`;
+* warnings: `max_attempts` > 10, duplicate service names, `idle_sleep_command` on a host without usable WOL
+  (idle sleep stays disabled for it).
+
+`assert_wake_config` raises `ConfigError` (`CONFIG_INVALID`, `details.issues`) for errors. At runtime the
+pipeline still copes with what slips through: an invalid MAC or broadcast yields `WOL_SEND_FAILED`
+without retries, a non-positive timeout makes its stage fail at once.
+
 ## 6. Failure behaviour
 
 * The only codes reported are `WOL_SEND_FAILED`, `PING_TIMEOUT`, `SSH_TIMEOUT`, `WORKER_API_TIMEOUT`,
@@ -226,8 +255,9 @@ There is no `policies.yaml` section for these yet (see shared changes below).
   `WolError(code=...)`, which is a `WorkerError` with `http_status` 503.
 * All retries are bounded: packets ≤ `max_attempts`, every stage is bounded by its budget, and the whole run is
   bounded by the overall deadline.
-* Three cases fail without waiting: a fatal probe (the health endpoint answers as another worker, or the target
-  is invalid), an incompatible worker (protocol or kind mismatch in the registry), and WOL being disabled while
+* Four cases fail without waiting: a fatal probe (the health endpoint answers as another worker, or the target
+  is invalid), an incompatible worker (protocol or kind mismatch in the registry), a `draining` worker (it takes
+  no new work, so waiting out the service budget would only delay the scheduler), and WOL being disabled while
   the host is down.
 * No probe raises for an unreachable target. Probes report the exception type only, never response bodies. Only
   selected health fields (`status`, `state`, `worker_id`, `worker_version`, `protocol_version`, each truncated)
@@ -249,7 +279,8 @@ checks active work again under the `sleeping` state.
    `broadcast: 192.168.178.255` and `port: 9`. Add `idle_sleep_command` (for example
    `sudo /usr/bin/systemctl suspend`, allowed in `ssh.allow_sudo_commands`) and, if needed,
    `labels.lease_resources: "code-executor-222"`.
-3. Runtime wiring: `WakeController(get_sessionmaker(), get_config())` is shared by the scheduler. Call it with
+3. Runtime wiring: call `assert_wake_config(get_config())` at orchestrator start and log the returned warnings.
+   `WakeController(get_sessionmaker(), get_config())` is shared by the scheduler. Call it with
    `ensure_worker_ready(step.assigned_worker_id, job.id, required_capabilities=[step.capability])` before
    dispatch. Run `IdleSleepPolicy(get_sessionmaker(), get_config(), ssh_runner).run_forever(stop)` as a
    background task once the SSH admin tool (P26) provides the runner.
@@ -266,6 +297,8 @@ checks active work again under the `sleeping` state.
 
 ## 8. Tests
 
+* `tests/unit/test_wol_config.py` (10.1): the shipped `config/hosts.example.yaml` has no errors, every error and
+  warning rule, disabled WOL is not checked, `assert_wake_config` aggregates errors into one `ConfigError`.
 * `tests/unit/test_wol_magic.py`: packet layout, the MAC forms that are accepted and rejected, target validation,
   real UDP sends to a unicast listener (one and several copies), loopback broadcast with `SO_BROADCAST`, a real
   socket error mapped to `WOL_SEND_FAILED`.
@@ -290,19 +323,24 @@ checks active work again under the `sleeping` state.
     deadline, health 503, wrong `worker_id` (fails at once), unknown health status, Ollama 500, a closed TCP-only
     service, a missing capability (live state kept), no heartbeat after a wake, an incompatible worker.
   * Config errors before any stage runs, and an unregistered host.
+* `tests/failure/test_wol_regressions.py` (self-review regressions): a draining worker fails at once and stays
+  `draining`; a live worker whose API port is closed keeps its heartbeat state after a failed wake; failing
+  sends stop at the overall deadline; two runs with different capability sets wake the host once, serialised.
 * `tests/integration/test_wol_idle.py`:
   * Every `IdleReason`, resource names from `models.yaml` and labels.
   * Command outcomes: success, a definite failure (state restored, stderr redacted), ambiguous results (255,
     transport error, timeout), self-correction through a heartbeat.
-  * Races: work arriving during the sleep request (aborted, runner not called), two concurrent policies (one
-    command).
+  * Races: work arriving during the sleep request (aborted, runner not called), a heartbeat (`ready`/`busy`) or
+    a reported active job between decision and command (aborted, heartbeat state kept), two concurrent policies
+    (one command).
   * `run_once` and `run_forever`.
-* `tests/integration/test_wol_live.py` (`-m live`, BLOCKER-001): a real magic packet and probes, and the full
-  pipeline on the LAN.
+* `tests/integration/test_wol_live.py` (`-m live`, BLOCKER-001): `assert_wake_config` on the production
+  `hosts.yaml`, a real magic packet and probes, and the full pipeline on the LAN.
 
 ```
-.venv/bin/pytest -q tests/unit/test_wol_magic.py tests/unit/test_wol_probes.py tests/integration/test_wol_readiness.py \
-    tests/integration/test_wol_idle.py tests/failure/test_wol_failures.py
+.venv/bin/pytest -q tests/unit/test_wol_config.py tests/unit/test_wol_magic.py tests/unit/test_wol_probes.py \
+    tests/integration/test_wol_readiness.py tests/integration/test_wol_idle.py tests/failure/test_wol_failures.py \
+    tests/failure/test_wol_regressions.py
 ```
 
 ## 9. Shared changes requested (outside `hermclaw/wol/`)
@@ -313,3 +351,5 @@ checks active work again under the `sleeping` state.
   `probe_interval_seconds`) so that operators can tune `WakeSettings` and `IdleSleepSettings` without code.
 * `EventType`: optionally a dedicated `WORKER_SLEEP = "worker.sleep"`. Idle sleep currently uses `worker.state`
   plus `status` events with `action=idle_sleep`.
+* Composition root / `hermclaw doctor`: call `hermclaw.wol.assert_wake_config(config)` at startup (fail on
+  errors, log warnings) so a broken `wake_on_lan` section is caught before the first wake.
