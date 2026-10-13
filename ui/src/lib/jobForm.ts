@@ -33,7 +33,12 @@ export const EMPTY_JOB_FORM: JobFormValues = {
 
 export type JobFormErrors = Partial<Record<keyof JobFormValues, string>>;
 
-const REPO_URL_RE = /^(ssh:\/\/|git@|https?:\/\/|file:\/\/)/;
+/**
+ * Accepted repository locations – mirrors `hermclaw/api/jobs.py::_REGISTRABLE_URL`. Local repositories
+ * (`file://`, absolute path) need the admin scope; the server enforces that and `validate_remote_url`.
+ */
+export const REPO_URL_RE = /^(ssh:\/\/|git@|https?:\/\/|file:\/\/|\/)/;
+export const REPO_URL_ERROR = "URL muss mit ssh://, git@, http(s)://, file:// oder / (lokaler Pfad) beginnen.";
 /** git check-ref-format rules (subset relevant for branch names typed by users). */
 export function isValidBranchName(name: string): boolean {
   if (!name || name.length > 200) return false;
@@ -74,7 +79,7 @@ export function buildJobCreateBody(v: JobFormValues): { body: JobCreateBody | nu
   const repoName = v.repoName.trim();
   const repoUrl = v.repoUrl.trim();
   const baseBranch = v.baseBranch.trim();
-  if (repoUrl && !REPO_URL_RE.test(repoUrl)) errors.repoUrl = "URL muss mit ssh://, git@, http(s):// oder file:// beginnen.";
+  if (repoUrl && !REPO_URL_RE.test(repoUrl)) errors.repoUrl = REPO_URL_ERROR;
   if (baseBranch && !isValidBranchName(baseBranch)) errors.baseBranch = "Ungültiger Branch-Name.";
   if (baseBranch && !repoName && !repoUrl) errors.baseBranch = "Basis-Branch nur zusammen mit einem Repository angeben.";
 

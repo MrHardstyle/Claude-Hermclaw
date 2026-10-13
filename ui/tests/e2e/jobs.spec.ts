@@ -35,7 +35,7 @@ test.describe("Jobs (31.3)", () => {
     await form.getByLabel("Priorität (0–100)").fill("101");
     await page.getByTestId("job-submit").click();
     await expect(form.getByText("Bitte eine Aufgabenbeschreibung mit mindestens 3 Zeichen eingeben.")).toBeVisible();
-    await expect(form.getByText("URL muss mit ssh://, git@, http(s):// oder file:// beginnen.")).toBeVisible();
+    await expect(form.getByText("URL muss mit ssh://, git@, http(s)://, file:// oder / (lokaler Pfad) beginnen.")).toBeVisible();
     await expect(form.getByText("Priorität muss eine ganze Zahl zwischen 0 und 100 sein.")).toBeVisible();
     await expect(form.getByLabel("Aufgabe (Prompt) *")).toHaveAttribute("aria-invalid", "true");
 

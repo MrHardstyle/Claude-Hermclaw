@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { artifactDownloadPath, describeError, fetchBlob } from "../api/client";
 import type { Artifact } from "../api/types";
+import { asAttachment } from "../lib/media";
 
 /** Download button: the API needs the bearer header, so the file is fetched and handed over as blob URL. */
 export function DownloadButton({ artifact }: { artifact: Pick<Artifact, "id" | "name"> }) {
@@ -10,7 +11,7 @@ export function DownloadButton({ artifact }: { artifact: Pick<Artifact, "id" | "
     setBusy(true);
     setError(null);
     try {
-      const blob = await fetchBlob(artifactDownloadPath(artifact.id));
+      const blob = asAttachment(await fetchBlob(artifactDownloadPath(artifact.id)));
       const url = URL.createObjectURL(blob);
       const a = document.createElement("a");
       a.href = url;

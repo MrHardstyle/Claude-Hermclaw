@@ -104,3 +104,18 @@ describe("safeExternalUrl", () => {
     expect(safeExternalUrl("")).toBeNull();
   });
 });
+
+describe("asAttachment", () => {
+  it("re-types untrusted artifacts as opaque downloads and keeps the bytes", async () => {
+    const { asAttachment } = await import("../../src/lib/media");
+    const html = new Blob(["<script>alert(document.cookie)</script>"], { type: "text/html" });
+    const out = asAttachment(html);
+    expect(out.type).toBe("application/octet-stream");
+    expect(await out.text()).toBe("<script>alert(document.cookie)</script>");
+    expect(out.size).toBe(html.size);
+    const svg = asAttachment(new Blob(["<svg onload='x()'/>"], { type: "image/svg+xml" }));
+    expect(svg.type).toBe("application/octet-stream");
+    const opaque = new Blob([new Uint8Array([0, 1, 2])], { type: "application/octet-stream" });
+    expect(asAttachment(opaque)).toBe(opaque);
+  });
+});

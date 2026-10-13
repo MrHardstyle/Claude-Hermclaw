@@ -1,3 +1,4 @@
+import { readFileSync } from "node:fs";
 import { expect, test } from "./fixtures";
 
 test.describe("Job-Detail", () => {
@@ -185,6 +186,9 @@ test.describe("Job-Detail", () => {
     await page.getByRole("button", { name: "pytest.log herunterladen" }).click();
     const file = await dl;
     expect(file.suggestedFilename()).toBe("pytest.log");
+    // the bytes survive the authenticated blob hand-over (re-typed as opaque attachment)
+    const saved = await file.path();
+    expect(readFileSync(saved, "utf-8")).toBe("10 passed, 2 failed\n");
 
     await page.getByRole("tab", { name: "Medien" }).click();
     const img = page.getByTestId("media-grid").getByRole("img", { name: "screenshot.png" });
