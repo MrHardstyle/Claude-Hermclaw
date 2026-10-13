@@ -1,0 +1,75 @@
+#!/usr/bin/env bash
+# hermclaw-model-pull – pull and verify the fixed Hermclaw model set on the model host (.224).
+#
+# Usage: hermclaw-model-pull [--dry-run] [--ollama BIN] [--skip-fallback-planner]
+#
+# Roles (fixed by architecture; see config/models.yaml):
+#   planner           gemma4:26b          planner fallback  gemma4:12b
+#   coder             qwen3-coder:30b     heavy reviewer    qwen3.8:27b
+#   fast router       qwen3:8b            embedding         embeddinggemma-2:740m (fallback embeddinggemma:300m, 768 dim)
+#
+# Every role model must pull and pass `ollama show`; a missing role model is a hard error (exit 1).
+# Only the embedding model has a fallback; when it is used the script prints the models.yaml change to make
+# on .225 (profile `embedding`, `model:`). Exit codes: 0 ok, 1 role model missing, 2 usage.
+set -euo pipefail
+
+OLLAMA="${OLLAMA_BIN:-ollama}"
+DRY=0
+PLANNER_FALLBACK=1
+while [ $# -gt 0 ]; do
+  case "$1" in
+    --dry-run) DRY=1 ;;
+    --ollama) OLLAMA="$2"; shift ;;
+    --skip-fallback-planner) PLANNER_FALLBACK=0 ;;
+    -h|--help) sed -n '2,16p' "$0"; exit 0 ;;
+    *) echo "unknown option: $1" >&2; exit 2 ;;
+  esac
+  shift
+done
+
+ROLE_MODELS=(gemma4:26b qwen3-coder:30b qwen3.8:27b qwen3:8b)
+[ "$PLANNER_FALLBACK" = 1 ] && ROLE_MODELS+=(gemma4:12b)
+EMBEDDING_PRIMARY="embeddinggemma-2:740m"
+EMBEDDING_FALLBACK="embeddinggemma:300m"
+
+run() { if [ "$DRY" = 1 ]; then echo "+ $*"; else "$@"; fi; }
+
+pull_and_check() {
+  local tag="$1"
+  echo "==> $tag"
+  if ! run "$OLLAMA" pull "$tag"; then
+    return 1
+  fi
+  if [ "$DRY" = 0 ] && ! "$OLLAMA" show "$tag" >/dev/null 2>&1; then
+    echo "    ollama show $tag failed" >&2
+    return 1
+  fi
+  echo "    ok"
+}
+
+missing=()
+for tag in "${ROLE_MODELS[@]}"; do
+  pull_and_check "$tag" || missing+=("$tag")
+done
+
+embedding="$EMBEDDING_PRIMARY"
+if ! pull_and_check "$EMBEDDING_PRIMARY"; then
+  echo "    $EMBEDDING_PRIMARY not available – falling back to $EMBEDDING_FALLBACK (same 768 dimensions)" >&2
+  if pull_and_check "$EMBEDDING_FALLBACK"; then
+    embedding="$EMBEDDING_FALLBACK"
+    echo
+    echo "ACTION on .225: set the embedding profile in /etc/hermclaw/models.yaml to"
+    echo "    model: $EMBEDDING_FALLBACK"
+    echo "then: hermclaw litellm-config /etc/hermclaw/litellm.yaml && systemctl restart hermclaw-litellm hermclaw-scheduler"
+  else
+    missing+=("$EMBEDDING_PRIMARY|$EMBEDDING_FALLBACK")
+  fi
+fi
+
+echo
+if [ "${#missing[@]}" -gt 0 ]; then
+  echo "MISSING role models: ${missing[*]}" >&2
+  exit 1
+fi
+echo "all models present (embedding: $embedding)"
+[ "$DRY" = 1 ] || "$OLLAMA" list

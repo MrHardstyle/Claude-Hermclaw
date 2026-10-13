@@ -29,3 +29,4 @@ Pflichtfelder: Question · Why needed · Sources · Source date/version · Relev
 | R-022 | Backup/Restore | docs/research/20261008-022-backup-restore.md | `pg_dump -Fc` + echter Restore-Test |
 | R-023 | Web-Research-API | docs/research/20261008-023-web-research-api.md | SearXNG JSON (selbst gehostet) |
 | R-024 | Media-Pipeline | docs/research/20261008-024-media-pipeline.md | ffmpeg NVENC (H.264/HEVC), ComfyUI-API |
+| R-025 | Model tag re-check (install) | docs/research/20261013-025-model-tag-recheck.md | `qwen3.8:27b` bestätigt; Embedding-Fallback `embeddinggemma:300m` (768 dim) |
