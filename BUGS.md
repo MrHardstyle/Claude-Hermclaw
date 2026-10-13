@@ -280,6 +280,12 @@ Noch keine.
 - Erwartet: hint accepted (file exists)
 - Tatsächlich: semantic repair "repo_hint 'src/strings.ts' does not exist in repository_inventory/retrieved_context", plan rejected; only files that retrieval happened to return were known
 
+### BUG-043 – POST /api/jobs: repository auto-registration by URL crashes (HTTP 500) on a name collision and bypasses the registry validation
+- Phase: P40 (found by the local soak) · Komponente: api/jobs · Severity: P2 · blockierend: nein · Status: **offen** (Fix nach Abschluss der laufenden API-Härtung in P39)
+- Reproduktion: two jobs with different repository URLs that share the basename, e.g. file:///a/remote.git and file:///b/remote.git → second POST /api/jobs fails with UniqueViolation uq_repositories_name (HTTP 500)
+- Erwartet: the repository is registered through RepositoryRegistry (URL validation: no userinfo, allowed schemes) with a unique name (collision → suffix), or a clear 409/422
+- Tatsächlich: _slug_name(url) is used as the unique name directly and the row is inserted without RepositoryRegistry checks
+
 ## Template
 
 ### BUG-XXX – Titel
