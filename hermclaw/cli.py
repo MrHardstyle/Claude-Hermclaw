@@ -44,15 +44,10 @@ async def _with_db(coro_fn: Any) -> Any:
 
 
 def cmd_migrate(_: argparse.Namespace) -> int:
-    from alembic import command
-    from alembic.config import Config
+    from hermclaw.persistence.migrate import head_revision, upgrade_head
 
-    root = Path(__file__).resolve().parents[1]
-    ini = root / "alembic.ini"
-    cfg = Config(str(ini)) if ini.exists() else Config()
-    cfg.set_main_option("script_location", str(root / "migrations"))
-    command.upgrade(cfg, "head")
-    print("database migrated to head")
+    upgrade_head()  # source checkout or the release's <venv>/share/hermclaw (BUG-060)
+    print(f"database migrated to head ({head_revision()})")
     return 0
 
 

@@ -47,6 +47,12 @@ hermclaw-model-worker = "worker.model.app:main"
 [tool.setuptools.packages.find]
 include = ["hermclaw*", "worker*"]
 
+# migrations ship with every release: <venv>/share/hermclaw/{alembic.ini,migrations/} (hermclaw.persistence.migrate)
+[tool.setuptools.data-files]
+"share/hermclaw" = ["alembic.ini"]
+"share/hermclaw/migrations" = ["migrations/env.py", "migrations/script.py.mako"]
+"share/hermclaw/migrations/versions" = ["migrations/versions/*.py"]
+
 [tool.pytest.ini_options]
 asyncio_mode = "auto"
 asyncio_default_fixture_loop_scope = "session"

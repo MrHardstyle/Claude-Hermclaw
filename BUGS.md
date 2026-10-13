@@ -384,6 +384,13 @@ Noch keine.
 - Tatsächlich: `_scratch_index` copied `.git/index` with `shutil.copyfile`; the fresh mtime made git treat the entry as clean (stat data matches at second granularity) instead of "racily clean" (content compare)
 - Fix: `gitops/_fs.copy_if_exists` uses `shutil.copy2` (keeps the mtime); deterministic regression test aligns commit and edit to one second
 
+### BUG-060 – A wheel installation had no Alembic migrations: `hermclaw migrate` failed outside a source checkout
+- Phase: P32 · Komponente: packaging/persistence · Severity: P1 · blockierend: ja (Deployment) · Status: **behoben** (`tests/unit/test_persistence_migrate.py`; manuell: Wheel in frische venv installiert, `hermclaw migrate` + `alembic -c <venv>/share/hermclaw/alembic.ini downgrade 0001` gegen leere DB)
+- Reproduktion: `pip wheel .` → install into `/opt/hermclaw/venv-<version>` → `hermclaw migrate` (cwd ≠ checkout)
+- Erwartet: the release migrates its database; the rollback in `docs/runbooks/upgrade.md` uses `<venv>/share/hermclaw/alembic.ini`
+- Tatsächlich: the wheel contained only the packages; `cmd_migrate` looked for `migrations/` next to the installed package (site-packages) and found nothing
+- Fix: pyproject `[tool.setuptools.data-files]` ships `alembic.ini` + `migrations/` to `<venv>/share/hermclaw/`; `hermclaw.persistence.migrate` resolves checkout → installed data files (`HERMCLAW_MIGRATIONS_DIR` overrides)
+
 ## Template
 
 ### BUG-XXX – Titel
