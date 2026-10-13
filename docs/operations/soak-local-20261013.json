@@ -1,0 +1,832 @@
+{
+  "started_at": "2026-10-13T13:00:43.716990+00:00",
+  "minutes": 60.0,
+  "jobs_submitted": 118,
+  "restarts": {
+    "api": 0,
+    "scheduler": 1,
+    "exec-worker": 1
+  },
+  "worker_reconnect": {
+    "offline_detected_s": 51.5,
+    "state_after_kill": "offline",
+    "ready_again_s": 2.2,
+    "state_after_restart": "ready"
+  },
+  "final": {
+    "jobs_by_status": {
+      "succeeded": 118
+    },
+    "stuck_leases": 0,
+    "open_requests": 0,
+    "inflight_steps_of_terminal_jobs": 0,
+    "succeeded_without_report": 0,
+    "failed_without_error_code": 0,
+    "open_attempts_of_terminal_jobs": 0,
+    "event_order_violations": 0,
+    "duplicate_sequences": 0,
+    "unvalidated_constraints": 0,
+    "orphan_step_dependencies": 0,
+    "events_total": 12589,
+    "rss_trend": {
+      "api": {
+        "rss_first_quarter_mb": 95.4,
+        "rss_last_quarter_mb": 95.8,
+        "growth_pct": 0.5,
+        "max_mb": 95.9
+      },
+      "scheduler": {
+        "rss_first_quarter_mb": 109.7,
+        "rss_last_quarter_mb": 113.8,
+        "growth_pct": 3.7,
+        "max_mb": 116.4
+      },
+      "exec-worker": {
+        "rss_first_quarter_mb": 61.1,
+        "rss_last_quarter_mb": 62.7,
+        "growth_pct": 2.7,
+        "max_mb": 62.8
+      }
+    }
+  },
+  "verdict": {
+    "passed": true,
+    "checks": {
+      "all_jobs_terminal": true,
+      "all_jobs_succeeded": true,
+      "no_stuck_leases": true,
+      "no_inflight_steps_of_terminal_jobs": true,
+      "event_order": true,
+      "db_integrity": true,
+      "reports_for_succeeded_jobs": true,
+      "worker_reconnected": true,
+      "no_rss_leak": true
+    }
+  },
+  "events": [
+    {
+      "t": 2.7,
+      "event": "started",
+      "api_port": 49563,
+      "worker_port": 59255,
+      "db": "hermclaw_soak_d35c1413"
+    },
+    {
+      "t": 1440.3,
+      "event": "worker SIGKILL",
+      "state_before": "ready"
+    },
+    {
+      "t": 1494.1,
+      "event": "worker restarted",
+      "offline_detected_s": 51.5,
+      "state_after_kill": "offline",
+      "ready_again_s": 2.2,
+      "state_after_restart": "ready"
+    },
+    {
+      "t": 2520.7,
+      "event": "scheduler graceful restart",
+      "exit_code": 0
+    },
+    {
+      "t": 3600.1,
+      "event": "draining",
+      "jobs": 118
+    }
+  ],
+  "samples_every_60s": [
+    {
+      "t": 3.0,
+      "jobs": {
+        "queued": 1
+      },
+      "active_leases": 0,
+      "steps_in_flight": 0,
+      "events": 3,
+      "rss_api": 94.1,
+      "rss_scheduler": 44.0,
+      "rss_exec-worker": 38.3
+    },
+    {
+      "t": 62.7,
+      "jobs": {
+        "succeeded": 2
+      },
+      "active_leases": 0,
+      "steps_in_flight": 0,
+      "events": 207,
+      "rss_api": 95.4,
+      "rss_scheduler": 111.8,
+      "rss_exec-worker": 62.5
+    },
+    {
+      "t": 123.2,
+      "jobs": {
+        "succeeded": 4
+      },
+      "active_leases": 0,
+      "steps_in_flight": 0,
+      "events": 426,
+      "rss_api": 95.4,
+      "rss_scheduler": 112.9,
+      "rss_exec-worker": 62.6
+    },
+    {
+      "t": 183.7,
+      "jobs": {
+        "succeeded": 6
+      },
+      "active_leases": 0,
+      "steps_in_flight": 0,
+      "events": 645,
+      "rss_api": 95.5,
+      "rss_scheduler": 113.6,
+      "rss_exec-worker": 62.6
+    },
+    {
+      "t": 244.1,
+      "jobs": {
+        "succeeded": 8
+      },
+      "active_leases": 0,
+      "steps_in_flight": 0,
+      "events": 847,
+      "rss_api": 95.5,
+      "rss_scheduler": 113.9,
+      "rss_exec-worker": 62.7
+    },
+    {
+      "t": 304.5,
+      "jobs": {
+        "succeeded": 10
+      },
+      "active_leases": 0,
+      "steps_in_flight": 0,
+      "events": 1066,
+      "rss_api": 95.5,
+      "rss_scheduler": 114.2,
+      "rss_exec-worker": 62.7
+    },
+    {
+      "t": 364.9,
+      "jobs": {
+        "succeeded": 12
+      },
+      "active_leases": 0,
+      "steps_in_flight": 0,
+      "events": 1285,
+      "rss_api": 95.5,
+      "rss_scheduler": 114.7,
+      "rss_exec-worker": 62.7
+    },
+    {
+      "t": 425.3,
+      "jobs": {
+        "succeeded": 14
+      },
+      "active_leases": 0,
+      "steps_in_flight": 0,
+      "events": 1487,
+      "rss_api": 95.5,
+      "rss_scheduler": 114.7,
+      "rss_exec-worker": 62.7
+    },
+    {
+      "t": 485.4,
+      "jobs": {
+        "succeeded": 16
+      },
+      "active_leases": 0,
+      "steps_in_flight": 0,
+      "events": 1706,
+      "rss_api": 95.5,
+      "rss_scheduler": 114.8,
+      "rss_exec-worker": 62.7
+    },
+    {
+      "t": 545.9,
+      "jobs": {
+        "succeeded": 18
+      },
+      "active_leases": 0,
+      "steps_in_flight": 0,
+      "events": 1925,
+      "rss_api": 95.5,
+      "rss_scheduler": 114.8,
+      "rss_exec-worker": 62.7
+    },
+    {
+      "t": 606.3,
+      "jobs": {
+        "succeeded": 20
+      },
+      "active_leases": 0,
+      "steps_in_flight": 0,
+      "events": 2127,
+      "rss_api": 95.5,
+      "rss_scheduler": 114.8,
+      "rss_exec-worker": 62.8
+    },
+    {
+      "t": 666.7,
+      "jobs": {
+        "succeeded": 22
+      },
+      "active_leases": 0,
+      "steps_in_flight": 0,
+      "events": 2346,
+      "rss_api": 95.5,
+      "rss_scheduler": 114.9,
+      "rss_exec-worker": 62.8
+    },
+    {
+      "t": 727.2,
+      "jobs": {
+        "succeeded": 24
+      },
+      "active_leases": 0,
+      "steps_in_flight": 0,
+      "events": 2565,
+      "rss_api": 95.5,
+      "rss_scheduler": 115.2,
+      "rss_exec-worker": 62.8
+    },
+    {
+      "t": 787.7,
+      "jobs": {
+        "succeeded": 26
+      },
+      "active_leases": 0,
+      "steps_in_flight": 0,
+      "events": 2767,
+      "rss_api": 95.5,
+      "rss_scheduler": 115.3,
+      "rss_exec-worker": 62.8
+    },
+    {
+      "t": 848.0,
+      "jobs": {
+        "succeeded": 28
+      },
+      "active_leases": 0,
+      "steps_in_flight": 0,
+      "events": 2986,
+      "rss_api": 95.5,
+      "rss_scheduler": 115.6,
+      "rss_exec-worker": 62.8
+    },
+    {
+      "t": 908.4,
+      "jobs": {
+        "succeeded": 30
+      },
+      "active_leases": 0,
+      "steps_in_flight": 0,
+      "events": 3205,
+      "rss_api": 95.5,
+      "rss_scheduler": 115.6,
+      "rss_exec-worker": 62.8
+    },
+    {
+      "t": 968.9,
+      "jobs": {
+        "succeeded": 32
+      },
+      "active_leases": 0,
+      "steps_in_flight": 0,
+      "events": 3407,
+      "rss_api": 95.6,
+      "rss_scheduler": 115.6,
+      "rss_exec-worker": 62.8
+    },
+    {
+      "t": 1029.4,
+      "jobs": {
+        "succeeded": 34
+      },
+      "active_leases": 0,
+      "steps_in_flight": 0,
+      "events": 3626,
+      "rss_api": 95.6,
+      "rss_scheduler": 115.7,
+      "rss_exec-worker": 62.8
+    },
+    {
+      "t": 1089.8,
+      "jobs": {
+        "succeeded": 36
+      },
+      "active_leases": 0,
+      "steps_in_flight": 0,
+      "events": 3845,
+      "rss_api": 95.6,
+      "rss_scheduler": 115.7,
+      "rss_exec-worker": 62.8
+    },
+    {
+      "t": 1150.2,
+      "jobs": {
+        "succeeded": 38
+      },
+      "active_leases": 0,
+      "steps_in_flight": 0,
+      "events": 4047,
+      "rss_api": 95.6,
+      "rss_scheduler": 115.7,
+      "rss_exec-worker": 62.8
+    },
+    {
+      "t": 1210.5,
+      "jobs": {
+        "succeeded": 40
+      },
+      "active_leases": 0,
+      "steps_in_flight": 0,
+      "events": 4266,
+      "rss_api": 95.6,
+      "rss_scheduler": 115.7,
+      "rss_exec-worker": 62.8
+    },
+    {
+      "t": 1270.9,
+      "jobs": {
+        "succeeded": 42
+      },
+      "active_leases": 0,
+      "steps_in_flight": 0,
+      "events": 4485,
+      "rss_api": 95.6,
+      "rss_scheduler": 115.7,
+      "rss_exec-worker": 62.8
+    },
+    {
+      "t": 1331.4,
+      "jobs": {
+        "succeeded": 44
+      },
+      "active_leases": 0,
+      "steps_in_flight": 0,
+      "events": 4687,
+      "rss_api": 95.6,
+      "rss_scheduler": 115.8,
+      "rss_exec-worker": 62.8
+    },
+    {
+      "t": 1391.8,
+      "jobs": {
+        "succeeded": 46
+      },
+      "active_leases": 0,
+      "steps_in_flight": 0,
+      "events": 4906,
+      "rss_api": 95.6,
+      "rss_scheduler": 115.8,
+      "rss_exec-worker": 62.8
+    },
+    {
+      "t": 1494.8,
+      "jobs": {
+        "succeeded": 48,
+        "queued": 1
+      },
+      "active_leases": 0,
+      "steps_in_flight": 0,
+      "events": 5131,
+      "rss_api": 95.8,
+      "rss_scheduler": 115.8,
+      "rss_exec-worker": 62.4
+    },
+    {
+      "t": 1555.2,
+      "jobs": {
+        "succeeded": 50,
+        "queued": 1
+      },
+      "active_leases": 0,
+      "steps_in_flight": 0,
+      "events": 5333,
+      "rss_api": 95.8,
+      "rss_scheduler": 115.8,
+      "rss_exec-worker": 62.5
+    },
+    {
+      "t": 1615.6,
+      "jobs": {
+        "succeeded": 52,
+        "queued": 1
+      },
+      "active_leases": 0,
+      "steps_in_flight": 0,
+      "events": 5552,
+      "rss_api": 95.8,
+      "rss_scheduler": 115.8,
+      "rss_exec-worker": 62.5
+    },
+    {
+      "t": 1675.9,
+      "jobs": {
+        "succeeded": 54,
+        "queued": 1
+      },
+      "active_leases": 0,
+      "steps_in_flight": 0,
+      "events": 5771,
+      "rss_api": 95.8,
+      "rss_scheduler": 116.0,
+      "rss_exec-worker": 62.6
+    },
+    {
+      "t": 1736.3,
+      "jobs": {
+        "succeeded": 56,
+        "queued": 1
+      },
+      "active_leases": 0,
+      "steps_in_flight": 0,
+      "events": 5973,
+      "rss_api": 95.8,
+      "rss_scheduler": 116.1,
+      "rss_exec-worker": 62.6
+    },
+    {
+      "t": 1796.7,
+      "jobs": {
+        "succeeded": 58,
+        "queued": 1
+      },
+      "active_leases": 0,
+      "steps_in_flight": 0,
+      "events": 6192,
+      "rss_api": 95.8,
+      "rss_scheduler": 116.2,
+      "rss_exec-worker": 62.6
+    },
+    {
+      "t": 1857.1,
+      "jobs": {
+        "succeeded": 60,
+        "queued": 1
+      },
+      "active_leases": 0,
+      "steps_in_flight": 0,
+      "events": 6411,
+      "rss_api": 95.8,
+      "rss_scheduler": 116.2,
+      "rss_exec-worker": 62.6
+    },
+    {
+      "t": 1917.6,
+      "jobs": {
+        "succeeded": 62,
+        "queued": 1
+      },
+      "active_leases": 0,
+      "steps_in_flight": 0,
+      "events": 6613,
+      "rss_api": 95.8,
+      "rss_scheduler": 116.2,
+      "rss_exec-worker": 62.7
+    },
+    {
+      "t": 1977.4,
+      "jobs": {
+        "succeeded": 64
+      },
+      "active_leases": 0,
+      "steps_in_flight": 0,
+      "events": 6829,
+      "rss_api": 95.8,
+      "rss_scheduler": 116.2,
+      "rss_exec-worker": 62.7
+    },
+    {
+      "t": 2037.8,
+      "jobs": {
+        "succeeded": 66
+      },
+      "active_leases": 0,
+      "steps_in_flight": 0,
+      "events": 7048,
+      "rss_api": 95.8,
+      "rss_scheduler": 116.2,
+      "rss_exec-worker": 62.7
+    },
+    {
+      "t": 2098.1,
+      "jobs": {
+        "succeeded": 68
+      },
+      "active_leases": 0,
+      "steps_in_flight": 0,
+      "events": 7250,
+      "rss_api": 95.8,
+      "rss_scheduler": 116.2,
+      "rss_exec-worker": 62.7
+    },
+    {
+      "t": 2158.5,
+      "jobs": {
+        "succeeded": 70
+      },
+      "active_leases": 0,
+      "steps_in_flight": 0,
+      "events": 7469,
+      "rss_api": 95.8,
+      "rss_scheduler": 116.2,
+      "rss_exec-worker": 62.7
+    },
+    {
+      "t": 2218.9,
+      "jobs": {
+        "succeeded": 72
+      },
+      "active_leases": 0,
+      "steps_in_flight": 0,
+      "events": 7688,
+      "rss_api": 95.8,
+      "rss_scheduler": 116.3,
+      "rss_exec-worker": 62.7
+    },
+    {
+      "t": 2279.3,
+      "jobs": {
+        "succeeded": 74
+      },
+      "active_leases": 0,
+      "steps_in_flight": 0,
+      "events": 7890,
+      "rss_api": 95.8,
+      "rss_scheduler": 116.4,
+      "rss_exec-worker": 62.7
+    },
+    {
+      "t": 2339.7,
+      "jobs": {
+        "succeeded": 76
+      },
+      "active_leases": 0,
+      "steps_in_flight": 0,
+      "events": 8109,
+      "rss_api": 95.8,
+      "rss_scheduler": 116.4,
+      "rss_exec-worker": 62.7
+    },
+    {
+      "t": 2400.1,
+      "jobs": {
+        "succeeded": 78
+      },
+      "active_leases": 0,
+      "steps_in_flight": 0,
+      "events": 8328,
+      "rss_api": 95.8,
+      "rss_scheduler": 116.4,
+      "rss_exec-worker": 62.7
+    },
+    {
+      "t": 2460.4,
+      "jobs": {
+        "succeeded": 80
+      },
+      "active_leases": 0,
+      "steps_in_flight": 0,
+      "events": 8530,
+      "rss_api": 95.8,
+      "rss_scheduler": 116.4,
+      "rss_exec-worker": 62.7
+    },
+    {
+      "t": 2521.4,
+      "jobs": {
+        "succeeded": 82,
+        "queued": 1
+      },
+      "active_leases": 0,
+      "steps_in_flight": 0,
+      "events": 8752,
+      "rss_api": 95.8,
+      "rss_scheduler": 68.1,
+      "rss_exec-worker": 62.7
+    },
+    {
+      "t": 2581.9,
+      "jobs": {
+        "succeeded": 84,
+        "queued": 1
+      },
+      "active_leases": 0,
+      "steps_in_flight": 0,
+      "events": 8971,
+      "rss_api": 95.8,
+      "rss_scheduler": 111.0,
+      "rss_exec-worker": 62.7
+    },
+    {
+      "t": 2642.3,
+      "jobs": {
+        "succeeded": 86,
+        "queued": 1
+      },
+      "active_leases": 0,
+      "steps_in_flight": 0,
+      "events": 9173,
+      "rss_api": 95.8,
+      "rss_scheduler": 111.6,
+      "rss_exec-worker": 62.7
+    },
+    {
+      "t": 2702.7,
+      "jobs": {
+        "succeeded": 88,
+        "queued": 1
+      },
+      "active_leases": 0,
+      "steps_in_flight": 0,
+      "events": 9392,
+      "rss_api": 95.8,
+      "rss_scheduler": 112.2,
+      "rss_exec-worker": 62.7
+    },
+    {
+      "t": 2762.5,
+      "jobs": {
+        "succeeded": 90
+      },
+      "active_leases": 0,
+      "steps_in_flight": 0,
+      "events": 9608,
+      "rss_api": 95.8,
+      "rss_scheduler": 112.6,
+      "rss_exec-worker": 62.7
+    },
+    {
+      "t": 2823.0,
+      "jobs": {
+        "succeeded": 92
+      },
+      "active_leases": 0,
+      "steps_in_flight": 0,
+      "events": 9810,
+      "rss_api": 95.8,
+      "rss_scheduler": 112.8,
+      "rss_exec-worker": 62.7
+    },
+    {
+      "t": 2883.4,
+      "jobs": {
+        "succeeded": 94
+      },
+      "active_leases": 0,
+      "steps_in_flight": 0,
+      "events": 10029,
+      "rss_api": 95.8,
+      "rss_scheduler": 113.2,
+      "rss_exec-worker": 62.7
+    },
+    {
+      "t": 2943.9,
+      "jobs": {
+        "succeeded": 96
+      },
+      "active_leases": 0,
+      "steps_in_flight": 0,
+      "events": 10248,
+      "rss_api": 95.8,
+      "rss_scheduler": 113.4,
+      "rss_exec-worker": 62.7
+    },
+    {
+      "t": 3004.4,
+      "jobs": {
+        "succeeded": 98
+      },
+      "active_leases": 0,
+      "steps_in_flight": 0,
+      "events": 10450,
+      "rss_api": 95.8,
+      "rss_scheduler": 113.4,
+      "rss_exec-worker": 62.7
+    },
+    {
+      "t": 3064.7,
+      "jobs": {
+        "succeeded": 100
+      },
+      "active_leases": 0,
+      "steps_in_flight": 0,
+      "events": 10669,
+      "rss_api": 95.8,
+      "rss_scheduler": 113.5,
+      "rss_exec-worker": 62.7
+    },
+    {
+      "t": 3125.2,
+      "jobs": {
+        "succeeded": 102
+      },
+      "active_leases": 0,
+      "steps_in_flight": 0,
+      "events": 10888,
+      "rss_api": 95.8,
+      "rss_scheduler": 113.7,
+      "rss_exec-worker": 62.7
+    },
+    {
+      "t": 3185.6,
+      "jobs": {
+        "succeeded": 104
+      },
+      "active_leases": 0,
+      "steps_in_flight": 0,
+      "events": 11090,
+      "rss_api": 95.8,
+      "rss_scheduler": 113.7,
+      "rss_exec-worker": 62.7
+    },
+    {
+      "t": 3246.1,
+      "jobs": {
+        "succeeded": 106
+      },
+      "active_leases": 0,
+      "steps_in_flight": 0,
+      "events": 11309,
+      "rss_api": 95.9,
+      "rss_scheduler": 114.0,
+      "rss_exec-worker": 62.7
+    },
+    {
+      "t": 3306.5,
+      "jobs": {
+        "succeeded": 108
+      },
+      "active_leases": 0,
+      "steps_in_flight": 0,
+      "events": 11528,
+      "rss_api": 95.9,
+      "rss_scheduler": 114.3,
+      "rss_exec-worker": 62.7
+    },
+    {
+      "t": 3366.8,
+      "jobs": {
+        "succeeded": 110
+      },
+      "active_leases": 0,
+      "steps_in_flight": 0,
+      "events": 11730,
+      "rss_api": 95.9,
+      "rss_scheduler": 114.4,
+      "rss_exec-worker": 62.7
+    },
+    {
+      "t": 3427.2,
+      "jobs": {
+        "succeeded": 112
+      },
+      "active_leases": 0,
+      "steps_in_flight": 0,
+      "events": 11949,
+      "rss_api": 95.9,
+      "rss_scheduler": 114.4,
+      "rss_exec-worker": 62.7
+    },
+    {
+      "t": 3487.6,
+      "jobs": {
+        "succeeded": 114
+      },
+      "active_leases": 0,
+      "steps_in_flight": 0,
+      "events": 12168,
+      "rss_api": 95.9,
+      "rss_scheduler": 114.4,
+      "rss_exec-worker": 62.7
+    },
+    {
+      "t": 3548.1,
+      "jobs": {
+        "succeeded": 116
+      },
+      "active_leases": 0,
+      "steps_in_flight": 0,
+      "events": 12370,
+      "rss_api": 95.9,
+      "rss_scheduler": 114.4,
+      "rss_exec-worker": 62.7
+    },
+    {
+      "t": 3600.1,
+      "jobs": {
+        "succeeded": 118
+      },
+      "active_leases": 0,
+      "steps_in_flight": 0,
+      "events": 12589,
+      "rss_api": 95.9,
+      "rss_scheduler": 114.4,
+      "rss_exec-worker": 62.7
+    }
+  ]
+}

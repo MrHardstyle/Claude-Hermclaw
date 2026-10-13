@@ -526,15 +526,15 @@ Legende: `[x]` erledigt mit Evidence · `[~]` erledigt, Live-Verifikation auf Zi
 
 ## P40 – SOAK TEST
 
-- [ ] 40.1 System vollständig starten. — Evidence: –
-- [ ] 40.2 mehrere reale Jobs. — Evidence: –
-- [ ] 40.3 24h/geeigneter Dauerbetrieb soweit Umgebung erlaubt. — Evidence: –
-- [ ] 40.4 Ressourcen prüfen. — Evidence: –
-- [ ] 40.5 Leaks. — Evidence: –
-- [ ] 40.6 stuck leases. — Evidence: –
-- [ ] 40.7 worker reconnect. — Evidence: –
-- [ ] 40.8 event ordering. — Evidence: –
-- [ ] 40.9 DB integrity. — Evidence: –
+- [~] 40.1 System vollständig starten. — Evidence: local: API + scheduler + execution worker processes started by scripts/soak/run_soak.py (docs/operations/soak-local.md); target hosts pending (BLOCKER-001)
+- [~] 40.2 mehrere reale Jobs. — Evidence: 118 jobs via HTTP API, 118 succeeded (real git/verifier/review/commit/push, scripted model answers) – docs/operations/soak-local.md; real models on .224 pending (BLOCKER-001)
+- [~] 40.3 24h/geeigneter Dauerbetrieb soweit Umgebung erlaubt. — Evidence: 60 min continuous local soak with fault injection – docs/operations/soak-local.md; 24 h on the target hosts after deployment (BLOCKER-001)
+- [x] 40.4 Ressourcen prüfen. — Evidence: leases, in-flight steps and RSS sampled every 60 s, all back to zero between jobs – docs/operations/soak-local.md
+- [x] 40.5 Leaks. — Evidence: RSS growth first→last quarter API +0.5 %, scheduler +3.7 %, worker +2.7 % over 118 jobs – docs/operations/soak-local.md
+- [x] 40.6 stuck leases. — Evidence: 0 active/preempting leases and 0 waiting requests after drain – docs/operations/soak-local.md
+- [x] 40.7 worker reconnect. — Evidence: execution worker SIGKILLed: offline after 51.5 s, ready 2.2 s after restart – docs/operations/soak-local.md
+- [x] 40.8 event ordering. — Evidence: 12 589 events: no duplicate sequence, no per-job ordering violation – docs/operations/soak-local.md
+- [x] 40.9 DB integrity. — Evidence: no unvalidated constraints, no orphans, no open attempts of terminal jobs, report for every succeeded job – docs/operations/soak-local.md
 
 ## P41 – RELEASE CANDIDATE
 
