@@ -275,7 +275,7 @@ Legende: `[x]` erledigt mit Evidence · `[~]` erledigt, Live-Verifikation auf Zi
 - [x] 19.5 completion. — Evidence: terminal complete_step/block_step/request_replan; test_full_turn_sequence_completes_step, test_request_replan_and_correction_items_reach_prompt
 - [x] 19.6 checkpoints. — Evidence: CoderResult.checkpoint/history_from_checkpoint + per-turn StepAttempt.history; test_cancel_and_checkpoint_resume
 - [x] 19.7 result schema. — Evidence: CoderResult (outcome, turns, history digests, completion/block report); test_no_reasoning_or_secrets_in_history
-- [ ] 19.8 code task regression matrix. — Evidence: –
+- [x] 19.8 code task regression matrix. — Evidence: tests/e2e/test_e2e_code_tasks.py: 8 code task types (Python/FastAPI, SQLite migration, TSX/CSS, PHP, TypeScript, YAML-only, shell, replan) through CoderLoop + real verifier, run by scripts/dev/regression-matrix.sh; loop-level cases tests/integration/test_coder_loop.py (8)
 
 ## P20 – Stagnation Detection
 

@@ -48,6 +48,8 @@ class EventType:
     RESOURCE_RELEASED = "resource.released"
     RESOURCE_PREEMPT_REQUESTED = "resource.preempt.requested"
     RESOURCE_EXPIRED = "resource.expired"
+    RESOURCE_REQUEST_CANCELLED = "resource.request.cancelled"  # waiter gave up (timeout/cancel/stale)
+    RESOURCE_PREEMPT_WITHDRAWN = "resource.preempt.withdrawn"  # preemption request taken back
     WORKER_REGISTERED = "worker.registered"
     WORKER_STATE = "worker.state"
     WORKER_OFFLINE = "worker.offline"
@@ -56,6 +58,7 @@ class EventType:
     WORKER_READY = "worker.ready"
     WORKER_WAKE_FAILED = "worker.wake.failed"
     WORKER_ASSIGNED = "worker.assigned"
+    WORKER_SLEEP = "worker.sleep"  # idle sleep hook put the host to sleep (P10.9)
     MODEL_LOAD_STARTED = "model.load.started"
     MODEL_LOAD_FINISHED = "model.load.finished"
     MODEL_UNLOADED = "model.unloaded"
@@ -89,6 +92,7 @@ class EventType:
     MEDIA_FINISHED = "media.finished"
     SSH_COMMAND = "ssh.command"
     DB_TOOL = "db.tool"
+    WORKSPACE_CLEANED = "workspace.cleaned"  # retention cleanup removed a job workspace and its index
     SYSTEM_DISK = "system.disk"  # free space of a runtime data path crossed a warning/critical threshold (P35.9)
     ERROR = "error"
     STATUS = "status"  # human-readable live status line for the UI
