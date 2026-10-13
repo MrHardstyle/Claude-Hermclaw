@@ -81,9 +81,11 @@ def write_text(path: Path, text: str) -> None:
 
 
 def copy_if_exists(src: Path, dst: Path) -> bool:
+    """Copy with the source's mtime: a scratch copy of ``.git/index`` must keep it, or git loses its racy-git
+    detection and misses same-size edits made in the same second as the index write (BUG-059)."""
     if not src.exists():
         return False
-    shutil.copyfile(src, dst)
+    shutil.copy2(src, dst)
     return True
 
 

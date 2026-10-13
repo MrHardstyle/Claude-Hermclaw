@@ -377,6 +377,13 @@ Noch keine.
 - Tatsächlich: `hermclaw/workers/api.py` also registered an admin-only `GET /api/workers`; the system router won by order, the second route was dead and the OpenAPI document ambiguous
 - Fix: `create_workers_router(include_list=False)` in the Hermclaw app; the standalone worker router (tests, embedding) keeps its list route
 
+### BUG-059 – read_diff/changed_files missed a same-size edit made in the same second as the index write (racy git)
+- Phase: P39 · Komponente: gitops · Severity: P2 · blockierend: nein · Status: **behoben** (`tests/integration/test_gitops_racy_index.py`)
+- Reproduktion: commit `module.py` (`VALUE = 1`), rewrite it to `VALUE = 3` (same size) in the same second, wait 1 s, `ops.changed_files` → `[]` (found by the P39 scope agent: `test_reader_implements_git_reader_protocol` failed ~25 %)
+- Erwartet: every change that `git status` reports is in the diff, the verifier's changed files and the push decision
+- Tatsächlich: `_scratch_index` copied `.git/index` with `shutil.copyfile`; the fresh mtime made git treat the entry as clean (stat data matches at second granularity) instead of "racily clean" (content compare)
+- Fix: `gitops/_fs.copy_if_exists` uses `shutil.copy2` (keeps the mtime); deterministic regression test aligns commit and edit to one second
+
 ## Template
 
 ### BUG-XXX – Titel
