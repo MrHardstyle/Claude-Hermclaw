@@ -47,4 +47,4 @@ def register_routes(app: FastAPI) -> None:
     from hermclaw.api.auth import require
     from hermclaw.workers.api import create_workers_router
 
-    app.include_router(create_workers_router(admin_dependencies=[Depends(require("admin"))]))
+    app.include_router(create_workers_router(admin_dependencies=[Depends(require("admin"))], include_list=False))

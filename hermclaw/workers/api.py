@@ -93,7 +93,9 @@ async def _read_limited(request: Request, limit: int) -> bytes:
     return bytes(buf)
 
 
-def create_workers_router(*, admin_dependencies: Sequence[DependsParam] = ()) -> APIRouter:
+def create_workers_router(*, admin_dependencies: Sequence[DependsParam] = (), include_list: bool = True) -> APIRouter:
+    """Worker protocol + admin routes; ``include_list=False`` when the host app already serves ``GET /api/workers``
+    (the Hermclaw API: ``hermclaw.api.system`` lists workers with the read scope for the UI, BUG-058)."""
     router = APIRouter(prefix="/api/workers", tags=["workers"])
 
     @router.post("/heartbeat", response_model=HeartbeatAck, responses={401: {}, 403: {}, 413: {}, 422: {}})
@@ -152,14 +154,16 @@ def create_workers_router(*, admin_dependencies: Sequence[DependsParam] = ()) ->
 
     admin = list(admin_dependencies)
 
-    @router.get("", response_model=list[WorkerInfo], dependencies=admin)
-    async def list_workers(
-        kind: WorkerKind | None = None,
-        state: WorkerState | None = None,
-        ctx: WorkerApiContext = Depends(get_worker_api_context),
-    ) -> list[WorkerInfo]:
-        async with ctx.sessionmaker() as session:
-            return await ctx.registry.list_workers(session, kind=kind, state=state)
+    if include_list:
+
+        @router.get("", response_model=list[WorkerInfo], dependencies=admin)
+        async def list_workers(
+            kind: WorkerKind | None = None,
+            state: WorkerState | None = None,
+            ctx: WorkerApiContext = Depends(get_worker_api_context),
+        ) -> list[WorkerInfo]:
+            async with ctx.sessionmaker() as session:
+                return await ctx.registry.list_workers(session, kind=kind, state=state)
 
     @router.get("/{worker_id}", response_model=WorkerDetail, dependencies=admin, responses={404: {}})
     async def get_worker(

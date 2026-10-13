@@ -370,6 +370,13 @@ Noch keine.
 - Erwartet: Refused, or judged as its literal name
 - Tatsächlich: normalise_path turns '\' into '/', so the audit allows it as 'src/a.py'. gitops staging (normalise_repo_path) still refuses backslash paths, so it cannot be committed. Not changed, because backslash conversion is part of contract parsing.
 
+### BUG-058 – GET /api/workers was registered twice (system read route and workers admin route)
+- Phase: P39 · Komponente: api/workers · Severity: P3 · blockierend: nein · Status: **behoben** (`tests/unit/test_api_routes_unique.py`)
+- Reproduktion: `create_app().openapi()` with warnings as errors → FastAPI "Duplicate Operation ID list_workers_api_workers_get" (found by the P31 UI agent)
+- Erwartet: one route per method/path; the UI list uses the read-scope system route (display_state, capabilities)
+- Tatsächlich: `hermclaw/workers/api.py` also registered an admin-only `GET /api/workers`; the system router won by order, the second route was dead and the OpenAPI document ambiguous
+- Fix: `create_workers_router(include_list=False)` in the Hermclaw app; the standalone worker router (tests, embedding) keeps its list route
+
 ## Template
 
 ### BUG-XXX – Titel
