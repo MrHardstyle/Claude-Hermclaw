@@ -50,3 +50,4 @@ test-results/
 tmp/
 *.tmp
 *.swp
+audit-reports/

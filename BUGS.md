@@ -234,7 +234,7 @@ Noch keine.
 
 ### BUG-035 – Shared redactor misses secrets assigned to prefixed identifiers
 - Phase: P11 · Komponente: repo_intelligence · Severity: P2 · blockierend: nein · Status: **behoben** (Regressionstest in den repo_intelligence-Tests)
-- Reproduktion: from hermclaw.core.redaction import DEFAULT_REDACTOR; DEFAULT_REDACTOR.text("DB_PASSWORD = 'hunter2-very-secret'")
+- Reproduktion: from hermclaw.core.redaction import DEFAULT_REDACTOR; DEFAULT_REDACTOR.text("DB_PASSWORD = '<literal value>'")
 - Erwartet: the literal is masked
 - Tatsächlich: returned unchanged (\bpassword\b does not match inside DB_PASSWORD). Repo intelligence works around it with hermclaw/repo_intelligence/redact.py::redact_code; other components using DEFAULT_REDACTOR on code are still affected.
 
@@ -267,6 +267,12 @@ Noch keine.
 - Reproduktion: heartbeat with an active job arrives between the idle decision and the sleep command
 - Erwartet: sleep aborted
 - Tatsächlich: worker was put to sleep anyway
+
+### BUG-041 – Verifier secret scanner flagged secret *references* as secrets (systemd LoadCredential paths, cred: refs, "ghp_..." placeholders)
+- Phase: P36 · Komponente: verifier · Severity: P1 · blockierend: ja (a deploy job writing systemd units with LoadCredential= would be blocked by its own verifier) · Status: **behoben** (regression cases in tests/unit/test_verifier_secrets.py::test_ordinary_code_is_not_reported; found by tests/security/test_security_checks.py::test_repository_contains_no_secrets)
+- Reproduktion: SecretScanner().scan_line("x.service", 1, "LoadCredential=worker-token:/etc/hermclaw-worker/worker-token")
+- Erwartet: no finding – the value is a path to the credential, not the credential
+- Tatsächlich: secret_assignment finding; likewise for "api_token_ref: cred:…" and documentation placeholders like "token=ghp_..."
 
 ## Template
 

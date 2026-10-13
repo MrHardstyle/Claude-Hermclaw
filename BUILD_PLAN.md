@@ -470,14 +470,14 @@ Legende: `[x]` erledigt mit Evidence · `[~]` erledigt, Live-Verifikation auf Zi
 
 ## P36 – Security Hardening
 
-- [ ] 36.1 secret scan. — Evidence: –
-- [ ] 36.2 permissions. — Evidence: –
-- [ ] 36.3 worker auth. — Evidence: –
+- [x] 36.1 secret scan. — Evidence: tests/security/test_security_checks.py::test_repository_contains_no_secrets (verifier SecretScanner over every tracked non-test file; found BUG-041); job diffs: tests/unit/test_verifier_secrets.py, verifier secret check in every verification run
+- [x] 36.2 permissions. — Evidence: API scopes read/control/admin: tests/integration/test_api.py::test_auth_required_and_scopes; tests/security/test_security_checks.py::test_worker_api_views_need_admin_scope_and_heartbeats_a_signature, ::test_secret_references_policy_in_production (0400 secret files, no env:/literal: in production), ::test_api_errors_never_echo_tokens
+- [x] 36.3 worker auth. — Evidence: HMAC-signed worker requests (method/path/timestamp/nonce/body hash, skew window, replay cache, rotation): tests/unit/test_workers_auth.py (12 tests), tests/integration/test_workers_api.py::test_heartbeat_auth_failures, ::test_unauthenticated_heartbeat_rejected_before_body_is_read, tests/failure/test_workers_failures.py::test_orchestrator_rejects_heartbeats_with_rotated_out_token; tests/security/test_security_checks.py (main app)
 - [ ] 36.4 SSH restrictions. — Evidence: –
-- [ ] 36.5 command policy. — Evidence: –
-- [ ] 36.6 sandbox escape checks. — Evidence: –
-- [ ] 36.7 network policy. — Evidence: –
-- [ ] 36.8 dependency audit. — Evidence: –
+- [x] 36.5 command policy. — Evidence: policies.commands read/mutate/destructive/forbidden: tests/integration/test_tools_engine_exec.py::test_forbidden_and_destructive_commands_are_refused, ::test_destructive_commands_need_explicit_capability; tests/unit/test_tools_units.py
+- [x] 36.6 sandbox escape checks. — Evidence: rootless podman sandbox: tests/integration/test_sandbox_podman.py::test_workspace_rw_rootfs_ro_tmp_rw, ::test_only_workspace_tmp_and_shm_writable, ::test_capabilities_dropped_and_no_new_privileges, ::test_pids_limit_enforced, ::test_memory_limit_enforced, ::test_secret_values_never_on_engine_command_line; workspace sync refuses .git/escapes: tests/integration/test_tools_remote_executor.py; symlink/embedded repo staging guards: tests/integration/test_gitops_engine.py::test_stage_refuses_escaping_symlink_and_odd_names
+- [x] 36.7 network policy. — Evidence: sandbox network off by default / explicit per step: tests/integration/test_sandbox_podman.py::test_network_off_by_default, ::test_network_allowed_mode_has_route; research SSRF guard (private ranges, NAT64, redirects): tests/failure/test_research_failures.py, tests/integration/test_research_fetch_search.py
+- [x] 36.8 dependency audit. — Evidence: docs/security/dependency-audit.md (2026-10-13: runtime venv 98 packages, LiteLLM venv 115 packages – no known vulnerabilities, pip-audit); reproducible: scripts/dev/dependency-audit.sh (incl. npm audit for ui/)
 
 ## P37 – Generalization E2E
 

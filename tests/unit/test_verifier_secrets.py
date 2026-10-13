@@ -71,6 +71,12 @@ def test_secret_shapes_are_found(path: str, line: str, rule: str) -> None:
         ("app.py", "max_tokens = 4096"),
         ("app.py", 'logo = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPhfDwAChwGA"'),
         ("app.py", "x = foo_bar_baz_qux_quux_corge_grault_garply_waldo(1)"),
+        # BUG-041: secret *references* are not secrets (systemd credentials, secret refs, doc ellipses)
+        ("hermclaw-api.service", "LoadCredential=worker-token:/etc/hermclaw-worker/worker-token"),
+        ("hermclaw-api.service", "LoadCredentialEncrypted=db-password:/etc/credstore.encrypted/hermclaw-db-password"),
+        ("hosts.yaml", "api_token_ref: cred:api-admin-token"),
+        ("workers.md", "Copy it as a systemd credential: `LoadCredential=worker-token:/etc/hermclaw-worker/worker-token`."),
+        ("notes.md", "Reproduktion: repo_hint 'token=ghp_...' appears verbatim"),
     ],
 )
 def test_ordinary_code_is_not_reported(path: str, line: str) -> None:

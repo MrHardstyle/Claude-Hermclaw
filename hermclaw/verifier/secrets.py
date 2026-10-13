@@ -106,7 +106,8 @@ _PLACEHOLDER_PARTS = (
     "your-",
     "xxxx",
     "****",
-    "....",
+    "...",
+    "…",
     "${",
     "{{",
 )
@@ -138,9 +139,14 @@ def shannon_entropy(value: str) -> float:
     return -sum((c / n) * math.log2(c / n) for c in counts.values())
 
 
+_REFERENCE = re.compile(r"^(?:(?:file|cred|env|vault):\S+|(?:/[a-z0-9._-]+){2,}/?)$")
+
+
 def is_placeholder(value: str) -> bool:
     v = value.strip().strip("\"'`")
     if not v:
+        return True
+    if _REFERENCE.match(v.rstrip(".,;:)`'\"")):  # a reference (path / secret ref, e.g. LoadCredential=name:/etc/…)
         return True
     low = v.lower()
     if v.startswith(_PLACEHOLDER_START) or low in _PLACEHOLDER_WORDS:
