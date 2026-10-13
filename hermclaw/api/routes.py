@@ -6,7 +6,7 @@ from typing import Any
 
 from fastapi import FastAPI
 
-from hermclaw.api import events, jobs, system
+from hermclaw.api import events, jobs, metrics, system
 
 
 class SseHeadersMiddleware:
@@ -40,6 +40,7 @@ def register_routes(app: FastAPI) -> None:
     app.include_router(system.router)
     app.include_router(jobs.router)
     app.include_router(events.router)
+    app.include_router(metrics.router)
     # orchestrator worker API (P07): signed heartbeats from .222/.224; the read/admin views need the admin scope
     from fastapi import Depends
 
