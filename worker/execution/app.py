@@ -582,10 +582,23 @@ class ExecutionService:
             ok = result.exit_code == 0 and SELFTEST_MARKER in result.stdout
             return ok, result.error or f"exit {result.exit_code} in {result.duration_ms} ms ({result.sandbox})"
 
+        from worker.execution.sandbox import ContainerSandbox  # lazy like startup_recovery (engine-free test runners)
+
+        async def images() -> tuple[bool, str]:
+            # every image of policies.sandbox (default + toolchain aliases, R-022) must be built/pulled on this host
+            assert isinstance(self.runner, ContainerSandbox)
+            missing = await self.runner.missing_images()
+            present = len(self.runner.allowed_images()) - len(missing)
+            if missing:
+                return False, f"missing: {', '.join(missing)} (scripts/ops/hermclaw-build-sandbox-images)"
+            return True, f"{present} image(s) present"
+
         await timed("workspaces_writable", writable())
         await timed("disk_free", disk())
         await timed("sandbox_engine", engine())
         if checks[-1].ok:
+            if isinstance(self.runner, ContainerSandbox):
+                await timed("sandbox_images", images())
             await timed("sandbox_run", sandbox_run())
         return SelftestResult(ok=all(c.ok for c in checks), worker_id=self.settings.worker_id, checks=checks)
 

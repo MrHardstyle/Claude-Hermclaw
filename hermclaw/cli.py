@@ -13,6 +13,8 @@ Subcommands
   job-submit PROMPT       create a job (--title, --repo NAME, --base-branch, --constraint …)
   litellm-config OUT      generate the LiteLLM proxy config from config/models.yaml
   schemas OUT_DIR         export the JSON schemas of all contracts
+  doctor                  installation/operations preflight: config, DB, paths, tokens, LiteLLM, workers, models,
+                          sandbox images, research (--offline, --json); exit 1 when a check fails
 """
 
 from __future__ import annotations
@@ -49,6 +51,19 @@ def cmd_migrate(_: argparse.Namespace) -> int:
     upgrade_head()  # source checkout or the release's <venv>/share/hermclaw (BUG-060)
     print(f"database migrated to head ({head_revision()})")
     return 0
+
+
+def cmd_doctor(ns: argparse.Namespace) -> int:
+    from hermclaw.core.config import load_config
+    from hermclaw.core.settings import get_settings
+    from hermclaw.doctor import run_doctor
+
+    report = asyncio.run(run_doctor(load_config(), get_settings(), offline=ns.offline, timeout_seconds=ns.timeout))
+    if ns.json:
+        _print(report.to_dict())
+    else:
+        print(report.render())
+    return 0 if report.ok else 1
 
 
 def cmd_config_check(_: argparse.Namespace) -> int:
@@ -219,6 +234,11 @@ def build_parser() -> argparse.ArgumentParser:
     sub.add_parser("api", help="run the HTTP API").set_defaults(fn=cmd_api)
     sub.add_parser("scheduler", help="run the scheduler + runtime services").set_defaults(fn=cmd_scheduler)
     sub.add_parser("migrate", help="apply database migrations").set_defaults(fn=cmd_migrate)
+    d = sub.add_parser("doctor", help="installation/operations preflight (exit 1 on failures)")
+    d.add_argument("--offline", action="store_true", help="skip LiteLLM, worker, model, sandbox and research probes")
+    d.add_argument("--json", action="store_true", help="machine-readable report")
+    d.add_argument("--timeout", type=float, default=5.0, help="HTTP timeout per probe in seconds")
+    d.set_defaults(fn=cmd_doctor)
     sub.add_parser("config-check", help="validate the configuration").set_defaults(fn=cmd_config_check)
     t = sub.add_parser("token-create", help="create an API token")
     t.add_argument("name")

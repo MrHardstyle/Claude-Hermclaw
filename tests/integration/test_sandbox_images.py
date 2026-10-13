@@ -175,3 +175,12 @@ async def test_pytest_runs_in_selected_python_image(sessionmaker: Any, tmp_path:
         ),
     )
     assert "RO" in iso.stdout and "NONET" in iso.stdout
+
+
+@pytest.mark.skipif(_image_missing(DEFAULT_IMAGE) is not None, reason=_image_missing(DEFAULT_IMAGE) or "")
+async def test_missing_images_reports_unbuilt_toolchain_images_without_pulling() -> None:
+    from worker.execution.sandbox import PodmanSandbox
+
+    sbx = PodmanSandbox(policy(node="localhost/hermclaw-sandbox-never-built:1"), pull="missing", managed_label="hermclaw.r022test=true")
+    assert await sbx.missing_images() == ["localhost/hermclaw-sandbox-never-built:1"]  # alpine default is present
+    assert subprocess.run(["podman", "image", "exists", "localhost/hermclaw-sandbox-never-built:1"], check=False).returncode == 1

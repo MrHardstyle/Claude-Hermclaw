@@ -879,6 +879,18 @@ class ContainerSandbox:
         await self.kill_container(name)
         return await self.remove_container(name)
 
+    async def missing_images(self, images: Iterable[str] | None = None) -> list[str]:
+        """Allowed images that are not present locally (inspection only, never pulls) – worker selftest/doctor."""
+        missing: list[str] = []
+        for image in sorted(set(images) if images is not None else self.allowed_images()):
+            if not _IMAGE_RE.match(image):
+                missing.append(image)
+                continue
+            rc, _out, _err = await engine_exec([self.executable, "image", "inspect", "--format", "{{.Id}}", image], timeout_seconds=60)
+            if rc != 0:
+                missing.append(image)
+        return missing
+
     async def ensure_images(self, images: Iterable[str] | None = None, *, pull_timeout: float = 1800.0) -> dict[str, str]:
         """Make sure the allowed images are present locally (18.2): ``image -> present|pulled|error: …``."""
         report: dict[str, str] = {}
