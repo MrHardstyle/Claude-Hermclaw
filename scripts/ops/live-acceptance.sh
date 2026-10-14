@@ -18,7 +18,7 @@
 #   sudo scripts/ops/live-acceptance.sh --cleanup-db     # drop the test role, template and leftover test databases
 #   scripts/ops/live-acceptance.sh --list
 #
-# Suites: orchestrator (.225): workers models repo_intelligence research sshtools wol gitops backup
+# Suites: orchestrator (.225): workers models repo_intelligence research sshtools infratools wol gitops backup
 #         execution worker (.222): sandbox
 # `backup` writes one real backup set to Terra (.60), restore-tests it and applies the retention policy.
 # Default: every suite of this host's role (orchestrator: /etc/hermclaw/hermclaw.env, execution worker:
@@ -48,7 +48,7 @@ PGPORT_="${HERMCLAW_ACCEPTANCE_PGPORT:-5432}"
 TEST_ROLE=hermclaw_acceptance
 TEMPLATE_DB=hermclaw_acceptance_tpl
 URL_FILE="${CONFIG_DIR}/secrets/acceptance-test-admin-url"
-ORCHESTRATOR_SUITES=(workers models repo_intelligence research sshtools wol gitops backup)
+ORCHESTRATOR_SUITES=(workers models repo_intelligence research sshtools infratools wol gitops backup)
 WORKER_SUITES=(sandbox)
 
 log() { printf '%s\n' "live-acceptance: $*" >&2; }
@@ -69,6 +69,7 @@ suite_files() {
         repo_intelligence) echo tests/integration/test_repo_intelligence_live.py ;;
         research) echo tests/integration/test_research_fetch_search.py tests/integration/test_research_engine.py ;;
         sshtools) echo tests/integration/test_sshtools_live.py ;;
+        infratools) echo tests/integration/test_infratools_live.py ;;
         wol) echo tests/integration/test_wol_live.py ;;
         gitops) echo tests/integration/test_gitops_live.py ;;
         backup) echo tests/integration/test_backup_live.py ;;
@@ -201,7 +202,7 @@ configure_suite() { # sets UNIT_PROPS/UNIT_ENV for a suite; returns 3 to skip it
             [[ -n "${HERMCLAW_LIVE_SEARXNG_URL:-}" ]] && UNIT_ENV+=(-E "HERMCLAW_LIVE_SEARXNG_URL=${HERMCLAW_LIVE_SEARXNG_URL}")
             add_cred litellm-master-key || true
             ;;
-        sshtools) ;;
+        sshtools | infratools) ;;
         wol)
             UNIT_ENV+=(-E "HERMCLAW_LIVE_WOL_WORKER=${HERMCLAW_LIVE_WOL_WORKER:-${MODEL_ID}}")
             if [[ "$FULL_WOL" == 1 ]]; then

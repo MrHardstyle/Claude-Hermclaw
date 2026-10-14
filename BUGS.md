@@ -586,6 +586,57 @@ Noch keine.
 - Tatsächlich: 400 `no_db_connection` → `MODEL_BAD_REQUEST`; without the `prisma` package auth errors are HTTP 500 (research R-027 L10)
 - Fix: both shapes are authentication failures; `prisma==0.15.0` joins the `litellm-proxy` extra (401 for a missing key)
 
+
+### BUG-098 – JSON output redacted before parsing broke `podman inspect` (container sandboxes never saw their containers)
+- Phase: P28 · Komponente: infratools · Severity: P1 · blockierend: ja · Status: **behoben** (`tests/unit/test_infratools_containers.py::test_inspect_secret_like_json_keys_do_not_break_parsing`)
+- Tatsächlich: `"Passwd": true` became invalid JSON after redaction
+- Fix: JSON is parsed raw, only extracted fields are redacted; `loads_lenient` repairs transport-redacted output; raw output never reaches `command_runs`
+
+### BUG-099 – Podman healthchecks stayed `starting` without systemd timers
+- Phase: P28 · Komponente: infratools · Severity: P2 · blockierend: nein · Status: **behoben** (`tests/integration/test_infratools_compose_real.py::test_sandbox_up_healthy_remapped_ports_logs_and_teardown`)
+- Tatsächlich: compose sandbox waited for `healthy` forever on a host without systemd user timers
+- Fix: the sandbox runs `podman healthcheck run` itself
+
+### BUG-100 – `nginx -t` bound the real listen sockets and wrote log/pid paths
+- Phase: P28 · Komponente: infratools · Severity: P2 · blockierend: nein · Status: **behoben** (`tests/integration/test_infratools_nginx_real.py::test_listen_on_foreign_address_and_busy_port_is_rewritten`)
+- Tatsächlich: other hosts' addresses fail with EADDRNOTAVAIL, ports < 1024 without root, paths created on the host
+- Fix: `rewrite_for_test` moves sockets and paths into a private prefix and maps messages back to the original lines
+
+### BUG-101 – SSE regex locations were not recognised as SSE
+- Phase: P28 · Komponente: infratools · Severity: P3 · blockierend: nein · Status: **behoben** (`tests/unit/test_infratools_nginx.py`)
+- Tatsächlich: `~ ^/api/(jobs/[^/]+/)?events/stream$` skipped the buffering/timeout rules
+- Fix: probe paths matched with nginx location semantics
+
+### BUG-102 – Billion-laughs YAML in a compose file
+- Phase: P28 · Komponente: infratools · Severity: P1 · blockierend: nein · Status: **behoben** (`tests/unit/test_infratools_compose.py`)
+- Tatsächlich: an alias-count limit did not stop the expansion
+- Fix: cap on the expanded node count
+
+### BUG-103 – Duplicate host ports: IPv4/IPv6 and wildcard overlap not told apart
+- Phase: P28 · Komponente: infratools · Severity: P3 · blockierend: nein · Status: **behoben** (`tests/unit/test_infratools_ports.py`)
+- Tatsächlich: false duplicates / missed overlaps between `0.0.0.0` and a specific address
+- Fix: address-family aware overlap check
+
+### BUG-104 – Local compose staging directory leaked when copying failed
+- Phase: P28 · Komponente: infratools · Severity: P3 · blockierend: nein · Status: **behoben** (`tests/failure/test_infratools_failures.py`)
+- Tatsächlich: temp dir left behind
+- Fix: always removed
+
+### BUG-105 – Remote port allocator could fail although free ports existed
+- Phase: P28 · Komponente: infratools · Severity: P3 · blockierend: nein · Status: **behoben** (`tests/unit/test_infratools_sandbox_model.py`)
+- Tatsächlich: allocation gave up early
+- Fix: fixed retry over the range
+
+### BUG-106 – Predeploy check crashed on invalid YAML
+- Phase: P28 · Komponente: infratools · Severity: P3 · blockierend: nein · Status: **behoben** (`tests/failure/test_infratools_failures.py`)
+- Tatsächlich: exception instead of a finding
+- Fix: reported as validation error
+
+### BUG-107 – A failed rollback-artifact step left the deployment row in `started`
+- Phase: P28 · Komponente: infratools · Severity: P2 · blockierend: nein · Status: **behoben** (`tests/integration/test_infratools_rollback.py::test_failed_rollback_artifact_blocks_the_write_and_releases_the_claim`)
+- Tatsächlich: target blocked for later deployments
+- Fix: claim released, deployment marked failed
+
 ## Template
 
 ### BUG-XXX – Titel

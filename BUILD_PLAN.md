@@ -367,12 +367,12 @@ Legende: `[x]` erledigt mit Evidence · `[~]` erledigt, Live-Verifikation auf Zi
 
 ## P28 – Container/Proxy Tools
 
-- [ ] 28.1 inspect. — Evidence: –
-- [ ] 28.2 compose validate. — Evidence: –
-- [ ] 28.3 sandbox startup. — Evidence: –
-- [ ] 28.4 port collision. — Evidence: –
-- [ ] 28.5 Nginx test. — Evidence: –
-- [ ] 28.6 rollback artifact. — Evidence: –
+- [~] 28.1 inspect. — Evidence: containers.py ContainerInventory.list_containers/inspect (podman `ps --format json`, docker `ps --format '{{json .}}'`, `inspect --type container`) normalised to ContainerInfo; env values never returned; JSON parsed before redaction (loads_lenient handles transport redaction). Tests: tests/unit/test
+- [x] 28.2 compose validate. — Evidence: compose.py ComposeValidator: engine check via `docker compose -f … config --quiet` (fallback docker-compose/podman-compose/podman compose; none → skipped with reason; remote include/extends never fetched) + validate_structure (YAML 1.2 loader, alias/expansion bomb guard, services/image|build, port s
+- [x] 28.3 sandbox startup. — Evidence: compose_sandbox.py ComposeSandbox.run: strict + sandbox-only refusals, staged project copy (local 0700 tmp / remote tar via stdin + mktemp), generated full sandbox compose file (project hermclaw-sbx-<id>, all ports → 127.0.0.1:<free>, container_name dropped, restart no, label), up -d, wait running/h
+- [~] 28.4 port collision. — Evidence: ports.py PortChecker: requested ports from compose/nginx/systemd vs BAUPLAN_PORT_PLAN (§6, owner per port, address from hosts.yaml) and live `ss -ltnpH/-lunpH` (local or remote runner) with owner/process/pid; InfraTools.predeploy_check adds container-inventory collisions (PORT_USED_BY_CONTAINER, roo
+- [x] 28.5 Nginx test. — Evidence: nginx.py NginxTester.test: real `nginx -t -q -p <prefix>/ -c <conf> -e stderr` with site wrapper or main mode, rewrite_for_test (listen → free loopback ports, ipv6only dropped, unix sockets/log/pid/temp/cache paths into prefix; nginx -t really binds sockets), messages mapped back; ProxyConfigValidat
+- [x] 28.6 rollback artifact. — Evidence: rollback.py RollbackStore.create (previous content + sha256 + manifest + restore command under artifacts_dir/<job>/rollback/<id>/, artifacts row kind=rollback), get/verify (row+manifest+file checksum, path confinement) and restore (verify before touching target, atomic write, post-verify, optional r
 
 ## P29 – Media
 

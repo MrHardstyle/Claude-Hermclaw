@@ -179,8 +179,28 @@ async def test_database_tools_are_wired_with_the_sandbox_executor(sessionmaker: 
         assert all(services.ops.provider.provides(t) for t in DB_TOOLS)  # type: ignore[union-attr]
         db_provider = next(p for p in services.ops.provider.providers if type(p).__name__ == "DbOpsProvider")  # type: ignore[union-attr]
         assert isinstance(db_provider.executor, WorkspaceExecutor)
-        assert len(services.ops.startup_hooks) == 1
-        await services.ops.startup_hooks[0]()  # no sandbox server configured: nothing to drop, no error
+        assert len(services.ops.startup_hooks) == 2, "orphan DB sandboxes + orphan compose sandboxes"
+        for hook in services.ops.startup_hooks:
+            await hook()  # nothing configured / nothing left over: no error
+    finally:
+        await services.aclose()
+
+
+async def test_container_and_proxy_tools_are_wired_with_the_ssh_runner(sessionmaker: Any, tmp_path: Path) -> None:
+    """P28 in the runtime: container/compose/nginx tools in the composite provider for docker/deploy steps; remote
+    hosts go through the audited SSH runner of the bundle, artifacts (rollback, outputs) below the data dir."""
+    from hermclaw.contracts.tools import CONTAINER_TOOLS, OPS_TOOLS_BY_CAPABILITY
+
+    services = build_services(get_config(), _settings(tmp_path), sessionmaker, overrides=ServiceOverrides(chat=StackModels()))
+    try:
+        assert services.ops is not None and services.ops.names == ["ssh", "dbtools", "infratools"]
+        provider = services.ops.provider
+        assert provider is not None and all(provider.provides(t) for t in CONTAINER_TOOLS)
+        infra = next(p for p in provider.providers if type(p).__name__ == "InfraOpsProvider")  # type: ignore[attr-defined]
+        assert infra.tools.executor.remote is services.ops.ssh_runner
+        assert OPS_TOOLS_BY_CAPABILITY["docker"] >= CONTAINER_TOOLS, "docker steps may call the container tools"
+        docker_step = next(h for h in services.handlers if "docker" in h.kinds)
+        assert docker_step.deps.ops is provider  # type: ignore[attr-defined]
     finally:
         await services.aclose()
 
