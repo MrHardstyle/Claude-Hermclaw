@@ -64,5 +64,5 @@
 | P36.8/P39 | Abhängigkeits-Audit | `scripts/dev/dependency-audit.sh .venv <litellm-venv>` | 2026-10-14: Runtime 108 Pakete, LiteLLM-venv 117 Pakete (1.104.2 + prisma 0.15.0): keine bekannten Schwachstellen (pip-audit); UI `npm audit`: 0 | auf `.225` mit `/opt/litellm/venv` wiederholen |
 | P31/P39 | UI statisch + Unit | `cd ui && npm run typecheck && npm run lint && npm run test:unit && npm run build` | 2026-10-14: tsc strict ok, ESLint 0 Warnungen, 48 Vitest-Tests, Build ok | – |
 | P26 | SSH/Admin Tools | `pytest tests/*/test_sshtools_*.py` | 200 passed, 4 live deselektiert (echter sshd mit Forced-Command-Gate, Policy-Klassifikation inkl. Bypass-Regressionen BUG-076/077, Freigaben, Schlüssel) | `pytest -m live tests/integration/test_sshtools_live.py` (über `live-acceptance.sh`) |
-| P31 | Web UI | `cd ui && npm run test:unit`; `pytest tests/e2e/test_ui_playwright.py` (Playwright gegen die echte API) | 48 Vitest + 3 Playwright-Läufe (Spezifikationen unter `ui/tests/e2e/`) | Browser gegen `.223` |
+| P31 | Web UI | `cd ui && npm run test:unit`; `pytest tests/e2e/test_ui_playwright.py` (Playwright gegen die echte API) | 48 Vitest; Playwright: 10 Spezifikationen mit 36 Tests (`ui/tests/e2e/`), über 3 pytest-Läufe | Browser gegen `.223` |
 | P30 | API | `pytest tests/*/test_api*.py` | 22 passed (Routen eindeutig, Metriken, Registrierung, Scopes) | – |
