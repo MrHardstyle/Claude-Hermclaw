@@ -28,9 +28,11 @@
         name: hermclaw_config
         tasks_from: data.yml
 
+# a failure here (e.g. the schema change) stops the whole run: workers and UI never get ahead of the orchestrator
 - name: Orchestrator .225 - runtime, configuration, LiteLLM, migration, services, SearXNG
   hosts: orchestrator
   become: true
+  any_errors_fatal: true
   roles:
     - role: systemd_skeleton
     - role: hermclaw_release

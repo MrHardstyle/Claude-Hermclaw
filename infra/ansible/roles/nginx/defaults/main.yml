@@ -42,7 +42,8 @@ nginx_tls_key: "{{ nginx_tls_dir }}/hermclaw-web.key"
 # <= 397 days: accepted by every current browser/OS for a server certificate
 nginx_tls_self_signed_days: 397
 nginx_tls_san: >-
-  {{ (nginx_server_name.split() | reject('equalto', '_') | reject('search', '[*~]') | map('regex_replace', '^', 'DNS:') | list)
-     + (['IP:' ~ ansible_host] if ansible_host | default('') is match('^[0-9.]+$') else []) }}
+  {{ ((nginx_server_name.split() | reject('equalto', '_') | reject('search', '[*~]')
+       | map('regex_replace', '^([0-9.]+)$', 'IP:\1') | map('regex_replace', '^(?!IP:)', 'DNS:') | list)
+      + (['IP:' ~ ansible_host] if ansible_host | default('') is match('^[0-9.]+$') else [])) | unique }}
 # Strict-Transport-Security max-age (seconds) - only once every client trusts the certificate; 0 = not sent.
 nginx_hsts_max_age: 0

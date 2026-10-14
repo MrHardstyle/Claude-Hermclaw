@@ -50,6 +50,9 @@
         dest: "{{ hermclaw_ui_release_dir }}"
         owner: "{{ hermclaw_ui_owner }}"
         group: "{{ hermclaw_ui_group }}"
+        # the archives are reproducible (mtime 0): give the files the deployment time instead, so nginx
+        # Last-Modified/ETag change with every release (otherwise a same-size index.html could be answered 304)
+        extra_opts: [--touch]
 
     - name: Check the unpacked build
       ansible.builtin.stat:

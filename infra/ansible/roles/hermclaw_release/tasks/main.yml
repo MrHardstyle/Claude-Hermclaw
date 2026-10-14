@@ -44,6 +44,8 @@
         dest: "{{ hermclaw_release_unpack_dir }}"
         owner: root
         group: root
+        # reproducible archives carry mtime 0: files get the unpack time
+        extra_opts: [--touch]
 
     - name: Verify the unpacked payload (SHA256SUMS)
       ansible.builtin.command:

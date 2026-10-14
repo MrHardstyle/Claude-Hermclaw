@@ -62,7 +62,7 @@
       {%- set by_id = dict(ids | zip(entries)) | combine(hermclaw_config_inventory_patches, hermclaw_config_host_overrides, recursive=true) -%}
       {%- set merged = [] -%}
       {%- for host_id in ids + (hermclaw_config_host_overrides.keys() | list | difference(ids)) -%}
-      {%- set entry = by_id[host_id] -%}
+      {%- set entry = {'id': host_id} | combine(by_id[host_id]) -%}
       {%- if entry.role | default('') == 'webui' -%}
       {%- set services = [] -%}
       {%- for svc in entry.services | default([]) -%}

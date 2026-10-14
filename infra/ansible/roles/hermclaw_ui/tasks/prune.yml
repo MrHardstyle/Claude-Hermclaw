@@ -1,4 +1,5 @@
-# Keep the active UI build and the hermclaw_keep_releases most recently unpacked others.
+# Keep the active UI build and the hermclaw_keep_releases most recently unpacked others, ordered by their
+# completion markers <version>.release (the build directories carry the archive's fixed mtime).
 - name: Read the active UI build
   ansible.builtin.stat:
     path: "{{ hermclaw_webroot }}"
@@ -12,13 +13,20 @@
     file_type: directory
   register: hermclaw_ui_builds
 
+- name: Find the UI build markers
+  ansible.builtin.find:
+    paths: ["{{ hermclaw_ui_releases_dir }}"]
+    patterns: ["*.release"]
+    file_type: file
+  register: hermclaw_ui_markers
+
 - name: Decide which UI builds to keep
   ansible.builtin.set_fact:
     hermclaw_ui_keep: >-
       {%- set active = (hermclaw_ui_active.stat.lnk_target | default('') | basename)
          if hermclaw_ui_active.stat.islnk | default(false) else hermclaw_version -%}
-      {%- set others = hermclaw_ui_builds.files | sort(attribute='mtime', reverse=true)
-         | map(attribute='path') | map('basename') | reject('equalto', active) | list -%}
+      {%- set others = hermclaw_ui_markers.files | sort(attribute='mtime', reverse=true)
+         | map(attribute='path') | map('basename') | map('regex_replace', '\.release$', '') | reject('equalto', active) | list -%}
       {{ ([active, hermclaw_version] + others[:hermclaw_keep_releases | int]) | unique }}
 
 - name: Delete pruned UI builds and their markers
@@ -26,5 +34,6 @@
     path: "{{ item }}"
     state: absent
   loop: >-
-    {%- set out = [] -%}{%- for build in hermclaw_ui_builds.files | map(attribute='path') | list -%}{%- if build | basename
-    not in hermclaw_ui_keep -%}{%- set _ = out.extend([build, build ~ '.release']) -%}{%- endif -%}{%- endfor -%}{{ out }}
+    {{ (hermclaw_ui_builds.files + hermclaw_ui_markers.files) | map(attribute='path')
+       | reject('in', hermclaw_ui_keep | map('regex_replace', '^', hermclaw_ui_releases_dir ~ '/') | list)
+       | reject('in', hermclaw_ui_keep | map('regex_replace', '^(.*)$', hermclaw_ui_releases_dir ~ '/\1.release') | list) | list }}

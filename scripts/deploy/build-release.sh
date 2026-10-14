@@ -98,8 +98,38 @@ for dir in "${OFFLINE[@]}"; do
     [[ -d "$dir" ]] || die "--offline-from ${dir}: no such directory" 2
 done
 [[ -z "$CONSTRAINTS" || -f "$CONSTRAINTS" ]] || die "--constraints ${CONSTRAINTS}: no such file" 2
+# the nginx site sends a Content-Security-Policy without 'unsafe-inline' (roles/nginx nginx_csp): an inline <script>,
+# <style> or style="" attribute in index.html would be blocked in the browser
+check_ui_bundle() {  # dir
+    [[ -f "$1/index.html" && -d "$1/assets" ]] || die "UI bundle $1 has no index.html + assets/" 2
+    "$PYTHON" -I - "$1/index.html" <<'PY' || die "UI bundle $1: index.html is not compatible with the Content-Security-Policy" 2
+import html.parser, sys
+class Check(html.parser.HTMLParser):
+    problems, script = [], None
+    def handle_starttag(self, tag, attrs):
+        names = {k for k, _ in attrs}
+        if "style" in names or any(k.startswith("on") for k in names):
+            self.problems.append(f"inline attribute in <{tag}>")
+        if tag == "style":
+            self.problems.append("inline <style>")
+        if tag == "script":
+            self.script = "src" in names
+            if not self.script:
+                self.problems.append("inline <script>")
+    def handle_data(self, data):
+        if self.script and data.strip():
+            self.problems.append("<script src> with inline code")
+    def handle_endtag(self, tag):
+        if tag == "script":
+            self.script = None
+c = Check()
+c.feed(open(sys.argv[1], encoding="utf-8").read())
+if c.problems:
+    sys.exit("; ".join(sorted(set(c.problems))))
+PY
+}
 if [[ -n "$UI_DIST" ]]; then
-    [[ -f "${UI_DIST}/index.html" && -d "${UI_DIST}/assets" ]] || die "--ui-dist ${UI_DIST} has no index.html + assets/" 2
+    check_ui_bundle "$UI_DIST"
 else
     command -v npm >/dev/null 2>&1 || die "npm not found (Node.js >= 22.12 builds the UI; or pass --ui-dist)" 69
     node -e 'const [a,b]=process.versions.node.split(".").map(Number); process.exit(a>22||(a===22&&b>=12)?0:1)' \
@@ -314,11 +344,7 @@ else
     NODE_VERSION=$(node --version)
     UI_SOURCE="npm run build"
 fi
-[[ -f "${UI_OUT}/index.html" ]] || die "the UI bundle has no index.html"
-# the nginx CSP allows script-src 'self' only: an inline <script> would be blocked in the browser
-if grep -Eiq '<script(\s[^>]*)?>' "${UI_OUT}/index.html" && grep -Ei '<script(\s[^>]*)?>' "${UI_OUT}/index.html" | grep -Eivq 'src='; then
-    die "ui index.html contains an inline <script> (blocked by the Content-Security-Policy)"
-fi
+check_ui_bundle "$UI_OUT"
 
 # --------------------------------------------------------------------------------------------- metadata
 mkdir -p "${STAGE}/scripts/ops"
