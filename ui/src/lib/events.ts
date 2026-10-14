@@ -94,6 +94,8 @@ export const KNOWN_EVENT_TYPES: readonly string[] = [
   "workspace.cleaned",
   "system.disk",
   "ssh.command",
+  "ssh.approval.granted",
+  "ssh.approval.revoked",
   "db.tool",
   "error",
   "status",

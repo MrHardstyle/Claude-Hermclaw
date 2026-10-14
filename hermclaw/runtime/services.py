@@ -53,6 +53,7 @@ from hermclaw.runtime.driver import DriverSettings, RuntimeJobDriver
 from hermclaw.runtime.handlers import RepoInfoStepHandler, ReviewStepHandler, VerifyStepHandler, _workspace
 from hermclaw.runtime.health import DiskMonitor
 from hermclaw.runtime.images import ImageDefaultingExecutor, SandboxImageSelector
+from hermclaw.runtime.ops import OpsBundle, build_ops
 from hermclaw.runtime.research_step import ResearchRunner, ResearchStepHandler
 from hermclaw.runtime.scratch import ScratchWorkspaces
 from hermclaw.scheduler.handlers import StepHandler, StepRunContext
@@ -208,6 +209,7 @@ class RuntimeServices:
     holder_id: str
     wake: WakePort | None = None
     disk: DiskMonitor | None = None
+    ops: OpsBundle | None = None  # operations tools (provider, SSH runner for the idle-sleep hook, SSH approvals)
     _closers: list[Callable[[], Awaitable[Any]]] = field(default_factory=list)
 
     @property
@@ -329,6 +331,8 @@ def build_services(
         return await _workspace(git, ctx.job_id, step_baseline=True)
 
     scratch = ScratchWorkspaces(sessionmaker, git, Path(settings.data_dir) / "scratch")  # repository-less jobs (R-026)
+    # operations tools (P26–P28): SSH (+ database/container providers when installed); tests may inject their own
+    ops_bundle = OpsBundle(ov.ops) if ov.ops is not None else build_ops(config, sessionmaker, settings)
     artifacts = artifacts_dir or Path(settings.artifacts_dir)
 
     deps = ImplementDeps(
@@ -348,7 +352,7 @@ def build_services(
         coder_settings=ov.coder_settings or CoderSettings(),
         resources=resources,
         scratch=scratch,
-        ops=ov.ops,
+        ops=ops_bundle.provider,
         artifacts_dir=artifacts,
     )
     if ov.lease_keeper_interval is not None:
@@ -417,6 +421,7 @@ def build_services(
         holder_id=holder,
         wake=ov.wake,
         disk=disk,
+        ops=ops_bundle,
         _closers=closers,
     )
 

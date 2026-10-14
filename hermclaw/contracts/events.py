@@ -98,6 +98,8 @@ class EventType:
     MEDIA_STARTED = "media.started"
     MEDIA_FINISHED = "media.finished"
     SSH_COMMAND = "ssh.command"
+    SSH_APPROVAL_GRANTED = "ssh.approval.granted"  # operator approved a mutating SSH command (single use)
+    SSH_APPROVAL_REVOKED = "ssh.approval.revoked"
     DB_TOOL = "db.tool"
     WORKSPACE_CLEANED = "workspace.cleaned"  # retention cleanup removed a job workspace and its index
     SYSTEM_DISK = "system.disk"  # free space of a runtime data path crossed a warning/critical threshold (P35.9)

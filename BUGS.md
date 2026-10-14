@@ -433,7 +433,7 @@ Noch keine.
 - Phase: P39 · Komponente: runtime/maintenance · Severity: P3 · blockierend: nein · Status: **behoben** (`tests/integration/test_runtime_maintenance.py::test_crash_right_after_the_directory_removal_leaves_no_orphaned_index`)
 
 ### BUG-071 – IdleSleepPolicy (P10.9 idle sleep) is never instantiated by any process
-- Phase: P39 · Komponente: wol/runtime · Severity: P2 · blockierend: nein · Status: **offen** – needs the SSH runner of P26 (`hermclaw.sshtools`); wiring with the operations providers
+- Phase: P39 · Komponente: wol/runtime · Severity: P2 · blockierend: nein · Status: **behoben** (`tests/integration/test_runtime_ops.py::test_scheduler_process_runs_idle_sleep_over_the_ssh_runner`): `SchedulerProcess` runs `IdleSleepPolicy.run_forever` over the SSH runner of `hermclaw.runtime.ops` when Wake-on-LAN is on and a host has an `idle_sleep_command`
 - Reproduktion: `grep -rn 'IdleSleepPolicy(' hermclaw worker` → only the class itself
 
 ### BUG-072 – Scheduler fails a job permanently (PREPARE_CRASHED) on a transient DB OperationalError during preparation
@@ -483,6 +483,14 @@ Noch keine.
 - Reproduktion: Kill the process between writing the key and deleting it
 - Erwartet: The leftover key is removed at the next start
 - Tatsächlich: Fixed: keys are named key-<pid>-* and purge_stale_keys runs on first use of the runtime dir; test ::test_stale_materialised_keys_of_dead_processes_are_purged.
+
+### BUG-081 – Mutating SSH commands could never be approved (no operator endpoint for `ssh_approvals`)
+- Phase: P39 · Komponente: api/sshtools · Severity: P1 · blockierend: ja (für SSH-Mutationen) · Status: **behoben** (`tests/integration/test_runtime_ops.py::test_operator_approves_and_revokes_a_pending_ssh_command`)
+- Reproduktion: a step runs `ssh_command` on an allow-listed host with `require_approval_for_mutations: true` → `approval_required` + token; nothing could write `jobs.metadata.ssh_approvals`
+- Fix: `GET/POST /api/jobs/{id}/ssh-approvals`, `DELETE …/{token}` (read / admin), pending tokens from `ssh.command` events, events `ssh.approval.granted|revoked`
+
+### BUG-082 – Operations provider skip log used the reserved LogRecord key `module` (scheduler start crashed at INFO level)
+- Phase: P39 · Komponente: runtime/ops · Severity: P1 · blockierend: ja · Status: **behoben** before release (`tests/integration/test_runtime_ops.py::test_missing_optional_provider_is_skipped_with_info_logging`; found by `tests/failure/test_recovery_process_kill.py`)
 
 ## Template
 

@@ -251,6 +251,8 @@ class SshPolicy(_Strict):
     allowed_hosts: list[str] = Field(default_factory=list)
     default_timeout_seconds: int = 120
     require_approval_for_mutations: bool = True
+    # full-match regexes of chained mutate commands that are explicitly allowed (';', '&&', '|' … are refused otherwise)
+    compound_allowlist: list[str] = Field(default_factory=list)
 
 
 class WakeOnLanPolicy(_Strict):

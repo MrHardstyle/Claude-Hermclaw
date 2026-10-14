@@ -110,12 +110,26 @@ class SchedulerProcess:
         self.services: RuntimeServices | None = None
         self.scheduler: Scheduler | None = None
         self.janitor: WorkspaceJanitor | None = None
+        self.idle_sleep: Any = None  # hermclaw.wol.idle.IdleSleepPolicy when idle sleep is active
         self._stop = asyncio.Event()
 
     def stop(self) -> None:
         self._stop.set()
         if self.scheduler is not None:
             self.scheduler.stop()
+
+    def _idle_sleep_task(self, services: RuntimeServices) -> asyncio.Task[None] | None:
+        """IdleSleepPolicy over the SSH runner, when Wake-on-LAN is on and a host has an ``idle_sleep_command``."""
+        runner = services.ops.ssh_runner if services.ops is not None else None
+        if not self.settings.wake_on_lan or runner is None or not any(h.idle_sleep_command for h in self.config.hosts.hosts):
+            return None
+        from hermclaw.wol.idle import IdleSleepPolicy
+
+        policy = IdleSleepPolicy(
+            self.sm, self.config, runner, settings=idle_settings_from_policy(self.config.policies.wake_on_lan), registry=services.registry
+        )
+        self.idle_sleep = policy
+        return asyncio.create_task(policy.run_forever(self._stop), name="idle-sleep")
 
     async def run(self) -> int:
         try:  # P10.1: unusable Wake-on-LAN host configuration is fatal, warnings are logged
@@ -155,6 +169,7 @@ class SchedulerProcess:
         )
         janitor.start()  # workspace retention (policies.git.workspace_retention_hours)
         maintenance = asyncio.create_task(services.resources.run_maintenance(self._stop), name="resource-maintenance")
+        idle = self._idle_sleep_task(services)  # P10.9 / BUG-071: idle workers are suspended over SSH
         self.scheduler = Scheduler(
             self.sm,
             self.config,
@@ -181,9 +196,12 @@ class SchedulerProcess:
             await self.scheduler.run_forever()
         finally:
             self._stop.set()
-            maintenance.cancel()
-            with contextlib.suppress(asyncio.CancelledError, Exception):
-                await maintenance
+            for task in (maintenance, idle):
+                if task is None:
+                    continue
+                task.cancel()
+                with contextlib.suppress(asyncio.CancelledError, Exception):
+                    await task
             await monitor.stop()
             if services.disk is not None:
                 await services.disk.stop()

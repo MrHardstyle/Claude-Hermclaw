@@ -98,6 +98,8 @@ ssh:
   allowed_hosts: [webui-223, exec-222, model-224]
   default_timeout_seconds: 120
   require_approval_for_mutations: true
+  # full-match regexes for chained mutate commands that may run (everything with ; && | ` $( is refused otherwise)
+  compound_allowlist: []
 # global Wake-on-LAN / idle sleep tuning (per host: hosts.yaml wake_on_lan {mac, broadcast, port, ping_timeout_seconds,
 # service_timeout_seconds, max_attempts} and idle_sleep_command)
 wake_on_lan:

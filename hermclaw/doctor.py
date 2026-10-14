@@ -130,6 +130,7 @@ class Doctor:
 
     async def run(self) -> DoctorReport:
         self.check_config()
+        self.check_separation()
         await self.check_database()
         self.check_paths()
         await self.check_tokens()
@@ -174,6 +175,24 @@ class Doctor:
             self.add("config:hosts", "fail", f"hosts.yaml has no {' / '.join(lacking)} worker with worker_api")
         else:
             self.add("config:hosts", "ok", ", ".join(f"{h.id} ({h.worker_kind}) {h.worker_api}" for h in self.worker_hosts()))
+
+    def check_separation(self) -> None:
+        """SSH host registry is valid; the sandbox can never reach SSH credentials or the host (P26.8)."""
+        from hermclaw.sshtools.registry import HostRegistry
+        from hermclaw.sshtools.separation import sandbox_isolation_issues
+
+        try:
+            HostRegistry.from_config(self.config)
+        except Exception as exc:
+            self.add("config:ssh_hosts", "fail", f"invalid SSH host entry: {type(exc).__name__}: {str(exc)[:300]}")
+        else:
+            allowed = list(self.config.policies.ssh.allowed_hosts)
+            self.add("config:ssh_hosts", "ok", f"{len(allowed)} allow-listed SSH host(s): {', '.join(allowed) or 'none'}")
+        issues = sandbox_isolation_issues(self.config, workspaces_dir=Path(self.settings.workspaces_dir))
+        if issues:
+            self.add("config:sandbox_separation", "fail", "; ".join(issues)[:600])
+        else:
+            self.add("config:sandbox_separation", "ok", "sandbox gets no SSH variables, keys or known_hosts")
 
     def worker_hosts(self) -> list[HostConfig]:
         return [h for h in self.config.hosts.hosts if h.worker_api and h.worker_kind]
