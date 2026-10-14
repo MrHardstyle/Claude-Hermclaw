@@ -1449,10 +1449,10 @@
       "description": "Forbidden"
      },
      "413": {
-      "description": "Request Entity Too Large"
+      "description": "Content Too Large"
      },
      "422": {
-      "description": "Unprocessable Entity"
+      "description": "Unprocessable Content"
      }
     }
    }

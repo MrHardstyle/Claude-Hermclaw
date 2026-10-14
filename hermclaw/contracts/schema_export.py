@@ -9,6 +9,7 @@ from __future__ import annotations
 import json
 import sys
 from pathlib import Path
+from typing import Any
 
 from pydantic import BaseModel
 
@@ -59,11 +60,32 @@ def export(directory: Path) -> list[Path]:
     return written
 
 
+#: CPython 3.13 renamed these ``HTTPStatus`` phrases per RFC 9110 (3.12 → 3.13); FastAPI uses the phrase as the
+#: default response description. Normalising to the RFC 9110 phrase keeps the document identical on the build
+#: interpreter (3.12) and the production interpreter (Debian 13: 3.13) – research 20261014-027 Y4.
+_RFC9110_PHRASES: dict[str, tuple[str, str]] = {
+    "413": ("Request Entity Too Large", "Content Too Large"),
+    "414": ("Request-URI Too Long", "URI Too Long"),
+    "416": ("Requested Range Not Satisfiable", "Range Not Satisfiable"),
+    "422": ("Unprocessable Entity", "Unprocessable Content"),
+}
+
+
+def _normalise_status_phrases(doc: dict[str, Any]) -> dict[str, Any]:
+    for item in (doc.get("paths") or {}).values():
+        for op in item.values() if isinstance(item, dict) else ():
+            for code, resp in ((op or {}).get("responses") or {}).items() if isinstance(op, dict) else ():
+                old_new = _RFC9110_PHRASES.get(str(code))
+                if old_new and isinstance(resp, dict) and resp.get("description") in old_new:
+                    resp["description"] = old_new[1]
+    return doc
+
+
 def openapi_document() -> dict[str, object]:
     """The OpenAPI document of the Hermclaw API as served by ``create_app()`` (docs/contracts/openapi.json)."""
     from hermclaw.api.app import create_app
 
-    return create_app().openapi()
+    return _normalise_status_phrases(create_app().openapi())
 
 
 def export_openapi(path: Path) -> Path:
