@@ -65,6 +65,15 @@ versions (credentials, exit code 75, restore test).
 
 ## Daily operation
 
+Run the commands in the services' context – the database URL comes from `/etc/hermclaw/hermclaw.env` and the
+manifest key is a systemd credential, neither exists in a plain `sudo -u hermclaw` shell:
+
+* scheduled work through the units: `sudo systemctl start hermclaw-backup.service` /
+  `sudo systemctl start hermclaw-restore-test.service`, output in `journalctl -u hermclaw-backup -u hermclaw-restore-test`;
+* everything else through the operator CLI of the deployment (`sudo hermclaw backup <command> …`, the same commands as
+  `python -m hermclaw.backup`, run as `hermclaw` with the environment file and credentials of the services).
+
+
 | Task | Command (as `hermclaw`, e.g. `sudo -u hermclaw …`) |
 |---|---|
 | backup now | `/opt/hermclaw/bin/hermclaw-backup` (= `python -m hermclaw.backup create`) |
@@ -120,7 +129,7 @@ with the state of the newest good backup. Keep at hand: the password manager ent
 encrypted credential blobs (`credstore.encrypted`) are bound to the host key of the old machine (or its TPM) and
 are only usable when restoring onto that same host.
 
-1. **Rebuild the host** with the deployment playbook (P01/P32: OS, PostgreSQL 16 + pgvector, users, venv,
+1. **Rebuild the host** with the deployment playbook (P01/P32: OS, PostgreSQL 17 + pgvector, users, venv,
    units – services stay stopped): `ansible-playbook -i inventory/hosts.yml playbooks/site.yml --limit orchestrator`,
    then `sudo systemctl stop hermclaw-scheduler hermclaw-api`.
 2. **Reach the backups**: put the backup key `/etc/hermclaw/ssh/backup_ed25519` (from the password manager, or a new

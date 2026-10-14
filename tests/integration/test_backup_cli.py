@@ -185,3 +185,20 @@ async def test_cli_exit_codes_for_config_errors_and_lock(world: BackupWorld) -> 
     code, doc, _ = _run([sys.executable, "-m", "hermclaw.backup", "create", "--no-events", "--target-dir", str(world.root / "other")], env)
     assert code == 3 and "does not exist" in doc["error"]["message"]  # an unmounted share is never created implicitly
     assert not (world.root / "other").exists()
+
+
+def test_hermclaw_cli_passes_backup_commands_through(tmp_path: Path) -> None:
+    """``hermclaw backup …`` is the same CLI as ``python -m hermclaw.backup`` (one entry point for the operator
+    wrapper that runs the CLI with the services' environment and credentials)."""
+    import contextlib
+    import io
+
+    from hermclaw.cli import main
+
+    out = io.StringIO()
+    with contextlib.redirect_stdout(out):
+        rc = main(["backup", "list", "--config", str(tmp_path / "missing.yaml")])
+    assert rc == 2 and '"BACKUP_CONFIG_INVALID"' in out.getvalue()
+    with contextlib.redirect_stdout(io.StringIO()) as helped, contextlib.suppress(SystemExit):
+        main(["backup", "--help"])
+    assert "restore-test" in helped.getvalue()

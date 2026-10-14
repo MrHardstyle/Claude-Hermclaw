@@ -219,6 +219,13 @@ def cmd_litellm_config(ns: argparse.Namespace) -> int:
     return litellm_main([str(ns.out), *(["--config-dir", str(ns.config_dir)] if ns.config_dir else [])])
 
 
+def cmd_backup(ns: argparse.Namespace) -> int:
+    """``hermclaw backup <create|verify|restore-test|restore-full|list|prune> …`` – one CLI for the operator wrapper."""
+    from hermclaw.backup.cli import main as backup_main
+
+    return backup_main(ns.args)
+
+
 def cmd_schemas(ns: argparse.Namespace) -> int:
     from hermclaw.contracts.schema_export import export as export_schemas
     from hermclaw.contracts.schema_export import export_openapi
@@ -275,11 +282,17 @@ def build_parser() -> argparse.ArgumentParser:
     sc = sub.add_parser("schemas", help="export contract JSON schemas")
     sc.add_argument("out_dir")
     sc.set_defaults(fn=cmd_schemas)
+    b = sub.add_parser("backup", add_help=False, help="backup/restore of Hermclaw's own state (python -m hermclaw.backup)")
+    b.add_argument("args", nargs=argparse.REMAINDER)
+    b.set_defaults(fn=cmd_backup)
     return p
 
 
 def main(argv: Sequence[str] | None = None) -> int:
-    ns = build_parser().parse_args(argv)
+    args = list(sys.argv[1:] if argv is None else argv)
+    if args[:1] == ["backup"]:  # pass everything (incl. --help and options) to the backup CLI unchanged
+        return cmd_backup(argparse.Namespace(args=args[1:]))
+    ns = build_parser().parse_args(args)
     return int(ns.fn(ns) or 0)
 
 
