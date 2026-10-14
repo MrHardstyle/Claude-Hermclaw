@@ -187,8 +187,8 @@ def postgres() -> Iterator[Postgres | None]:
         return
     root = Path(tempfile.mkdtemp(prefix="hcl-pg-", dir="/tmp"))
     root.chmod(0o755)
-    data, sock = root / "data", root / "sock"
-    for d in (data, sock):
+    data, sock, logs = root / "data", root / "sock", root / "log"
+    for d in (data, sock, logs):
         d.mkdir()
         shutil.chown(d, "postgres", "postgres")
     sock.chmod(0o755)
@@ -199,7 +199,7 @@ def postgres() -> Iterator[Postgres | None]:
         yield None
         return
     opts = f"-k {sock} -c listen_addresses='' -p 5432 -c fsync=off -c full_page_writes=off"
-    start = _run([*as_pg, str(PG_BIN / "pg_ctl"), "-D", str(data), "-o", opts, "-l", str(root / "pg.log"), "-w", "start"], timeout=120)
+    start = _run([*as_pg, str(PG_BIN / "pg_ctl"), "-D", str(data), "-o", opts, "-l", str(logs / "pg.log"), "-w", "start"], timeout=120)
     assert start.returncode == 0, start.stdout + start.stderr
     pg = Postgres(root, sock)
     try:
