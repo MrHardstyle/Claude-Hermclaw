@@ -454,6 +454,36 @@ Noch keine.
 - Phase: P39 · Komponente: contracts/docs · Severity: P3 · blockierend: nein · Status: **behoben** (`tests/unit/test_contract_docs.py` fails on any drift; `hermclaw schemas docs/contracts/schemas` regenerates schemas + OpenAPI)
 - Tatsächlich: worker detail/drain/heartbeat and `/api/metrics` missing in the OpenAPI document; CoderAction/ToolCall/ToolResult/CommandRequest/VerificationReport schemas outdated
 
+### BUG-076 – ssh_read classification bypass: VAR=value prefix and non-word-boundary tool names were treated as read
+- Phase: P26 · Komponente: sshtools · Severity: P1 · blockierend: ja · Status: **behoben** (Regressionstest in den sshtools-Tests)
+- Reproduktion: SshCommandPolicy.classify(host, "cat=1 python3 -c 'import os'") or classify(host, 'cat.sh /x') with the example policies
+- Erwartet: mutate (approval required; ssh_read refuses it)
+- Tatsächlich: Before the fix: read, so arbitrary code ran through ssh_read without approval. Fixed in policy.py (_PLAIN_TOOL_RE plus _matches_read); regression test tests/unit/test_sshtools_policy.py::test_read_bypasses_are_not_reads.
+
+### BUG-077 – Read tools with executing, writing or remote-hop flags classified as read (ip abbreviations/-batch, ss -D, systemctl -H/-M, journalctl --cursor-file, nginx -g/-c, rg --hostname-bin)
+- Phase: P26 · Komponente: sshtools · Severity: P1 · blockierend: ja · Status: **behoben** (Regressionstest in den sshtools-Tests)
+- Reproduktion: classify(host, 'ip a a 10.0.0.1/24 dev eth0'), classify(host, 'systemctl status -H root@other nginx')
+- Erwartet: mutate
+- Tatsächlich: Before the fix: read. Fixed: extended escalation tables and an ip read-command check in policy.py; covered by the same regression test.
+
+### BUG-078 – known_hosts/key file paths with whitespace or %/~ tokens accepted by the registry
+- Phase: P26 · Komponente: sshtools · Severity: P2 · blockierend: nein · Status: **behoben** (Regressionstest in den sshtools-Tests)
+- Reproduktion: HostConfig ssh.known_hosts='/etc/hermclaw/known hosts'
+- Erwartet: SshConfigError at startup
+- Tatsächlich: Before the fix: accepted, and ssh would split UserKnownHostsFile into two files. Fixed with SAFE_PATH_RE in registry.py; test tests/unit/test_sshtools_registry_keys.py::test_registry_validates_entries_at_startup.
+
+### BUG-079 – Order-dependent test failures caused by global redactor literals registered by tests
+- Phase: P26 · Komponente: sshtools · Severity: P3 · blockierend: nein · Status: **behoben** (Regressionstest in den sshtools-Tests)
+- Reproduktion: Run the unit tests before test_runner_satisfies_remote_command_runner_protocol: SecretStore registers 'hello' as a redaction literal
+- Erwartet: Tests independent of order
+- Tatsächlich: Fixed: the tests now use unique secret values.
+
+### BUG-080 – Materialised cred: keys could survive a SIGKILL of the orchestrator
+- Phase: P26 · Komponente: sshtools · Severity: P3 · blockierend: nein · Status: **behoben** (Regressionstest in den sshtools-Tests)
+- Reproduktion: Kill the process between writing the key and deleting it
+- Erwartet: The leftover key is removed at the next start
+- Tatsächlich: Fixed: keys are named key-<pid>-* and purge_stale_keys runs on first use of the runtime dir; test ::test_stale_materialised_keys_of_dead_processes_are_purged.
+
 ## Template
 
 ### BUG-XXX – Titel

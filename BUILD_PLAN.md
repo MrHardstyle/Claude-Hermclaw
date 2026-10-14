@@ -346,14 +346,14 @@ Legende: `[x]` erledigt mit Evidence · `[~]` erledigt, Live-Verifikation auf Zi
 
 ## P26 – SSH/Admin Tools
 
-- [ ] 26.1 host registry. — Evidence: –
-- [ ] 26.2 SSH keys. — Evidence: –
-- [ ] 26.3 command policy. — Evidence: –
-- [ ] 26.4 read commands. — Evidence: –
-- [ ] 26.5 mutation commands. — Evidence: –
-- [ ] 26.6 audit. — Evidence: –
-- [ ] 26.7 timeout. — Evidence: –
-- [ ] 26.8 sandbox vs host separation. — Evidence: –
+- [x] 26.1 host registry. — Evidence: hermclaw/sshtools/registry.py checks entries at startup: option-like addresses, user, port, key_ref, and known_hosts paths with whitespace, % or ~ are rejected. tests/unit/test_sshtools_registry_keys.py::test_registry_from_example_config, ::test_unknown_and_unlisted_hosts_are_policy_violations, ::te
+- [x] 26.2 SSH keys. — Evidence: hermclaw/sshtools/keys.py: file: keys checked for mode 0600/0400 and owner; cred: keys written to a 0600 key-<pid>-* file in a private 0700 runtime dir and deleted after the run; keys left by dead processes purged; known_hosts mandatory with an ssh-keygen -F entry check; generate_keypair; authorized
+- [x] 26.3 command policy. — Evidence: hermclaw/sshtools/policy.py classifies read|mutate|destructive|forbidden, allows sudo only for exact allow_sudo_commands entries, denies chaining (SSH_COMPOUND_NOT_ALLOWED) unless allow-listed, forbids onward hops, and returns Verdict.approval_required with approval_token(host, command, step). tests
+- [x] 26.4 read commands. — Evidence: SshTools.ssh_read (read class only, otherwise SSH_NOT_READ_ONLY), ssh_service_status (systemctl is-active + status --no-pager; reports no-systemd hosts as SSH_SERVICE_UNAVAILABLE), SshOpsProvider. tests/integration/test_sshtools_sshd.py::test_ssh_read_runs_and_is_audited, ::test_ssh_read_refuses_non
+- [x] 26.5 mutation commands. — Evidence: SshTools.ssh_command and ssh_upload (atomic mktemp + sha256 + chmod + mv, approval bound to path/mode/sha256); hermclaw/sshtools/approvals.py keeps jobs.metadata['ssh_approvals'], each approval single use under FOR UPDATE and consumed in the same transaction as the command_runs 'started' row. tests/
+- [x] 26.6 audit. — Evidence: tools.py writes command_runs rows (target='ssh', classification, exit_code, timed_out, redacted excerpts, duration, worker_id=host) and EventType.SSH_COMMAND events for every call, refusals included; a failed audit write is flagged as audit_incomplete. tests/integration/test_sshtools_sshd.py::test_s
+- [x] 26.7 timeout. — Evidence: client.py SshRunner runs ssh in its own process group with SIGTERM then SIGKILL on timeout or cancellation, ConnectTimeout, output caps and redaction, and satisfies the RemoteCommandRunner protocol. tests/integration/test_sshtools_sshd.py::test_runner_timeout_kills_the_ssh_client, ::test_runner_canc
+- [~] 26.8 sandbox vs host separation. — Evidence: Implemented and tested locally: separation.py (assert_ssh_allowed for 'ssh'/'deploy', sandbox_isolation_issues, scrub_ssh_environment) and scripts/ops/hermclaw-ssh-gate (POSIX sh, SSH_ORIGINAL_COMMAND, whole-line ERE allow-list, shell: opt-in for metacharacters, syslog; tested with dash, bash and bu
 
 ## P27 – DB Tools
 
