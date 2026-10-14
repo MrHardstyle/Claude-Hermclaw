@@ -750,6 +750,22 @@ async def _seed_db(state: dict[str, Any], api_job_ids: dict[str, str]) -> dict[s
             )
             await event(ev.MEDIA_FINISHED, step=s3.id, artifact="screenshot.png", media_type="image/png")
             await event(ev.ERROR, severity="error", message="LiteLLM Timeout beim Review (wird wiederholt)")
+            # a mutating SSH command waiting for the operator (P26 approvals tab)
+            from hermclaw.sshtools.policy import approval_token
+
+            ssh_cmd = "sudo /usr/bin/systemctl reload nginx"
+            out["ssh_approval"] = approval_token("webui-223", ssh_cmd, s3.id)
+            await event(
+                ev.SSH_COMMAND,
+                step=s3.id,
+                severity="warning",
+                tool="ssh_command",
+                host="webui-223",
+                outcome="approval_required",
+                command=ssh_cmd,
+                classification="mutate",
+                approval=out["ssh_approval"],
+            )
             await event(
                 ev.JOB_FAILED,
                 job=failed.id,

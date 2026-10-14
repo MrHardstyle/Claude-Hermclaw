@@ -15,6 +15,7 @@ export interface E2EState {
   api_url: string;
   jobs: { main: string; queued: string; pausable: string; failed: string };
   steps: Record<string, string>;
+  ssh_approval: string;
 }
 
 export function loadState(): E2EState {

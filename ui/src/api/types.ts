@@ -562,3 +562,28 @@ export interface VersionResponse {
   env: string;
   instance: string;
 }
+
+/** GET /api/jobs/{id}/ssh-approvals – operator approvals of mutating SSH commands (P26) */
+export interface SshApprovalPending {
+  token: string;
+  host: string | null;
+  tool: string | null;
+  command: string | null;
+  classification: string | null;
+  step_id: string | null;
+  requested_at: string | null;
+}
+
+export interface SshApprovalEntry {
+  token: string;
+  approved_by?: string;
+  approved_at?: string;
+  note?: string;
+  consumed_at?: string;
+}
+
+export interface SshApprovals {
+  pending: SshApprovalPending[];
+  approved: SshApprovalEntry[];
+  consumed: SshApprovalEntry[];
+}

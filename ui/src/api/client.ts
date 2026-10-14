@@ -16,6 +16,7 @@ import type {
   Repository,
   ResearchRun,
   ResourcesResponse,
+  SshApprovals,
   StatsResponse,
   StepDetail,
   VersionResponse,
@@ -41,7 +42,7 @@ export class ApiError extends Error {
 type Query = Record<string, string | number | boolean | null | undefined>;
 
 interface RequestOptions {
-  method?: "GET" | "POST";
+  method?: "GET" | "POST" | "DELETE";
   query?: Query;
   body?: unknown;
   signal?: AbortSignal;
@@ -157,6 +158,15 @@ export const api = {
   resources: (signal?: AbortSignal) => request<ResourcesResponse>("/resources", { signal }),
   repositories: (signal?: AbortSignal) => request<Repository[]>("/repositories", { signal }),
   bugs: (status?: string, signal?: AbortSignal) => request<BugRecord[]>("/bugs", { query: { status }, signal }),
+  sshApprovals: (id: string, signal?: AbortSignal) => request<SshApprovals>(`/jobs/${encodeURIComponent(id)}/ssh-approvals`, { signal }),
+  /** admin: approve one execution of a pending mutating SSH command */
+  approveSsh: (id: string, token: string, note: string) =>
+    request<{ state: string }>(`/jobs/${encodeURIComponent(id)}/ssh-approvals`, {
+      method: "POST",
+      body: { token, note: note.trim() ? note.trim().slice(0, 500) : null },
+    }),
+  revokeSsh: (id: string, token: string) =>
+    request<{ state: string }>(`/jobs/${encodeURIComponent(id)}/ssh-approvals/${encodeURIComponent(token)}`, { method: "DELETE" }),
 };
 
 export function artifactDownloadPath(id: string): string {

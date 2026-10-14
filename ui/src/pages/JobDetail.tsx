@@ -10,6 +10,7 @@ import { formatTime, shortId } from "../lib/format";
 import { Link, useRouter } from "../lib/router";
 import { useApi, useThrottled } from "../lib/useApi";
 import { useJobEvents } from "../lib/useEvents";
+import { ApprovalsTab } from "./job/ApprovalsTab";
 import { EventsTab, StreamBadge } from "./job/EventsTab";
 import { ChangesTab, ReviewTab, TestsTab, VerifierTab } from "./job/EvidenceTabs";
 import { ArtifactsTab, DeploymentTab, ErrorsTab, GitTab, MediaTab, RepositoryTab, ResourcesTab } from "./job/MiscTabs";
@@ -35,6 +36,7 @@ const JOB_TABS: readonly { id: string; label: string }[] = [
   { id: "media", label: "Medien" },
   { id: "git", label: "Git" },
   { id: "deployment", label: "Deployment" },
+  { id: "approvals", label: "Freigaben" },
   { id: "errors", label: "Fehler" },
 ];
 
@@ -78,6 +80,8 @@ function TabPanel({ tab, sub, props }: { tab: string; sub: string | null; props:
       return <GitTab {...props} />;
     case "deployment":
       return <DeploymentTab {...props} />;
+    case "approvals":
+      return <ApprovalsTab {...props} />;
     case "errors":
       return <ErrorsTab {...props} />;
     default:
