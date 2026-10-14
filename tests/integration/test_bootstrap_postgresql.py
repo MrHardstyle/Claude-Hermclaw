@@ -6,7 +6,7 @@ on a free port with a private socket directory) is configured with the role's *r
 
 * ``database.yml`` creates the role, the database and the ``vector`` extension, a second run
   reports ``changed=0``, and the active pgvector version is asserted (the local pgvector is
-  older than 0.8.2, so the CVE-2026-3172 minimum must make the role fail – negative control);
+  older than 0.8.2, so the pgvector minimum (0.8.7, floor 0.8.2) must make the role fail – negative control);
 * identifiers that need quoting are created verbatim (``format(%I)`` / psql variables, no
   string-built SQL);
 * the server accepts both files without errors (``pg_hba_file_rules`` / ``pg_file_settings``),
@@ -191,7 +191,8 @@ def test_database_tasks_create_role_db_extension_idempotently(tmp_path: Path, cl
     if not available:
         pytest.skip("pgvector is not installed for the local PostgreSQL server")
     # the local pgvector is older than the production minimum: run with the local version as minimum
-    first = _database_play(tmp_path / "first", cluster, {"postgresql_pgvector_min_version": available})
+    local = {"postgresql_pgvector_min_version": available, "postgresql_pgvector_accept_below_recommended": True}
+    first = _database_play(tmp_path / "first", cluster, local)
     assert first.returncode == 0, first.stdout[-3000:]
     ok, changed, failed = _recap(first.stdout)
     assert failed == 0 and changed >= 2, first.stdout[-3000:]
@@ -205,7 +206,7 @@ def test_database_tasks_create_role_db_extension_idempotently(tmp_path: Path, cl
                         "WHERE datname = 'hermclaw'") == "hermclaw UTF8"  # fmt: skip
     assert cluster.psql("SELECT extversion FROM pg_extension WHERE extname = 'vector'", db="hermclaw") == available
 
-    second = _database_play(tmp_path / "second", cluster, {"postgresql_pgvector_min_version": available})
+    second = _database_play(tmp_path / "second", cluster, local)
     assert second.returncode == 0, second.stdout[-3000:]
     assert _recap(second.stdout)[1:] == (0, 0), "second run must not change anything"
 
@@ -214,9 +215,11 @@ def test_database_tasks_refuse_pgvector_below_the_cve_minimum(tmp_path: Path, cl
     available = cluster.psql("SELECT default_version FROM pg_available_extensions WHERE name = 'vector'")
     if not available or not re.match(r"^0\.([0-7]\.|8\.[01]$)", available):
         pytest.skip(f"local pgvector {available or 'missing'} is not older than 0.8.2 - nothing to refuse")
-    res = _database_play(tmp_path, cluster, {})  # production default: >= 0.8.2 (CVE-2026-3172)
+    res = _database_play(tmp_path, cluster, {})  # production default: >= 0.8.7 (CVE-2026-103484)
     assert res.returncode != 0
-    assert f"extension vector {available} < 0.8.2" in res.stdout
+    assert f"extension vector {available} < 0.8.7" in res.stdout
+    floor = _database_play(tmp_path / "floor", cluster, {"postgresql_pgvector_accept_below_recommended": True})
+    assert floor.returncode != 0 and f"extension vector {available} < 0.8.2" in floor.stdout, "the 0.8.2 floor stays"
 
 
 def test_database_tasks_quote_identifiers(tmp_path: Path, cluster: Cluster) -> None:
@@ -249,18 +252,22 @@ esac
 def test_verify_pgvector_package_versions(tmp_path: Path) -> None:
     bindir = tmp_path / "bin"
     _fake_tool(bindir, "dpkg-query", DPKG_QUERY)
-    versions = {
-        "pgdg-fixed": ("0.8.2-1.pgdg13+1", "PASS"),
-        "pgdg-newer-minor": ("0.10.0-1.pgdg13+1", "PASS"),  # numeric, not string comparison
-        "epoch": ("1:0.8.2-2", "PASS"),
-        "debian-vulnerable": ("0.8.0-1", "FAIL"),  # trixie's own package (CVE-2026-3172)
-        "one-below": ("0.8.1-1.pgdg13+1", "FAIL"),
-        "epoch-vulnerable": ("2:0.7.4-1", "FAIL"),
-        "not-installed": ("", "FAIL"),
+    accept: dict[str, object] = {"postgresql_pgvector_accept_below_recommended": True}
+    versions: dict[str, tuple[str, dict[str, object], str]] = {
+        "pgdg-fixed": ("0.8.7-1.pgdg13+1", {}, "PASS"),
+        "pgdg-newer-minor": ("0.10.0-1.pgdg13+1", {}, "PASS"),  # numeric, not string comparison
+        "epoch": ("1:0.8.7-2", {}, "PASS"),
+        "cve-2026-103484": ("0.8.6-1.pgdg13+1", {}, "FAIL"),  # IVFFlat build OOB write (default refuses)
+        "accepted-below-recommended": ("0.8.6-1.pgdg13+1", accept, "PASS"),
+        "accepted-floor": ("0.8.2-1.pgdg13+1", accept, "PASS"),
+        "debian-vulnerable": ("0.8.0-1", accept, "FAIL"),  # trixie's own package (CVE-2026-3172): never
+        "one-below-floor": ("0.8.1-1.pgdg13+1", accept, "FAIL"),
+        "epoch-vulnerable": ("2:0.7.4-1", accept, "FAIL"),
+        "not-installed": ("", {}, "FAIL"),
     }
     cases: list[Case] = [
-        (f"pgvector-{name}", "postgresql", "verify_pgvector.yml", {}, {"FAKE_PGVECTOR": version}, want)
-        for name, (version, want) in versions.items()
+        (f"pgvector-{name}", "postgresql", "verify_pgvector.yml", extra, {"FAKE_PGVECTOR": version}, want)
+        for name, (version, extra, want) in versions.items()
     ]
     _run_cases(tmp_path, cases, bindir=bindir)
 

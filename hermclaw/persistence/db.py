@@ -81,5 +81,6 @@ async def db_health() -> dict[str, object]:
         "postgres": str(version).split(",")[0],
         "pgvector": vector,
         "pgvector_cve_2026_3172_patched": bool(vparts and vparts >= (0, 8, 2)),
+        "pgvector_cve_2026_103484_patched": bool(vparts and vparts >= (0, 8, 7)),
         "schema_revision": rev,
     }

@@ -79,10 +79,10 @@
     - "'vector' in postgresql_extensions"
     - not ansible_check_mode
 
-- name: Assert the active pgvector extension >= {{ postgresql_pgvector_min_version }}
+- name: Assert the active pgvector extension >= {{ postgresql_pgvector_required_version }}
   ansible.builtin.assert:
-    that: postgresql_vector_active.stdout | trim is version(postgresql_pgvector_min_version, '>=')
-    fail_msg: "extension vector {{ postgresql_vector_active.stdout | trim }} < {{ postgresql_pgvector_min_version }}"
+    that: postgresql_vector_active.stdout | trim is version(postgresql_pgvector_required_version, '>=')
+    fail_msg: "extension vector {{ postgresql_vector_active.stdout | trim }} < {{ postgresql_pgvector_required_version }}"
     quiet: true
   when:
     - "'vector' in postgresql_extensions"

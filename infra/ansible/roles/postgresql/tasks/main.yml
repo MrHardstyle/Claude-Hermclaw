@@ -1,4 +1,4 @@
-# postgresql – PostgreSQL 17 + pgvector >= 0.8.2 from PGDG, localhost only (P01 1.7, 1.8)
+# postgresql – PostgreSQL 17 + pgvector >= 0.8.7 (floor 0.8.2) from PGDG, localhost only (P01 1.7, 1.8)
 - name: Validate the PostgreSQL settings
   ansible.builtin.import_tasks: validate.yml
   tags: [postgresql]

@@ -261,15 +261,15 @@ ansible-playbook -i inventory/hosts.yml playbooks/bootstrap.yml --limit orchestr
 
 Was installiert wird: Basispakete, Python 3.13 + venv, Benutzer `hermclaw` und `hermclaw-admin`, Verzeichnisse
 (`/opt/hermclaw`, `/etc/hermclaw`, `/var/lib/hermclaw/{workspaces,artifacts,repos}`, `/var/log/hermclaw`),
-**PostgreSQL 17 + pgvector ≥ 0.8.2 aus dem PGDG-Repository** (Debians pgvector 0.8.0 ist von CVE-2026-3172
-betroffen, Entscheidung D-002), Datenbank `hermclaw`, rootless Podman für SearXNG, SSH-Schlüssel der Runtime
+**PostgreSQL 17 + pgvector ≥ 0.8.7 aus dem PGDG-Repository** (Debians pgvector 0.8.0 ist von CVE-2026-3172
+betroffen, 0.8.2–0.8.6 von CVE-2026-103484; Entscheidungen D-002, D-012), Datenbank `hermclaw`, rootless Podman für SearXNG, SSH-Schlüssel der Runtime
 (`/etc/hermclaw/ssh/id_ed25519`, `backup_ed25519`), `known_hosts`, die verschlüsselten Credentials
 (`/etc/credstore.encrypted/hermclaw-*`: API-Admin-Token, LiteLLM-Master-Key, je Worker ein Token).
 
 Prüfen auf .225:
 
 ```bash
-dpkg-query -W postgresql-17 postgresql-17-pgvector          # pgvector >= 0.8.2
+dpkg-query -W postgresql-17 postgresql-17-pgvector          # pgvector >= 0.8.7
 sudo -u postgres psql -d hermclaw -tAc "SELECT extversion FROM pg_extension WHERE extname='vector'"
 sudo ls -l /etc/hermclaw/ssh                                 # id_ed25519 (0600 hermclaw), backup_ed25519, known_hosts
 sudo /opt/hermclaw/bin/hermclaw-credential list              # api-admin-token litellm-master-key worker-token-exec-222 worker-token-model-224

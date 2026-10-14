@@ -244,3 +244,13 @@ async def test_production_refuses_example_configuration_and_flags_placeholder_ma
     )
     assert ok["config:files"].status == "ok" and "(example)" not in ok["config:files"].detail
     assert "exec-222" not in ok["config:wake_on_lan"].detail and "model-224" in ok["config:wake_on_lan"].detail
+
+
+async def test_pgvector_verdicts() -> None:
+    from hermclaw.doctor import pgvector_status
+
+    assert pgvector_status(None)[0] == "fail"
+    assert pgvector_status("0.8.0") == ("fail", "pgvector 0.8.0 < 0.8.2 (CVE-2026-3172) – install postgresql-17-pgvector from PGDG")
+    status, detail = pgvector_status("0.8.6")
+    assert status == "warn" and "CVE-2026-103484" in detail
+    assert pgvector_status("0.8.7") == ("ok", "pgvector 0.8.7") and pgvector_status("0.10.0")[0] == "ok"

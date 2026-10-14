@@ -7,7 +7,8 @@ jobs?" with one line per check (``ok`` / ``warn`` / ``fail`` / ``skip``) and an 
                      Qwen3.8 heavy reviewer, Qwen3 router, embedding), sandbox toolchain aliases (R-022), worker hosts;
                      production reads real ``<name>.yaml`` files (not the ``.example.yaml`` fallback) and no
                      Wake-on-LAN host still carries a placeholder MAC address;
-* ``database``     – reachable, migrated to the release's Alembic head, pgvector ≥ 0.8.2 (CVE-2026-3172);
+* ``database``     – reachable, migrated to the release's Alembic head, pgvector ≥ 0.8.2 (CVE-2026-3172, fail) and
+                     ≥ 0.8.7 (CVE-2026-103484, warn);
 * ``paths``        – data directories exist, are writable and have free space (disk thresholds of the runtime);
 * ``api_tokens``   – at least one active admin token exists (``hermclaw token-create``);
 * ``litellm``      – the gateway is alive and serves every enabled model alias;
@@ -42,7 +43,8 @@ Status = Literal["ok", "warn", "fail", "skip"]
 REQUIRED_ROLES = ("planner", "coder", "heavy", "fast", "embedding")
 CONFIG_FILES = ("hosts", "models", "policies", "capabilities", "logging")  # hermclaw.core.config.load_config
 TOOLCHAIN_ALIASES = ("python", "node", "php", "generic")
-MIN_PGVECTOR = (0, 8, 2)
+MIN_PGVECTOR = (0, 8, 2)  # CVE-2026-3172 (parallel HNSW build) – Hermclaw builds HNSW indexes: fail below
+RECOMMENDED_PGVECTOR = (0, 8, 7)  # CVE-2026-103484 (IVFFlat build; Hermclaw builds none) – warn below
 HEARTBEAT_STALE_SECONDS = 120
 _ADMIN_HINT = "hermclaw token-create admin --scopes admin"
 
@@ -102,6 +104,21 @@ def _free_mb(path: Path) -> int:
     while not probe.exists() and probe != probe.parent:
         probe = probe.parent
     return int(shutil.disk_usage(probe).free // (1024 * 1024))
+
+
+def pgvector_status(vector: str | None) -> tuple[Status, str]:
+    """Doctor verdict for the installed pgvector extension version."""
+    if vector is None:
+        return "fail", "extension vector not installed (CREATE EXTENSION vector)"
+    if _version_tuple(vector) < MIN_PGVECTOR:
+        return "fail", f"pgvector {vector} < 0.8.2 (CVE-2026-3172) – install postgresql-17-pgvector from PGDG"
+    if _version_tuple(vector) < RECOMMENDED_PGVECTOR:
+        return (
+            "warn",
+            f"pgvector {vector} < 0.8.7 (CVE-2026-103484, IVFFlat index build) – update postgresql-17-pgvector from PGDG, "
+            "then ALTER EXTENSION vector UPDATE and restart PostgreSQL",
+        )
+    return "ok", f"pgvector {vector}"
 
 
 def _placeholder_mac(mac: str) -> bool:
@@ -249,12 +266,7 @@ class Doctor:
             self.add("database", "fail", f"revision {rev}, release head {head} – run: hermclaw migrate", revision=rev, head=head)
         else:
             self.add("database", "ok", f"revision {rev} (release head)", revision=rev)
-        if vector is None:
-            self.add("database:pgvector", "fail", "extension vector not installed (CREATE EXTENSION vector)")
-        elif _version_tuple(str(vector)) < MIN_PGVECTOR:
-            self.add("database:pgvector", "fail", f"pgvector {vector} < 0.8.2 (CVE-2026-3172) – install postgresql-17-pgvector from PGDG")
-        else:
-            self.add("database:pgvector", "ok", f"pgvector {vector}")
+        self.add("database:pgvector", *pgvector_status(None if vector is None else str(vector)))
 
     # ------------------------------------------------------------------------------------------- paths
     def check_paths(self) -> None:

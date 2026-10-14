@@ -1,10 +1,22 @@
 # postgresql – PostgreSQL 17 + pgvector from PGDG on the orchestrator (P01 1.7, 1.8;
 # research 20261008-003, DECISIONS D-002). Debian's own pgvector 0.8.0 is affected by
-# CVE-2026-3172, therefore pgvector comes from PGDG and must be >= 0.8.2.
+# CVE-2026-3172 and CVE-2026-103484, therefore pgvector comes from PGDG (>= 0.8.7, floor 0.8.2).
 postgresql_version: "17"
 postgresql_cluster: main
 postgresql_port: "{{ hermclaw_postgres_port }}"
+# Hard floor, can never be lowered: CVE-2026-3172 (parallel HNSW build; Hermclaw builds HNSW indexes).
 postgresql_pgvector_min_version: "0.8.2"
+# Required by default: CVE-2026-103484 (GHSA-pw7q-9788-x566, IVFFlat index build -> code execution, fixed in 0.8.7;
+# research 20261014-027 P11). Hermclaw creates no IVFFlat index. If PGDG has no 0.8.7 build for trixie yet, accept
+# 0.8.2-0.8.6 explicitly with postgresql_pgvector_accept_below_recommended: true and update as soon as it exists
+# (`hermclaw doctor` keeps warning).
+postgresql_pgvector_recommended_version: "0.8.7"
+postgresql_pgvector_accept_below_recommended: false
+postgresql_pgvector_required_version: >-
+  {{ postgresql_pgvector_min_version
+     if (postgresql_pgvector_accept_below_recommended | bool
+         or postgresql_pgvector_min_version is version(postgresql_pgvector_recommended_version, '>='))
+     else postgresql_pgvector_recommended_version }}
 
 postgresql_pgdg_uri: https://apt.postgresql.org/pub/repos/apt
 postgresql_pgdg_suite: "{{ hermclaw_debian_codename }}-pgdg"

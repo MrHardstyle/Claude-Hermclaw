@@ -10,7 +10,7 @@
   failed_when: false
   check_mode: false
 
-- name: Assert pgvector is not affected by CVE-2026-3172, minimum {{ postgresql_pgvector_min_version }}
+- name: Assert pgvector is not affected by CVE-2026-3172 / CVE-2026-103484, minimum {{ postgresql_pgvector_required_version }}
   ansible.builtin.assert:
     that:
       - postgresql_pgvector_pkg.rc == 0
@@ -18,10 +18,11 @@
       # stay free of backslashes: Jinja decodes escapes there (a '\2' backreference became chr(2)).
       - >-
         (postgresql_pgvector_pkg.stdout | trim).split(':')[-1] | regex_search('^[0-9]+([.][0-9]+)*') | default('0', true)
-        is version(postgresql_pgvector_min_version, '>=')
+        is version(postgresql_pgvector_required_version, '>=')
     fail_msg: >-
       postgresql-{{ postgresql_version }}-pgvector {{ postgresql_pgvector_pkg.stdout | default('not installed') }}
-      is missing or older than {{ postgresql_pgvector_min_version }} (CVE-2026-3172). Install it from PGDG
-      (apt.postgresql.org {{ postgresql_pgdg_suite }}), not from Debian.
+      is missing or older than {{ postgresql_pgvector_required_version }} (CVE-2026-3172 below 0.8.2, CVE-2026-103484
+      below 0.8.7). Install it from PGDG (apt.postgresql.org {{ postgresql_pgdg_suite }}), not from Debian. Only if PGDG
+      has no 0.8.7 build yet: postgresql_pgvector_accept_below_recommended=true (floor 0.8.2 stays).
     quiet: true
   when: not (ansible_check_mode and postgresql_pgvector_pkg.rc != 0)

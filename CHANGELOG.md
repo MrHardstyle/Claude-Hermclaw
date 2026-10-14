@@ -72,7 +72,8 @@ getestet; die Live-Abnahme auf den Ziel-Hosts steht aus (BLOCKER-001, `scripts/o
   Secret-Scan des Repositorys und jedes Job-Diffs.
 - Sandbox: rootless, `--read-only`, `--network=none` ohne Netz-Capability, `--cap-drop=ALL`, Ressourcenlimits,
   Image-Sicherheitsgate gegen Podman CVE-2026-57231/CVE-2026-94603 (BUG-108).
-- pgvector ≥ 0.8.2 (CVE-2026-3172), LiteLLM ohne bekannte Advisories in der gepinnten Version (Research R-027).
+- pgvector ≥ 0.8.7 (CVE-2026-3172, CVE-2026-103484; Untergrenze 0.8.2, D-012), LiteLLM ohne bekannte Advisories in der
+  gepinnten Version (Research R-027).
 
 ### Behoben
 

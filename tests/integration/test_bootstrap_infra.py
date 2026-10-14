@@ -1059,6 +1059,7 @@ VALIDATION_CASES: list[tuple[str, str, dict[str, Any], str]] = [
     ("pg-listen-lan", "postgresql", {"postgresql_listen_addresses": "0.0.0.0"}, "FAIL"),
     ("pg-db-injection", "postgresql", {"postgresql_db_name": "hermclaw; drop"}, "FAIL"),
     ("pg-vulnerable-pgvector", "postgresql", {"postgresql_pgvector_min_version": "0.8.1"}, "FAIL"),
+    ("pg-recommended-below-cve-2026-103484", "postgresql", {"postgresql_pgvector_recommended_version": "0.8.6"}, "FAIL"),
     (
         "pg-hba-trust",
         "postgresql",

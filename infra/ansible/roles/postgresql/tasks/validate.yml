@@ -10,9 +10,10 @@
       - postgresql_extensions | select('match', '^[a-z_][a-z0-9_]*$') | list | length == postgresql_extensions | length
       - postgresql_listen_addresses in ['localhost', '127.0.0.1', '::1', '127.0.0.1,::1']
       - postgresql_pgvector_min_version is version('0.8.2', '>=')
+      - postgresql_pgvector_recommended_version is version('0.8.7', '>=')
     fail_msg: >-
-      invalid PostgreSQL settings (identifiers, a non-local listen address or a pgvector minimum
-      below 0.8.2, CVE-2026-3172)
+      invalid PostgreSQL settings (identifiers, a non-local listen address, a pgvector minimum
+      below 0.8.2 (CVE-2026-3172) or a recommended pgvector below 0.8.7 (CVE-2026-103484))
     quiet: true
 
 # Extra pg_hba rules: no trust/password/md5 methods, no injected fields or line breaks.
