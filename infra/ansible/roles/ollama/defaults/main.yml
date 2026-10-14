@@ -39,7 +39,9 @@ ollama_extra_env: {}
 ollama_firewall_enabled: true
 ollama_firewall_allowed_sources:
   - "{{ hermclaw_orchestrator_ip }}"
-ollama_firewall_nft_file: /etc/hermclaw/nftables/hermclaw-ollama.nft
+ollama_firewall_nft_file: "{{ hermclaw_config_dir }}/nftables/hermclaw-ollama.nft"
+ollama_firewall_nft_bin: /usr/sbin/nft
+ollama_firewall_port: "{{ ollama_listen.split(':')[-1] }}"   # taken from ollama_listen
 
 # Verify the API after (re)start
 ollama_verify: true
