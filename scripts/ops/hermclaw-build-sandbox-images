@@ -12,7 +12,15 @@
 #   node   – npm ci into /opt/hermclaw-deps/node_modules + NODE_PATH, and a pre-filled npm cache for `npm ci --offline`
 set -euo pipefail
 HERE="$(cd "$(dirname "$0")/../.." && pwd)"
-CTX="${HERMCLAW_SANDBOX_IMAGES_DIR:-$HERE/infra/sandbox-images}"
+# build context: $HERMCLAW_SANDBOX_IMAGES_DIR, the checkout (scripts/ops/../../infra/sandbox-images), or – installed
+# in /opt/hermclaw/bin by the deployment – the active release payload /opt/hermclaw/current/sandbox-images
+if [ -n "${HERMCLAW_SANDBOX_IMAGES_DIR:-}" ]; then
+  CTX="$HERMCLAW_SANDBOX_IMAGES_DIR"
+elif [ -d "$HERE/infra/sandbox-images" ]; then
+  CTX="$HERE/infra/sandbox-images"
+else
+  CTX=/opt/hermclaw/current/sandbox-images
+fi
 ENGINE=podman VERSION=1 ONLY="python,node,php,generic" DRY=0 PROJECT="" BASE="" REQ="" PKGDIR=""
 while [ $# -gt 0 ]; do
   case "$1" in

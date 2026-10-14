@@ -47,8 +47,8 @@ litellm-proxy = ["litellm[proxy]==1.104.2", "prisma==0.15.0"]
 
 [project.scripts]
 hermclaw = "hermclaw.cli:main"
-hermclaw-exec-worker = "worker.execution.app:main"
-hermclaw-model-worker = "worker.model.app:main"
+hermclaw-exec-worker = "worker.execution.__main__:main"
+hermclaw-model-worker = "worker.model.__main__:main"
 
 [tool.setuptools.packages.find]
 include = ["hermclaw*", "worker*"]

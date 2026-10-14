@@ -661,6 +661,20 @@ Noch keine.
 - Tatsächlich: cluster locale depended on the installer's locale; the PGDG key was downloaded from postgresql.org without a fingerprint check
 - Fix: `create_main_cluster = false` in `/etc/postgresql-common/createcluster.conf` before the package install; the repository uses Debian's shipped keyring `/usr/share/postgresql-common/pgdg/apt.postgresql.org.gpg`, asserted to hold exactly fingerprint `B97B0AFC…4CF8`
 
+### BUG-112 – Worker console scripts pointed to non-existent functions (`worker.execution.app:main`)
+- Phase: P32 · Komponente: packaging · Severity: P1 · blockierend: ja (jedes Deployment) · Status: **behoben** (`tests/unit/test_packaging.py::test_console_scripts_resolve_to_callables`; found by the P32 release canary `test_this_checkout_builds_a_deployable_release`)
+- Reproduktion: install the wheel, run `hermclaw-exec-worker` (the unit's ExecStart)
+- Tatsächlich: `AttributeError` at start – the `main` functions live in `worker/execution/__main__.py` / `worker/model/__main__.py`; the dev setup always used `python -m worker.execution`
+- Fix: entry points `worker.execution.__main__:main` / `worker.model.__main__:main`; a test resolves every console script
+
+### BUG-113 – API trusted X-Forwarded-For/-Proto from any client (`forwarded_allow_ips="*"`)
+- Phase: P32 · Komponente: api · Severity: P2 · blockierend: nein · Status: **behoben** (`tests/unit/test_config_and_redaction.py::test_api_trusts_forwarded_headers_only_from_configured_proxies`; research R-029 E2/E3, R-028 A16)
+- Tatsächlich: any client reaching `.225:8000` directly could forge its address in logs and audit (authentication is by token and unaffected)
+- Fix: `HERMCLAW_API_FORWARDED_ALLOW_IPS` (default `127.0.0.1`; production: the nginx host `.223`)
+
+### BUG-114 – `hermclaw-build-sandbox-images` installed in /opt/hermclaw/bin looked for its Containerfiles in /opt/infra/sandbox-images
+- Phase: P32 · Komponente: scripts/ops · Severity: P3 · blockierend: nein · Status: **behoben** (fallback to the release payload `/opt/hermclaw/current/sandbox-images`; `HERMCLAW_SANDBOX_IMAGES_DIR` still wins; shellcheck clean)
+
 ## Template
 
 ### BUG-XXX – Titel

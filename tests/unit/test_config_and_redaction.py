@@ -101,3 +101,25 @@ def test_default_config_dir_is_the_checkout_or_etc_hermclaw(tmp_path: Path, monk
     assert settings_mod.Settings().config_dir == Path("/etc/hermclaw")
     monkeypatch.setenv("HERMCLAW_CONFIG_DIR", str(tmp_path))
     assert settings_mod.Settings().config_dir == tmp_path
+
+
+def test_api_trusts_forwarded_headers_only_from_configured_proxies(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Never forwarded_allow_ips="*": only the configured proxy (nginx on .223) may set the client address."""
+    import uvicorn
+
+    from hermclaw.api import app as app_mod
+    from hermclaw.core.settings import reset_settings_cache
+
+    seen: dict[str, object] = {}
+    monkeypatch.setattr(uvicorn, "run", lambda app, **kw: seen.update(kw))
+    monkeypatch.setattr(app_mod, "create_app", object)
+    monkeypatch.setattr(app_mod, "configure_logging", lambda *a, **k: None)
+    monkeypatch.delenv("HERMCLAW_API_FORWARDED_ALLOW_IPS", raising=False)
+    reset_settings_cache()
+    app_mod.main()
+    assert seen["proxy_headers"] is True and seen["forwarded_allow_ips"] == "127.0.0.1"
+    monkeypatch.setenv("HERMCLAW_API_FORWARDED_ALLOW_IPS", "192.168.178.223")
+    reset_settings_cache()
+    app_mod.main()
+    assert seen["forwarded_allow_ips"] == "192.168.178.223"
+    reset_settings_cache()

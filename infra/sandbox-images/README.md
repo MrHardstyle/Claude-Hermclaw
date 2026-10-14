@@ -14,8 +14,8 @@ such as `pytest -q` would fail. These Containerfiles add the toolchains; project
 Build on `.222` as the worker user (rootless podman):
 
 ```bash
-sudo -u hermclaw-exec /opt/hermclaw/bin/hermclaw-build-sandbox-images             # all toolchain images
-sudo -u hermclaw-exec /opt/hermclaw/bin/hermclaw-build-sandbox-images \
+sudo -u hermclaw /opt/hermclaw/bin/hermclaw-build-sandbox-images             # all toolchain images
+sudo -u hermclaw /opt/hermclaw/bin/hermclaw-build-sandbox-images \
      --project myapp --base python --requirements /srv/myapp/requirements.txt     # project image with deps
 ```
 

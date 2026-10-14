@@ -31,7 +31,10 @@ MAX_SYMBOLS_PER_FILE = 5_000
 DEFINITION_KINDS = ("function", "method", "class", "interface", "trait", "enum", "type", "constant")
 #: rows that are not definitions: imports (11.7) and per-file module-level call references
 AUX_KINDS = ("import", "module")
-_TS_LANGS = {"javascript": "javascript", "typescript": "typescript", "tsx": "tsx", "php": "php"}
+#: tree-sitter grammars the structure index uses (language -> grammar name); the release build pre-fetches exactly
+#: these (scripts/deploy/build-release.sh, research 20261014-027 Y6)
+TREE_SITTER_GRAMMARS: dict[str, str] = {"javascript": "javascript", "typescript": "typescript", "tsx": "tsx", "php": "php"}
+_TS_LANGS = TREE_SITTER_GRAMMARS
 _local = threading.local()
 log = get_logger(__name__)
 

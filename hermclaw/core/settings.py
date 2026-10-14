@@ -33,6 +33,10 @@ class Settings(BaseSettings):
     log_json: bool = True
     api_host: str = "127.0.0.1"
     api_port: int = 8000
+    #: reverse proxies whose X-Forwarded-For/-Proto the API trusts (uvicorn ``forwarded_allow_ips``, comma separated):
+    #: in production the nginx host .223 only – never "*", or any client could forge its address in logs/audit
+    #: (research 20261014-029 E2/E3, 20261014-028 A16)
+    api_forwarded_allow_ips: str = "127.0.0.1"
     cors_origins: list[str] = Field(default_factory=list)
     # Secret references (see hermclaw.security.secrets); never literal secrets in env for production.
     api_token_ref: str = "cred:api-admin-token"

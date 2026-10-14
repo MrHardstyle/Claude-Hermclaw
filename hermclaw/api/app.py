@@ -55,4 +55,10 @@ def main() -> None:  # pragma: no cover - process entry point
 
     settings = get_settings()
     configure_logging(settings.log_level, "hermclaw-api", settings.log_json)
-    uvicorn.run(create_app(), host=settings.api_host, port=settings.api_port, proxy_headers=True, forwarded_allow_ips="*")
+    uvicorn.run(
+        create_app(),
+        host=settings.api_host,
+        port=settings.api_port,
+        proxy_headers=True,
+        forwarded_allow_ips=settings.api_forwarded_allow_ips,
+    )
