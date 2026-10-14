@@ -19,9 +19,12 @@
 P01/P32 roles `nginx`, `nodejs`, `podman`, `wol_target` and `systemd_skeleton` (SearXNG Quadlet), INSTALLATION.md
 (web UI `.223`, execution worker `.222`, model worker `.224`), P10 idle sleep / wake, P18 sandbox, P36 security.
 The roles were written from R-001, R-005, R-014, R-016 and R-018 (2026-10-08). This re-check confirms most of
-them, but found three things that need action: Podman 5.4.2 in trixie is affected by an unfixed CVE, NodeSource
+them, but found three things that need action: Podman 5.4.2 in trixie is affected by several unfixed CVEs, NodeSource
 had a signing-key problem with trixie's apt in 2026, and the nginx template has gaps (TLS/CSP missing, header
 inheritance, token in logs, health probe vs. redirect). See Decision.
+*Adversarial verification pass (same day):* upstream versions, CVE ranges and the Debian nodejs build were corrected,
+and new advisories were added: nginx 2026-10-14 (five CVEs), Podman CVE-2026-94603 / CVE-2025-11395, and the
+NodeSource repository lag. Corrections are marked **[verified-fix]**.
 
 ## Sources (accessed 2026-10-14)
 Access notes. These were **not reachable** from this build sandbox (DNS failure or egress-policy 403):
@@ -34,7 +37,7 @@ WebFetch. Debian trixie package versions therefore come from **search-engine sni
 (marked `[P/snippet]`) and are not verified directly. Run `apt-cache policy <pkg>` on the hosts to confirm them.
 
 Primary, read directly (`[P]`):
-- nginx reference docs (source of nginx.org, `main` = 1.29.x mainline, with per-directive version notes):
+- nginx reference docs (source of nginx.org; `main` documents the current mainline 1.31.x **[verified-fix]**, with per-directive version notes):
   https://github.com/nginx/nginx.org/blob/main/xml/en/docs/http/ngx_http_proxy_module.xml , `ngx_http_gzip_module.xml`,
   `ngx_http_headers_module.xml`, `ngx_http_v2_module.xml`, `ngx_http_upstream_module.xml`, `ngx_http_ssl_module.xml`,
   `ngx_http_log_module.xml` (`combined` format), `ngx_http_core_module.xml` (`$request`, `$uri`)
@@ -67,6 +70,21 @@ Primary, read directly (`[P]`):
 - Ollama v0.40.4 `docs/gpu.mdx` ("Linux Suspend Resume"): https://github.com/ollama/ollama/blob/v0.40.4/docs/gpu.mdx
 - Launchpad mirror of the Debian archive, publishing history (sid/experimental/bookworm only):
   https://launchpad.net/debian/+source/nginx/+publishinghistory , …/podman/…, …/nodejs/…
+- Added by the verification pass (`[P]`, read directly 2026-10-14):
+  - nginx releases https://github.com/nginx/nginx/releases (release-1.31.7 / release-1.30.6, 14 Oct; 1.30.5, 15 Sep) and
+    the nginx.org advisory list source https://github.com/nginx/nginx.org/blob/main/xml/en/security_advisories.xml
+  - Podman releases https://github.com/containers/podman/releases (v6.1.4 / v5.8.9, 12 Oct; v5.8.8 / v6.1.3, 29 Sep;
+    v5.8.7, 16 Sep), release pages `releases/tag/v5.8.7`, `v5.8.8`, `v5.8.9`; advisory list
+    https://github.com/podman-container-tools/podman/security/advisories ; GHSA-2cvf-wqm6-wr9g (CVE-2026-94603),
+    GHSA-q6r4-3wmg-fwcq (CVE-2026-55686); container-libs GHSA-3gcv-x57j-xqxv (CVE-2025-11395)
+    https://github.com/containers/container-libs/security/advisories/GHSA-3gcv-x57j-xqxv
+  - Launchpad binary page of the **same Debian source** `podman 5.4.2+ds1-2` as synced into Ubuntu questing
+    (Depends/Recommends from the identical `debian/control`): https://launchpad.net/ubuntu/questing/amd64/podman/5.4.2+ds1-2 ;
+    Launchpad Debian sid history for crun and catatonit (`+source/crun/+publishinghistory`, `+source/catatonit/…`)
+  - NodeSource issue #1931 "deb-Repos not up-to-date" https://github.com/nodesource/distributions/issues/1931
+- Added by the verification pass (`[P/snippet]`): DSA-6517-1 nodejs (trixie fixed in 20.19.2+dfsg-1+deb13u3)
+  https://security-tracker.debian.org/tracker/DSA-6517-1 ; Debian Security Tracker CVE-2026-94603 (podman, trixie vulnerable)
+  https://security-tracker.debian.org/tracker/CVE-2026-94603 ; tracker podman (CVE-2026-55686 open for trixie)
 - Repo state read for this re-check: `infra/ansible/roles/{nginx,nodejs,podman,wol_target,common}`,
   `infra/systemd/{hermclaw-searxng.container.j2,hermclaw-exec-worker.service.j2,hermclaw-wol@.service}`,
   `config/hosts.example.yaml`, `ui/package.json`, `ui/vite.config.ts`, `ui/dist/index.html`, `ui/src/lib/sse.ts`,
@@ -100,16 +118,17 @@ Secondary (`[S]`, marked wherever used):
 
 | # | Fact | Source |
 |---|---|---|
-| A1 | trixie ships the **nginx 1.26.3** branch with backported fixes. Current stable-security build **1.26.3-3+deb13u9** (changelog 2026-09-15, DSA-6496-2 dated 2026-09-16, a regression fix for DSA-6496-1 = deb13u8: CVE-2026-42533, CVE-2026-56434, CVE-2026-60005). The tracker still lists 4 open security issues for trixie. Upstream is at 1.30.4 (sid 1.30.4-7, 2026-09-16). | [P/snippet] tracker, DSA; [P] Launchpad sid history |
+| A1 | trixie ships the **nginx 1.26.3** branch with backported fixes. Current stable-security build **1.26.3-3+deb13u9** (changelog 2026-09-15, DSA-6496-2 dated 2026-09-16, a regression fix for DSA-6496-1 = deb13u8: CVE-2026-42533, CVE-2026-56434, CVE-2026-60005; deb13u9 itself fixes no new CVE, it repairs the nginx-dev build). The tracker still lists 4 open security issues for trixie. **[verified-fix]** Upstream is at **stable 1.30.6 / mainline 1.31.7 (both 2026-10-14)**; sid is at 1.30.4-7 (2026-09-16), i.e. sid itself lags upstream. | [P/snippet] tracker, DSA; [P] Launchpad sid history; [P] nginx GitHub releases |
+| A1b | **[verified-fix] New nginx advisories of 2026-10-14** (fixed in 1.30.6 / 1.31.7, all "medium"). Vulnerable ranges per nginx.org: CVE-2026-15176 `alias` + `rewrite` buffer overflow (0.1.29–1.31.6), CVE-2026-95101 HTTP/3 request-body injection (1.25.0–1.31.6), CVE-2026-97629 session forgery with TLS session tickets (1.23.2–1.31.6), CVE-2026-97205 use-after-free with AIO (0.8.11–1.31.6) – all four cover 1.26.3. CVE-2026-93479 (script evaluation) only affects 1.30.0+/1.31.2+, CVE-2026-90439 (HTTP/3, 2026-09-15) only 1.29.2+, so neither affects 1.26. No Debian fix for the 2026-10-14 set was seen yet (published today). | [P] nginx.org `security_advisories.xml`, nginx release-1.30.6/1.30.5 pages |
 | A2 | `proxy_buffering` (default `on`): when off, "the response is passed to a client synchronously, immediately as it is received". Buffering "can also be enabled or disabled by passing 'yes' or 'no' in the X-Accel-Buffering response header field" unless `proxy_ignore_headers` disables it. | [P] proxy module doc |
-| A3 | `proxy_http_version`: "**Since 1.29.7, version 1.1 is used by default. Before 1.29.7, version 1.0** was used". On trixie's 1.26 it must be set to `1.1` explicitly (needed for upstream keepalive and chunked streaming). | [P] proxy module doc |
+| A3 | `proxy_http_version`: "**Since 1.29.7, version 1.1 is used by default. Before 1.29.7, version 1.0** was used". On trixie's 1.26 it must be set to `1.1` explicitly; the doc recommends 1.1 "for use with keepalive connections" (SSE itself also streams over 1.0 with a connection-close-delimited body, so 1.1 is needed for the upstream keepalive pool, not for SSE as such **[verified-fix]**). | [P] proxy module doc |
 | A4 | Upstream `keepalive`: enabled by default only **since 1.29.7**; on 1.26 it needs an explicit `keepalive N;` plus `proxy_http_version 1.1` and `proxy_set_header Connection "";`. | [P] upstream module doc |
 | A5 | `proxy_read_timeout` default **60s**, measured "only between two successive read operations"; the connection is closed if the upstream sends nothing in that time. The 15 s SSE heartbeat (config `events.heartbeat_seconds: 15`) keeps any value > 15 s alive. | [P] proxy module doc; repo config |
 | A6 | `gzip_types` default is `text/html` only. `text/event-stream` is compressed only if it is listed (or `*`). Debian's stock `nginx.conf` has `gzip on;` with `gzip_types` commented out, so `gzip off;` in the SSE location is defensive but correct. | [P] gzip module doc; [S] older Debian nginx.conf copy |
 | A7 | `add_header` directives "are inherited from the previous configuration level **if and only if there are no add_header directives defined on the current level**". The `add_header_inherit` directive exists only since **1.29.3**, so it is **not available in 1.26**: every location that sets its own `add_header` must repeat the CSP and security headers. | [P] headers module doc |
 | A8 | `http2 on;` (server level) is available since 1.25.1. The `ssl_protocols` default is `TLSv1.2 TLSv1.3` since 1.23.4. A server-level `ssl_protocols` may be taken from the port's default server. | [P] v2/ssl module docs |
-| A9 | Over HTTP/1.1, browsers allow only **6 connections per browser+host**, across all tabs (Chrome/Firefox "won't fix"). With HTTP/2 the limit is the number of negotiated streams (default 100). The UI opens up to two EventSources per tab (`/jobs/{id}/events/stream`, `/events/stream`), so without HTTP/2 a few tabs block all further API requests. | [P] MDN EventSource; repo `ui/src/lib/useEvents.ts` |
-| A10 | Vite CSP guidance: without `html.cspNonce`, nothing inline is needed in a production build. Small assets are inlined as `data:` URIs unless `build.assetsInlineLimit: 0`. "Do not allow `data:` for `script-src`". The modulepreload polyfill is injected into the entry chunk (not an inline script). | [P] Vite 8.3.4 features.md, build-options.md |
+| A9 | Over HTTP/1.1, browsers allow only **6 connections per browser+host**, across all tabs (Chrome/Firefox "won't fix"). With HTTP/2 the limit is the number of negotiated streams (MDN: "defaults to 100"; nginx's own `http2_max_concurrent_streams` default is **128** **[verified-fix]**). The UI opens up to two EventSources per tab (`/jobs/{id}/events/stream`, `/events/stream`), so without HTTP/2 a few tabs block all further API requests. | [P] MDN EventSource; repo `ui/src/lib/useEvents.ts` |
+| A10 | Vite CSP guidance names only two requirements: a nonce (`html.cspNonce`, which also injects a `csp-nonce` meta tag) and `data:` for inlined assets; "nothing inline is needed without `cspNonce`" is an inference from that section plus the repo build check (A11), not a quoted Vite statement **[verified-fix]**. Small assets are inlined as `data:` URIs unless `build.assetsInlineLimit: 0`. "Do not allow `data:` for `script-src`". The modulepreload polyfill is injected into the entry chunk (not an inline script). | [P] Vite 8.3.4 features.md, build-options.md |
 | A11 | Repo build check: `ui/vite.config.ts` already sets `assetsInlineLimit: 0`. `ui/dist/index.html` has only `<script type="module" crossorigin src="/assets/…js">` and a stylesheet link, with **no inline script/style**. The bundle has no `eval`/`new Function`. Images and videos are shown from **`blob:` URLs** (`URL.createObjectURL`, `Artifacts.tsx`), so `img-src`/`media-src` need `blob:`. React sets styles through the `style` property (CSSOM), which `style-src 'self'` does not block (MDN: properties "set directly on the element's style property will not be blocked"). | [P] repo; MDN style-src |
 | A12 | `frame-ancestors` "is not supported in the `<meta>` element", so the CSP must be sent as an HTTP header by nginx. | [P] MDN frame-ancestors |
 | A13 | The API middleware already sends `X-Accel-Buffering: no` and `Cache-Control: no-cache` for `text/event-stream` (`hermclaw/api/routes.py`). The SSE location regex `^/api/(jobs/[^/]+/)?events/stream$` covers both stream routes (`hermclaw/api/events.py`). | [P] repo |
@@ -117,7 +136,7 @@ Secondary (`[S]`, marked wherever used):
 | A15 | The orchestrator's HTTP readiness probe uses `follow_redirects=False` and accepts only **2xx** (`hermclaw/wol/probes.py`). `config/hosts.example.yaml` probes nginx at `port: 80, http_path: /`. Once port 80 redirects to HTTPS, that probe fails. | [P] repo |
 | A16 | `hermclaw/api/app.py` starts uvicorn with `proxy_headers=True, forwarded_allow_ips="*"`, so any LAN client that reaches `:8000` directly can spoof `X-Forwarded-For`/`-Proto`. | [P] repo |
 | A17 | `infra/nginx/` contains only `.gitkeep`. The role template comment says "the deployment phase replaces it with infra/nginx/hermclaw-next.conf (TLS, rate limits, headers)", but that file does not exist yet. | [P] repo |
-| A18 | Apple platforms (iOS 13+/macOS 10.15+) reject TLS server certs issued after 2019-07-01 unless they meet all of these: validity **≤ 825 days**, EKU **id-kp-serverAuth**, DNS name in **SAN** (CN is not trusted), RSA ≥ 2048 bits, SHA-2. | [P/snippet] Apple 103769 |
+| A18 | Apple platforms (iOS 13+/macOS 10.15+), for **all** TLS server certs: DNS name in **SAN** (CN is not trusted), RSA ≥ 2048 bits, SHA-2 signatures. Additionally for certs with NotBefore after **2019-07-01**: EKU **id-kp-serverAuth** and validity **≤ 825 days** **[verified-fix: date condition applies only to the last two]**. These rules also apply to private/user-added CAs (Apple's later 398-day rule applies only to built-in public roots – not re-fetched). | [P/snippet] Apple 103769 |
 
 ### B. Node.js 22 / Vite 8 (UI build)
 
@@ -126,19 +145,22 @@ Secondary (`[S]`, marked wherever used):
 | B1 | Node 22 "Jod": LTS since 2024-10-29, **maintenance since 2025-10-21, end-of-life 2027-04-30**. Node 24 "Krypton": active LTS until 2026-10-20, EOL 2028-04-30. Node 26: LTS from 2026-10-28, EOL 2029-04-30. **Node 20 reached EOL on 2026-04-30.** | [P] nodejs/Release schedule.json |
 | B2 | Latest 22.x is **v22.23.3** (2026-09-23, npm 10.9.9). The last 22.x **security** release is **v22.23.2** (2026-07-28). Tarball `node-v22.23.3-linux-x64.tar.xz` sha256 `df450af89261115ef9f9e3830c3eeb2cc9213b63c720b1af623cb5dcbe2e02de` (SHASUMS256.txt, signed `.sig` available). | [P] nodejs.org dist index, SHASUMS256.txt |
 | B3 | **Vite 8.3.4** (npm `latest`, published 2026-10-08) declares `engines.node: "^20.19.0 \|\| >=22.12.0"`. `ui/package.json` pins `vite 8.3.4` and `engines.node >=22.12.0`. | [P] npm registry; repo |
-| B4 | Debian trixie's own nodejs is **20.19.2+dfsg-1+deb13u2** (stable and stable-security), with 11 open security issues listed for trixie. That is an upstream-EOL line (B1). It technically satisfies Vite's `^20.19.0` but not the repo's `>=22.12.0`. No nodejs in trixie-backports was found. sid now has 24.21.0. | [P/snippet] tracker; [P] Launchpad sid history |
+| B4 | Debian trixie's own nodejs is the **20.19.2** line. The tracker snippet shows 20.19.2+dfsg-1+deb13u2 (DSA-6183-1), but **[verified-fix]** DSA-6517-1 (2026-09-25, 15 CVEs) lists **20.19.2+dfsg-1+deb13u3** as the fixed trixie version, so deb13u3 is most likely current (the tracker snippet with "11 open issues" predates it). Either way it is an upstream-EOL line (B1). It technically satisfies Vite's `^20.19.0` but not the repo's `>=22.12.0`. No nodejs in trixie-backports was found. sid now has 24.21.0. | [P/snippet] tracker; [P] Launchpad sid history |
 | B5 | NodeSource `setup_22.x` (current master) does this: installs `apt-transport-https ca-certificates curl gnupg`, writes the key from `https://deb.nodesource.com/gpgkey/nodesource-repo.gpg.key` via `gpg --dearmor` to `/usr/share/keyrings/nodesource.gpg`, writes the deb822 file `/etc/apt/sources.list.d/nodesource.sources` (`URIs: https://deb.nodesource.com/node_22.x`, `Suites: nodistro`, `Components: main`, `Architectures: amd64\|arm64`, `Signed-By:`), and pins `nodejs` and `nsolid` with `Pin: origin deb.nodesource.com` / `Pin-Priority: 600`. Documented usage: `curl -fsSL https://deb.nodesource.com/setup_22.x -o nodesource_setup.sh && bash nodesource_setup.sh && apt install -y nodejs`. | [P] setup_22.x, DEV_README |
 | B6 | NodeSource's own support table still lists Debian 10–12 only (no Debian 13 row). The `nodistro` suite is distribution-independent ("install Node.js on almost any distro"). A trixie user log shows `node_22.x nodistro … nodejs 22.19.0-1nodesource1` installing fine. | [P] DEV_README; [S] ioBroker forum |
 | B7 | Since **2026-02-01**, trixie's apt (Sequoia `sqv`) rejects SHA1 binding signatures. NodeSource repos failed with "Signing key on 6F71F525282841EEDAF851B42F59B5F99B1BE0B4 is not bound … SHA1 is not considered secure since 2026-02-01". Issue #1920 was closed 2026-02-05; users confirm that **re-downloading the current key** fixes it ("You shouldn't need to update that nodesource.sources file at all. Just the key."). An old cached key still gives a "will reject signature within a year" warning. | [P] nodesource issue #1920; [S] ioBroker |
 | B8 | Installing Debian's `npm` package on top of NodeSource's `nodejs` (which bundles npm) causes a package conflict. | [S] linuxcapable |
+| B9 | **[verified-fix] NodeSource lags upstream security releases.** Issue #1931 (2026-03-28, closed 2026-04-14 via PR #1934): the repo still served 22.22.0-1nodesource1 when 22.22.2 (a security release) was out; same for 24.x/20.x. Forum reports describe patch builds being published and then withdrawn. Whether 22.23.2/22.23.3 are in the NodeSource repo today could **not** be checked (deb.nodesource.com unreachable). | [P] nodesource issue #1931; [S] ioBroker forum |
 
 ### C. Rootless Podman 5 (`.222` sandbox, `.225` SearXNG)
 
 | # | Fact | Source |
 |---|---|---|
-| C1 | trixie: **podman 5.4.2+ds1-2** (binNMU `+b1`/`+b2`), no `+deb13u` update found, no trixie-backports podman found. Upstream: 5.8.6 / 6.1.x. Debian sid: 5.8.6+ds1-3 (2026-10-12), experimental 6.1.1+ds1-1. | [P/snippet] tracker, piuparts; [P] Launchpad sid history |
-| C2 | podman 5.4.2+ds1-2 **Depends**: conmon, `crun \| runc`, golang-github-containers-common, netavark, libsubid5, …; **Recommends**: buildah, ca-certificates, `catatonit \| tini \| dumb-init`, containers-storage, criu, dbus-user-session, **passt, slirp4netns, uidmap**. With `--no-install-recommends` (as the role installs), these must be listed explicitly. trixie crun is **1.21-1**, catatonit 0.2.1-2. | [P/snippet] piuparts log, packages.debian.org |
-| C3 | **CVE-2026-57231** (GHSA-4hq8-gpf5-8p68, CVSS 7.5, published 2026-06-24): an image `Env` entry with a key and no value makes `podman run` copy that variable's **host value** into the container (`*` copies all). Affects 1.8.1–5.8.3, fixed in **5.8.4 / 6.0.0**. Workaround: do not run untrusted images, and check `podman image inspect --format '{{.Config.Env}}'` for entries without `=`. Debian Security Tracker lists trixie 5.4.2+ds1-2 as **vulnerable** (unfixed, bug #1141502). The tracker also lists CVE-2026-55686 (WORKDIR symlink, ≤ 5.7.1) as open for trixie. | [P] GHSA; [P/snippet] security tracker; [S] Tenable |
+| C1 | trixie: **podman 5.4.2+ds1-2** (binNMU `+b1`/`+b2`; the source entered sid on 2025-07-08 with a CVE-2025-6032 fix), no `+deb13u` update found, no trixie-backports podman found. **[verified-fix]** Upstream: **v6.1.4 and v5.8.9 (both 2026-10-12)**; before that v5.8.8/v6.1.3 (2026-09-29), v5.8.7/v6.1.2 (2026-09-16). Debian sid: 5.8.6+ds1-3 (2026-10-12), experimental 6.1.1+ds1-1 (2026-09-12) – both older than the 2026-09-29 security fix. | [P/snippet] tracker, piuparts; [P] Launchpad sid history; [P] Podman GitHub releases |
+| C2 | podman 5.4.2+ds1-2 **Depends**: conmon, `crun \| runc`, golang-github-containers-common, netavark, libsubid5, …; **Recommends**: buildah, ca-certificates, `catatonit \| tini \| dumb-init`, containers-storage, criu, libcriu2, dbus-user-session, **passt, slirp4netns, uidmap**. With `--no-install-recommends` (as the role installs), these must be listed explicitly. `fuse-overlayfs` is neither a Depends nor a Recommends. trixie crun is **1.21-1**, catatonit 0.2.1-2 (both consistent with the sid history: crun 1.21-1 was in sid 2025-03-30…2025-11-06, catatonit 0.2.1-2 since 2025-05-30). | [P/snippet] piuparts log, packages.debian.org; **[verified-fix]** [P] Launchpad binary page of the same source (Ubuntu questing sync), Launchpad sid history |
+| C3 | **CVE-2026-57231** (GHSA-4hq8-gpf5-8p68, CVSS 7.5, published 2026-06-24): an image `Env` entry with a key and no value makes `podman run` copy that variable's **host value** into the container (`*` copies all). Affects 1.8.1–5.8.3, fixed in **5.8.4 / 6.0.0**. Workaround: do not run untrusted images, and check `podman image inspect --format '{{.Config.Env}}'` for entries without `=`. Debian Security Tracker lists trixie 5.4.2+ds1-2 as **vulnerable** (unfixed, bug #1141502). The tracker also lists **CVE-2026-55686** (GHSA-q6r4-3wmg-fwcq, WORKDIR symlink can create directories / change ownership on the host, CVSS 5.3, **affects 3.0.0–5.7.0, fixed in 5.7.1** **[verified-fix: was "≤ 5.7.1"]**) as open for trixie. | [P] GHSA ×2; [P/snippet] security tracker; [S] Tenable |
+| C3b | **[verified-fix] CVE-2026-94603** (GHSA-2cvf-wqm6-wr9g, **Critical, CVSS 10.0**, published 2026-09-29): any image carrying the annotation `io.podman.annotations.checkpoint.runtime.name` is treated as a checkpoint, and `podman run` then **silently ignores the user's sandbox options** (e.g. `--cap-drop=ALL`). Affects ≥ 4.4.0, fixed in **5.8.8 / 6.1.3** (feature removed). The advisory states "**rootless containers are not affected** as they do not support checkpoint/restore". Workaround: reject images with that annotation. Debian tracker: trixie 5.4.2+ds1-2 and sid **vulnerable / unfixed**. | [P] GHSA, v5.8.8 release notes; [P/snippet] Debian tracker |
+| C3c | **[verified-fix] CVE-2025-11395** (container-libs GHSA-3gcv-x57j-xqxv, CVSS 6.1, published 2026-09-17, fixed in Podman 5.8.7): extracting a crafted tar via `podman load`, `oci-archive:` references or `podman volume import` can overwrite attacker-chosen files; **pulling from registries is not affected**. Affects all older image/storage library versions, so trixie's 5.4.2 is in range (Debian status not checked). | [P] GHSA, v5.8.7 release notes |
 | C4 | pasta (package `passt`) is the default rootless network since Podman 5.0 (`default_rootless_network_cmd = "pasta"` in containers.conf `[network]`). **Podman 6.0 removed slirp4netns, cgroup v1, CNI, iptables and BoltDB**. This does not matter on trixie (5.4.2), but it does for the next Debian. | [P] rootless tutorial; RELEASE_NOTES 6.0.0 |
 | C5 | `/etc/subuid` and `/etc/subgid` need a unique, non-overlapping range per user, e.g. `usermod --add-subuids 100000-165535 --add-subgids 100000-165535 <user>`. After changing them, run `podman system migrate` as that user (it stops the user's containers and the pause process). | [P] rootless tutorial |
 | C6 | Without lingering, rootless containers exit when the user's session ends. Fix: `loginctl enable-linger <user>`. | [P] troubleshooting §17 |
@@ -170,6 +192,12 @@ Secondary (`[S]`, marked wherever used):
 ### 1. nginx on `.223` (package `nginx` from trixie main + trixie-security)
 - Install `nginx` from Debian. Require **≥ 1.26.3-3+deb13u9** and keep `trixie-security` enabled.
   The nginx.org mainline packages are not needed: all directives used below exist in 1.26.
+- **[verified-fix]** Four of the 2026-10-14 nginx CVEs cover 1.26.3 and have no Debian fix yet (A1b). The config
+  below avoids every affected feature: `ssl_session_tickets off;` (CVE-2026-97629), no `alias` (CVE-2026-15176),
+  no `aio` (CVE-2026-97205; not expected in Debian's stock `nginx.conf`, not re-verified – gate with
+  `sudo nginx -T 2>/dev/null | grep -Ev '^\s*#' | grep -Ew 'aio|ssi|quic|alias'` returning nothing), no
+  `listen … quic`/HTTP/3 (CVE-2026-95101). Keep it that way until the next nginx DSA for trixie, and raise the
+  minimum to that build once it appears.
 - Write the deployment config as `infra/nginx/hermclaw-next.conf` (or extend the role template) with the
   following content. `{{ name }}` is the LAN DNS name that actually resolves, e.g. `hermclaw.fritz.box` on a
   FRITZ!Box (`192.168.178.0/24` is the FRITZ!Box default net – assumption) or `hermclaw.home.arpa`.
@@ -332,7 +360,10 @@ sudo install -m 0644 ca.crt /usr/local/share/ca-certificates/hermclaw-lan-ca.crt
   / `main`, `amd64`, pin `Pin: origin deb.nodesource.com` / `600`. Install only `nodejs` (it includes npm and
   corepack), **never Debian's `npm`** (B8).
 - Raise the role minimum from `22.12.0` to **`22.23.2`** (last 22.x security release, B2). The current target is
-  22.23.3. Vite 8.3.4 is satisfied (B3).
+  22.23.3. Vite 8.3.4 is satisfied (B3). **[verified-fix]** Because NodeSource has lagged security releases before
+  (B9) and its current 22.x version could not be checked, the role must compare `apt-cache policy nodejs`
+  (candidate from `deb.nodesource.com`) with `nodejs_min_version` and **fail with a pointer to the tarball fallback**
+  instead of silently installing an older build.
 - Equivalent manual commands for INSTALLATION.md (same layout as `setup_22.x`, but with the key under
   `/etc/apt/keyrings`, and fetching the key **fresh**, which avoids the SHA1-binding failure B7):
 
@@ -402,6 +433,14 @@ cd / && sudo -u hermclaw env XDG_RUNTIME_DIR=/run/user/$U podman run --rm --netw
      `DBUS_SESSION_BUS_ADDRESS` + the explicit passthrough names), not the worker's full `os.environ`.
   4. Re-check `apt-cache policy podman` and the tracker at every point release, and switch to a fixed Debian build
      as soon as one appears.
+- **[verified-fix] Further unfixed Podman CVEs in trixie (C3–C3c)**, same image policy plus:
+  1. CVE-2026-94603 (checkpoint annotation disables sandboxing): the Hermclaw sandbox and SearXNG run **rootless**,
+     which the advisory says is not affected. Never run sandbox or SearXNG containers as root. As defence in depth,
+     refuse images whose `podman image inspect --format '{{json .Annotations}}'` contains
+     `io.podman.annotations.checkpoint.runtime.name`.
+  2. CVE-2025-11395 (crafted tar archives): never `podman load`, `podman volume import` or use `oci-archive:` with
+     archives that were not produced locally. Registry pulls (SearXNG image) are not affected.
+  3. CVE-2026-55686 (WORKDIR symlink): covered by "local images built from the repo's Containerfiles only".
 
 ### 4. Wake-on-LAN and suspend
 - BIOS/UEFI on `.222`/`.224`: enable Wake-on-LAN / "Power On By PCI-E", **disable ErP/EuP** (D7). If the board
@@ -467,7 +506,8 @@ WantedBy=sleep.target
 ## Implementation consequences
 - **INSTALLATION.md – web UI `.223`**: install `nginx`; create `/etc/nginx/tls/` with cert and key from the internal CA
   (commands above); install the site and `snippets/hermclaw-headers.conf`; run `nginx -t`; reload; verify the CSP header,
-  the HTTP/2 negotiation (`curl -sI --http2 https://…` shows `HTTP/2 200`) and the SSE heartbeat via nginx. Install
+  the HTTP/2 negotiation (`curl -sI --http2 https://…` shows `HTTP/2 200`) and the SSE heartbeat via nginx
+  (on a host that has not installed the internal CA, add `--cacert ca.crt` to these `curl` calls). Install
   Node 22 (NodeSource commands or role), then `npm ci && npm run build` in `ui/` and rsync `ui/dist/` to
   `/var/www/hermclaw-next/`. Distribute `ca.crt` to client browsers, and add a calendar reminder to renew the leaf
   cert before day 397.
@@ -482,26 +522,32 @@ WantedBy=sleep.target
     `/healthz` + redirect server, and `nginx -t` as the gate (already present).
   - `config/hosts.yaml` (`hosts.example.yaml`): nginx service probe → `{name: nginx, port: 80, http_path: /healthz}`,
     because the probe accepts 2xx only, without redirects (A15). Optionally add a 443 TCP check.
-  - `nodejs` role: `nodejs_min_version: "22.23.2"`; fail on sqv/SHA1 warnings in `apt-get update` output.
+  - `nodejs` role: `nodejs_min_version: "22.23.2"`; fail on sqv/SHA1 warnings in `apt-get update` output, and fail
+    (pointing to the tarball fallback) when the NodeSource candidate is older than the minimum (B9).
+  - `nginx` role: assert that `nginx -T` uses none of `aio`, `ssi on`, `quic`, `alias` while trixie's 1.26.3 has the
+    2026-10-14 CVEs open (A1b), and keep `ssl_session_tickets off`.
   - `podman` role: run `podman system migrate` as the user when a sub-ID range was added. Also assert
     `cgroup.controllers` and `rootlessNetworkCmd == pasta` (the existing `podman info` assert stays).
   - `wol_target` role: install and enable `hermclaw-wol-resume@<if>.service`. Assert
     `/sys/class/net/<if>/device/power/wakeup == enabled` (warn only, because some NICs expose no such file).
   - Model worker (`.224`): `hermclaw-ollama-sleep.service` after it has been validated on the hardware.
-- **Runtime code (outside this doc's write scope, for the owning engineers)**: minimal podman environment and the
-  image-`Env` check in `worker/execution/sandbox.py`; `forwarded_allow_ips` restricted in `hermclaw/api/app.py`;
+- **Runtime code (outside this doc's write scope, for the owning engineers)**: minimal podman environment, the
+  image-`Env` check and the checkpoint-annotation check (C3b) in `worker/execution/sandbox.py`; `forwarded_allow_ips` restricted in `hermclaw/api/app.py`;
   replace `?access_token=` on SSE with a short-lived, single-use stream ticket (the error log still contains the
   request line, A14).
 
 ## Open risks
 - **Debian versions are snippet-level evidence only.** packages.debian.org, the tracker and the mirrors were
-  unreachable, so nginx 1.26.3-3+deb13u9, podman 5.4.2+ds1-2, crun 1.21-1 and nodejs 20.19.2+dfsg-1+deb13u2 must be
-  confirmed with `apt-cache policy` on the hosts before INSTALLATION.md is frozen.
+  unreachable, so nginx 1.26.3-3+deb13u9, podman 5.4.2+ds1-2, crun 1.21-1 and nodejs 20.19.2+dfsg-1+deb13u3 (DSA-6517-1;
+  older snippets say deb13u2) must be confirmed with `apt-cache policy` on the hosts before INSTALLATION.md is frozen.
 - **CVE-2026-57231 is unfixed in trixie's podman** (tracker snippet; Tenable even flags "unpatched"). The fix in
-  Debian may never come for 5.4.2. The mitigations above reduce but do not remove the risk. CVE-2026-55686 is also open.
-- nginx 1.26 in trixie has 4 open security issues on the tracker. Keep unattended security updates on `.223`.
-- **Node 22 EOL 2027-04-30**. NodeSource does not officially list Debian 13, and its signing key already broke
-  once with trixie's sqv policy (2026-02). The tarball fallback is documented. The `sqv` policy may tighten further.
+  Debian may never come for 5.4.2. The mitigations above reduce but do not remove the risk. CVE-2026-55686,
+  **CVE-2026-94603** (Critical; rootless not affected per the advisory) and CVE-2025-11395 (Debian status unknown) are
+  also open or unverified for trixie. Even Debian sid (5.8.6) predates the CVE-2026-94603 fix (5.8.8).
+- nginx 1.26 in trixie has 4 open security issues on the tracker, and the 2026-10-14 upstream advisories add four more
+  that cover 1.26.3 (A1b). Keep unattended security updates on `.223` and watch for the next nginx DSA.
+- **Node 22 EOL 2027-04-30**. NodeSource does not officially list Debian 13, its signing key already broke
+  once with trixie's sqv policy (2026-02), and its repo has lagged upstream security releases (2026-03/04, B9). The tarball fallback is documented. The `sqv` policy may tighten further.
 - **Access token in SSE query strings**: the access log is fixed by `hermclaw_noquery`, but error-log request lines
   and browser history still carry it until the API offers stream tickets.
 - **HTTPS with a private CA** depends on every client importing the CA; certificate expiry (≤ 397 days) needs

@@ -89,6 +89,35 @@ Secondary (marked as such wherever used):
   agenticwire / localllm.in on `qwen3:8b`; datallmlab / morphllm on `qwen3-coder:30b`
 - [S] Wikipedia NVENC (Pascal: no HEVC B-frames): https://en.wikipedia.org/wiki/NVENC
 
+Added by the adversarial re-check (2026-10-14, same access limits: `ollama.com`, `*.debian.org`,
+`docs.nvidia.com`, `download.nvidia.com`, `developer.download.nvidia.com` again DNS-failed/403 from the
+sandbox; GitHub reachable):
+- [P] NVIDIA `nvidia-installer` source at tag `580.173.02`, `option_table.h` (runfile options):
+  https://github.com/NVIDIA/nvidia-installer/blob/580.173.02/option_table.h
+- [P] NVIDIA `nvidia-persistenced` at tag `580.173.02`: man page `nvidia-persistenced.1.m4` and `init/README`
+  (sample init tarball path): https://github.com/NVIDIA/nvidia-persistenced/tree/580.173.02
+- [P] FFmpeg `nv-codec-headers` tag `n12.1.14.0`, `README` (minimum driver) and `nvEncodeAPI.h` (API 12.1):
+  https://github.com/FFmpeg/nv-codec-headers/blob/n12.1.14.0/README
+- [P] Launchpad mirror of Debian `nvidia-graphics-drivers` (all series incl. experimental):
+  https://launchpad.net/debian/+source/nvidia-graphics-drivers/+changelog
+- [P] Ollama `discover/runner.go`, `ml/device.go` at v0.40.4 (Vulkan discovery / duplicate handling) and
+  `readelf -d` of `lib/ollama/vulkan/libggml-vulkan.so` from the v0.40.4 archive (NEEDED `libvulkan.so.1`)
+- [P/snippet] Debian DSA-6361-1 ffmpeg (2026-06-22, trixie fixed in 7:7.1.5-0+deb13u1):
+  https://security-tracker.debian.org/tracker/DSA-6361-1
+- [P/snippet] download.nvidia.com directory indices (e.g. `/XFree86/Linux-x86_64/580.142/`) list
+  `NVIDIA-Linux-x86_64-<ver>.run.sha256sum` next to each runfile (seen via search index only)
+- [P/snippet] NVIDIA data-center release notes 580.178.04 (2026-08-03):
+  https://docs.nvidia.com/datacenter/tesla/tesla-release-notes-580-178-04/index.html
+
+Re-check result: release list, v0.40.4 asset list, both checksums (v0.40.4 `15f31e95…`, v0.40.3 `ce6f8b67…`),
+archive size (1,436,408,810 B, Content-Range), archive listing (cuda_v12 12.8.90 / cuBLAS 12.8.5.5, cuda_v13
+13.0.96 / cuBLAS 13.1.1.3, vulkan; 2,255,368,362 B extracted = 2.10 GiB; sha256 recomputed again: identical),
+CMake presets (v0.32.12/v0.40.3/v0.40.4), `cuda_compat.go` (identical v0.40.3/v0.40.4; an equivalent 570 rule
+already exists at v0.30.0), docs/gpu.mdx history, envconfig defaults, FA/KV logic, install.sh behaviour,
+release notes v0.11.10/v0.20.0/v0.30.3/v0.32.12/v0.40.0/v0.40.4, issue #18825, PR #18820, cuda-repo-management
+#38/#40, open-gpu-kernel-modules tags and the llama.cpp b11521 FA kernel selection were re-read from primary
+sources and **confirmed**. Corrections are marked "(corrected in re-check)" below.
+
 ## Relevant facts
 
 ### Ollama release and Pascal support
@@ -98,10 +127,10 @@ Secondary (marked as such wherever used):
 | O1 | Latest release **v0.40.4**, published 2026-10-12 19:00, marked "Latest"; previous v0.40.3 (2026-10-11), v0.40.2 (10-08), v0.40.1 (10-07), v0.40.0 (09-25). | [P] GitHub releases |
 | O2 | Linux amd64 asset is **`ollama-linux-amd64.tar.zst`** (1,436,408,810 bytes); `ollama-linux-amd64.tgz` no longer exists for v0.40.4 (HTTP 404). Separate `-rocm` and `-mlx` archives. `sha256sum.txt` lists `15f31e9576d15a481e099b4145dba6e9f8c1f295927d6b8895300ae30ed3740a  ./ollama-linux-amd64.tar.zst`; recomputed in the sandbox: **identical**. v0.40.3: `ce6f8b671a699bf1ebafb28d60dbbabf4f37b30b499145fa308a8ba72de021d6` (from sha256sum.txt, not recomputed). | [P] release assets, sha256sum.txt, own download |
 | O3 | Archive layout: `bin/ollama`, `lib/ollama/{cuda_v12,cuda_v13,vulkan}`, CPU variants `libggml-cpu-*.so`, `llama-server`. `cuda_v12` = CUDA runtime **12.8.90**, cuBLAS 12.8.5.5 (1.20 GiB); `cuda_v13` = CUDA 13.0.96 / cuBLAS 13.1.1.3. No MLX in the base archive. Extracted 2.10 GiB. | [P] own tar listing |
-| O4 | Build presets v0.40.4 (identical in v0.32.12 and v0.40.3): `llama_cuda_v12_linux` `CMAKE_CUDA_ARCHITECTURES=50-virtual;52-virtual;60;61;70;75;80;86;89;90;90a;100;120` (native **sm_61** cubins); `llama_cuda_v13_linux` starts at `75-virtual` (no Pascal). Dockerfile: `CUDA12VERSION=12.8`, `CUDA13VERSION=13.0`. | [P] `llama/server/CMakePresets.json`, `Dockerfile` |
+| O4 | Build presets v0.40.4 (identical in v0.32.12 and v0.40.3): `llama_cuda_v12_linux` sets CMAKE_CUDA_ARCHITECTURES to `50-virtual;52-virtual;60;61;70;75;80;86;89;90;90a;100;120` (native **sm_61** cubins); `llama_cuda_v13_linux` starts at `75-virtual` (no Pascal). Dockerfile: `CUDA12VERSION=12.8`, `CUDA13VERSION=13.0`. | [P] `llama/server/CMakePresets.json`, `Dockerfile` |
 | O5 | GTX 1080 therefore runs on the **cuda_v12** runner only. CUDA 13.0 removed offline compilation/library support for Maxwell/Pascal/Volta. | [P] O4; [P/snippet] CUDA Features Archive |
 | O6 | Docs v0.40.4: "Ollama supports Nvidia GPUs with compute capability 5.0+ and driver version 550 and newer. **Nvidia GPUs with compute capability 5.0 through 6.2 require driver version 570 or newer.**" GTX 1080 listed under CC 6.1. The 570 sentence first appears in `docs/gpu.mdx` at v0.30.0 (absent at v0.22.0, which said "531 and newer"). | [P] docs/gpu.mdx at v0.20.0/v0.22.0/v0.30.0/v0.32.12/v0.40.4 |
-| O7 | Enforced in code: `discover/cuda_compat.go` `filterOldCUDADriver` drops every CUDA device with compute major < 7 from the cuda_v12 runner when the NVIDIA kernel driver branch is < 570 and the runtime is CUDA ≥ 12.8 (log: `NVIDIA driver too old … required_driver="570 or newer"`). Result with a 550 driver: **GTX 1080 is not used, inference falls back to CPU**. | [P] cuda_compat.go v0.40.4 (identical to v0.40.3) |
+| O7 | Enforced in code: `discover/cuda_compat.go` `filterOldCUDADriver` drops every CUDA device with compute major < 7 from the cuda_v12 runner when the NVIDIA kernel driver branch is < 570 and the runtime is CUDA ≥ 12.8 (log: `NVIDIA driver too old … required_driver="570 or newer"`). Result with a 550 driver: **GTX 1080 is not used by CUDA**. (corrected in re-check) It does *not* necessarily fall back to CPU: the filter runs only on the `cuda_v12` discovery pass; the bundled `vulkan` backend (`OLLAMA_VULKAN` default on) is probed separately and needs only the system Vulkan loader `libvulkan.so.1` (Debian `libvulkan1`, not bundled) plus the NVIDIA Vulkan ICD. If both are present (Debian's `nvidia-driver` recommends `nvidia-vulkan-icd`; `libvulkan1` is also pulled in via ffmpeg's libplacebo on the Debian-derived build host), the GPU is used **via Vulkan**; otherwise inference runs on the CPU. Inferred from code, not tested on hardware. | [P] cuda_compat.go v0.40.4 (identical to v0.40.3), `discover/runner.go`, `ml/device.go`, `readelf` of `libggml-vulkan.so` |
 | O8 | No Pascal deprecation notice in docs or release notes v0.32.12…v0.40.4; risk lies in a future removal of the cuda_v12 runner (cf. O5). | [P] releases pages 1–3, docs |
 | O9 | All GGUF models are served via the bundled upstream `llama-server` subprocess (llama.cpp **b11521** in v0.40.4, b11351 in v0.40.3). MLX models use a separate MLX runner whose Linux build is `mlx_cuda_v13` (CUDA 13 + cuDNN 9) → **MLX-only models cannot run on Pascal**. | [P] `llm/server.go`, `Dockerfile`, `LLAMA_CPP_VERSION` |
 | O10 | Minimum versions: `gemma4:26b` (and e2b/e4b/31b) added in **v0.20.0** (2026-04-02); `gemma4:12b` added in **v0.30.3** (2026-06-03); `qwen3.8:27b` added in **v0.32.12** (2026-08-14, "This release adds the support of Qwen 3.8 27B", `ollama run qwen3.8:27b` and `…:27b-mlx`). Hermclaw minimum therefore **≥ 0.32.12**, which already needs driver ≥ 570 on Pascal (O6). | [P] release notes |
@@ -115,8 +144,8 @@ Secondary (marked as such wherever used):
 | N2 | Latest 580 releases: **580.173.02** (tag 2026-06-25; GeForce legacy bug-fix release for GTX 900/10 series) and 580.178.04 (tag 2026-08-03; links to data-center release notes). No 580 release after 2026-08-03 found. | [P] open-gpu-kernel-modules tags; [S] GamingOnLinux/9to5Linux |
 | N3 | NVIDIA states the 580 branch continues to get new-kernel support and critical fixes during its support period; "security updates through 2028" only from secondary sources. | [S] Guru3D, 9to5Linux; issue #38 comment |
 | N4 | Open kernel modules need GSP (Turing+); **Pascal requires the proprietary module flavour**. | [P/snippet] NVIDIA kernel-modules guide |
-| N5 | **Debian trixie main** ships `nvidia-graphics-drivers` **550.163.01-2** (e.g. `libnvidia-encode1` 550.163.01-2, non-free). **trixie-backports**: `nvidia-driver` 550.163.01-4~bpo13+1. **sid**: 550.163.01-5.1 (2026-06-11, NMU for Linux 7.0). No 580 upload to Debian found (sid changelog shows 580/595 only as sources of back-ported kernel-compat patches). | [P/snippet] packages.debian.org; [P] Launchpad mirror of the sid changelog |
-| N6 | **NVIDIA's CUDA repo `debian13` has no 580 packages** – only 590+ (Pascal-less). Issue #38 (open since 2026-02-01): NVIDIA maintainer 2026-03-09 "Still no update on getting 580 packages", 2026-04-17 a trixie-specific 580 build "is still waiting for momentum"; last user comment 2026-10-14 expects no fix. The `debian12` repo has 580 but is SHA-1 signed, which trixie's apt (sqv) rejects since 2026-02-01. | [P] cuda-repo-management #38/#40 |
+| N5 | **Debian trixie main** ships `nvidia-graphics-drivers` **550.163.01-2** (e.g. `libnvidia-encode1` 550.163.01-2, non-free). **trixie-backports**: `nvidia-driver` 550.163.01-4~bpo13+1. **sid**: 550.163.01-5.1 (2026-06-11, NMU for Linux 7.0). **experimental**: 555.58.02-3 (2026-03-13) – also below 570. No 580 upload to Debian found (sid/experimental changelogs show 570/580/595 only as sources of back-ported kernel-compat patches). The trixie-backports version is inconsistent between search snippets (some packages.debian.org mirrors still show 550.163.01-2 for trixie-backports; the ftp-master NEW record and tracker show 550.163.01-4~bpo13+1) – either way 550. Tracker snippet: 550.163.01-5.1 is marked for autoremoval from *testing* on 2026-11-08 (affects forky, not trixie). | [P/snippet] packages.debian.org, ftp-master NEW, tracker.debian.org; [P] Launchpad mirror of the sid/experimental changelogs |
+| N6 | **NVIDIA's CUDA repo `debian13` has no 580 packages** – only 590+ (Pascal-less). Issue #38 (open since 2026-02-01, assignee kmittman/NVIDIA): NVIDIA maintainer 2026-03-09 "Still no update on getting 580 packages", 2026-04-17 "Still waiting to gain sufficient momentum on backfill for 580 branch" (packages must be built and validated specifically for trixie) (quote corrected in re-check); no NVIDIA comment after 2026-04-17; last user comment 2026-10-14 ("pretty clear that we're never going to get an update on this"). The `debian12` repo has 580 but is SHA-1 signed, which trixie's apt (sqv) rejects since 2026-02-01 (statement of the issue reporter; a user workaround extending the sequoia SHA-1 cutoff exists but lowers security – not for Hermclaw). The repo index itself could not be fetched from the sandbox; "no 580 in debian13" rests on this thread. | [P] cuda-repo-management #38/#40 |
 | N7 | Consequence: **no apt source provides a driver ≥ 570 for Pascal on trixie**. Debian's 550 is too old for Ollama ≥ 0.30 (O6/O7); NVIDIA's apt repo has no Pascal-capable branch. The only supported way to a 580 driver is NVIDIA's `.run` installer (with DKMS). | N5, N6, O7 |
 | N8 | Kernel coupling: vanilla drivers < 580 do not build on kernels ≥ 6.16 (Debian patches 550 for that); 580.x reportedly failed against Linux 7.0 (Proxmox kernel) – trixie's stock kernel is 6.12 LTS. Do not use backports kernels on .224. | [P/snippet] Debian wiki; [S] NVIDIA forum, Proxmox forum |
 | N9 | Debian package names (for reference / a future Debian 580 package): `nvidia-driver` (full stack incl. X), headless subset `nvidia-kernel-dkms`, `nvidia-smi`, `libcuda1`, `libnvidia-encode1`, `libnvcuvid1`, `nvidia-persistenced` (contrib); firmware `firmware-misc-nonfree` (non-free-firmware; not needed by the proprietary driver on Pascal); headers `linux-headers-amd64`; components `contrib non-free non-free-firmware`. | [P/snippet] packages.debian.org; Debian wiki |
@@ -138,7 +167,7 @@ Secondary (marked as such wherever used):
 | E11 | Libraries are found relative to the resolved executable (`<exe>/../lib/ollama`), so `/opt/ollama/<ver>/bin/ollama` + `/opt/ollama/<ver>/lib/ollama` works. | [P] `ml/path.go` |
 | E12 | GPU discovery logs `inference compute … library=CUDA compute=6.1 … libdirs=ollama,cuda_v12 driver=… total=… available=…`; CPU fallback logs `id=cpu library=cpu`. | [P] `discover/types.go` |
 | E13 | Linux suspend/resume: "sometimes Ollama will fail to discover your NVIDIA GPU, and fallback to running on the CPU"; workaround `rmmod nvidia_uvm && modprobe nvidia_uvm`. | [P] docs/gpu.mdx |
-| E14 | Install script (`install.sh` v0.40.4): downloads `https://ollama.com/download/ollama-linux-amd64.tar.zst?version=$OLLAMA_VERSION` (needs `zstd`), no checksum check, installs to `/usr/local` (deletes `/usr/local/lib/ollama`), **always rewrites `/etc/systemd/system/ollama.service`** (`WantedBy=default.target`), creates user `ollama` (home `/usr/share/ollama`) in `render`/`video`; **if `nvidia-smi` is missing it adds NVIDIA's `debian13` CUDA repo and installs `cuda-drivers` (= newest, Pascal-less branch)**. | [P] scripts/install.sh |
+| E14 | Install script (`install.sh` v0.40.4): downloads `https://ollama.com/download/ollama-linux-amd64.tar.zst?version=$OLLAMA_VERSION` (needs `zstd`), no checksum check, installs to `/usr/local` (deletes `/usr/local/lib/ollama`), **always rewrites `/etc/systemd/system/ollama.service`** (`WantedBy=default.target`), creates user `ollama` (home `/usr/share/ollama`) in `render`/`video`; **if `nvidia-smi` is missing (or prints no "CUDA Version") and `lspci`/`lshw` sees an NVIDIA GPU, it adds NVIDIA's `debian13` CUDA repo (keyring `cuda-keyring_1.1-1_all.deb`, also writes a `contrib` sources file) and installs `cuda-drivers` (= newest, Pascal-less branch)**; if `nvidia-smi` exists it exits without touching the driver. | [P] scripts/install.sh |
 | E15 | Manual install per docs: `curl -fsSL https://ollama.com/download/ollama-linux-amd64.tar.zst \| sudo tar x -C /usr`, remove old `/usr/lib/ollama` first; sample unit `ExecStart=/usr/bin/ollama serve`, `User=ollama`, `Restart=always`. | [P] docs/linux.mdx |
 
 ### Models (default tags are GGUF → llama-server cuda_v12; sizes are download sizes)
@@ -173,7 +202,7 @@ Disk for all six tags ≈ 70 GB plus ≈ 2.1 GiB per extracted Ollama version.
 | # | Fact | Source |
 |---|---|---|
 | F1 | Debian's own `ffmpeg` is built with NVENC since 7:4.4.1-2 (Build-Depends `libffmpeg-nvenc-dev` on amd64; NVENC loaded via `dlopen`, no `--enable-nonfree` needed). A Debian-derived 6.1 build lists `h264_nvenc`, `hevc_nvenc`, `av1_nvenc`. | [P] Debian changelog; own `ffmpeg -encoders` |
-| F2 | trixie: ffmpeg **7:7.1.5-0+deb13u1** (trixie-security, accepted 2026-06-22), `libffmpeg-nvenc-dev` **12.1.14.0-1** → NVENC API 12.1 → Linux driver **≥ 530.41.03** (580 and 550 both satisfy it). | [P/snippet] tracker.debian.org, packages.debian.org; [S] FFmpeg-cvslog, Gentoo ebuild |
+| F2 | trixie: ffmpeg **7:7.1.5-0+deb13u1** (trixie-security, accepted 2026-06-22, DSA-6361-1; no later trixie ffmpeg found), `libffmpeg-nvenc-dev` **12.1.14.0-1** → NVENC API 12.1 → Linux driver **≥ 530.41.03** (580 and 550 both satisfy it). | [P/snippet] tracker.debian.org, DSA-6361-1, packages.debian.org; [P] nv-codec-headers n12.1.14.0 README ("Linux: 530.41.03 or newer") and `nvEncodeAPI.h` (12.1) (source upgraded in re-check) |
 | F3 | Runtime libraries: `libnvidia-encode.so.1` + `libcuda.so.1` (Debian: `libnvidia-encode1`, `libcuda1`; NVDEC: `libnvcuvid1`) – installed by the NVIDIA `.run` installer as well. | [P/snippet] packages.debian.org |
 | F4 | Pascal (GP104) NVENC: H.264 and HEVC (8/10-bit), **no HEVC B-frames**, **no AV1** encode (`av1_nvenc` is listed by ffmpeg but fails on Pascal). GeForce has a driver-enforced concurrent-session limit (exact current value not verifiable from here; irrelevant with one video lease). | [S] Wikipedia NVENC; R-017/R-024 |
 
@@ -196,8 +225,13 @@ GPU/Ollama installation path changes.
      Debian wiki, not re-fetched).
    - Pin: no NVIDIA/CUDA apt repo on `.224`; apt preferences block every apt-provided NVIDIA driver package
      (`Pin: version *`, `Pin-Priority: -1`) so neither Debian's 550 nor a 590+ package can replace the runfile
-     driver; the runfile version is pinned in Ansible (`nvidia_runfile_version`, sha256 recorded on first
-     download — NVIDIA publishes no checksum file that could be checked from here).
+     driver; the runfile version is pinned in Ansible (`nvidia_runfile_version`, `nvidia_runfile_sha256`).
+     (corrected in re-check) NVIDIA *does* publish `NVIDIA-Linux-x86_64-<ver>.run.sha256sum` next to each
+     runfile on download.nvidia.com (directory indices of e.g. 580.142, 570.x, 590.x seen via search index);
+     for 580.173.02 it could not be fetched from the sandbox. Verify against that file (same HTTPS origin, so
+     it guards against corruption, not against a compromised origin) and pin the value in the inventory.
+   - Kernel module flavour check: `sh NVIDIA-Linux-x86_64-<ver>.run --print-recommended-kernel-module-type`
+     (option exists in nvidia-installer 580.173.02) should print `proprietary` for the GTX 1080.
 2. **Ollama v0.40.4** via the pinned release archive `ollama-linux-amd64.tar.zst`, sha256
    `15f31e9576d15a481e099b4145dba6e9f8c1f295927d6b8895300ae30ed3740a` (verified, O2); keep the tarball
    method (`/opt/ollama/<version>`, symlink `current`, checksum from `sha256sum.txt`). v0.40.3 (current role
@@ -252,11 +286,13 @@ printf 'blacklist nouveau\noptions nouveau modeset=0\n' >/etc/modprobe.d/hermcla
 update-initramfs -u && systemctl reboot
 
 # 4  NVIDIA 580 (proprietary modules, DKMS) – URL pattern of NVIDIA's download server (not reachable from the
-#    build sandbox); verify the flags with "--advanced-options" of the exact runfile
+#    build sandbox); option names verified against nvidia-installer 580.173.02 option_table.h (re-check)
 cd /var/cache/hermclaw
 curl -fLO https://download.nvidia.com/XFree86/Linux-x86_64/580.173.02/NVIDIA-Linux-x86_64-580.173.02.run
-sha256sum NVIDIA-Linux-x86_64-580.173.02.run          # record in the inventory (nvidia_runfile_sha256)
+curl -fLO https://download.nvidia.com/XFree86/Linux-x86_64/580.173.02/NVIDIA-Linux-x86_64-580.173.02.run.sha256sum
+sha256sum -c NVIDIA-Linux-x86_64-580.173.02.run.sha256sum   # then record the value (nvidia_runfile_sha256)
 sh NVIDIA-Linux-x86_64-580.173.02.run --check
+sh NVIDIA-Linux-x86_64-580.173.02.run --print-recommended-kernel-module-type   # expected: proprietary
 sh NVIDIA-Linux-x86_64-580.173.02.run --silent --dkms --kernel-module-type=proprietary --no-x-check --disable-nouveau
 systemctl reboot
 nvidia-smi --query-gpu=driver_version,name,memory.total,compute_cap --format=csv,noheader
@@ -315,7 +351,8 @@ Deployment playbook (`infra/ansible/roles/nvidia`, `roles/ollama`) must (recomme
   (550 < 570 required by Ollama ≥ 0.30);
 - `nvidia`: the runfile installs `/usr/bin/nvidia-persistenced` but no systemd unit — the current
   "enable nvidia-persistenced" task would fail; ship a unit (NVIDIA sample
-  `/usr/share/doc/NVIDIA_GLX-1.0/samples/nvidia-persistenced-init.tar.bz2`) or use a oneshot `nvidia-smi -pm 1`;
+  `/usr/share/doc/NVIDIA_GLX-1.0/sample/nvidia-persistenced-init.tar.bz2` – directory is `sample/`, singular,
+  per the nvidia-persistenced 580.173.02 man page; corrected in re-check) or use a oneshot `nvidia-smi -pm 1`;
 - `ollama`: bump `ollama_version` to `0.40.4` (or keep 0.40.3 until the smoke test ran), archive name stays
   `ollama-linux-amd64.tar.zst`;
 - `ollama`: make `ollama_flash_attention` tri-state (`auto|true|false`) and render `OLLAMA_FLASH_ATTENTION=0`
@@ -326,13 +363,26 @@ Deployment playbook (`infra/ansible/roles/nvidia`, `roles/ollama`) must (recomme
 - `scripts/ops/hermclaw-model-pull`: besides `ollama show`, do a functional check per tag (1-token generate
   with `keep_alive: 0`, one `/api/embed`) because MLX-only tags can be listed but not run on Linux.
 - Firewall on `.224`: allow TCP 11434 only from `.225` (and localhost).
+- `ollama`: keep `OLLAMA_VULKAN=0` – with a filtered CUDA device the bundled Vulkan backend would otherwise
+  silently take over the GPU (O7, corrected); the GPU check must look for `library=CUDA`, not just "a GPU".
+
+Status note (re-check, 2026-10-14): statements above about the "current role default" (`nvidia_source: cuda`,
+`ollama_flash_attention: false` = auto, `ollama_version` 0.40.3) describe the roles when this doc was written.
+The role defaults have since been changed (now `nvidia_source: runfile`, `nvidia_runfile_version: "580.173.02"`,
+`ollama_version: "0.40.4"`, FA `false` renders `0`, `OLLAMA_VULKAN=0`, a `nvidia-persistenced.service.j2`
+template); the role code itself was not reviewed in this re-check.
 
 ## Open risks
 - **No apt-managed Pascal driver on trixie**: runfile installs bypass Debian security updates; 580 updates
   (security/kernel compat) must be followed manually (NVIDIA legacy release notes) and re-run by Ansible.
   NVIDIA may never backfill 580 into `debian13` (issue #38).
-- Runfile flag names (`--kernel-module-type`, `--disable-nouveau`) and the download URL could not be verified
-  against NVIDIA's README from the sandbox; check `--advanced-options` on the host.
+- Runfile flag names were verified in the re-check against NVIDIA's `nvidia-installer` source at tag
+  `580.173.02` (`--silent`/`-s`, `--dkms`, `--kernel-module-type`/`-M` with `open|proprietary`, `--no-x-check`,
+  `--disable-nouveau`/`-Z` – already the default behaviour, `--print-recommended-kernel-module-type`). Still
+  unverified from the sandbox: the download URL, the existence of `….run.sha256sum` for 580.173.02 and its
+  value, and the makeself `--check` option (documented in older NVIDIA READMEs); confirm on the host.
+- If `.224` ever gets `libvulkan1` + an NVIDIA Vulkan ICD while CUDA is filtered (driver < 570), Ollama would
+  run on Vulkan instead of failing loudly; `OLLAMA_VULKAN=0` plus the `library=CUDA` journal check covers it.
 - 580 end of support (secondary: security updates until ~2028); after that `.224` needs a newer GPU.
 - Future Ollama releases may drop the `cuda_v12` runner (as CUDA 13 cannot target Pascal) → keep the version
   pinned; read release notes for "cuda_v12"/"compute capability" before every bump.
