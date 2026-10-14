@@ -37,7 +37,9 @@ POST /api/jobs ─► queued
      research                 ResearchStepHandler (SearXNG → fetch → claims → synthesis, cited)
      inventory/discover       RepoInfoStepHandler
      image/video              MediaStepHandler (GPU lease, AI preemption, .224 media job, verified artifacts)
-     ssh/database/docker/deploy  runtime tools of P26–P28 (capability-gated, see tools.md)
+     ssh/database/docker/deploy  ImplementStepHandler with the operations tools of P26–P28 (capability-gated:
+                              SSH on allow-listed hosts with approvals, DB sandboxes, compose sandbox, nginx -t);
+                              their outputs are ops_output artifacts (acceptance evidence)
   blocked/failed steps ─► Replanner (Gemma) with the failure package (max replans per job)
   all steps completed ─► finalize: base update (rebase) → regression rerun → push → merge request → final report
   ─► succeeded | failed | cancelled
@@ -55,7 +57,7 @@ them live via SSE with replay after reconnect (`Last-Event-ID`).
 | planner fallback | `planner-gemma-fallback` | `gemma4:12b` | 32K | only on technical failure of 26B (event `planner.fallback.used`) |
 | coder | `coder-main` | `qwen3-coder:30b` | 32K | coder loop (implementation worker) |
 | heavy reviewer | `heavy-review` | `qwen3.8:27b` | 24K | heavy review, stagnation escalation |
-| embedding | `embedding` | `embeddinggemma-2:740m` (fallback `embeddinggemma:300m`) | 8K, 768 dim | repository intelligence vectors |
+| embedding | `embedding` | `embeddinggemma:300m` (EmbeddingGemma 2 once Ollama runs it on Linux/CUDA, D-010) | 2K, 768 dim | repository intelligence vectors |
 
 Only one *large* model is resident at a time (`large-model-224` budget, ResourceManager); video/image jobs preempt
 AI leases (the coder checkpoints at its next turn).
@@ -95,5 +97,15 @@ AI leases (the coder checkpoints at its next turn).
 | research engine | [research.md](research.md) |
 | workers, protocol, auth | [workers.md](workers.md) |
 | Wake-on-LAN | [wol.md](wol.md) |
+| SSH/admin tools (P26) | [sshtools.md](sshtools.md) |
+| database tools (P27) | [dbtools.md](dbtools.md) |
+| container/proxy tools (P28) | [infratools.md](infratools.md) |
+| backup/restore (P33) | [backup.md](backup.md), [../operations/backup-restore.md](../operations/backup-restore.md) |
+| web UI (P31) | [ui.md](ui.md), [../operations/ui.md](../operations/ui.md) |
+| bootstrap (P01) | [bootstrap.md](bootstrap.md), [../operations/bootstrap.md](../operations/bootstrap.md) |
+| deployment (P32) | [deployment.md](deployment.md), [../operations/deployment.md](../operations/deployment.md) |
+| installation preflight | `hermclaw doctor` (`hermclaw/doctor.py`) |
+| runbooks | [upgrade](../runbooks/upgrade.md), [disaster recovery](../runbooks/disaster-recovery.md), [cutover](../runbooks/cutover.md) |
+| known limitations | [../operations/known-limitations.md](../operations/known-limitations.md) |
 | performance baseline | [../operations/performance-baseline.md](../operations/performance-baseline.md) |
 | installation | [../operations/INSTALLATION.md](../operations/INSTALLATION.md) |
