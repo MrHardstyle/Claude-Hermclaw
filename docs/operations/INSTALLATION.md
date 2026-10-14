@@ -445,17 +445,25 @@ Konfigurationsdatei, einer Umgebungsvariable, einem Log oder auf einer Kommandoz
 
 ### 6.2 Backup-Schlüssel auf Terra (.60)
 
-Hängen Sie den öffentlichen Backup-Schlüssel des Orchestrators an die `authorized_keys` des Backup-Benutzers auf
-Terra an, eingeschränkt auf den Orchestrator:
+Hängen Sie den öffentlichen Backup-Schlüssel des Orchestrators an die `authorized_keys` von root auf Terra an
+(Unraid bietet SSH nur für root an). Der Schlüssel wird auf den Orchestrator und auf rsync in das Hermclaw-
+Verzeichnis eingeschränkt (`rrsync`, Research R-022, RISK R-028):
 
 ```bash
 sudo cat /etc/hermclaw/ssh/backup_ed25519.pub        # auf .225
-# auf Terra (Unraid, als root) in /root/.ssh/authorized_keys – eine Zeile:
-restrict,from="192.168.178.225" ssh-ed25519 AAAAC3Nz... hermclaw-backup
+# auf Terra (als root):
+mkdir -p /mnt/user/backups/hermclaw /root/.ssh && chmod 700 /root/.ssh
+echo 'restrict,from="192.168.178.225",command="/usr/local/bin/rrsync /mnt/user/backups/hermclaw" ssh-ed25519 AAAA… hermclaw-backup@orchestrator' >> /root/.ssh/authorized_keys
+chmod 600 /root/.ssh/authorized_keys
 ```
 
-Unraid: `/root/.ssh` liegt im RAM. Damit der Schlüssel einen Neustart übersteht, legen Sie ihn zusätzlich unter
-`/boot/config/ssh/root/authorized_keys` ab (bzw. in der Unraid-Oberfläche: *Users → root → SSH authorized keys*).
+* Unraid ≥ 6.9 legt `/root/.ssh` dauerhaft auf dem Flash-Laufwerk ab. Prüfen Sie nach einem Neustart, dass der
+  Eintrag noch da ist.
+* `rrsync` braucht Python 3 auf Unraid (Plugin „NerdTools“). Ohne Python: denselben Eintrag ohne `command=…`, aber
+  mit `restrict,from=…` (schwächer), oder die Freigabe als NFS-Mount (Variante B in
+  `infra/backup/unraid-share-setup.md`).
+* Terras Host-Schlüssel steht nach Kapitel 4.3 bereits in `/etc/hermclaw/ssh/known_hosts`.
+
 Das Backup selbst richten Sie in Kapitel 11 ein.
 
 ### 6.3 Token rotieren
