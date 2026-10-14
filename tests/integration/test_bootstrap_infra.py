@@ -328,7 +328,9 @@ def test_unit_plan_is_in_sync() -> None:
     _, units = _check_host_tables()
     defaults = yaml.safe_load((ROLES_DIR / "systemd_skeleton" / "defaults" / "main.yml").read_text(encoding="utf-8"))
     expected = {(g, u) for g, lst in defaults["systemd_skeleton_units"].items() for u in lst}
-    expected |= {("execution_workers", "hermclaw-wol@.service"), ("model_workers", "hermclaw-wol@.service")}
+    # installed by the wol_target and ollama roles instead of systemd_skeleton
+    expected |= {("execution_workers", "hermclaw-wol@.service"), ("model_workers", "hermclaw-wol@.service"),
+                 ("model_workers", "hermclaw-ollama-firewall.service")}  # fmt: skip
     assert units == expected
     for _, unit in units:
         assert (SYSTEMD_DIR / unit).exists() or (SYSTEMD_DIR / f"{unit}.j2").exists(), unit
@@ -525,18 +527,43 @@ def test_rendered_ollama_and_nvidia_policy(rendered: dict[str, Path]) -> None:
     assert "Environment=OLLAMA_KEEP_ALIVE=5m" in dropin
     assert "UnsetEnvironment=OLLAMA_CONTEXT_LENGTH" in dropin
     assert "OLLAMA_CONTEXT_LENGTH=" not in dropin
-    assert "OLLAMA_FLASH_ATTENTION" not in dropin
+    # unset would mean "auto", which enables flash attention on compute capability 6.1 (research 026 E5)
+    assert "Environment=OLLAMA_FLASH_ATTENTION=0" in dropin
+    assert "OLLAMA_KV_CACHE_TYPE" not in dropin
+    assert "Environment=OLLAMA_NO_CLOUD=1" in dropin and "Environment=OLLAMA_VULKAN=0" in dropin
+    assert "Environment=OLLAMA_LOAD_TIMEOUT=10m" in dropin
+    keys = [line.split("=")[1] for line in dropin.splitlines() if line.startswith("Environment=")]
+    assert len(keys) == len(set(keys)), f"duplicate variables: {keys}"
     assert "ExecStart=\nExecStart=/opt/ollama/current/bin/ollama serve" in dropin
+    # runfile driver (default): every apt-provided NVIDIA driver package is blocked
     pin = rendered["nvidia/nvidia-pin.pref"].read_text(encoding="utf-8")
     records = [r for r in pin.split("\n\n") if "Pin:" in r]
-    assert "Pin: version 580.*\nPin-Priority: 1001" in records[0]
-    blocked = {re.search(r"Pin: version (\S+)", r).group(1) for r in records[1:] if "Pin-Priority: -1" in r}  # type: ignore[union-attr]
-    assert {"59*", "6*"} <= blocked
-    from fnmatch import fnmatch
-
-    for version in ("590.48.01-1", "595.1-1", "610.2-1"):
-        assert any(fnmatch(version, g) for g in blocked), version
-    assert not any(fnmatch("580.95.05-1", g) for g in blocked)
+    assert len(records) == 1 and "Pin: version *\nPin-Priority: -1" in records[0], pin
+    # runfile driver (default source on Debian 13): nouveau off, persistence daemon unit
+    blacklist = rendered["nvidia/blacklist-nouveau.conf"].read_text(encoding="utf-8")
+    assert "blacklist nouveau" in blacklist and "options nouveau modeset=0" in blacklist
+    persistenced = rendered["nvidia/nvidia-persistenced.service"].read_text(encoding="utf-8")
+    assert "ExecStart=/usr/bin/nvidia-persistenced --user nvidia-persistenced" in persistenced
+    defaults = yaml.safe_load((ROLES_DIR / "nvidia" / "defaults" / "main.yml").read_text(encoding="utf-8"))
+    assert defaults["nvidia_source"] == "runfile" and defaults["nvidia_runfile_version"].startswith("580.")
+    assert "--kernel-module-type=proprietary" in defaults["nvidia_runfile_options"], "Pascal has no open modules"
+    # Ollama: GPU groups detected on the host, firewall unit and table
+    unit = rendered["systemd/ollama.service"].read_text(encoding="utf-8")
+    assert "SupplementaryGroups=video render" in unit
+    fw_unit = rendered["systemd/hermclaw-ollama-firewall.service"].read_text(encoding="utf-8")
+    assert "ExecStart=/usr/sbin/nft -f /etc/hermclaw/nftables/hermclaw-ollama.nft" in fw_unit
+    assert "ExecStop=/usr/sbin/nft delete table inet hermclaw_ollama" in fw_unit
+    assert "PartOf=nftables.service" in fw_unit and "ReloadPropagatedFrom=nftables.service" in fw_unit
+    assert "Before=network-pre.target ollama.service shutdown.target" in fw_unit
+    table = rendered["ollama/hermclaw-ollama.nft"].read_text(encoding="utf-8")
+    assert "ip saddr { 192.168.178.225 } tcp dport 11434 accept" in table
+    assert table.rstrip().endswith("tcp dport 11434 counter drop\n\t}\n}")
+    assert "ip6 saddr" not in table and "flush ruleset" not in table, "only the own table may be replaced"
+    nft = shutil.which("nft")
+    if nft is not None:
+        check = _run([nft, "-c", "-f", str(rendered["ollama/hermclaw-ollama.nft"])], cwd=REPO)
+        if "Operation not permitted" not in check.stderr:
+            assert check.returncode == 0, check.stderr
 
 
 def test_rendered_podman_and_searxng(rendered: dict[str, Path]) -> None:
@@ -586,11 +613,14 @@ def _stub_paths(root: Path) -> dict[str, str]:
         "systemd_skeleton_litellm_venv": str(root / "opt/litellm/venv"),
         "systemd_skeleton_backup_command": str(root / "opt/hermclaw/bin/hermclaw-backup"),
         "ollama_install_root": str(root / "opt/ollama"),
+        "nvidia_persistenced_bin": str(root / "usr/bin/nvidia-persistenced"),
+        "ollama_firewall_nft_bin": str(root / "usr/sbin/nft"),
     }
     for exe in ("opt/hermclaw/venv/bin/hermclaw", "opt/hermclaw/venv/bin/hermclaw-exec-worker",
                 "opt/hermclaw/venv/bin/hermclaw-model-worker", "opt/hermclaw/bin/hermclaw-cred-env",
                 "opt/hermclaw/bin/hermclaw-backup", "opt/litellm/venv/bin/litellm",
-                "opt/ollama/current/bin/ollama", "usr/sbin/ethtool"):  # fmt: skip
+                "opt/ollama/current/bin/ollama", "usr/sbin/ethtool", "usr/bin/nvidia-persistenced",
+                "usr/sbin/nft"):  # fmt: skip
         p = root / exe
         p.parent.mkdir(parents=True, exist_ok=True)
         p.write_text("#!/bin/sh\nexit 0\n", encoding="utf-8")
@@ -627,6 +657,7 @@ def test_rendered_units_pass_systemd_analyze_verify(tmp_path: Path) -> None:
     assert {u.name for u in units} >= {
         "hermclaw-api.service", "hermclaw-scheduler.service", "hermclaw-litellm.service", "hermclaw-backup.service",
         "hermclaw-backup.timer", "hermclaw-exec-worker.service", "hermclaw-model-worker.service", "ollama.service",
+        "hermclaw-ollama-firewall.service", "nvidia-persistenced.service",
     }  # fmt: skip
     res = _run([analyze, "verify", *[str(u) for u in units]], cwd=unit_dir, timeout=120)
     problems = [ln for ln in res.stderr.splitlines() if SYSTEMD_ERROR.search(ln) and "sysinit.target" not in ln]
@@ -929,11 +960,43 @@ VALIDATION_CASES: list[tuple[str, str, dict[str, Any], str]] = [
     ("ollama-foreign-env", "ollama", {"ollama_extra_env": {"LD_PRELOAD": "/tmp/x.so"}}, "FAIL"),
     ("ollama-http-download", "ollama", {"ollama_release_base": "http://github.com/ollama/ollama/releases/download"}, "FAIL"),
     ("ollama-flash-attention-env-ok", "ollama", {"ollama_extra_env": {"OLLAMA_DEBUG": "1"}}, "PASS"),
+    # dedicated settings must not be duplicated through ollama_extra_env (two Environment= lines)
+    ("ollama-extra-env-managed-key", "ollama", {"ollama_extra_env": {"OLLAMA_FLASH_ATTENTION": "1"}}, "FAIL"),
+    ("ollama-extra-env-host", "ollama", {"ollama_extra_env": {"OLLAMA_HOST": "0.0.0.0:1"}}, "FAIL"),
+    ("ollama-flash-auto", "ollama", {"ollama_flash_attention": "auto"}, "PASS"),
+    ("ollama-flash-bool", "ollama", {"ollama_flash_attention": True}, "PASS"),
+    ("ollama-flash-bogus", "ollama", {"ollama_flash_attention": "maybe"}, "FAIL"),
+    ("ollama-kv-q8-without-fa", "ollama", {"ollama_kv_cache_type": "q8_0"}, "FAIL"),
+    ("ollama-kv-q8-with-fa", "ollama", {"ollama_kv_cache_type": "q8_0", "ollama_flash_attention": "true"}, "PASS"),
+    ("ollama-kv-unknown", "ollama", {"ollama_kv_cache_type": "q2_k", "ollama_flash_attention": "true"}, "FAIL"),
+    ("ollama-load-timeout-injection", "ollama", {"ollama_load_timeout": "10m\nExecStartPre=/bin/sh"}, "FAIL"),
+    ("ollama-gpu-library-unknown", "ollama", {"ollama_expected_gpu_library": "ROCm"}, "FAIL"),
+    ("ollama-gpu-check-off", "ollama", {"ollama_expected_gpu_library": ""}, "PASS"),
+    ("ollama-below-minimum", "ollama", {"ollama_version": "0.30.1"}, "FAIL"),
+    ("ollama-firewall-sources-ok", "ollama", {"ollama_firewall_allowed_sources": ["192.168.178.225", "192.168.178.0/24", "fd00::/8", "::1"]}, "PASS"),
+    ("ollama-firewall-source-injection", "ollama", {"ollama_firewall_allowed_sources": ["192.168.178.225 } accept; tcp dport 22 drop; ip saddr {"]}, "FAIL"),
+    ("ollama-firewall-source-newline", "ollama", {"ollama_firewall_allowed_sources": ["192.168.178.225\n"]}, "FAIL"),
+    ("ollama-firewall-bad-cidr", "ollama", {"ollama_firewall_allowed_sources": ["192.168.178.0/33"]}, "FAIL"),
+    ("ollama-firewall-bad-ip", "ollama", {"ollama_firewall_allowed_sources": ["192.168.178.256"]}, "FAIL"),
     ("podman-defaults", "podman", {}, "PASS"),
     ("podman-bad-controller", "podman", {"podman_delegate_controllers": ["cpu", "devices"]}, "FAIL"),
     ("podman-low-subids", "podman", {"podman_subid_start": 1000}, "FAIL"),
     ("nvidia-defaults", "nvidia", {}, "PASS"),
     ("nvidia-590-drops-pascal", "nvidia", {"nvidia_driver_branch": "590"}, "FAIL"),
+    # Debian's 550 drives Pascal, but Ollama >= 0.30 ignores CC 6.1 GPUs below driver 570 (research 026 O7)
+    ("nvidia-debian-550", "nvidia", {"nvidia_source": "debian", "nvidia_driver_branch": "550"}, "FAIL"),
+    ("nvidia-debian-550-without-ollama", "nvidia",
+     {"nvidia_source": "debian", "nvidia_driver_branch": "550", "nvidia_allow_branch_below_ollama_minimum": True}, "PASS"),
+    ("nvidia-cuda-570", "nvidia", {"nvidia_source": "cuda", "nvidia_driver_branch": "570"}, "PASS"),
+    ("nvidia-bad-min-branch", "nvidia", {"nvidia_min_driver_branch": "57x"}, "FAIL"),
+    ("nvidia-unknown-source", "nvidia", {"nvidia_source": "ppa"}, "FAIL"),
+    ("nvidia-runfile-other-branch", "nvidia", {"nvidia_runfile_version": "590.48.01"}, "FAIL"),
+    ("nvidia-runfile-sha-ok", "nvidia", {"nvidia_runfile_sha256": "a" * 64}, "PASS"),
+    ("nvidia-runfile-sha-bad", "nvidia", {"nvidia_runfile_sha256": "abc"}, "FAIL"),
+    ("nvidia-runfile-http", "nvidia", {"nvidia_runfile_base": "http://download.nvidia.com/XFree86/Linux-x86_64"}, "FAIL"),
+    ("nvidia-runfile-open-modules", "nvidia", {"nvidia_runfile_options": ["--silent", "--kernel-module-type=open"]}, "FAIL"),
+    ("nvidia-runfile-option-injection", "nvidia", {"nvidia_runfile_options": ["--silent; reboot"]}, "FAIL"),
+    ("nvidia-download-traversal", "nvidia", {"nvidia_runfile_download_dir": "/var/cache/../../etc"}, "FAIL"),
     ("nodejs-defaults", "nodejs", {}, "PASS"),
     ("nodejs-too-old", "nodejs", {"nodejs_major": 20, "nodejs_min_version": "20.19.0"}, "FAIL"),
     ("nodejs-plain-http", "nodejs", {"nodejs_repo_uri": "http://deb.nodesource.com/node_22.x"}, "FAIL"),

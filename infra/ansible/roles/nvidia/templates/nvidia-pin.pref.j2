@@ -1,11 +1,24 @@
 # Managed by Hermclaw – NVIDIA driver branch {{ nvidia_driver_branch }} for Pascal (GTX 1080).
-# 590 and later dropped Pascal support (research 20261008-017): never install them.
+# 590 and later dropped Pascal support (research 20261008-017, 20261014-026): never install them.
+{% if nvidia_source == 'runfile' %}
+# Source "runfile": the driver comes from NVIDIA's .run installer. No apt package may install
+# a second driver next to it (neither Debian's 550 nor a Pascal-less 590+ from any repository).
 Package: {{ nvidia_pin_regex }}
-Pin: version {{ nvidia_driver_branch }}.*
+Pin: version *
+Pin-Priority: -1
+{% else %}
+# Source "{{ nvidia_source }}": prefer the pinned branch and block every Pascal-less branch.
+# Debian versions may carry an epoch ("1:590.48.01-1"), hence the "*:" variants.
+{% for preferred in [nvidia_driver_branch ~ '.*', '*:' ~ nvidia_driver_branch ~ '.*'] %}
+
+Package: {{ nvidia_pin_regex }}
+Pin: version {{ preferred }}
 Pin-Priority: 1001
-{% for blocked in ['59*', '6*', '7*', '8*', '9*'] %}
+{% endfor %}
+{% for blocked in ['59*', '6*', '7*', '8*', '9*', '*:59*', '*:6*', '*:7*', '*:8*', '*:9*'] %}
 
 Package: {{ nvidia_pin_regex }}
 Pin: version {{ blocked }}
 Pin-Priority: -1
 {% endfor %}
+{% endif %}

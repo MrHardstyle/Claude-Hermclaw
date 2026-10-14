@@ -1,9 +1,13 @@
 # Input validation of the ollama role (tested locally by
 # tests/integration/test_bootstrap_infra.py::test_role_input_validation).
 - name: Validate Ollama settings
+  vars:
+    ollama_managed_env: [OLLAMA_HOST, OLLAMA_KEEP_ALIVE, OLLAMA_MAX_LOADED_MODELS, OLLAMA_NUM_PARALLEL, OLLAMA_MODELS,
+                         OLLAMA_FLASH_ATTENTION, OLLAMA_KV_CACHE_TYPE, OLLAMA_LOAD_TIMEOUT, OLLAMA_NO_CLOUD, OLLAMA_VULKAN]
   ansible.builtin.assert:
     that:
       - ollama_version is match('^[0-9]+[.][0-9]+[.][0-9]+(-rc[0-9]+)?$')
+      - ollama_version is version(ollama_min_version, '>=')
       - ollama_install_method in ['tarball', 'script']
       - ollama_release_base is match('^https://[A-Za-z0-9./_-]+$')
       - ollama_install_script_url is match('^https://[A-Za-z0-9./_-]+$')
@@ -13,9 +17,40 @@
       - ollama_max_loaded_models | int >= 1
       - ollama_num_parallel | int >= 1
       - "'OLLAMA_CONTEXT_LENGTH' not in ollama_extra_env"
+      # variables with a dedicated role setting must not be set twice
+      - ollama_extra_env.keys() | intersect(ollama_managed_env) | list | length == 0
+      - ollama_flash_attention | string | lower in ['true', 'false', 'auto']
+      - ollama_kv_cache_type in ['', 'f16', 'q8_0', 'q4_0']
+      - ollama_kv_cache_type in ['', 'f16'] or ollama_flash_attention | string | lower == 'true'
+      - ollama_load_timeout is match('^[0-9]+(s|m|h)?$')
+      - ollama_expected_gpu_library in ['', 'CUDA']
+      - ollama_gpu_check_retries | int >= 1 and ollama_gpu_check_delay | int >= 1
       - ollama_extra_env.keys() | reject('match', '^OLLAMA_[A-Z_]+$') | list | length == 0
       # allowlist (no whitespace, quotes, backslashes or line breaks reach the unit file)
       - ollama_extra_env.values() | map('string') | reject('match', '^[A-Za-z0-9._:/,+=@%*-]*$') | list | length == 0
       - ollama_extra_env.values() | map('string') | map('trim') | list == ollama_extra_env.values() | map('string') | list
-    fail_msg: invalid Ollama settings (OLLAMA_CONTEXT_LENGTH must stay unset - Hermclaw sends num_ctx)
+    fail_msg: >-
+      invalid Ollama settings (version below {{ ollama_min_version }}, plain http, OLLAMA_CONTEXT_LENGTH -
+      it must stay unset because Hermclaw sends num_ctx -, an ollama_extra_env key that has its own
+      setting ({{ ollama_managed_env | join(', ') }}), flash attention not true/false/auto, or a quantised
+      KV cache without flash attention)
+    quiet: true
+
+- name: Validate the Ollama firewall settings
+  vars:
+    ollama_v4_re: '((25[0-5]|2[0-4][0-9]|1?[0-9]?[0-9])[.]){3}(25[0-5]|2[0-4][0-9]|1?[0-9]?[0-9])(/([0-9]|[12][0-9]|3[0-2]))?'
+    ollama_v6_re: '[0-9A-Fa-f]{0,4}(:[0-9A-Fa-f]{0,4}){2,7}(/([0-9]|[1-9][0-9]|1[01][0-9]|12[0-8]))?'
+  ansible.builtin.assert:
+    that:
+      - ollama_firewall_port | int > 0 and ollama_firewall_port | int < 65536
+      - >-
+        ollama_firewall_allowed_sources | map('string')
+        | reject('match', '^(' ~ ollama_v4_re ~ '|' ~ ollama_v6_re ~ ')$') | list | length == 0
+      - ollama_firewall_allowed_sources | map('string') | map('trim') | list == ollama_firewall_allowed_sources | map('string') | list
+      - ollama_firewall_nft_file is match('^/[A-Za-z0-9._/-]+[.]nft$')
+      - "'/../' not in ollama_firewall_nft_file"
+      - ollama_firewall_nft_bin is match('^/[A-Za-z0-9._/-]+$')
+    fail_msg: >-
+      invalid ollama_firewall_allowed_sources {{ ollama_firewall_allowed_sources }} (IPv4/IPv6 addresses or
+      CIDR networks), firewall port or nftables file path
     quiet: true

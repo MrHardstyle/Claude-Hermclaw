@@ -1,0 +1,55 @@
+# GPU discovery check of the running ollama.service (research 20261014-026 O7 and install step 6).
+# Ollama logs one 'msg="inference compute"' line per device at start. With a driver below 570
+# it drops the GTX 1080 ("NVIDIA driver too old") and reports only id=cpu library=cpu: the API
+# still answers, so the version check alone would not notice the CPU fallback.
+# Only the journal of the current service invocation is read: an old "driver too old" line
+# from before a driver fix does not fail the run, and an old CUDA line does not hide a fallback.
+# Behaviour tested by tests/integration/test_bootstrap_roles.py::test_ollama_gpu_check.
+- name: Read the invocation id of the running ollama.service
+  ansible.builtin.command:
+    argv: [systemctl, show, --property=InvocationID, --value, ollama.service]
+  register: ollama_invocation
+  changed_when: false
+  failed_when: >-
+    ollama_invocation.rc != 0
+    or not (ollama_invocation.stdout | trim is match('^[0-9a-f]{32}$'))
+  check_mode: false
+
+- name: Wait for Ollama's GPU discovery in the journal of this ollama.service start
+  ansible.builtin.command:
+    argv:
+      - journalctl
+      - --no-pager
+      - --output=cat
+      - "_SYSTEMD_INVOCATION_ID={{ ollama_invocation.stdout | trim }}"
+  register: ollama_gpu_journal
+  changed_when: false
+  failed_when: ollama_gpu_journal.rc != 0
+  until: >-
+    ollama_gpu_journal.rc == 0
+    and (ollama_gpu_journal.stdout is search('inference compute')
+         or ollama_gpu_journal.stdout is search('driver too old', ignorecase=true))
+  retries: "{{ ollama_gpu_check_retries | int }}"
+  delay: "{{ ollama_gpu_check_delay | int }}"
+  check_mode: false
+
+- name: Collect the compute devices Ollama discovered
+  ansible.builtin.set_fact:
+    ollama_gpu_devices: "{{ ollama_gpu_journal.stdout_lines | select('search', 'inference compute') | list }}"
+
+- name: Assert that Ollama runs on the {{ ollama_expected_gpu_library }} GPU
+  ansible.builtin.assert:
+    that:
+      - ollama_gpu_journal.stdout is not search('driver too old', ignorecase=true)
+      - >-
+        ollama_gpu_devices
+        | select('search', 'library=' ~ ollama_expected_gpu_library ~ '( |$)', ignorecase=true)
+        | list | length > 0
+    fail_msg: >-
+      Ollama does not use the GPU ({{ ollama_expected_gpu_library }}): discovered
+      {{ ollama_gpu_devices | map('regex_search', 'id=[^ ]+ .*library=[^ ]+') | select | list | join('; ') | default('nothing', true) }}.
+      "NVIDIA driver too old" means a driver branch below 570 (Debian's 550): install the 580 runfile driver
+      (role nvidia) and restart ollama. A CPU-only result after suspend/resume needs
+      "rmmod nvidia_uvm && modprobe nvidia_uvm && systemctl restart ollama".
+    success_msg: "{{ ollama_gpu_devices | join(' | ') | truncate(300) }}"
+    quiet: true

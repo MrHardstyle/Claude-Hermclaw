@@ -19,6 +19,11 @@
   check_mode: false
   tags: [ollama]
 
+- name: Remember the GPU device groups for the unit
+  ansible.builtin.set_fact:
+    ollama_supplementary_groups: "{{ ollama_gpu_groups.results | selectattr('rc', 'equalto', 0) | map(attribute='item') | list }}"
+  tags: [ollama]
+
 - name: Look up an existing ollama account
   ansible.builtin.command:
     argv: [getent, passwd, "{{ ollama_user }}"]
@@ -44,7 +49,7 @@
 - name: Give ollama access to the GPU devices (existing accounts keep home and shell)
   ansible.builtin.user:
     name: "{{ ollama_user }}"
-    groups: "{{ ollama_gpu_groups.results | selectattr('rc', 'equalto', 0) | map(attribute='item') | list }}"
+    groups: "{{ ollama_supplementary_groups }}"
     append: true
   when: not (ansible_check_mode and ollama_pw.rc == 2)
   tags: [ollama]
@@ -123,7 +128,17 @@
           - "{{ ollama_download_dir }}/ollama-{{ ollama_version }}-{{ ollama_archive }}"
           - -C
           - "{{ ollama_install_root }}/{{ ollama_version }}"
-        creates: "{{ ollama_install_root }}/{{ ollama_version }}/bin/ollama"
+        # the marker is written only after a complete extraction: an interrupted run (bin/ollama
+        # present, CUDA runner libraries missing) is extracted again instead of counting as installed
+        creates: "{{ ollama_install_root }}/{{ ollama_version }}/.hermclaw-extracted"
+
+    - name: Mark the extraction of {{ ollama_version }} as complete
+      ansible.builtin.copy:
+        content: "ollama {{ ollama_version }} {{ ollama_archive }}\n"
+        dest: "{{ ollama_install_root }}/{{ ollama_version }}/.hermclaw-extracted"
+        owner: root
+        group: root
+        mode: "0644"
 
     - name: Point current at {{ ollama_version }}
       ansible.builtin.file:
@@ -145,6 +160,32 @@
       changed_when: false
       failed_when: false
       check_mode: false
+
+    # install.sh installs NVIDIA's newest cuda-drivers (590+, no Pascal) when nvidia-smi does
+    # not work (research 20261014-026 E14): only run it on top of a working driver.
+    - name: Check the NVIDIA driver before running the install script
+      ansible.builtin.command:
+        argv: [nvidia-smi, -L]
+      register: ollama_script_nvidia
+      changed_when: false
+      failed_when: false
+      check_mode: false
+      when:
+        - ollama_version not in ollama_installed.stdout | default('')
+        - ollama_expected_gpu_library == 'CUDA'
+
+    - name: Refuse the install script without a working NVIDIA driver
+      ansible.builtin.assert:
+        that: ollama_script_nvidia.rc == 0
+        fail_msg: >-
+          nvidia-smi does not work ({{ ollama_script_nvidia.msg | default(ollama_script_nvidia.stderr | default('')) | truncate(160) }}):
+          the Ollama install script would install NVIDIA's newest cuda-drivers, which no longer support
+          Pascal. Run the nvidia role first (or use ollama_install_method: tarball).
+        quiet: true
+      when:
+        - ollama_version not in ollama_installed.stdout | default('')
+        - ollama_expected_gpu_library == 'CUDA'
+        - not ansible_check_mode
 
     - name: Download the install script
       ansible.builtin.get_url:
@@ -213,9 +254,38 @@
     - Restart ollama
   tags: [ollama]
 
+- name: Firewall for the Ollama port
+  ansible.builtin.import_tasks: firewall.yml
+  tags: [ollama, firewall]
+
 - name: Apply unit changes
   ansible.builtin.meta: flush_handlers
   tags: [ollama]
+
+- name: Enable and start the Ollama firewall before Ollama
+  ansible.builtin.systemd_service:
+    name: hermclaw-ollama-firewall.service
+    enabled: true
+    state: started
+  when:
+    - ollama_firewall_enabled | bool
+    - hermclaw_manage_services | bool
+  tags: [ollama, firewall]
+
+- name: Verify that the Ollama firewall table is loaded
+  ansible.builtin.command:
+    argv: ["{{ ollama_firewall_nft_bin }}", list, table, inet, hermclaw_ollama]
+  register: ollama_firewall_table
+  changed_when: false
+  failed_when: >-
+    ollama_firewall_table.rc != 0
+    or ('dport ' ~ ollama_firewall_port ~ ' counter') not in ollama_firewall_table.stdout
+  check_mode: false
+  when:
+    - ollama_firewall_enabled | bool
+    - hermclaw_manage_services | bool
+    - not ansible_check_mode
+  tags: [ollama, firewall]
 
 - name: Enable and start ollama
   ansible.builtin.systemd_service:
@@ -246,6 +316,18 @@
     quiet: true
   when:
     - ollama_verify | bool
+    - hermclaw_manage_services | bool
+    - not ansible_check_mode
+  tags: [ollama]
+
+- name: Verify that Ollama uses the GPU
+  ansible.builtin.include_tasks:
+    file: gpu_check.yml
+    apply:
+      tags: [ollama]
+  when:
+    - ollama_verify | bool
+    - ollama_expected_gpu_library | length > 0
     - hermclaw_manage_services | bool
     - not ansible_check_mode
   tags: [ollama]

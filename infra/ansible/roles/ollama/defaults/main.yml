@@ -1,7 +1,9 @@
-# ollama – Ollama server on the model worker .224 (research 20261008-007).
+# ollama – Ollama server on the model worker .224 (research 20261008-007, recheck 20261014-026).
 # Pinned release; upgrade only after the GPU smoke test (`hermclaw-model-worker selftest`).
-# 0.40.3 = latest stable on 2026-10-14 (released 2026-10-11; 0.40.4 was hours old).
-ollama_version: "0.40.3"
+# 0.40.4 = latest release on 2026-10-14 (2026-10-12; archive sha256 verified in research 026).
+# 0.40.3 is the tested fallback (same CUDA runners and driver rule). Before every bump read the
+# release notes for "cuda_v12" / "compute capability": Pascal runs on the cuda_v12 runner only.
+ollama_version: "0.40.4"
 # Gemma 4 needs >= 0.22, Qwen3.8 >= 0.32.12 (research R-007/R-012): never pin below.
 ollama_min_version: "0.32.12"
 # tarball = pinned release archive (checksum verified) under /opt/ollama/<version>
@@ -28,7 +30,16 @@ ollama_listen: "0.0.0.0:{{ hermclaw_ollama_port }}"
 ollama_keep_alive: 5m
 ollama_max_loaded_models: 2        # one large model + the embedding model
 ollama_num_parallel: 1
-ollama_flash_attention: false      # enable only after a successful test on Pascal
+# Flash attention: "false" renders OLLAMA_FLASH_ATTENTION=0 (unset would mean "auto", which on
+# compute capability 6.1 already enables it), "true" renders 1 (only after the GPU smoke test),
+# "auto" leaves it to Ollama.
+ollama_flash_attention: "false"
+# KV cache quantisation: "" = Ollama default (f16); q8_0/q4_0 need flash attention enabled.
+ollama_kv_cache_type: ""
+ollama_load_timeout: 10m           # 18-19 GB partial-offload loads on a cold page cache
+ollama_no_cloud: true              # OLLAMA_NO_CLOUD=1: no remote inference/web search
+ollama_vulkan: false               # OLLAMA_VULKAN=0: deterministic CUDA path, no silent fallback
+# Further OLLAMA_* variables (validated allowlist, never OLLAMA_CONTEXT_LENGTH).
 ollama_extra_env: {}
 
 # Ollama has no authentication and listens on the LAN (OLLAMA_HOST=0.0.0.0): a dedicated
@@ -45,3 +56,9 @@ ollama_firewall_port: "{{ ollama_listen.split(':')[-1] }}"   # taken from ollama
 
 # Verify the API after (re)start
 ollama_verify: true
+# After (re)start, the GPU discovery in the journal of the current ollama.service invocation
+# must report an "inference compute" device of this library (fails on "NVIDIA driver too old"
+# or a CPU-only result). Empty = no GPU check (hosts without a GPU).
+ollama_expected_gpu_library: CUDA
+ollama_gpu_check_retries: 20
+ollama_gpu_check_delay: 3

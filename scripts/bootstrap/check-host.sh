@@ -57,6 +57,7 @@ execution_workers hermclaw-exec-worker.service
 execution_workers hermclaw-wol@.service
 model_workers hermclaw-model-worker.service
 model_workers hermclaw-wol@.service
+model_workers hermclaw-ollama-firewall.service
 EOF
 )
 

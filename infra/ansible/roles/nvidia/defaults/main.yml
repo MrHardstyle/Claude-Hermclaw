@@ -1,7 +1,12 @@
 # nvidia – GTX 1080 (Pascal) driver on the model worker .224 (research 20261008-017,
-# recheck 2026-10-14 in docs/architecture/bootstrap.md).
+# recheck 20261014-026; summary in docs/architecture/bootstrap.md).
 # 580 is the last driver branch supporting Pascal; 590+ dropped it, so the branch is pinned.
 nvidia_driver_branch: "580"
+# Ollama >= 0.30 ignores GPUs with compute capability < 7.0 (GTX 1080 = 6.1) on drivers below
+# 570 and falls back to the CPU (research 20261014-026 O6/O7). Hermclaw needs Ollama >= 0.32.12,
+# so a lower branch is refused unless the host does not serve models with Ollama.
+nvidia_min_driver_branch: "570"
+nvidia_allow_branch_below_ollama_minimum: false
 
 # Installation source:
 #   runfile = NVIDIA's official .run installer for a pinned 580.x release (SHA-256 verified,
@@ -11,8 +16,10 @@ nvidia_driver_branch: "580"
 #   cuda    = NVIDIA CUDA network repository (nvidia-driver-pinning-<branch> + cuda-drivers =
 #             proprietary modules; the open modules need Turing or newer). Usable only once
 #             NVIDIA publishes the branch for debian13 - the role checks the candidates first.
-#   debian  = Debian non-free nvidia-driver. trixie ships 550, which also supports Pascal:
-#             set nvidia_driver_branch: "550" together with nvidia_source: debian.
+#   debian  = Debian non-free nvidia-driver. trixie (incl. backports) ships 550: it drives Pascal,
+#             but Ollama does not use the GPU on it (see nvidia_min_driver_branch). Usable only
+#             once Debian ships >= 570, or with nvidia_allow_branch_below_ollama_minimum: true
+#             on a host that does not run Ollama.
 nvidia_source: runfile
 
 # --- runfile ------------------------------------------------------------------------------
@@ -57,8 +64,9 @@ nvidia_build_packages:
   - "linux-headers-{{ ansible_facts['kernel'] | default('amd64') }}"
   - dkms
 
-# Packages covered by the Hermclaw apt pin (regex on package names). With the runfile the
-# pin keeps any configured repository from installing a 590+ driver next to it.
+# Packages covered by the Hermclaw apt pin (regex on package names). With the runfile every
+# matching apt package is blocked (no second driver next to the runfile one); with cuda/debian
+# the branch is preferred and 590+ is blocked.
 nvidia_pin_regex: "/^(nvidia|libnvidia|libcuda|libnvcuvid|libnvoptix|xserver-xorg-video-nvidia|cuda-drivers|firmware-nvidia)/"
 # Driver packages whose presence conflicts with a runfile installation (dpkg-query patterns).
 nvidia_package_conflicts:

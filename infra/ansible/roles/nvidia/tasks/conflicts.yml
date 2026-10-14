@@ -1,0 +1,25 @@
+# Packaged drivers (Debian/CUDA) and the runfile driver must never be mixed. Tested with a
+# fake dpkg-query by tests/integration/test_bootstrap_infra.py::test_nvidia_runfile_conflict_check.
+- name: Find packaged NVIDIA drivers that conflict with a runfile installation
+  ansible.builtin.command:
+    argv: "{{ ['dpkg-query', '-W', '-f=${Package} ${db:Status-Abbrev}\\n'] + nvidia_package_conflicts }}"
+  register: nvidia_dpkg
+  changed_when: false
+  # 1 = some pattern matched no package (dpkg-query still lists the matching ones)
+  failed_when: nvidia_dpkg.rc not in [0, 1]
+  check_mode: false
+
+- name: Collect installed conflicting packages
+  ansible.builtin.set_fact:
+    # second status letter: n = not installed, c = only config files left; anything else counts
+    nvidia_runfile_conflicts: >-
+      {{ nvidia_dpkg.stdout_lines | select('match', '^[^ ]+ [a-z][iUFHWt]') | map('split', ' ') | map('first') | list }}
+
+- name: Refuse to mix the runfile driver with packaged drivers
+  ansible.builtin.assert:
+    that: nvidia_runfile_conflicts | length == 0
+    fail_msg: >-
+      {{ inventory_hostname }} has packaged NVIDIA drivers installed ({{ nvidia_runfile_conflicts | join(', ') }}).
+      Mixing them with the {{ nvidia_runfile_version }} runfile breaks both: purge them first
+      (apt purge {{ nvidia_runfile_conflicts | join(' ') }}; reboot) or keep them with nvidia_source=cuda/debian.
+    quiet: true

@@ -100,35 +100,33 @@
   tags: [nvidia]
 
 - name: Reboot to load the new kernel module
-  ansible.builtin.reboot:
-    reboot_timeout: "{{ nvidia_reboot_timeout }}"
-    msg: Hermclaw bootstrap - loading the NVIDIA {{ nvidia_driver_branch }} driver
   when:
     - nvidia_driver_changed | bool
     - nvidia_smi.rc != 0
     - nvidia_allow_reboot | bool
     - hermclaw_manage_services | bool
-  register: nvidia_rebooted
   tags: [nvidia]
+  block:
+    - name: Reboot {{ inventory_hostname }}
+      ansible.builtin.reboot:
+        reboot_timeout: "{{ nvidia_reboot_timeout }}"
+        msg: Hermclaw bootstrap - loading the NVIDIA {{ nvidia_driver_branch }} driver
 
-- name: Query the GPU again after the reboot
-  ansible.builtin.command:
-    argv:
-      - nvidia-smi
-      - --query-gpu=driver_version,name,memory.total
-      - --format=csv,noheader,nounits
-  register: nvidia_smi_after_reboot
-  changed_when: false
-  failed_when: false
-  check_mode: false
-  when: nvidia_rebooted is changed
-  tags: [nvidia]
+    - name: Query the GPU again after the reboot
+      ansible.builtin.command:
+        argv:
+          - nvidia-smi
+          - --query-gpu=driver_version,name,memory.total
+          - --format=csv,noheader,nounits
+      register: nvidia_smi_rebooted
+      changed_when: false
+      failed_when: false
+      check_mode: false
 
-- name: Use the post-reboot GPU query
-  ansible.builtin.set_fact:
-    nvidia_smi: "{{ nvidia_smi_after_reboot }}"
-  when: nvidia_rebooted is changed
-  tags: [nvidia]
+    # a separate register: a skipped task would overwrite nvidia_smi with a skip result
+    - name: Use the post-reboot GPU query
+      ansible.builtin.set_fact:
+        nvidia_smi: "{{ nvidia_smi_rebooted }}"
 
 - name: Explain a pending reboot
   ansible.builtin.fail:

@@ -3,6 +3,15 @@
     daemon_reload: true
   when: hermclaw_manage_services | bool
 
+# reloaded = reload when active, start otherwise (re-reads the nftables file atomically)
+- name: Reload the Ollama firewall
+  ansible.builtin.systemd_service:
+    name: hermclaw-ollama-firewall.service
+    state: reloaded
+  when:
+    - ollama_firewall_enabled | bool
+    - hermclaw_manage_services | bool
+
 - name: Restart ollama
   ansible.builtin.systemd_service:
     name: ollama

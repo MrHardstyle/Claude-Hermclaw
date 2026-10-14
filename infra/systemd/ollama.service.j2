@@ -9,7 +9,7 @@ Wants=network-online.target
 ExecStart={{ ollama_bin }} serve
 User={{ ollama_user }}
 Group={{ ollama_group }}
-SupplementaryGroups=video render
+SupplementaryGroups={{ ollama_supplementary_groups | default(['video', 'render']) | join(' ') }}
 Restart=always
 RestartSec=3
 Environment=HOME={{ ollama_effective_home }}

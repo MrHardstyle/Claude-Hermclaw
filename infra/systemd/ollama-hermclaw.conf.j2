@@ -10,9 +10,17 @@ Environment=OLLAMA_KEEP_ALIVE={{ ollama_keep_alive }}
 Environment=OLLAMA_MAX_LOADED_MODELS={{ ollama_max_loaded_models }}
 Environment=OLLAMA_NUM_PARALLEL={{ ollama_num_parallel }}
 Environment=OLLAMA_MODELS={{ ollama_effective_models_dir }}
-{% if ollama_flash_attention | bool %}
-Environment=OLLAMA_FLASH_ATTENTION=1
+{% if ollama_flash_attention | string | lower != 'auto' %}
+Environment=OLLAMA_FLASH_ATTENTION={{ '1' if ollama_flash_attention | bool else '0' }}
 {% endif %}
+{% if ollama_kv_cache_type | length > 0 %}
+Environment=OLLAMA_KV_CACHE_TYPE={{ ollama_kv_cache_type }}
+{% endif %}
+Environment=OLLAMA_LOAD_TIMEOUT={{ ollama_load_timeout }}
+{% if ollama_no_cloud | bool %}
+Environment=OLLAMA_NO_CLOUD=1
+{% endif %}
+Environment=OLLAMA_VULKAN={{ '1' if ollama_vulkan | bool else '0' }}
 {% for key, value in ollama_extra_env | dictsort %}
 Environment={{ key }}={{ value }}
 {% endfor %}

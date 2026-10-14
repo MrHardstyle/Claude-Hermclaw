@@ -1,0 +1,80 @@
+# Dedicated nftables table for the Ollama port (Ollama has no authentication and listens on
+# the LAN). Only connections to that port are dropped, and only from sources other than
+# loopback and ollama_firewall_allowed_sources; no other table or rule is touched.
+# Behaviour tested in a real network namespace by
+# tests/integration/test_bootstrap_infra.py::test_ollama_firewall_blocks_foreign_sources.
+- name: Install and load the Ollama firewall
+  when: ollama_firewall_enabled | bool
+  block:
+    - name: Install nftables
+      ansible.builtin.apt:
+        name: nftables
+        state: present
+        install_recommends: false
+      when: hermclaw_install_packages | bool
+
+    - name: Create the nftables directory
+      ansible.builtin.file:
+        path: "{{ ollama_firewall_nft_file | dirname }}"
+        state: directory
+        owner: root
+        group: root
+        mode: "0755"
+
+    - name: Write the Ollama nftables table
+      ansible.builtin.template:
+        src: hermclaw-ollama.nft.j2
+        dest: "{{ ollama_firewall_nft_file }}"
+        owner: root
+        group: root
+        mode: "0644"
+        validate: "{{ (ollama_firewall_nft_bin ~ ' -c -f %s') if hermclaw_install_packages | bool else omit }}"
+      notify: Reload the Ollama firewall
+
+    - name: Check for an existing firewall unit
+      ansible.builtin.stat:
+        path: /etc/systemd/system/hermclaw-ollama-firewall.service
+      register: ollama_firewall_unit
+
+    - name: Read the existing firewall unit
+      ansible.builtin.slurp:
+        src: /etc/systemd/system/hermclaw-ollama-firewall.service
+      register: ollama_firewall_unit_raw
+      when: ollama_firewall_unit.stat.exists
+
+    - name: Stop if the unit belongs to something else
+      ansible.builtin.fail:
+        msg: >-
+          /etc/systemd/system/hermclaw-ollama-firewall.service exists and is not managed by Hermclaw -
+          refusing to overwrite an existing service.
+      when:
+        - ollama_firewall_unit.stat.exists
+        - "'Managed by Hermclaw' not in (ollama_firewall_unit_raw.content | b64decode)"
+
+    - name: Install hermclaw-ollama-firewall.service
+      ansible.builtin.template:
+        src: "{{ role_path }}/../../../systemd/hermclaw-ollama-firewall.service.j2"
+        dest: /etc/systemd/system/hermclaw-ollama-firewall.service
+        owner: root
+        group: root
+        mode: "0644"
+      notify:
+        - Reload systemd
+        - Reload the Ollama firewall
+
+- name: Remove the Ollama firewall when it is switched off
+  when: not ollama_firewall_enabled | bool
+  block:
+    - name: Check for the firewall unit
+      ansible.builtin.stat:
+        path: /etc/systemd/system/hermclaw-ollama-firewall.service
+      register: ollama_firewall_unit_off
+
+    - name: Stop and disable the firewall unit
+      ansible.builtin.systemd_service:
+        name: hermclaw-ollama-firewall.service
+        enabled: false
+        state: stopped
+      when:
+        - ollama_firewall_unit_off.stat.exists
+        - hermclaw_manage_services | bool
