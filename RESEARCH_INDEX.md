@@ -30,3 +30,4 @@ Pflichtfelder: Question · Why needed · Sources · Source date/version · Relev
 | R-023 | Web-Research-API | docs/research/20261008-023-web-research-api.md | SearXNG JSON (selbst gehostet) |
 | R-024 | Media-Pipeline | docs/research/20261008-024-media-pipeline.md | ffmpeg NVENC (H.264/HEVC), ComfyUI-API |
 | R-025 | Model tag re-check (install) | docs/research/20261013-025-model-tag-recheck.md | `qwen3.8:27b` bestätigt; Embedding-Fallback `embeddinggemma:300m` (768 dim) |
+| R-026 | GPU-Stack `.224` (Treiber, Ollama, Pascal) | docs/research/20261014-026-gpu-ollama-stack.md | Ollama v0.40.4 läuft auf CC 6.1 nur mit cuda_v12 + Treiber ≥ 570; Debian 13 hat nur 550 und NVIDIAs debian13-Repo kein 580 → R580-`.run` (DKMS, proprietär); `embeddinggemma-2` ist MLX-only → `embeddinggemma:300m`; Ollama-Env (FA, KV q8_0, MAX_LOADED_MODELS 2) |
