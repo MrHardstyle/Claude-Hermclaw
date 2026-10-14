@@ -218,11 +218,19 @@ def _error_text(resp: httpx.Response) -> str:
     return str(data)[:MAX_ERROR_CHARS]
 
 
+_AUTH_FAILURE_HINTS = ("no connected db", "no_db_connection", "no module named 'prisma'")
+
+
 def classify_http_error(status: int, message: str) -> str:
     low = message.lower()
     if status in (408, 504):
         return MODEL_TIMEOUT
     if status in (401, 403):
+        return MODEL_AUTH_FAILED
+    # LiteLLM proxy without a database (our setup): a wrong key is answered 400 "No connected db." (type
+    # no_db_connection), and without the prisma package any auth error turns into a 500 "No module named 'prisma'"
+    # (research 20261014-027 L10) – both are authentication failures, never a reason for a fallback model.
+    if status in (400, 500) and any(h in low for h in _AUTH_FAILURE_HINTS):
         return MODEL_AUTH_FAILED
     if status == 429:
         return MODEL_RATE_LIMITED

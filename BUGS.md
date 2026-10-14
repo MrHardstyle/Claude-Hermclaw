@@ -579,6 +579,13 @@ Noch keine.
 - Erwartet: Refused.
 - Tatsächlich: Fixed: check_staging_separate raises BACKUP_CONFIG_INVALID. Regression test: test_backup_failures.py::test_staging_inside_the_target_is_refused.
 
+### BUG-097 – A wrong LiteLLM master key was classified as a bad request (DB-less proxy answers 400 / 500)
+- Phase: P39 · Komponente: models/gateway · Severity: P2 · blockierend: nein · Status: **behoben** (`tests/unit/test_models_gateway.py` cases for 400 "No connected db." and 500 "No module named 'prisma'"; `tests/integration/test_models_litellm_proxy.py::test_wrong_key_is_rejected_without_fallback` now requires `MODEL_AUTH_FAILED`, green against real LiteLLM 1.104.2 with and without prisma)
+- Reproduktion: LiteLLM proxy without database (our setup), gateway with a wrong key
+- Erwartet: `MODEL_AUTH_FAILED` (operator problem, no retry/fallback, clear doctor message)
+- Tatsächlich: 400 `no_db_connection` → `MODEL_BAD_REQUEST`; without the `prisma` package auth errors are HTTP 500 (research R-027 L10)
+- Fix: both shapes are authentication failures; `prisma==0.15.0` joins the `litellm-proxy` extra (401 for a missing key)
+
 ## Template
 
 ### BUG-XXX – Titel

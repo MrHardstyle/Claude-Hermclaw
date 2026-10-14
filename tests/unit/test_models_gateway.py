@@ -152,6 +152,9 @@ def test_response_format_wrapping() -> None:
         (500, "litellm.APIConnectionError: connection refused", MODEL_UNAVAILABLE),
         (503, "busy", MODEL_UNAVAILABLE),
         (400, "Invalid model name passed", MODEL_BAD_REQUEST),
+        # LiteLLM without a database: wrong key / missing prisma package (research R-027 L10)
+        (400, "No connected db.", "MODEL_AUTH_FAILED"),
+        (500, "No module named 'prisma'", "MODEL_AUTH_FAILED"),
     ],
 )
 def test_classify_http_error(status: int, message: str, code: str) -> None:

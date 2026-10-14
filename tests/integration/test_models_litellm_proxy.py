@@ -20,7 +20,7 @@ from sqlalchemy import select
 
 from hermclaw.contracts.events import EventType
 from hermclaw.core.errors import ModelError, ModelTimeout
-from hermclaw.models.gateway import MODEL_AUTH_FAILED, MODEL_BAD_REQUEST, MODEL_NOT_FOUND, GatewayOptions, LiteLLMGateway
+from hermclaw.models.gateway import MODEL_AUTH_FAILED, MODEL_NOT_FOUND, GatewayOptions, LiteLLMGateway
 from hermclaw.models.health import ModelHealthChecker
 from hermclaw.models.litellm_config import build_litellm_config, write_litellm_config
 from hermclaw.models.protocols import CallContext, ChatMessage
@@ -228,7 +228,7 @@ async def test_wrong_key_is_rejected_without_fallback(stack: dict[str, Any]) -> 
     async with gateway(stack, api_key="sk-wrong-key-000000000000000000") as gw:
         with pytest.raises(ModelError) as exc:
             await gw.chat("planner-gemma", [ChatMessage("user", "x")], ctx=CTX)
-    assert exc.value.code in (MODEL_AUTH_FAILED, MODEL_BAD_REQUEST)
+    assert exc.value.code == MODEL_AUTH_FAILED, exc.value.message  # never BAD_REQUEST (R-027 L10: 400 no_db_connection)
     assert "sk-wrong-key" not in exc.value.message
     assert fake.bodies("/api/chat") == []
 

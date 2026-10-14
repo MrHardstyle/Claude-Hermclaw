@@ -40,7 +40,8 @@ dev = [
   "ansible-lint>=25",
 ]
 # LiteLLM proxy on .225 runs in its own venv (its pinned deps must not leak into the orchestrator venv)
-litellm-proxy = ["litellm[proxy]==1.104.2"]
+# prisma: without it LiteLLM's DB-less auth errors become HTTP 500 instead of 401 (research 20261014-027 L10)
+litellm-proxy = ["litellm[proxy]==1.104.2", "prisma==0.15.0"]
 
 [project.scripts]
 hermclaw = "hermclaw.cli:main"
