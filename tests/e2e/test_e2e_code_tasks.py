@@ -265,6 +265,89 @@ async def test_37_3_postgresql_migration(sessionmaker: Any, tmp_path: Path) -> N
     assert set(sandbox_names()) - before == set(), "the sandbox database and role are dropped after the run"
 
 
+# ---------------------------------------------------------------------------------------- 37.4 Docker Compose
+NGINX_IMAGE = "docker.io/library/nginx:1.28"
+COMPOSE_SEED = {
+    "compose.yaml": (
+        f'services:\n  web:\n    image: {NGINX_IMAGE}\n    ports: ["8080:80"]\n    volumes: ["./site:/usr/share/nginx/html:ro"]\n'
+    ),
+    "site/index.html": "<h1>shop</h1>\n",
+}
+COMPOSE_NEW = (
+    f'services:\n  web:\n    image: {NGINX_IMAGE}\n    ports: ["8080:80"]\n    volumes: ["./site:/usr/share/nginx/html:ro"]\n'
+    '    healthcheck:\n      test: ["CMD-SHELL", "test -s /usr/share/nginx/html/status.html && nginx -t"]\n'
+    "      interval: 2s\n      timeout: 3s\n      retries: 5\n"
+)
+
+
+def _podman_compose_ready() -> bool:
+    if shutil.which("podman") is None or shutil.which("podman-compose") is None:
+        return False
+    import subprocess
+
+    return subprocess.run(["podman", "image", "exists", NGINX_IMAGE], capture_output=True, check=False).returncode == 0
+
+
+@pytest.mark.skipif(not _podman_compose_ready(), reason="podman, podman-compose or the nginx image missing")
+async def test_37_4_docker_compose_service(sessionmaker: Any, tmp_path: Path) -> None:
+    """A ``docker`` step adds a status page and a healthcheck to a compose service and proves it with the runtime's
+    container tools: ``compose_validate`` (engine + structural policy) and ``compose_up_sandbox`` (the project runs
+    in a throw-away compose sandbox on 127.0.0.1 ports, becomes healthy and is torn down); both outputs are the
+    step's ``ops_output`` evidence."""
+    sc = Scenario(
+        name="compose",
+        title="web: status page + healthcheck",
+        prompt="Add a /status.html page to the web service and a compose healthcheck that requires it.",
+        seed=COMPOSE_SEED,
+        plans=[
+            plan(
+                "status page + healthcheck",
+                [
+                    step(
+                        "S001",
+                        "docker",
+                        "docker",
+                        "Add site/status.html and a healthcheck for the web service in compose.yaml; validate the compose "
+                        "file and start the project in a compose sandbox until the service is healthy.",
+                        repo_hints=["compose.yaml", "site/index.html"],
+                        allowed_new_paths=["site/status.html"],
+                        acceptance=[
+                            {"type": "presence", "path_glob": "compose.yaml", "pattern": "healthcheck"},
+                            {"type": "presence", "path_glob": "site/status.html", "pattern": "ok"},
+                            {"type": "artifact", "kind": "ops_output", "name_glob": "compose_validate*"},
+                            {"type": "artifact", "kind": "ops_output", "name_glob": "compose_up_sandbox*"},
+                        ],
+                    ),
+                    _review("S001"),
+                ],
+            )
+        ],
+        coder={
+            "S001": [
+                write_file("site/status.html", "<p>status: ok</p>\n"),
+                write_file("compose.yaml", COMPOSE_NEW),
+                act("compose_validate", path="compose.yaml"),
+                act("compose_up_sandbox", path="compose.yaml", timeout_seconds=180),
+                done("status page and healthcheck; compose sandbox healthy", ["compose.yaml", "site/status.html"]),
+            ]
+        },
+        timeout=420,
+    )
+    out = await run_scenario(sessionmaker, sc, tmp_path)
+    assert "healthcheck" in out.remote_file("compose.yaml") and "ok" in out.remote_file("site/status.html")
+    names = sorted(a.name for a in out.artifacts if a.kind == "ops_output")
+    assert any(n.startswith("compose_validate") for n in names) and any(n.startswith("compose_up_sandbox") for n in names), names
+    up = next(a for a in out.artifacts if a.kind == "ops_output" and a.name.startswith("compose_up_sandbox"))
+    text = Path(up.path).read_text(encoding="utf-8")
+    assert "PASSED" in text and "health healthy" in text and "teardown: complete" in text, text[:2000]
+    import subprocess
+
+    from hermclaw.infratools.compose import SANDBOX_LABEL
+
+    left = subprocess.run(["podman", "ps", "-aq", "--filter", f"label={SANDBOX_LABEL}"], capture_output=True, text=True, check=False)
+    assert left.stdout.strip() == "", "the compose sandbox is torn down"
+
+
 # ------------------------------------------------------------------------------------------- TS / TSX toolchain
 TSC = shutil.which("tsc")
 NODE = shutil.which("node")

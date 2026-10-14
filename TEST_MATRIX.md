@@ -19,7 +19,7 @@
 - [x] Python FastAPI Feature (37.1, `tests/e2e/`)
 - [x] SQLite Migration (37.2, `tests/e2e/`)
 - [x] PostgreSQL Migration (37.3, `tests/e2e/`)
-- [ ] Docker Compose Service (37.4 – nach P28)
+- [x] Docker Compose Service (37.4, `tests/e2e/`)
 - [x] React/CSS Navigation (37.5, `tests/e2e/`)
 - [x] PHP Backend Form (37.6, `tests/e2e/`)
 - [x] TypeScript Utility (37.7, `tests/e2e/`)

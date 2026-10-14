@@ -484,7 +484,7 @@ Legende: `[x]` erledigt mit Evidence · `[~]` erledigt, Live-Verifikation auf Zi
 - [x] 37.1 Python FastAPI Feature. — Evidence: tests/e2e/test_e2e_code_tasks.py::test_37_1_python_fastapi_feature (full runtime: triage, plan, scope, coder tools, real pytest acceptance, heavy review, commit, push, report)
 - [x] 37.2 SQLite Schema Migration. — Evidence: tests/e2e/test_e2e_code_tasks.py::test_37_2_sqlite_schema_migration (new migration + test, 001 untouched via diff evidence)
 - [x] 37.3 PostgreSQL Migration. — Evidence: tests/e2e/test_e2e_code_tasks.py::test_37_3_postgresql_migration (Alembic revision in a database step, db_migration_apply_sandbox upgrade/downgrade/upgrade in a throw-away PostgreSQL DB through the step executor, ops_output evidence, sandbox DB dropped; found BUG-089)
-- [ ] 37.4 Docker Compose Service. — Evidence: –
+- [x] 37.4 Docker Compose Service. — Evidence: tests/e2e/test_e2e_code_tasks.py::test_37_4_docker_compose_service (docker step: compose.yaml healthcheck + status page, compose_validate + compose_up_sandbox through the runtime's container tools on real podman-compose; service healthy on 127.0.0.1 ports, torn down; ops_output evidence)
 - [x] 37.5 React/CSS Navigation. — Evidence: tests/e2e/test_e2e_code_tasks.py::test_37_5_react_css_navigation (TSX via tsc + node --test, CSS presence)
 - [x] 37.6 PHP Backend Form. — Evidence: tests/e2e/test_e2e_code_tasks.py::test_37_6_php_backend_form (php -l + php test script)
 - [x] 37.7 TypeScript Utility. — Evidence: tests/e2e/test_e2e_code_tasks.py::test_37_7_typescript_utility (tsc + node --test; found BUG-042)
