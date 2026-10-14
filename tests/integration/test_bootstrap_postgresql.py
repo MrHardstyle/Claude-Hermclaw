@@ -332,3 +332,30 @@ def test_validate_config_removes_a_new_broken_dropin(tmp_path: Path, cluster: Cl
     finally:
         conf.write_text(good_conf, encoding="utf-8")
         shutil.chown(conf, "postgres", "postgres")
+
+
+GPG = """case "$FAKE_KEYS" in
+  missing) echo "gpg: can't open: No such file or directory" >&2; exit 2 ;;
+esac
+for fpr in $FAKE_KEYS; do
+  printf 'pub:-:4096:1:7FCC7D46ACCC4CF8:1308931425:::-:::scESC::::::23::0:\\n'
+  printf 'fpr:::::::::%s:\\n' "$fpr"
+done
+"""
+PGDG_FPR = "B97B0AFCAA1A47F044F244A07FCC7D46ACCC4CF8"
+
+
+def test_pgdg_keyring_fingerprint_check(tmp_path: Path) -> None:
+    """The PGDG keyring from Debian's postgresql-common must hold exactly the published signing key."""
+    bindir = tmp_path / "bin"
+    _fake_tool(bindir, "gpg", GPG)
+    keys = {
+        "pgdg": (PGDG_FPR, "PASS"),
+        "other-key": ("0123456789ABCDEF0123456789ABCDEF01234567", "FAIL"),
+        "extra-key": (f"{PGDG_FPR} 0123456789ABCDEF0123456789ABCDEF01234567", "FAIL"),
+        "missing": ("missing", "FAIL"),
+    }
+    cases: list[Case] = [
+        (f"pgdg-key-{name}", "postgresql", "pgdg_key.yml", {}, {"FAKE_KEYS": value}, want) for name, (value, want) in keys.items()
+    ]
+    _run_cases(tmp_path, cases, bindir=bindir)

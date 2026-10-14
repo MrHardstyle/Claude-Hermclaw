@@ -655,6 +655,12 @@ Noch keine.
 - Tatsächlich: `nodejs_min_version` was Vite's minimum 22.12.0; NodeSource has lagged security releases, so an outdated Node could pass
 - Fix: minimum 22.23.2 (last 22.x security release); the failure message points to `--only-upgrade` and the checksum-verified tarball fallback (INSTALLATION.md 5.3)
 
+### BUG-111 – PostgreSQL bootstrap: main cluster created with the system locale; PGDG key fetched at deploy time
+- Phase: P39 · Komponente: bootstrap/postgresql · Severity: P2 · blockierend: nein · Status: **behoben** (`tests/integration/test_bootstrap_postgresql.py::test_pgdg_keyring_fingerprint_check`; found by research R-027 P4/P7)
+- Reproduktion: fresh `.225`: installing `postgresql-17` runs its postinst, which creates `17/main` with the system locale before the role's `pg_createcluster --locale=C.UTF-8` (which then skips: config exists)
+- Tatsächlich: cluster locale depended on the installer's locale; the PGDG key was downloaded from postgresql.org without a fingerprint check
+- Fix: `create_main_cluster = false` in `/etc/postgresql-common/createcluster.conf` before the package install; the repository uses Debian's shipped keyring `/usr/share/postgresql-common/pgdg/apt.postgresql.org.gpg`, asserted to hold exactly fingerprint `B97B0AFC…4CF8`
+
 ## Template
 
 ### BUG-XXX – Titel

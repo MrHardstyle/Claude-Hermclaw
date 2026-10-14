@@ -1,3 +1,23 @@
+- name: Install postgresql-common and gnupg from Debian (PGDG keyring, cluster defaults)
+  ansible.builtin.apt:
+    name: [postgresql-common, gnupg]
+    state: present
+    install_recommends: false
+
+- name: Check the PGDG keyring fingerprint
+  ansible.builtin.import_tasks: pgdg_key.yml
+
+# postgresql-17's postinst would create 17/main with the system locale; the role creates it with C.UTF-8
+# (configure.yml) – research 20261014-027 P7
+- name: Do not create the main cluster automatically on package installation
+  ansible.builtin.lineinfile:
+    path: /etc/postgresql-common/createcluster.conf
+    regexp: '^#?\s*create_main_cluster\s*='
+    line: create_main_cluster = false
+    owner: root
+    group: root
+    mode: "0644"
+
 - name: Add the PGDG apt repository ({{ postgresql_pgdg_suite }})
   ansible.builtin.deb822_repository:
     name: pgdg
@@ -6,7 +26,7 @@
     suites: ["{{ postgresql_pgdg_suite }}"]
     components: [main]
     architectures: [amd64]
-    signed_by: "{{ postgresql_pgdg_key_url }}"
+    signed_by: "{{ postgresql_pgdg_keyring }}"
     state: present
   register: postgresql_repo
 

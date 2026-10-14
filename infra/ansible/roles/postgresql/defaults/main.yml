@@ -20,7 +20,10 @@ postgresql_pgvector_required_version: >-
 
 postgresql_pgdg_uri: https://apt.postgresql.org/pub/repos/apt
 postgresql_pgdg_suite: "{{ hermclaw_debian_codename }}-pgdg"
-postgresql_pgdg_key_url: https://www.postgresql.org/media/keys/ACCC4CF8.asc
+# PGDG signing key: the copy shipped by Debian's postgresql-common (signed via the Debian archive), checked against
+# the published fingerprint (research 20261014-027 P4) – no key download at deploy time.
+postgresql_pgdg_keyring: /usr/share/postgresql-common/pgdg/apt.postgresql.org.gpg
+postgresql_pgdg_key_fingerprint: B97B0AFCAA1A47F044F244A07FCC7D46ACCC4CF8
 
 postgresql_packages:
   - "postgresql-{{ postgresql_version }}"

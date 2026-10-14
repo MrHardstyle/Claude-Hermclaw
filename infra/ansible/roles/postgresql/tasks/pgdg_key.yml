@@ -1,0 +1,20 @@
+# The PGDG keyring must carry exactly the published PGDG signing key (research 20261014-027 P4).
+- name: Read the fingerprint of the PGDG keyring
+  ansible.builtin.command:
+    argv: [gpg, --batch, --show-keys, --with-colons, "{{ postgresql_pgdg_keyring }}"]
+  register: postgresql_pgdg_key
+  changed_when: false
+  failed_when: false
+  check_mode: false
+
+- name: Assert the PGDG signing key fingerprint
+  ansible.builtin.assert:
+    that:
+      - postgresql_pgdg_key.rc == 0
+      - >-
+        postgresql_pgdg_key.stdout_lines | select('match', '^fpr:') | map('split', ':') | map(attribute=9)
+        | list == [postgresql_pgdg_key_fingerprint]
+    fail_msg: >-
+      {{ postgresql_pgdg_keyring }} is missing or is not the PGDG signing key {{ postgresql_pgdg_key_fingerprint }}
+      (install postgresql-common from Debian; never trust a key whose fingerprint does not match).
+    quiet: true
