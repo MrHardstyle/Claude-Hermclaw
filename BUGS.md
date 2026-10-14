@@ -548,6 +548,13 @@ Noch keine.
 - Tatsächlich: `config_dir` defaulted to `REPO_ROOT/config`, which for a wheel install is `<venv>/lib/python3.13/site-packages/config` → "missing configuration file"
 - Fix: default is the checkout's `config/` only when it exists (examples), otherwise `/etc/hermclaw`
 
+### BUG-092 – `ollama` CLI not on PATH with the pinned tarball install (.224)
+- Phase: P39 · Komponente: bootstrap/ollama · Severity: P3 · blockierend: nein · Status: **behoben** (role task "Link the ollama CLI into /usr/local/bin"; `tests/integration/test_bootstrap_infra.py` lint/syntax/idempotency green)
+- Reproduktion: tarball install to `/opt/ollama/<version>` + `current` symlink, then `ollama ps` or `hermclaw-model-pull` (default `OLLAMA_BIN=ollama`)
+- Erwartet: the CLI works for operators and the pull script
+- Tatsächlich: `command not found` – only the unit used the absolute path
+- Fix: `/usr/local/bin/ollama` → `/opt/ollama/current/bin/ollama`
+
 ## Template
 
 ### BUG-XXX – Titel

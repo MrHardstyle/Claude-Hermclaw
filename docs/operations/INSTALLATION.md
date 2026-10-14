@@ -391,5 +391,108 @@ sudo -u hermclaw ssh -i /etc/hermclaw/ssh/id_ed25519 -o UserKnownHostsFile=/etc/
 
 ---
 
+## 6. Zugangsdaten und Schlüssel
+
+Alle Geheimnisse liegen als **verschlüsselte systemd-Credentials** in `/etc/credstore.encrypted/hermclaw-<name>`
+(verschlüsselt mit dem Host-Schlüssel bzw. TPM2, `systemd-creds`). Die Dienste bekommen sie über
+`LoadCredentialEncrypted=` und lesen sie aus `$CREDENTIALS_DIRECTORY`. Kein Geheimnis steht in einer
+Konfigurationsdatei, einer Umgebungsvariable, einem Log oder auf einer Kommandozeile. Werkzeug auf jedem Host:
+`/opt/hermclaw/bin/hermclaw-credential` (`set`, `generate`, `check`, `list`; Werte nur über stdin).
+
+| Credential | Host | Erzeugt von | Verwendet von |
+|---|---|---|---|
+| `api-admin-token` | .225 | Bootstrap (zufällig) | API: Admin-Token für die Erstanmeldung |
+| `litellm-master-key` | .225 | Bootstrap (zufällig) | LiteLLM-Proxy und Scheduler |
+| `worker-token-exec-222`, `worker-token-model-224` | .225 | Bootstrap (zufällig) | Scheduler/API (Signatur der Worker-Aufrufe) |
+| `worker-token` | .222, .224 | Bootstrap (Kopie vom Orchestrator) | Worker-Daemons |
+| `gitlab-token` | .225 | **Sie** (Schritt 6.1) | Scheduler: Merge Requests, geschützte Branches |
+
+### 6.1 GitLab vorbereiten (.226)
+
+1. Legen Sie in GitLab einen Bot-Benutzer an (z. B. `hermclaw-bot`) oder verwenden Sie einen
+   **Project/Group Access Token** mit Rolle *Developer* und den Scopes `api`, `read_repository`,
+   `write_repository`.
+2. Schützen Sie `main`, `master` und `release/*` (*Settings → Repository → Protected branches*). Hermclaw pusht
+   nie dorthin, sondern nur auf `hermclaw/*`-Job-Branches und öffnet Merge Requests.
+3. Hinterlegen Sie den **Deploy-Key** des Orchestrators mit Schreibrecht (*Settings → Repository → Deploy keys*,
+   „Grant write permissions“):
+
+   ```bash
+   sudo cat /etc/hermclaw/ssh/id_ed25519.pub          # auf .225
+   ```
+
+4. Token auf .225 speichern (Eingabe wird nicht angezeigt):
+
+   ```bash
+   sudo /opt/hermclaw/bin/hermclaw-credential set gitlab-token
+   sudo /opt/hermclaw/bin/hermclaw-credential check gitlab-token      # OK gitlab-token
+   ```
+
+### 6.2 Backup-Schlüssel auf Terra (.60)
+
+Hängen Sie den öffentlichen Backup-Schlüssel des Orchestrators an die `authorized_keys` des Backup-Benutzers auf
+Terra an, eingeschränkt auf den Orchestrator:
+
+```bash
+sudo cat /etc/hermclaw/ssh/backup_ed25519.pub        # auf .225
+# auf Terra (Unraid, als root) in /root/.ssh/authorized_keys – eine Zeile:
+restrict,from="192.168.178.225" ssh-ed25519 AAAAC3Nz... hermclaw-backup
+```
+
+Unraid: `/root/.ssh` liegt im RAM. Damit der Schlüssel einen Neustart übersteht, legen Sie ihn zusätzlich unter
+`/boot/config/ssh/root/authorized_keys` ab (bzw. in der Unraid-Oberfläche: *Users → root → SSH authorized keys*).
+Das Backup selbst richten Sie in Kapitel 11 ein.
+
+### 6.3 Token rotieren
+
+```bash
+# Worker-Token (auf .225), danach Worker-Play erneut, dann Dienste neu starten
+sudo /opt/hermclaw/bin/hermclaw-credential generate worker-token-exec-222 --force
+ssh admin@192.168.178.222 sudo rm /etc/credstore.encrypted/hermclaw-worker-token
+ansible-playbook -i inventory/hosts.yml playbooks/bootstrap.yml --limit execution_workers -K
+sudo systemctl restart hermclaw-api hermclaw-scheduler        # .225
+# GitLab-Token: neuen Token in GitLab erzeugen, dann
+sudo /opt/hermclaw/bin/hermclaw-credential set gitlab-token --force && sudo systemctl restart hermclaw-scheduler
+```
+
+---
+
+## 7. Modelle laden (.224)
+
+Der Model Worker braucht diese sechs Modelle (≈ 70 GB). Die Modellrollen sind fest (Kapitel 1.2):
+
+| Tag | Rolle | Download | min. Ollama |
+|---|---|---|---|
+| `gemma4:26b` | Planner | ≈ 18 GB | 0.20.0 |
+| `gemma4:12b` | Planner-Fallback | ≈ 7,6 GB | 0.30.3 |
+| `qwen3-coder:30b` | Implementation Worker | ≈ 19 GB | – |
+| `qwen3.8:27b` | Heavy Reviewer | ≈ 18 GB | **0.32.12** |
+| `qwen3:8b` | Fast Router | 5,2 GB | – |
+| `embeddinggemma:300m` | Embedding (768 Dim., 2048 Token Kontext) | ≈ 0,6 GB | 0.11.10 |
+
+Das Deployment (Kapitel 8) lädt sie automatisch mit `hermclaw-model-pull`. Manuell, z. B. vorab, während Sie
+Kapitel 8 vorbereiten:
+
+```bash
+# auf .224 (aus dem Repository: scripts/ops/hermclaw-model-pull; nach dem Deployment unter /opt/hermclaw/bin)
+df -h /var/lib/ollama                              # >= 80 GB frei
+sudo -u ollama /opt/hermclaw/bin/hermclaw-model-pull --dry-run
+sudo -u ollama /opt/hermclaw/bin/hermclaw-model-pull
+#   prüft jedes Modell mit `ollama show`; fehlt ein Rollenmodell: Exit 1
+/opt/ollama/current/bin/ollama list
+```
+
+Gleichwertig ohne Skript: `ollama pull gemma4:26b`, `ollama pull gemma4:12b`, `ollama pull qwen3-coder:30b`,
+`ollama pull qwen3.8:27b`, `ollama pull qwen3:8b`, `ollama pull embeddinggemma:300m`.
+
+Ohne Planner-Fallback (spart 7,6 GB): `hermclaw-model-pull --skip-fallback-planner` und in `models.yaml` das
+Profil `planner-gemma-fallback` auf `enabled: false` setzen.
+
+Später auf EmbeddingGemma 2 wechseln (sobald Ollama es unter Linux/CUDA ausführt): `hermclaw-model-pull
+--embedding embeddinggemma-2:740m`. Das Skript fällt automatisch auf `embeddinggemma:300m` zurück und nennt die
+nötige Änderung in `models.yaml` (Kapitel 9.2).
+
+---
+
 <!-- INSTALL-PART-2: Kapitel 6–14 (Zugangsdaten, Modelle, Deployment, Konfiguration, Inbetriebnahme, Backup,
 Live-Abnahme, Betrieb, Fehlersuche) – wird nach P32/P33 vervollständigt. -->

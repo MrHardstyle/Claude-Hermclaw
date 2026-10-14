@@ -147,6 +147,14 @@
         state: link
       notify: Restart ollama
 
+    # the CLI on PATH for operators and hermclaw-model-pull (ollama pull/list/ps talk to the local server)
+    - name: Link the ollama CLI into /usr/local/bin
+      ansible.builtin.file:
+        src: "{{ ollama_install_root }}/current/bin/ollama"
+        dest: /usr/local/bin/ollama
+        state: link
+        force: true
+
 - name: Install with the official script
   when:
     - ollama_install_method == 'script'
