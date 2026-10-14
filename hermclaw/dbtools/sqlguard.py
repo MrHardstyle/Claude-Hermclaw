@@ -136,7 +136,14 @@ DENIED_FUNCTION_PREFIXES = (
     "pg_replication_origin_",
     "pg_logical_slot_",
     "pg_replication_slot_advance",
+    "pg_sync_replication_slots",
+    "pg_stat_reset",
+    "brin_summarize_",
+    "brin_desummarize_",
+    "gin_clean_pending_list",
 )
+# statistics/state resets of extensions (pg_stat_statements_reset, pg_stat_reset_shared …)
+_RESET_RE = re.compile(r"(?:^|_)reset(?:_|$)")
 # read-only SQLite PRAGMAs (no '=' assignment allowed)
 SQLITE_READ_PRAGMAS = frozenset(
     {
@@ -388,7 +395,7 @@ def _scan_forbidden(tokens: list[Token], dialect: Dialect) -> None:
                 raise reject("row-locking clauses (FOR UPDATE/SHARE) are not allowed in a read-only query")
         if tok.kind in ("word", "qident") and nxt is not None and nxt.kind == "punct" and nxt.value == "(":
             name = tok.value.lower()
-            if name in DENIED_FUNCTIONS or name.startswith(DENIED_FUNCTION_PREFIXES):
+            if name in DENIED_FUNCTIONS or name.startswith(DENIED_FUNCTION_PREFIXES) or _RESET_RE.search(name):
                 raise reject(f"function '{tok.value[:60]}' is not allowed in a read-only query")
 
 
