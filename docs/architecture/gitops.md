@@ -228,7 +228,7 @@ interrupted rebase/merge found later is reported as `WORKSPACE_STATE` and cleane
 
 - `verification_runs` has no workspace/tree hash column; coverage is checked by job/step, freshness and
   `changed_files`. A content hash would make the binding exact (shared schema change, not done here).
-- Registering `file://`/local-path repositories is allowed (tests, local mirrors); registration is an operator
-  action and should be restricted at the API layer in production.
+- Registering `file://`/local-path repositories is allowed (tests, local mirrors); through the API it needs the
+  `admin` scope (`hermclaw/api/jobs.py`), other URLs the `control` scope.
 - `create_workspace` returns an existing active workspace of the job/repository even if another `base_branch` is
   requested.
