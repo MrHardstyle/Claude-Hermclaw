@@ -210,7 +210,7 @@ orchestrator to the backup user's `authorized_keys` on Terra, prefixed with
 * Every task is idempotent; fix the cause and rerun the same command.
 * nginx / PostgreSQL configuration errors are rolled back automatically and nothing is reloaded.
 * Worker play fails with "bootstrap the orchestrator first": run step 3, then rerun.
-* Rotating a worker token: `sudo /opt/hermclaw/bin/hermclaw-credential generate worker-token-<id> --force`
+* Rotating a worker token – run `sudo /opt/hermclaw/bin/hermclaw-credential generate worker-token-<id> --force`
   on the orchestrator, `sudo rm /etc/credstore.encrypted/hermclaw-worker-token` on the worker, rerun the worker play,
   then restart `hermclaw-api`/`hermclaw-scheduler` and the worker service (credentials are read at start).
 * Units stay disabled until the deployment phase (`systemd_skeleton_enable_units: true`).

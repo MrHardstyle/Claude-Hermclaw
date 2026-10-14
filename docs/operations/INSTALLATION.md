@@ -451,7 +451,7 @@ sudo /opt/hermclaw/bin/hermclaw-credential generate worker-token-exec-222 --forc
 ssh admin@192.168.178.222 sudo rm /etc/credstore.encrypted/hermclaw-worker-token
 ansible-playbook -i inventory/hosts.yml playbooks/bootstrap.yml --limit execution_workers -K
 sudo systemctl restart hermclaw-api hermclaw-scheduler        # .225
-# GitLab-Token: neuen Token in GitLab erzeugen, dann
+# GitLab: in GitLab ein neues Access Token erzeugen, dann
 sudo /opt/hermclaw/bin/hermclaw-credential set gitlab-token --force && sudo systemctl restart hermclaw-scheduler
 ```
 

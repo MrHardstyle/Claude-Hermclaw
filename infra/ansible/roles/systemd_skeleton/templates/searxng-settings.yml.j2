@@ -1,11 +1,11 @@
-# Managed by Hermclaw – SearXNG settings (research 20261008-023). The secret key comes from
-# the podman secret {{ systemd_skeleton_searxng_secret_name }} (SEARXNG_SECRET), never from this file.
+# Managed by Hermclaw – SearXNG settings (research 20261008-023, 20261014-027 S8/S9). The secret key comes
+# only from the podman secret {{ systemd_skeleton_searxng_secret_name }} (SEARXNG_SECRET); this file sets none, so
+# without the secret SearXNG keeps its shipped default and refuses to start instead of running with a known key.
 use_default_settings: true
 general:
   instance_name: hermclaw-research
   enable_metrics: false
 server:
-  secret_key: "set-by-SEARXNG_SECRET"
   limiter: false
   public_instance: false
   image_proxy: false
