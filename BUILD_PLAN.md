@@ -510,14 +510,14 @@ Legende: `[x]` erledigt mit Evidence · `[~]` erledigt, Live-Verifikation auf Zi
 
 ## P39 – FULL BUG BASH / HARDENING
 
-- [ ] 39.1 `BUGS.md` vollständig reviewen. — Evidence: –
-- [ ] 39.2 jeden offenen Bug reproduzieren. — Evidence: –
-- [ ] 39.3 stale Bugs schließen mit Beleg. — Evidence: –
-- [ ] 39.4 P0 fixen. — Evidence: –
-- [ ] 39.5 P1 fixen. — Evidence: –
-- [ ] 39.6 P2 fixen. — Evidence: –
-- [ ] 39.7 P3 soweit reproduzierbar und sinnvoll fixen. — Evidence: –
-- [ ] 39.8 für jeden Fix Regressiontest. — Evidence: –
+- [x] 39.1 `BUGS.md` vollständig reviewen. — Evidence: BUGS.md reviewed 2026-10-14: 111 entries (BUG-001..BUG-111) + BLOCKER-001; every entry has phase, component, severity, repro/actual, fix and a regression-test reference
+- [x] 39.2 jeden offenen Bug reproduzieren. — Evidence: no open bugs: each fixed bug is reproduced by its regression test in the matrix (tests/*), which fails without the fix
+- [x] 39.3 stale Bugs schließen mit Beleg. — Evidence: no stale bugs: all 111 entries closed as behoben with the regression test as evidence; BLOCKER-001 stays external (live steps [~])
+- [x] 39.4 P0 fixen. — Evidence: P0: 2/2 fixed – BUG-001 CommandRequest.workspace path traversal on the execution daemon (workers tests) and BUG-009 runtime git executing workspace-controlled config (gitops tests: hardened git runner env/config allow-list)
+- [x] 39.5 P1 fixen. — Evidence: P1: 19/19 fixed with regression tests (e.g. BUG-081 SSH approvals, BUG-082 scheduler start, BUG-084 sandbox env, BUG-085 PostgreSQL validation, BUG-108 sandbox image gate)
+- [x] 39.6 P2 fixen. — Evidence: P2: 47/47 fixed with regression tests (e.g. BUG-089 lexical phrases, BUG-090 doctor config files, BUG-093 secret scan, BUG-097 LiteLLM auth, BUG-111 PostgreSQL bootstrap)
+- [x] 39.7 P3 soweit reproduzierbar und sinnvoll fixen. — Evidence: P3: 40/40 fixed (and P4: 3/3) with regression tests
+- [x] 39.8 für jeden Fix Regressiontest. — Evidence: every fix has a named regression test (BUGS.md Status column); new in this round: test_sandbox_runtime_env, test_query_phrases_are_single_line_and_ignore_apostrophes, test_production_refuses_example_configuration_and_flags_placeholder_macs, test_images_that_defeat_the_sandbox_are_refused, test_pgdg_keyring_fingerprint_check, test_unavailable_grammar_is_not_retried_per_file
 - [ ] 39.9 komplette Testmatrix neu. — Evidence: –
 - [ ] 39.10 Failure Tests neu. — Evidence: –
 - [ ] 39.11 Recovery neu. — Evidence: –

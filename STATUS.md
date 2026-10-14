@@ -50,11 +50,11 @@
 | P36 – Security Hardening | 8 | 0 | 0 |
 | P37 – Generalization E2E | 15 | 0 | 0 |
 | P38 – Performance / Load | 8 | 0 | 0 |
-| P39 – FULL BUG BASH / HARDENING | 0 | 0 | 13 |
+| P39 – FULL BUG BASH / HARDENING | 8 | 0 | 5 |
 | P40 – SOAK TEST | 6 | 3 | 0 |
 | P41 – RELEASE CANDIDATE | 0 | 0 | 9 |
 | P42 – CUTOVER PLAN | 2 | 4 | 0 |
-| **Summe** | **326** | **66** | **32** |
+| **Summe** | **334** | **66** | **24** |
 
 ## Deploymentstatus pro Host
 | Host | Rolle | Status |
