@@ -29,7 +29,7 @@ from tests.integration.test_models_support import MASTER_KEY, FakeOllama, litell
 
 pytestmark = pytest.mark.integration
 
-INSTALLED = ["qwen3:8b", "gemma4:26b", "gemma4:12b", "qwen3-coder:30b", "qwen3.8:27b", "embeddinggemma-2:740m"]
+INSTALLED = ["qwen3:8b", "gemma4:26b", "gemma4:12b", "qwen3-coder:30b", "qwen3.8:27b", "embeddinggemma:300m"]
 
 
 class Answer(BaseModel):
@@ -166,7 +166,7 @@ async def test_embeddings_through_proxy(stack: dict[str, Any]) -> None:
     assert len(vectors) == 3 and all(len(v) == 8 for v in vectors)
     assert vectors[0] != vectors[1]
     body = fake.bodies("/api/embed")[-1]
-    assert body["model"] == "embeddinggemma-2:740m"
+    assert body["model"] == "embeddinggemma:300m"
     assert body["input"] == ["alpha", "beta", "gamma"]
     assert body["options"]["num_ctx"] == 2048
     assert body["keep_alive"] == "10m"

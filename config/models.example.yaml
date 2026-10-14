@@ -71,8 +71,11 @@ profiles:
   - alias: embedding
     role: embedding
     kind: embedding
-    model: embeddinggemma-2:740m
-    context_tokens: 8192
+    # EmbeddingGemma (300M, 768 dim, 2048-token context). EmbeddingGemma 2 (embeddinggemma-2:740m) is MLX-only in
+    # Ollama and does not run on Linux/CUDA as of 2026-10-14 (research 20261014-026, ollama issue #18825); switch to
+    # it once it does – same 768 dimensions, chunks are re-embedded automatically (embedding_model per chunk).
+    model: embeddinggemma:300m
+    context_tokens: 2048
     max_output_tokens: 0
     timeout_seconds: 120
     priority: 20

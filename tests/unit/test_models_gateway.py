@@ -93,7 +93,7 @@ class Plan(BaseModel):
 def test_protocol_conformance(script: Script) -> None:
     gw = make(script)
     assert isinstance(gw, ChatModel) and isinstance(gw, EmbeddingModel)
-    assert gw.dimensions == 8 and gw.model_name == "embeddinggemma-2:740m"
+    assert gw.dimensions == 8 and gw.model_name == "embeddinggemma:300m"
 
 
 @pytest.mark.parametrize(

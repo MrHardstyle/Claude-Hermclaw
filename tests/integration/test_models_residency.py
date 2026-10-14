@@ -21,7 +21,7 @@ from tests.integration.test_models_support import MASTER_KEY, FakeLiteLLM, FakeO
 
 pytestmark = pytest.mark.integration
 
-INSTALLED = ["qwen3:8b", "gemma4:26b", "gemma4:12b", "qwen3-coder:30b", "qwen3.8:27b", "embeddinggemma-2:740m"]
+INSTALLED = ["qwen3:8b", "gemma4:26b", "gemma4:12b", "qwen3-coder:30b", "qwen3.8:27b", "embeddinggemma:300m"]
 
 
 @pytest.fixture
@@ -38,7 +38,7 @@ async def events(sm: Any, job_id: uuid.UUID) -> list[Event]:
 
 async def test_ensure_loaded_switches_exclusive_group(ollama: tuple[FakeOllama, str], sessionmaker: Any) -> None:
     fake, url = ollama
-    fake.loaded = {"gemma4:26b": 32768, "qwen3:8b": 16384, "embeddinggemma-2:740m": 2048}
+    fake.loaded = {"gemma4:26b": 32768, "qwen3:8b": 16384, "embeddinggemma:300m": 2048}
     client = OllamaHostClient(url, poll_seconds=0.05)
     assert isinstance(client, ModelHostClient)
     res = ModelResidency(models_config(), client, session_factory=sessionmaker, keep_alive="30m")
@@ -46,7 +46,7 @@ async def test_ensure_loaded_switches_exclusive_group(ollama: tuple[FakeOllama, 
     lease = uuid.uuid4()
     result = await res.ensure_loaded("coder-main", lease_id=lease, job_id=job)
     # the other large-group member is gone, small-group models stay resident
-    assert set(fake.loaded) == {"qwen3-coder:30b", "qwen3:8b", "embeddinggemma-2:740m"}
+    assert set(fake.loaded) == {"qwen3-coder:30b", "qwen3:8b", "embeddinggemma:300m"}
     assert fake.loaded["qwen3-coder:30b"] == 32768
     assert result.unloaded == ["gemma4:26b"] and not result.already_loaded
     assert result.context_length == 32768 and result.context_verified
@@ -119,7 +119,7 @@ async def test_load_failure_and_embedding_load(ollama: tuple[FakeOllama, str]) -
     out = await res.ensure_loaded("embedding")  # /api/generate rejected -> /api/embed load
     assert out.context_length == 2048
     assert fake.bodies("/api/embed")[-1] == {
-        "model": "embeddinggemma-2:740m",
+        "model": "embeddinggemma:300m",
         "input": [],
         "keep_alive": "10m",
         "options": {"num_ctx": 2048},
@@ -132,8 +132,8 @@ async def test_unload_and_unload_group(ollama: tuple[FakeOllama, str], sessionma
     res = ModelResidency(models_config(), OllamaHostClient(url, poll_seconds=0.05), session_factory=sessionmaker)
     assert await res.unload("planner-gemma", reason="video job needs the GPU") is True
     assert await res.unload("planner-gemma") is False
-    fake.loaded = {"gemma4:12b": 32768, "qwen3:8b": 16384, "embeddinggemma-2:740m": 2048}
-    assert sorted(await res.unload_group("small-model-224")) == ["embeddinggemma-2:740m", "qwen3:8b"]
+    fake.loaded = {"gemma4:12b": 32768, "qwen3:8b": 16384, "embeddinggemma:300m": 2048}
+    assert sorted(await res.unload_group("small-model-224")) == ["embeddinggemma:300m", "qwen3:8b"]
     assert set(fake.loaded) == {"gemma4:12b"}
 
 
