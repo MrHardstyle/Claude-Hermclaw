@@ -267,6 +267,15 @@ def test_release_layout_metadata_and_checksums(releases: Releases) -> None:
     for script in ("hermclaw-backup", "hermclaw-build-sandbox-images", "hermclaw-model-pull", "hermclaw-ssh-gate"):
         assert os.access(rel / "scripts" / "ops" / script, os.X_OK), script
     assert (rel / "constraints.txt").is_file() and (rel / "litellm-constraints.txt").is_file()
+    # tree-sitter grammars (research 027 Y6): the languages the runtime parses, for the locked language pack
+    from hermclaw.repo_intelligence.symbols import _TS_LANGS
+
+    pins = dict(ln.split("==", 1) for ln in (rel / "constraints.txt").read_text(encoding="utf-8").splitlines())
+    assert meta["tree_sitter"] == {
+        "package_version": pins["tree-sitter-language-pack"],
+        "languages": sorted(set(_TS_LANGS.values())),
+        "cache_dir": "tree-sitter",
+    }
 
 
 @pytest.mark.parametrize("payload", ["runtime", "litellm"])
@@ -313,6 +322,13 @@ def test_wheelhouse_payloads_are_hash_locked_for_cpython_313(releases: Releases,
             encoding="utf-8"
         )
         assert sorted(p.name for p in (tmp_path / "sandbox-images").iterdir() if p.is_dir()) == ["generic", "node", "php", "python"]
+        ts = meta["tree_sitter"]
+        assert isinstance(ts, dict)
+        grammars = tmp_path / str(ts["cache_dir"]) / "tree-sitter-language-pack" / f"v{ts['package_version']}"
+        shipped = sorted(str(p.relative_to(grammars)) for p in grammars.rglob("*") if p.is_file())
+        assert shipped == ["libs/" + f"libtree_sitter_{lang}.so" for lang in ts["languages"]] + ["manifest.json"], (
+            "only the grammars and their manifest (no 23 MB download bundle, no lock file)"
+        )
     else:
         assert any(n.startswith("litellm-") for n in wheels) and not any(
             n.rsplit("/", 1)[-1] == "litellm_init.pth" for w in wheels.values() for n in zipfile.ZipFile(w).namelist()
@@ -370,6 +386,15 @@ print("python", sys.version.split()[0])
 ' {" ".join(meta["entry_points"])}
 HERMCLAW_CONFIG_DIR=/release/config /opt/hermclaw/venv-{V1}/bin/hermclaw config-check > /tmp/check.json
 python3 -c 'import json; d = json.load(open("/tmp/check.json")); print("config", d["version"], len(d["hosts"]), sorted(d["model_profiles"]))'
+# the shipped grammars serve the structure index offline, read-only, for an unprivileged service user
+chmod -R a-w /opt/payload/tree-sitter
+setpriv --reuid=65534 --regid=65534 --clear-groups env HOME=/nonexistent \
+    TREE_SITTER_LANGUAGE_PACK_CACHE_DIR=/opt/payload/tree-sitter /opt/hermclaw/venv-{V1}/bin/python -I -c '
+from hermclaw.repo_intelligence.symbols import _parser, _TS_LANGS
+for lang in sorted(set(_TS_LANGS.values())):
+    root = _parser(lang).parse(b"<?php function f() {{}}" if lang == "php" else b"function f() {{}}").root_node
+    print("grammar", lang, root.type, root.has_error)
+'
 """
     res = _podman("run", "--rm", "--name", name, "--network=none", "-v", f"{rel}:/release:ro", TRIXIE_PY, "bash", "-c", script)
     assert res.returncode == 0, res.stdout[-3000:] + res.stderr[-3000:]
@@ -381,6 +406,8 @@ python3 -c 'import json; d = json.load(open("/tmp/check.json")); print("config",
     assert roles and roles[1] == V1 and int(roles[2]) >= 6
     for alias in ("planner-gemma", "coder-main", "heavy-review", "fast-router", "embedding"):
         assert alias in roles[3]
+    grammars = re.findall(r"^grammar (\S+) (\S+) (\S+)$", out, re.M)
+    assert grammars == [(lang, "program", "False") for lang in meta["tree_sitter"]["languages"]], out[-2000:]
 
 
 def test_release_migrations_upgrade_and_downgrade_on_postgresql(releases: Releases, tmp_path: Path) -> None:
@@ -495,4 +522,21 @@ def test_build_refuses_a_release_whose_entry_points_cannot_load(releases: Releas
     )
     assert res.returncode == 1, res.stderr[-3000:]
     assert "hermclaw-broken = hermclaw.cli:nope" in res.stderr and "entry point check failed" in res.stderr
+    assert not list((tmp_path / "dist").glob("release-*")), "nothing is published"
+
+
+def test_offline_build_refuses_a_wheel_mirror_without_the_grammars(releases: Releases, tmp_path: Path, ui_bundle: Path) -> None:
+    """An air-gapped build cannot fetch the tree-sitter grammars: it stops instead of shipping a release that would
+    download native code on the hosts at run time (research 027 Y6)."""
+    src = copy_source(tmp_path / "src")
+    if broken_entry_points(src):
+        fix_entry_points(src, broken_entry_points(src))
+    mirror = tmp_path / "wheels"
+    mirror.mkdir()
+    for wheel in releases.wheel_cache.glob("*.whl"):
+        (mirror / wheel.name).symlink_to(wheel)
+    assert (releases.wheel_cache / "tree-sitter-language-pack").is_dir(), "the --wheel-cache build stored the grammars"
+    res = build("--source", str(src), "--out", str(tmp_path / "dist"), "--offline-from", str(mirror), "--ui-dist", str(ui_bundle))
+    assert res.returncode == 1, res.stderr[-3000:]
+    assert "offline build: no tree-sitter grammars tree-sitter-language-pack/v" in res.stderr, res.stderr[-3000:]
     assert not list((tmp_path / "dist").glob("release-*")), "nothing is published"

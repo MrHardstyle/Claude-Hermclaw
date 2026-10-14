@@ -30,10 +30,12 @@ Qwen3.8 27B is the heavy reviewer, Qwen3 8B is the fast router, and `embeddingge
 dist/release-<version>/
   release.json                         # version, python {version 3.13, abi cp313, platforms}, alembic_head,
                                        # entry_points, sandbox_toolchains, runtime {payload, lock_sha256},
-                                       # litellm {version, requirements, venv_name, payload}, ui {payload, source}
+                                       # litellm {version, requirements, venv_name, payload}, ui {payload, source},
+                                       # tree_sitter {package_version, languages, cache_dir}
   hermclaw-runtime-<v>.tar             # wheelhouse/ (hermclaw wheel + every dependency, cp313/manylinux<=2_41),
                                        # requirements.lock (--require-hashes), constraints.txt, sandbox-images/,
-                                       # release.json, SHA256SUMS (wheels are compressed already: plain tar)
+                                       # tree-sitter/ (grammars), release.json, SHA256SUMS (plain tar: wheels
+                                       # are compressed already)
   hermclaw-litellm-<v>.tar             # LiteLLM wheelhouse + lock, from the `litellm-proxy` extra of pyproject.toml
   hermclaw-ui-<v>.tar.gz               # static UI build (npm ci && npm run build, or --ui-dist), CSP-checked
   config/*.example.yaml                # what the configuration is rendered from (read on the control node)
@@ -58,10 +60,15 @@ The build runs these steps:
    * the Alembic head
    * `hermclaw config-check` of the shipped examples
    * a dry-run install of the LiteLLM lock
-7. Check the UI bundle: the HTML must have no inline `<script>`/`<style>`, no `style=` and no `on*=`, because the
+7. Ship the tree-sitter grammars. `tree-sitter-language-pack` >= 1.0 downloads its grammars on first use
+   (research 20261014-027 Y6), so the build fetches the languages the runtime parses with
+   (`hermclaw.repo_intelligence.symbols`) for the locked package version. It copies only the `.so` files and the
+   manifest into `tree-sitter/`, checks that this copy alone parses each language without writing anything, and
+   stores the grammars in the `--wheel-cache` for offline builds.
+8. Check the UI bundle: the HTML must have no inline `<script>`/`<style>`, no `style=` and no `on*=`, because the
    nginx CSP forbids them.
-8. Pack reproducible tars (`--sort=name --owner=0 --mtime=@0`) and write the checksums.
-9. Publish by renaming the staging directory.
+9. Pack reproducible tars (`--sort=name --owner=0 --mtime=@0`) and write the checksums.
+10. Publish by renaming the staging directory.
 
 `--offline-from DIR` (repeatable) builds without network access, from a wheel cache that `--wheel-cache DIR` filled.
 The exit codes are 0 (ok), 1 (build or self-test failure), 2 (usage) and 69 (missing tool).
@@ -82,7 +89,8 @@ reasons:
   /opt/hermclaw/venv -> venv-<v>                       # active release (relative symlink, atomic switch)
   /opt/hermclaw/venv-<v>/                              # root-owned, world-readable, marker .hermclaw-release (JSON)
   /opt/hermclaw/releases/<v>/                          # unpacked runtime payload, marker .hermclaw-unpacked
-  /opt/hermclaw/current -> releases/<v>                # payload of the active release (sandbox-images, examples)
+  /opt/hermclaw/current -> releases/<v>                # payload of the active release (sandbox-images, tree-sitter
+                                                       # grammars = TREE_SITTER_LANGUAGE_PACK_CACHE_DIR in hermclaw.env)
   /opt/hermclaw/bin/hermclaw-*                         # operator scripts of the release (scripts/ops)
   /etc/hermclaw/*.yaml                                 # rendered + validated configuration
   /etc/hermclaw/deploy-staging/                        # validation copy (config-check before install)
@@ -201,7 +209,8 @@ It also asserts that `migrate` and `token-create` ran exactly once (fake `system
 * **Release files.** Venvs and payloads are owned by `root` and read-only for the service users (`u=rwX,go=rX`), so
   a compromised service cannot modify its own code. Only `hermclaw.env` and the credentials are private.
 * **Supply chain.** Installs are hash-locked and offline (`--require-hashes --only-binary=:all:`), and both the
-  release and the payloads carry per-file `SHA256SUMS`. The LiteLLM lock is checked for `litellm_init.pth`, and the
+  release and the payloads carry per-file `SHA256SUMS`. The tree-sitter grammars (native code) are part of the
+  checksummed payload, so no host downloads code at run time. The LiteLLM lock is checked for `litellm_init.pth`, and the
   LiteLLM unit sets `LITELLM_LOCAL_MODEL_COST_MAP=True` (no fetch at start) and `DISABLE_ADMIN_UI=True`.
 * **nginx.** The CSP is `default-src 'none'` with only `'self'` (plus `blob:` for images and media) allowed per
   type, `frame-ancestors 'none'` and no inline script or style (enforced at build time). The site also sends

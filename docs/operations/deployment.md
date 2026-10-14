@@ -93,6 +93,10 @@ What it does and refuses:
   **every console entry point loads** (the units start them), the Alembic head is read, and `hermclaw config-check`
   validates the shipped examples. The LiteLLM lock must resolve offline, and its wheels must not contain the
   `litellm_init.pth` implant (GHSA-5mg7-485q-xm76);
+* ships the tree-sitter grammars the structure index parses with (JavaScript, TypeScript, TSX, PHP) for the
+  locked `tree-sitter-language-pack`, which would otherwise download them on first use (research 027 Y6). They are
+  fetched online or taken from `--offline-from` (a `--wheel-cache` build stores them there). On the hosts,
+  `TREE_SITTER_LANGUAGE_PACK_CACHE_DIR=/opt/hermclaw/current/tree-sitter` (`hermclaw.env`) points at them;
 * builds the UI (`npm ci && npm run build` from `ui/package-lock.json`). It refuses an `index.html` with inline
   script or style, which the CSP would block;
 * writes `release.json`, the payloads `hermclaw-runtime-<v>.tar`, `hermclaw-litellm-<v>.tar` and

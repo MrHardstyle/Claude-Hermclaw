@@ -200,7 +200,10 @@ def postgres() -> Iterator[Postgres | None]:
         return
     opts = f"-k {sock} -c listen_addresses='' -p 5432 -c fsync=off -c full_page_writes=off"
     start = _run([*as_pg, str(PG_BIN / "pg_ctl"), "-D", str(data), "-o", opts, "-l", str(logs / "pg.log"), "-w", "start"], timeout=120)
-    assert start.returncode == 0, start.stdout + start.stderr
+    if start.returncode != 0:
+        log = (logs / "pg.log").read_text(encoding="utf-8", errors="replace") if (logs / "pg.log").exists() else ""
+        shutil.rmtree(root, ignore_errors=True)
+        pytest.fail(f"private PostgreSQL did not start: {start.stdout}{start.stderr}{log[-2000:]}")
     pg = Postgres(root, sock)
     try:
         pg.sql("CREATE ROLE hermclaw LOGIN", db="postgres")
@@ -534,6 +537,18 @@ def test_site_converges_bootstrap_and_deployment(deployment: dict[str, Any]) -> 
     assert a.out(f"stat -c '%U %a' /opt/hermclaw/venv-{V1} /opt/hermclaw/venv-{V1}/bin/hermclaw").split() == ["root", "755", "root", "755"]
     assert _link(a, "/opt/hermclaw-exec/venv") == f"venv-{V1}", "execution worker"
     a.out(f"test -f /opt/hermclaw/releases/{V1}/.hermclaw-unpacked && test -d /opt/hermclaw/releases/{V1}/sandbox-images/python")
+    # tree-sitter grammars of the release: the services' environment points at them, and they load as the service
+    # user without network (the container has none) and without writing (research 027 Y6)
+    grammars = a.out(
+        "set -e; ts=$(sed -n 's/^TREE_SITTER_LANGUAGE_PACK_CACHE_DIR=//p' /etc/hermclaw/hermclaw.env); echo \"dir $ts\"; "
+        "runuser -u hermclaw -- env HOME=/nonexistent TREE_SITTER_LANGUAGE_PACK_CACHE_DIR=$ts /opt/hermclaw/venv/bin/python -I -c '"
+        "from hermclaw.repo_intelligence.symbols import _parser, _TS_LANGS\n"
+        "for lang in sorted(set(_TS_LANGS.values())):\n"
+        '    root = _parser(lang).parse(b"<?php function f() {}" if lang == "php" else b"function f() {}").root_node\n'
+        "    print(lang, root.type, root.has_error)'"
+    ).splitlines()
+    assert grammars[0] == "dir /opt/hermclaw/current/tree-sitter", grammars
+    assert grammars[1:] == [f"{lang} program False" for lang in deployment["releases"].meta(V1)["tree_sitter"]["languages"]]
 
     # configuration: rendered, validated and owned by the deployment (real MAC addresses from the inventory)
     modes = a.out("stat -c '%n %U %G %a' /etc/hermclaw/{hosts,models,policies,capabilities,logging,databases,litellm}.yaml").splitlines()

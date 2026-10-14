@@ -14,7 +14,8 @@
 #                       constraints.txt of an earlier release)
 #   --offline-from DIR  resolve every wheel (runtime, LiteLLM, setuptools/wheel for the build) from DIR only,
 #                       without an index (air-gapped builds; repeatable). Default: the configured package index.
-#   --wheel-cache DIR   copy every wheel this build used into DIR (a local mirror for later --offline-from builds)
+#   --wheel-cache DIR   copy every wheel this build used into DIR (a local mirror for later --offline-from builds),
+#                       together with the tree-sitter grammars (DIR/tree-sitter-language-pack/v<version>/)
 #   --ui-dist DIR       use an already built UI bundle (index.html + assets/) instead of npm ci && npm run build
 #   --force             replace an existing DIR/release-<version>/
 #
@@ -23,7 +24,8 @@
 #                                    `litellm-proxy` extra of pyproject.toml), payload names and lock checksums
 #   hermclaw-runtime-<v>.tar         wheelhouse/ (the hermclaw wheel incl. share/hermclaw/{alembic.ini,migrations}
 #                                    and every runtime dependency), requirements.lock (name==version --hash=sha256:…),
-#                                    constraints.txt, SHA256SUMS, release.json, sandbox-images/ (Containerfiles)
+#                                    constraints.txt, SHA256SUMS, release.json, sandbox-images/ (Containerfiles),
+#                                    tree-sitter/ (the grammars of hermclaw.repo_intelligence, research 027 Y6)
 #   hermclaw-litellm-<v>.tar         wheelhouse/ + requirements.lock + constraints.txt + SHA256SUMS for the proxy venv
 #   hermclaw-ui-<v>.tar.gz           static UI build (ui/: npm ci && npm run build)
 #   config/*.example.yaml            templates the deployment renders /etc/hermclaw/*.yaml from
@@ -60,7 +62,7 @@ ABI="cp313"
 
 log() { printf '[build-release] %s\n' "$*" >&2; }
 die() { printf '[build-release] ERROR: %s\n' "$1" >&2; exit "${2:-1}"; }
-usage() { sed -n '2,23p' "$0" | sed 's/^# \{0,1\}//' >&2; exit 2; }
+usage() { sed -n '2,20p' "$0" | sed 's/^# \{0,1\}//' >&2; exit 2; }
 
 while [[ $# -gt 0 ]]; do
     case "$1" in
@@ -326,6 +328,66 @@ HERMCLAW_CONFIG_DIR="${STAGE}/config" "${ST}/hermclaw" config-check >/dev/null \
     --find-links "${LITELLM}/wheelhouse" --only-binary=:all: --require-hashes -r "${LITELLM}/requirements.lock" >&2 \
     || die "the LiteLLM lock does not resolve offline"
 
+# --------------------------------------------------------------------------------------------- tree-sitter grammars
+# tree-sitter-language-pack >= 1.0 downloads its grammars on first use (research 20261014-027 Y6). The release ships
+# the grammars the runtime parses with (hermclaw.repo_intelligence.symbols), checksummed like every other file, so
+# no host fetches native code at run time; hermclaw.env points TREE_SITTER_LANGUAGE_PACK_CACHE_DIR at
+# <install_dir>/current/tree-sitter (read-only for the services).
+TS_INFO=$("${ST}/python" -I -c '
+import importlib.metadata as md
+from hermclaw.repo_intelligence.symbols import _TS_LANGS
+print(md.version("tree-sitter-language-pack"))
+print(" ".join(sorted(set(_TS_LANGS.values()))))') || die "cannot read the tree-sitter grammars of the release"
+TS_VERSION=$(sed -n 1p <<< "$TS_INFO")
+read -r -a TS_LANGS <<< "$(sed -n 2p <<< "$TS_INFO")"
+[[ "$TS_VERSION" =~ ^[0-9][0-9A-Za-z.]*$ && ${#TS_LANGS[@]} -gt 0 ]] || die "unexpected tree-sitter information: ${TS_INFO}"
+TS_REL="tree-sitter-language-pack/v${TS_VERSION}"
+have_grammars() {  # dir: manifest.json + libs/libtree_sitter_<lang>.so for every language
+    local lang
+    [[ -f "$1/manifest.json" ]] || return 1
+    for lang in "${TS_LANGS[@]}"; do
+        [[ -f "$1/libs/libtree_sitter_${lang}.so" ]] || return 1
+    done
+}
+TS_SRC=""
+if [[ ${#OFFLINE[@]} -gt 0 ]]; then
+    for dir in "${OFFLINE[@]}"; do
+        if have_grammars "${dir}/${TS_REL}"; then TS_SRC="${dir}/${TS_REL}"; break; fi
+    done
+    [[ -n "$TS_SRC" ]] || die "offline build: no tree-sitter grammars ${TS_REL} (${TS_LANGS[*]}) in --offline-from (an online build with --wheel-cache stores them there)"
+else
+    log "fetching the tree-sitter grammars ${TS_LANGS[*]} (tree-sitter-language-pack ${TS_VERSION})"
+    TREE_SITTER_LANGUAGE_PACK_CACHE_DIR="${WORK}/ts-cache" "${ST}/python" -I -c '
+import sys, tree_sitter_language_pack as t
+t.download(sys.argv[1:])
+missing = sorted(set(sys.argv[1:]) - set(t.downloaded_languages()))
+if missing:
+    sys.exit(f"not downloaded: {missing}")' "${TS_LANGS[@]}" >&2 || die "download of the tree-sitter grammars failed"
+    TS_SRC="${WORK}/ts-cache/${TS_REL}"
+    have_grammars "$TS_SRC" || die "unexpected tree-sitter cache layout: no ${TS_REL}/{manifest.json,libs/*.so}"
+fi
+TS_DIR="${RUNTIME}/tree-sitter/${TS_REL}"
+mkdir -p "${TS_DIR}/libs"
+cp "${TS_SRC}/manifest.json" "${TS_DIR}/"
+for lang in "${TS_LANGS[@]}"; do
+    cp "${TS_SRC}/libs/libtree_sitter_${lang}.so" "${TS_DIR}/libs/"
+done
+# the shipped copy alone must serve every grammar: parsing may neither fetch nor write anything
+TS_BEFORE=$(find "${RUNTIME}/tree-sitter" -printf '%P %s\n' | LC_ALL=C sort)
+TREE_SITTER_LANGUAGE_PACK_CACHE_DIR="${RUNTIME}/tree-sitter" "${ST}/python" -I -c '
+import sys, tree_sitter_language_pack as t
+for lang in sys.argv[1:]:
+    root = t.get_parser(lang).parse(b"<?php function f() {}" if lang == "php" else b"function f() {}").root_node
+    if root.has_error:
+        sys.exit(f"{lang}: the grammar does not parse a function declaration")' "${TS_LANGS[@]}" >&2 \
+    || die "the shipped tree-sitter grammars do not load"
+[[ "$(find "${RUNTIME}/tree-sitter" -printf '%P %s\n' | LC_ALL=C sort)" == "$TS_BEFORE" ]] \
+    || die "loading the shipped tree-sitter grammars changed them (the hosts would download at run time)"
+if [[ -n "$WHEEL_CACHE" ]]; then
+    mkdir -p "${WHEEL_CACHE}/${TS_REL}"
+    cp -a "${TS_DIR}/." "${WHEEL_CACHE}/${TS_REL}/"
+fi
+
 # --------------------------------------------------------------------------------------------- UI
 UI_OUT="${WORK}/ui-dist"
 NODE_VERSION=""
@@ -358,9 +420,10 @@ mapfile -t TOOLCHAINS < <(find "${RUNTIME}/sandbox-images" -mindepth 2 -maxdepth
 
 "$PYTHON" -I - "$STAGE" "$VERSION" "$ALEMBIC_HEAD" "$NODE_VERSION" "$UI_SOURCE" "$RUNTIME_WHEELS" "$LITELLM_WHEELS" \
     "$(printf '%s,' "${ENTRY_POINTS[@]}")" "$(printf '%s,' "${TOOLCHAINS[@]}")" "$(printf '%s,' "${PLATFORMS[@]}")" \
-    "$(printf '%s\n' "${LITELLM_REQS[@]}")" <<'PY'
+    "$(printf '%s\n' "${LITELLM_REQS[@]}")" "$TS_VERSION" "$(printf '%s,' "${TS_LANGS[@]}")" <<'PY'
 import datetime, hashlib, json, pathlib, platform, re, socket, sys
-(stage, version, head, node, ui_source, n_runtime, n_litellm, eps, toolchains, platforms, llm_reqs) = sys.argv[1:12]
+(stage, version, head, node, ui_source, n_runtime, n_litellm, eps, toolchains, platforms, llm_reqs, ts_version,
+ ts_langs) = sys.argv[1:14]
 stage = pathlib.Path(stage)
 split = lambda s: [x for x in s.split(",") if x]
 sha = lambda p: hashlib.sha256(p.read_bytes()).hexdigest()
@@ -385,6 +448,7 @@ meta = {
                 "version": main.split("==", 1)[1], "distributions": int(n_litellm), "lock_sha256": lock_sha,
                 "venv_name": f"venv-{main.split('==', 1)[1]}-{lock_sha[:12]}"},
     "ui": {"payload": f"hermclaw-ui-{version}.tar.gz", "source": ui_source, "node": node or None},
+    "tree_sitter": {"package_version": ts_version, "languages": split(ts_langs), "cache_dir": "tree-sitter"},
 }
 text = json.dumps(meta, indent=2, sort_keys=True) + "\n"
 (stage / "release.json").write_text(text, encoding="utf-8")
