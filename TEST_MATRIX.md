@@ -16,21 +16,21 @@
 
 ## Pflicht-Generalization-Fixtures
 
-- [ ] Python FastAPI Feature
-- [ ] SQLite Migration
-- [ ] PostgreSQL Migration
-- [ ] Docker Compose Service
-- [ ] React/CSS Navigation
-- [ ] PHP Backend Form
-- [ ] TypeScript Utility
-- [ ] YAML-only Config
-- [ ] Linux Admin
-- [ ] Research-only Task
-- [ ] Image Job
-- [ ] Video Job
-- [ ] Wake-on-LAN Job
-- [ ] Worker Failure / Recovery
-- [ ] Planner Replan after Failure
+- [x] Python FastAPI Feature (37.1, `tests/e2e/`)
+- [x] SQLite Migration (37.2, `tests/e2e/`)
+- [x] PostgreSQL Migration (37.3, `tests/e2e/`)
+- [ ] Docker Compose Service (37.4 – nach P28)
+- [x] React/CSS Navigation (37.5, `tests/e2e/`)
+- [x] PHP Backend Form (37.6, `tests/e2e/`)
+- [x] TypeScript Utility (37.7, `tests/e2e/`)
+- [x] YAML-only Config (37.8, `tests/e2e/`)
+- [x] Linux Admin (37.9, `tests/e2e/`)
+- [x] Research-only Task (37.10, `tests/e2e/`)
+- [x] Image Job (37.11, `tests/e2e/`)
+- [x] Video Job (37.12, `tests/e2e/`)
+- [x] Wake-on-LAN Job (37.13, `tests/e2e/`)
+- [x] Worker Failure / Recovery (37.14, `tests/e2e/`)
+- [x] Planner Replan after Failure (37.15, `tests/e2e/`)
 
 ## Komponenten-Testläufe (Build-Umgebung)
 
