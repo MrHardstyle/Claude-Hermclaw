@@ -1,11 +1,11 @@
 #!/usr/bin/env bash
 # Dependency audit (P36.8): pip-audit over the runtime venv and the LiteLLM venv, npm audit over the UI.
 # Usage: scripts/dev/dependency-audit.sh [RUNTIME_VENV] [LITELLM_VENV]
-#   defaults: .venv and /opt/hermclaw/litellm-venv ; writes reports to ./audit-reports/
+#   defaults: .venv and /opt/litellm/venv ; writes reports to ./audit-reports/
 set -euo pipefail
 cd "$(dirname "$0")/../.."
 RUNTIME_VENV="${1:-.venv}"
-LITELLM_VENV="${2:-/opt/hermclaw/litellm-venv}"
+LITELLM_VENV="${2:-/opt/litellm/venv}"
 OUT=audit-reports
 mkdir -p "$OUT"
 TOOL_VENV="$(mktemp -d)/pip-audit"
