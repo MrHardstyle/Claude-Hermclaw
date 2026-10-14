@@ -10,7 +10,7 @@ from typing import Any
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
-from hermclaw.coder.handler import CODE_STEP_KINDS, VerificationOutcome
+from hermclaw.coder.handler import TOOL_STEP_KINDS, VerificationOutcome
 from hermclaw.contracts.scope import ScopeContract
 from hermclaw.contracts.step import StepContract
 from hermclaw.core.config import HermclawConfig
@@ -97,7 +97,7 @@ class VerifierAdapter:
                             Step.job_id == job_id,
                             Step.superseded.is_(False),
                             Step.status == "completed",
-                            Step.kind.in_(list(CODE_STEP_KINDS)),
+                            Step.kind.in_(list(TOOL_STEP_KINDS)),
                         )
                         .order_by(Step.created_at, Step.step_key)
                     )

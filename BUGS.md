@@ -403,9 +403,9 @@ Noch keine.
 - Erwartet: verifier and `commit_verified` hash with the same git binary/environment · Tatsächlich: the verifier built `GitRunner("git")` · Fix: `VerifierAdapter` passes the reader's runner
 
 ### BUG-063 – Five event types had no live SSE listener in the UI (arrived only through the 15 s REST reconciliation)
-- Phase: P39 · Komponente: ui · Severity: P4 · blockierend: nein · Status: **behoben** (siehe Commit; `ui/tests/unit/events.test.ts`)
+- Phase: P39 · Komponente: ui/events · Severity: P4 · blockierend: nein · Status: **behoben** (`tests/unit/test_event_types.py`: Contract ↔ alle `append_event`-Literale ↔ UI-Listenerliste)
 - Reproduktion: compare `EventType` with `KNOWN_EVENT_TYPES` in `ui/src/lib/events.ts`: `resource.preempt.withdrawn`, `resource.request.cancelled`, `system.disk`, `worker.sleep`, `workspace.cleaned` missing
-- Fix: listeners added; a unit test compares the UI list with `docs/contracts` event types
+- Fix: listeners added; `job.recovered`, `job.control.*` and `repository.registered` were emitted as literals only and are now `EventType` members
 
 ### BUG-064 – Any control principal could register file:// or local-path repositories through POST /api/jobs
 - Phase: P39 · Komponente: api/jobs · Severity: P1 · blockierend: nein · Status: **behoben** (`tests/integration/test_api_repository_registration.py::test_control_principal_cannot_register_local_repository`)
@@ -444,6 +444,15 @@ Noch keine.
 
 ### BUG-073 – Test hygiene: test_api_skeleton pinned schema revision 0001; untyped helper in test_gitops_support
 - Phase: P39 · Komponente: tests · Severity: P4 · blockierend: nein · Status: **behoben** (assert against `hermclaw.persistence.migrate.head_revision()`; annotations)
+
+### BUG-074 – GET /api/jobs/{id}/diff loaded the whole diff file into memory, cut it silently and did not confine the path
+- Phase: P39 · Komponente: api/jobs · Severity: P3 · blockierend: nein · Status: **behoben** (`tests/integration/test_api.py::test_diff_is_bounded_flagged_and_confined`)
+- Tatsächlich: `p.read_text()[:2_000_000]` (whole artifact in memory, no flag; found by the P31 UI agent); the diff path was not checked against the artifact store like the download is
+- Fix: reads at most `DIFF_CHAR_LIMIT` characters, returns `truncated` + `size_bytes`; artifacts outside the store are never read (`missing: true`)
+
+### BUG-075 – docs/contracts/openapi.json and five contract schemas were stale
+- Phase: P39 · Komponente: contracts/docs · Severity: P3 · blockierend: nein · Status: **behoben** (`tests/unit/test_contract_docs.py` fails on any drift; `hermclaw schemas docs/contracts/schemas` regenerates schemas + OpenAPI)
+- Tatsächlich: worker detail/drain/heartbeat and `/api/metrics` missing in the OpenAPI document; CoderAction/ToolCall/ToolResult/CommandRequest/VerificationReport schemas outdated
 
 ## Template
 

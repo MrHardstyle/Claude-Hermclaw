@@ -120,6 +120,32 @@ async def test_artifact_download_confined(app, sessionmaker, tmp_path):
         assert len((await c.get(f"/api/jobs/{jid}/artifacts")).json()) == 2
 
 
+async def test_diff_is_bounded_flagged_and_confined(app, sessionmaker, tmp_path, monkeypatch):
+    """The diff endpoint reads at most DIFF_CHAR_LIMIT characters, says so, and refuses paths outside the store."""
+    from hermclaw.api import jobs as jobs_api
+    from hermclaw.core.settings import get_settings
+
+    monkeypatch.setattr(jobs_api, "DIFF_CHAR_LIMIT", 100)
+    adir = get_settings().artifacts_dir
+    adir.mkdir(parents=True, exist_ok=True)
+    big = adir / f"big-{uuid.uuid4().hex[:6]}.patch"
+    big.write_text("diff --git a/x b/x\n" + "+line\n" * 500)
+    outside = tmp_path / "outside.patch"
+    outside.write_text("diff --git a/secret b/secret\n")
+    async with _client(app) as c:
+        j1 = (await c.post("/api/jobs", json={"prompt": "big diff job"})).json()["id"]
+        j2 = (await c.post("/api/jobs", json={"prompt": "outside diff job"})).json()["id"]
+    async with sessionmaker() as s:
+        s.add(Artifact(job_id=uuid.UUID(j1), kind="diff", name="big.patch", path=str(big), media_type="text/x-diff", size_bytes=3019))
+        s.add(Artifact(job_id=uuid.UUID(j2), kind="diff", name="o.patch", path=str(outside), media_type="text/x-diff"))
+        await s.commit()
+    async with _client(app) as c:
+        d1 = (await c.get(f"/api/jobs/{j1}/diff")).json()
+        d2 = (await c.get(f"/api/jobs/{j2}/diff")).json()
+    assert len(d1["diff"]) == 100 and d1["truncated"] is True and d1["size_bytes"] == 3019
+    assert d2["diff"] == "" and d2["missing"] is True, "a diff artifact outside the artifact store is never read"
+
+
 def _free_port():
     s = socket.socket()
     s.bind(("127.0.0.1", 0))

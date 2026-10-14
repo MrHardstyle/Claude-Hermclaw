@@ -133,7 +133,7 @@ async def _resolve_repository(session: AsyncSession, body: JobCreate, principal:
         await session.flush()
         await append_event(
             session,
-            "repository.registered",
+            EventType.REPOSITORY_REGISTERED,
             source_type="api",
             source_id=principal.name,
             payload={"repository": repo.name, "url": url, "local": _is_local_repository_url(url)},
@@ -392,8 +392,16 @@ def _resolve_artifact(p: Path) -> tuple[Path, Path, bool]:
     return root, path, path.is_file()
 
 
-def _read_text_limited(p: Path, limit: int) -> str:
-    return p.read_text(encoding="utf-8", errors="replace")[:limit] if p.is_file() else ""
+DIFF_CHAR_LIMIT = 2_000_000
+
+
+def _read_text_limited(p: Path, limit: int) -> tuple[str, bool]:
+    """At most ``limit`` characters of a text artifact (never the whole file in memory) and whether it was cut."""
+    if not p.is_file():
+        return "", False
+    with p.open(encoding="utf-8", errors="replace") as fh:
+        data = fh.read(limit + 1)
+    return data[:limit], len(data) > limit
 
 
 @router.get("/artifacts/{artifact_id}/download")
@@ -422,13 +430,18 @@ async def get_diff(
         )
     ).scalar_one_or_none()
     if art is None:
-        return {"diff": "", "artifact_id": None}
-    text = await asyncio.to_thread(_read_text_limited, Path(art.path), 2_000_000)
+        return {"diff": "", "artifact_id": None, "truncated": False}
+    root, path, exists = await asyncio.to_thread(_resolve_artifact, Path(art.path))
+    if root not in path.parents or not exists:  # same containment rule as the artifact download
+        return {"diff": "", "artifact_id": str(art.id), "truncated": False, "missing": True}
+    text, truncated = await asyncio.to_thread(_read_text_limited, path, DIFF_CHAR_LIMIT)
     return {
         "diff": text,
         "artifact_id": str(art.id),
         "step_id": str(art.step_id) if art.step_id else None,
         "created_at": art.created_at.isoformat(),
+        "truncated": truncated,
+        "size_bytes": art.size_bytes,
     }
 
 

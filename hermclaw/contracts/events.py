@@ -17,6 +17,13 @@ class EventType:
     JOB_SUCCEEDED = "job.succeeded"
     JOB_FAILED = "job.failed"
     JOB_CANCELLED = "job.cancelled"
+    JOB_RECOVERED = "job.recovered"  # scheduler took over a job left in a preparation/phase state (restart, crash)
+    JOB_CONTROL_CANCEL = "job.control.cancel"  # operator controls via the API (f"job.control.{action}")
+    JOB_CONTROL_PAUSE = "job.control.pause"
+    JOB_CONTROL_RESUME = "job.control.resume"
+    JOB_CONTROL_RETRY = "job.control.retry"
+    JOB_CONTROL_REPLAN = "job.control.replan"
+    REPOSITORY_REGISTERED = "repository.registered"  # POST /api/jobs registered a repository by URL
     STEP_CREATED = "step.created"
     STEP_TRANSITION = "step.transition"
     ATTEMPT_STARTED = "attempt.started"

@@ -221,9 +221,11 @@ def cmd_litellm_config(ns: argparse.Namespace) -> int:
 
 def cmd_schemas(ns: argparse.Namespace) -> int:
     from hermclaw.contracts.schema_export import export as export_schemas
+    from hermclaw.contracts.schema_export import export_openapi
 
     paths = export_schemas(Path(ns.out_dir))
-    print(f"{len(paths)} schemas written to {ns.out_dir}")
+    api = export_openapi(Path(ns.out_dir).parent / "openapi.json")
+    print(f"{len(paths)} schemas written to {ns.out_dir}; OpenAPI document {api}")
     return 0
 
 

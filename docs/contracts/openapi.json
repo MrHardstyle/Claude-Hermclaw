@@ -1250,6 +1250,176 @@
      }
     }
    }
+  },
+  "/api/metrics": {
+   "get": {
+    "tags": [
+     "metrics"
+    ],
+    "summary": "Metrics",
+    "operationId": "metrics_api_metrics_get",
+    "responses": {
+     "200": {
+      "description": "Successful Response",
+      "content": {
+       "text/plain": {
+        "schema": {
+         "type": "string"
+        }
+       }
+      }
+     }
+    }
+   }
+  },
+  "/api/workers/heartbeat": {
+   "post": {
+    "tags": [
+     "workers"
+    ],
+    "summary": "Heartbeat",
+    "operationId": "heartbeat_api_workers_heartbeat_post",
+    "responses": {
+     "200": {
+      "description": "Successful Response",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/HeartbeatAck"
+        }
+       }
+      }
+     },
+     "401": {
+      "description": "Unauthorized"
+     },
+     "403": {
+      "description": "Forbidden"
+     },
+     "413": {
+      "description": "Request Entity Too Large"
+     },
+     "422": {
+      "description": "Unprocessable Entity"
+     }
+    }
+   }
+  },
+  "/api/workers/{worker_id}": {
+   "get": {
+    "tags": [
+     "workers"
+    ],
+    "summary": "Get Worker",
+    "operationId": "get_worker_api_workers__worker_id__get",
+    "parameters": [
+     {
+      "name": "worker_id",
+      "in": "path",
+      "required": true,
+      "schema": {
+       "type": "string",
+       "maxLength": 100,
+       "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,99}$",
+       "title": "Worker Id"
+      }
+     },
+     {
+      "name": "health_limit",
+      "in": "query",
+      "required": false,
+      "schema": {
+       "type": "integer",
+       "maximum": 1000,
+       "minimum": 0,
+       "default": 20,
+       "title": "Health Limit"
+      }
+     }
+    ],
+    "responses": {
+     "200": {
+      "description": "Successful Response",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/WorkerDetail"
+        }
+       }
+      }
+     },
+     "404": {
+      "description": "Not Found"
+     },
+     "422": {
+      "description": "Validation Error",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/HTTPValidationError"
+        }
+       }
+      }
+     }
+    }
+   }
+  },
+  "/api/workers/{worker_id}/drain": {
+   "post": {
+    "tags": [
+     "workers"
+    ],
+    "summary": "Drain Worker",
+    "operationId": "drain_worker_api_workers__worker_id__drain_post",
+    "parameters": [
+     {
+      "name": "worker_id",
+      "in": "path",
+      "required": true,
+      "schema": {
+       "type": "string",
+       "maxLength": 100,
+       "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,99}$",
+       "title": "Worker Id"
+      }
+     }
+    ],
+    "requestBody": {
+     "required": true,
+     "content": {
+      "application/json": {
+       "schema": {
+        "$ref": "#/components/schemas/DrainRequest"
+       }
+      }
+     }
+    },
+    "responses": {
+     "200": {
+      "description": "Successful Response",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/WorkerInfo"
+        }
+       }
+      }
+     },
+     "404": {
+      "description": "Not Found"
+     },
+     "422": {
+      "description": "Validation Error",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/HTTPValidationError"
+        }
+       }
+      }
+     }
+    }
+   }
   }
  },
  "components": {
@@ -1356,6 +1526,24 @@
      "status"
     ],
     "title": "ControlOut"
+   },
+   "DrainRequest": {
+    "properties": {
+     "drain": {
+      "type": "boolean",
+      "title": "Drain",
+      "default": true
+     },
+     "reason": {
+      "type": "string",
+      "maxLength": 200,
+      "title": "Reason",
+      "default": "operator"
+     }
+    },
+    "additionalProperties": false,
+    "type": "object",
+    "title": "DrainRequest"
    },
    "EventOut": {
     "properties": {
@@ -1472,6 +1660,54 @@
     ],
     "title": "EventOut"
    },
+   "GpuInfo": {
+    "properties": {
+     "index": {
+      "type": "integer",
+      "title": "Index",
+      "default": 0
+     },
+     "name": {
+      "type": "string",
+      "title": "Name",
+      "default": ""
+     },
+     "memory_total_mb": {
+      "type": "integer",
+      "title": "Memory Total Mb",
+      "default": 0
+     },
+     "memory_used_mb": {
+      "type": "integer",
+      "title": "Memory Used Mb",
+      "default": 0
+     },
+     "utilization_percent": {
+      "type": "integer",
+      "title": "Utilization Percent",
+      "default": 0
+     },
+     "temperature_c": {
+      "anyOf": [
+       {
+        "type": "integer"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Temperature C"
+     },
+     "driver": {
+      "type": "string",
+      "title": "Driver",
+      "default": ""
+     }
+    },
+    "additionalProperties": false,
+    "type": "object",
+    "title": "GpuInfo"
+   },
    "HTTPValidationError": {
     "properties": {
      "detail": {
@@ -1484,6 +1720,60 @@
     },
     "type": "object",
     "title": "HTTPValidationError"
+   },
+   "HeartbeatAck": {
+    "properties": {
+     "accepted": {
+      "type": "boolean",
+      "title": "Accepted"
+     },
+     "worker_id": {
+      "type": "string",
+      "title": "Worker Id"
+     },
+     "state": {
+      "$ref": "#/components/schemas/WorkerState"
+     },
+     "compatible": {
+      "type": "boolean",
+      "title": "Compatible"
+     },
+     "expected_protocol_version": {
+      "type": "integer",
+      "title": "Expected Protocol Version",
+      "default": 1
+     },
+     "heartbeat_interval_seconds": {
+      "type": "number",
+      "title": "Heartbeat Interval Seconds"
+     },
+     "server_time": {
+      "type": "string",
+      "format": "date-time",
+      "title": "Server Time"
+     },
+     "stale": {
+      "type": "boolean",
+      "title": "Stale",
+      "default": false
+     },
+     "message": {
+      "type": "string",
+      "title": "Message",
+      "default": ""
+     }
+    },
+    "type": "object",
+    "required": [
+     "accepted",
+     "worker_id",
+     "state",
+     "compatible",
+     "heartbeat_interval_seconds",
+     "server_time"
+    ],
+    "title": "HeartbeatAck",
+    "description": "Orchestrator answer to ``POST /api/workers/heartbeat``."
    },
    "JobCreate": {
     "properties": {
@@ -1914,6 +2204,52 @@
     ],
     "title": "JobOut"
    },
+   "LoadedModel": {
+    "properties": {
+     "name": {
+      "type": "string",
+      "title": "Name"
+     },
+     "size_bytes": {
+      "type": "integer",
+      "title": "Size Bytes",
+      "default": 0
+     },
+     "size_vram_bytes": {
+      "type": "integer",
+      "title": "Size Vram Bytes",
+      "default": 0
+     },
+     "context_length": {
+      "anyOf": [
+       {
+        "type": "integer"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Context Length"
+     },
+     "expires_at": {
+      "anyOf": [
+       {
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Expires At"
+     }
+    },
+    "additionalProperties": false,
+    "type": "object",
+    "required": [
+     "name"
+    ],
+    "title": "LoadedModel"
+   },
    "PlanVersionOut": {
     "properties": {
      "id": {
@@ -2213,6 +2549,536 @@
      "type"
     ],
     "title": "ValidationError"
+   },
+   "WorkerDetail": {
+    "properties": {
+     "id": {
+      "type": "string",
+      "title": "Id"
+     },
+     "hostname": {
+      "type": "string",
+      "title": "Hostname"
+     },
+     "address": {
+      "type": "string",
+      "title": "Address"
+     },
+     "kind": {
+      "$ref": "#/components/schemas/WorkerKind"
+     },
+     "state": {
+      "$ref": "#/components/schemas/WorkerState"
+     },
+     "api_url": {
+      "anyOf": [
+       {
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Api Url"
+     },
+     "worker_version": {
+      "anyOf": [
+       {
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Worker Version"
+     },
+     "protocol_version": {
+      "anyOf": [
+       {
+        "type": "integer"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Protocol Version"
+     },
+     "compatible": {
+      "type": "boolean",
+      "title": "Compatible",
+      "default": true
+     },
+     "last_heartbeat_at": {
+      "anyOf": [
+       {
+        "type": "string",
+        "format": "date-time"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Last Heartbeat At"
+     },
+     "heartbeat_age_seconds": {
+      "anyOf": [
+       {
+        "type": "number"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Heartbeat Age Seconds"
+     },
+     "active_job": {
+      "anyOf": [
+       {
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Active Job"
+     },
+     "active_step": {
+      "anyOf": [
+       {
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Active Step"
+     },
+     "capabilities": {
+      "items": {
+       "type": "string"
+      },
+      "type": "array",
+      "title": "Capabilities"
+     },
+     "declared_capabilities": {
+      "items": {
+       "type": "string"
+      },
+      "type": "array",
+      "title": "Declared Capabilities"
+     },
+     "wol_enabled": {
+      "type": "boolean",
+      "title": "Wol Enabled",
+      "default": false
+     },
+     "admin_drain": {
+      "type": "boolean",
+      "title": "Admin Drain",
+      "default": false
+     },
+     "state_reason": {
+      "anyOf": [
+       {
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "State Reason"
+     },
+     "state_changed_at": {
+      "anyOf": [
+       {
+        "type": "string",
+        "format": "date-time"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "State Changed At"
+     },
+     "service_versions": {
+      "additionalProperties": {
+       "type": "string"
+      },
+      "type": "object",
+      "title": "Service Versions"
+     },
+     "resources": {
+      "anyOf": [
+       {
+        "$ref": "#/components/schemas/WorkerResources"
+       },
+       {
+        "type": "null"
+       }
+      ]
+     },
+     "in_config": {
+      "type": "boolean",
+      "title": "In Config",
+      "default": true
+     },
+     "health": {
+      "items": {
+       "$ref": "#/components/schemas/WorkerHealthSample"
+      },
+      "type": "array",
+      "title": "Health"
+     }
+    },
+    "type": "object",
+    "required": [
+     "id",
+     "hostname",
+     "address",
+     "kind",
+     "state"
+    ],
+    "title": "WorkerDetail"
+   },
+   "WorkerHealthSample": {
+    "properties": {
+     "created_at": {
+      "type": "string",
+      "format": "date-time",
+      "title": "Created At"
+     },
+     "state": {
+      "$ref": "#/components/schemas/WorkerState"
+     },
+     "cpu_percent": {
+      "type": "number",
+      "title": "Cpu Percent"
+     },
+     "ram_total_mb": {
+      "type": "integer",
+      "title": "Ram Total Mb"
+     },
+     "ram_used_mb": {
+      "type": "integer",
+      "title": "Ram Used Mb"
+     },
+     "disk_free_mb": {
+      "type": "integer",
+      "title": "Disk Free Mb"
+     },
+     "gpus": {
+      "items": {
+       "additionalProperties": true,
+       "type": "object"
+      },
+      "type": "array",
+      "title": "Gpus"
+     },
+     "loaded_models": {
+      "items": {
+       "additionalProperties": true,
+       "type": "object"
+      },
+      "type": "array",
+      "title": "Loaded Models"
+     },
+     "active_job": {
+      "anyOf": [
+       {
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Active Job"
+     },
+     "active_step": {
+      "anyOf": [
+       {
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Active Step"
+     },
+     "uptime_seconds": {
+      "type": "integer",
+      "title": "Uptime Seconds",
+      "default": 0
+     }
+    },
+    "type": "object",
+    "required": [
+     "created_at",
+     "state",
+     "cpu_percent",
+     "ram_total_mb",
+     "ram_used_mb",
+     "disk_free_mb"
+    ],
+    "title": "WorkerHealthSample"
+   },
+   "WorkerInfo": {
+    "properties": {
+     "id": {
+      "type": "string",
+      "title": "Id"
+     },
+     "hostname": {
+      "type": "string",
+      "title": "Hostname"
+     },
+     "address": {
+      "type": "string",
+      "title": "Address"
+     },
+     "kind": {
+      "$ref": "#/components/schemas/WorkerKind"
+     },
+     "state": {
+      "$ref": "#/components/schemas/WorkerState"
+     },
+     "api_url": {
+      "anyOf": [
+       {
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Api Url"
+     },
+     "worker_version": {
+      "anyOf": [
+       {
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Worker Version"
+     },
+     "protocol_version": {
+      "anyOf": [
+       {
+        "type": "integer"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Protocol Version"
+     },
+     "compatible": {
+      "type": "boolean",
+      "title": "Compatible",
+      "default": true
+     },
+     "last_heartbeat_at": {
+      "anyOf": [
+       {
+        "type": "string",
+        "format": "date-time"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Last Heartbeat At"
+     },
+     "heartbeat_age_seconds": {
+      "anyOf": [
+       {
+        "type": "number"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Heartbeat Age Seconds"
+     },
+     "active_job": {
+      "anyOf": [
+       {
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Active Job"
+     },
+     "active_step": {
+      "anyOf": [
+       {
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Active Step"
+     },
+     "capabilities": {
+      "items": {
+       "type": "string"
+      },
+      "type": "array",
+      "title": "Capabilities"
+     },
+     "declared_capabilities": {
+      "items": {
+       "type": "string"
+      },
+      "type": "array",
+      "title": "Declared Capabilities"
+     },
+     "wol_enabled": {
+      "type": "boolean",
+      "title": "Wol Enabled",
+      "default": false
+     },
+     "admin_drain": {
+      "type": "boolean",
+      "title": "Admin Drain",
+      "default": false
+     },
+     "state_reason": {
+      "anyOf": [
+       {
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "State Reason"
+     },
+     "state_changed_at": {
+      "anyOf": [
+       {
+        "type": "string",
+        "format": "date-time"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "State Changed At"
+     },
+     "service_versions": {
+      "additionalProperties": {
+       "type": "string"
+      },
+      "type": "object",
+      "title": "Service Versions"
+     },
+     "resources": {
+      "anyOf": [
+       {
+        "$ref": "#/components/schemas/WorkerResources"
+       },
+       {
+        "type": "null"
+       }
+      ]
+     },
+     "in_config": {
+      "type": "boolean",
+      "title": "In Config",
+      "default": true
+     }
+    },
+    "type": "object",
+    "required": [
+     "id",
+     "hostname",
+     "address",
+     "kind",
+     "state"
+    ],
+    "title": "WorkerInfo",
+    "description": "Registry view of one worker (``GET /api/workers``)."
+   },
+   "WorkerKind": {
+    "type": "string",
+    "enum": [
+     "execution",
+     "model",
+     "media"
+    ],
+    "title": "WorkerKind"
+   },
+   "WorkerResources": {
+    "properties": {
+     "cpu_percent": {
+      "type": "number",
+      "title": "Cpu Percent",
+      "default": 0.0
+     },
+     "load_avg": {
+      "items": {
+       "type": "number"
+      },
+      "type": "array",
+      "title": "Load Avg"
+     },
+     "ram_total_mb": {
+      "type": "integer",
+      "title": "Ram Total Mb",
+      "default": 0
+     },
+     "ram_used_mb": {
+      "type": "integer",
+      "title": "Ram Used Mb",
+      "default": 0
+     },
+     "disk_free_mb": {
+      "type": "integer",
+      "title": "Disk Free Mb",
+      "default": 0
+     },
+     "gpus": {
+      "items": {
+       "$ref": "#/components/schemas/GpuInfo"
+      },
+      "type": "array",
+      "title": "Gpus"
+     },
+     "loaded_models": {
+      "items": {
+       "$ref": "#/components/schemas/LoadedModel"
+      },
+      "type": "array",
+      "title": "Loaded Models"
+     },
+     "uptime_seconds": {
+      "type": "integer",
+      "title": "Uptime Seconds",
+      "default": 0
+     }
+    },
+    "type": "object",
+    "title": "WorkerResources"
+   },
+   "WorkerState": {
+    "type": "string",
+    "enum": [
+     "offline",
+     "starting",
+     "ready",
+     "busy",
+     "draining",
+     "sleeping",
+     "waking",
+     "error"
+    ],
+    "title": "WorkerState"
    }
   }
  }

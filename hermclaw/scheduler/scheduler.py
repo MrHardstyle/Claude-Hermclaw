@@ -236,7 +236,12 @@ class Scheduler:
                 job.lock_expires_at = None
                 job.metadata_ = {**(job.metadata_ or {}), "recovered_prepare_from": job.status}
                 await append_event(
-                    s, "job.recovered", source_type="scheduler", source_id=self.instance_id, job_id=job.id, payload={"status": job.status}
+                    s,
+                    EventType.JOB_RECOVERED,
+                    source_type="scheduler",
+                    source_id=self.instance_id,
+                    job_id=job.id,
+                    payload={"status": job.status},
                 )
             await s.commit()
         return n
@@ -946,7 +951,7 @@ class Scheduler:
                 reason = str((job.metadata_ or {}).get("replan_reason") or "resumed after restart")
                 await append_event(
                     s,
-                    "job.recovered",
+                    EventType.JOB_RECOVERED,
                     source_type="scheduler",
                     source_id=self.instance_id,
                     job_id=job.id,

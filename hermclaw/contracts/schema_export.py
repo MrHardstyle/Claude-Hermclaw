@@ -1,4 +1,8 @@
-"""Export JSON schemas for all public contracts (P13.12): ``python -m hermclaw.contracts.schema_export DIR``."""
+"""Export JSON schemas for all public contracts (P13.12) and the OpenAPI document of the API.
+
+``hermclaw schemas docs/contracts/schemas`` writes both (``docs/contracts/openapi.json`` next to the schema directory);
+``tests/unit/test_contract_docs.py`` fails when the committed documents are stale.
+"""
 
 from __future__ import annotations
 
@@ -48,11 +52,28 @@ CONTRACTS: dict[str, type[BaseModel]] = {
 def export(directory: Path) -> list[Path]:
     directory.mkdir(parents=True, exist_ok=True)
     written = []
-    for name, model in CONTRACTS.items():
+    for name in CONTRACTS:
         path = directory / f"{name}.schema.json"
-        path.write_text(json.dumps(model.model_json_schema(), indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
+        path.write_text(render_schema(name), encoding="utf-8")
         written.append(path)
     return written
+
+
+def openapi_document() -> dict[str, object]:
+    """The OpenAPI document of the Hermclaw API as served by ``create_app()`` (docs/contracts/openapi.json)."""
+    from hermclaw.api.app import create_app
+
+    return create_app().openapi()
+
+
+def export_openapi(path: Path) -> Path:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps(openapi_document(), indent=1, ensure_ascii=False) + "\n", encoding="utf-8")
+    return path
+
+
+def render_schema(name: str) -> str:
+    return json.dumps(CONTRACTS[name].model_json_schema(), indent=2, ensure_ascii=False) + "\n"
 
 
 if __name__ == "__main__":
