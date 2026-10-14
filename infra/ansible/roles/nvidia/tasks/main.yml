@@ -3,6 +3,10 @@
   ansible.builtin.import_tasks: validate.yml
   tags: [nvidia]
 
+- name: Secure Boot guard
+  ansible.builtin.import_tasks: secureboot.yml
+  tags: [nvidia]
+
 - name: Pin the driver branch (before any driver package is installed)
   ansible.builtin.template:
     src: nvidia-pin.pref.j2

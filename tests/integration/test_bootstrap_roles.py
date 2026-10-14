@@ -230,6 +230,25 @@ def test_nvidia_runfile_conflict_check(tmp_path: Path) -> None:
     assert [a for a in argv[2:] if a] == defaults["nvidia_package_conflicts"]
 
 
+def test_nvidia_secure_boot_guard(tmp_path: Path) -> None:
+    """Unsigned DKMS modules do not load under Secure Boot: refuse unless the MOK key is enrolled."""
+
+    def efivar(name: str, state: int, attributes: int = 0x06) -> str:
+        path = tmp_path / f"SecureBoot-{name}"
+        path.write_bytes(bytes([attributes, 0, 0, 0, state]))
+        return str(path)
+
+    on, off = efivar("on", 1), efivar("off", 0)
+    cases: list[Case] = [
+        ("sb-enabled", "nvidia", "secureboot.yml", {"nvidia_secureboot_efivar": on}, {}, "FAIL"),
+        ("sb-enabled-other-attributes", "nvidia", "secureboot.yml", {"nvidia_secureboot_efivar": efivar("on27", 1, 0x27)}, {}, "FAIL"),
+        ("sb-enabled-mok-enrolled", "nvidia", "secureboot.yml", {"nvidia_secureboot_efivar": on, "nvidia_secureboot_mok_enrolled": True}, {}, "PASS"),
+        ("sb-disabled", "nvidia", "secureboot.yml", {"nvidia_secureboot_efivar": off}, {}, "PASS"),
+        ("legacy-boot", "nvidia", "secureboot.yml", {"nvidia_secureboot_efivar": str(tmp_path / "missing")}, {}, "PASS"),
+    ]  # fmt: skip
+    _run_cases(tmp_path, cases)
+
+
 # --------------------------------------------------------------------------------------------- Ollama firewall
 
 PY_IMAGE = "docker.io/library/python:3.12-slim"

@@ -50,6 +50,8 @@
     owner: postgres
     group: postgres
     mode: "0644"
+    backup: true
+  register: postgresql_conf
   notify: Restart postgresql
 
 - name: Write pg_hba.conf
@@ -71,49 +73,10 @@
   when: hermclaw_manage_services | bool
 
 - name: Validate configuration files before they are applied
+  ansible.builtin.import_tasks: validate_config.yml
   when:
     - hermclaw_manage_services | bool
     - not ansible_check_mode
-  block:
-    - name: Query pg_hba_file_rules and pg_file_settings for errors
-      ansible.builtin.command:
-        argv:
-          - psql
-          - -X
-          - -q
-          - -tA
-          - -v
-          - ON_ERROR_STOP=1
-          - -p
-          - "{{ postgresql_port }}"
-          - -d
-          - postgres
-          - -c
-          - >-
-            SELECT 'hba:' || line_number || ':' || error FROM pg_hba_file_rules WHERE error IS NOT NULL
-            UNION ALL
-            SELECT 'conf:' || sourcefile || ':' || sourceline || ':' || error FROM pg_file_settings WHERE error IS NOT NULL
-      become: true
-      become_user: postgres
-      register: postgresql_config_errors
-      changed_when: false
-
-    - name: Restore the previous pg_hba.conf on errors
-      ansible.builtin.copy:
-        src: "{{ postgresql_hba.backup_file }}"
-        dest: "/etc/postgresql/{{ postgresql_version }}/{{ postgresql_cluster }}/pg_hba.conf"
-        remote_src: true
-        owner: postgres
-        group: postgres
-        mode: "0640"
-      when:
-        - postgresql_config_errors.stdout | length > 0
-        - postgresql_hba.backup_file is defined
-
-    - name: Stop on configuration errors
-      ansible.builtin.fail:
-        msg: "PostgreSQL configuration errors: {{ postgresql_config_errors.stdout_lines }}"
-      when: postgresql_config_errors.stdout | length > 0
 
 - name: Apply configuration changes now
   ansible.builtin.meta: flush_handlers

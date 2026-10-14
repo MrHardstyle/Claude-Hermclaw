@@ -68,7 +68,7 @@ def trixie() -> Iterator[str]:
         pytest.skip(f"cannot start a container here: {started.stderr.strip()[:300]}")
     try:
         release = _podman("exec", name, "cat", "/etc/os-release").stdout
-        assert 'VERSION_CODENAME=trixie' in release and 'VERSION_ID="13"' in release, release
+        assert "VERSION_CODENAME=trixie" in release and 'VERSION_ID="13"' in release, release
         # sshd is not installed in the slim image: give the worker a host key like openssh-server would
         setup = _podman("exec", name, "sh", "-c",
                         "mkdir -p /etc/ssh && /opt/hosttools/ssh-keygen -q -t ed25519 -N '' -f /etc/ssh/ssh_host_ed25519_key")  # fmt: skip
@@ -246,10 +246,11 @@ def test_bootstrap_converges_and_is_idempotent_on_debian_13(trixie: str) -> None
     # ---------------------------------------------------------------- idempotency (second run and check mode)
     second, recap2 = _playbook(trixie, workdir)
     assert second.returncode == 0, second.stdout[-6000:]
-    changed = {h: r[1] for h, r in recap2.items() if r[1] != 0}
-    assert set(recap2) == set(HOSTS) and not changed, f"second run changed tasks: {changed}\n" + "\n".join(
-        ln for ln in second.stdout.splitlines() if ln.startswith("changed:") or ln.startswith("TASK [")
-    )[-4000:]
+    changed_hosts = {h: r[1] for h, r in recap2.items() if r[1] != 0}
+    assert set(recap2) == set(HOSTS) and not changed_hosts, (
+        f"second run changed tasks: {changed_hosts}\n"
+        + "\n".join(ln for ln in second.stdout.splitlines() if ln.startswith("changed:") or ln.startswith("TASK ["))[-4000:]
+    )
     check, recap3 = _playbook(trixie, workdir, "--check", "--diff")
     assert check.returncode == 0, check.stdout[-6000:]
     assert set(recap3) == set(HOSTS) and all(r[1] == 0 for r in recap3.values()), recap3

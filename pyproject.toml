@@ -35,6 +35,9 @@ dev = [
   "ruff>=0.6",
   "mypy>=1.10",
   "types-PyYAML",
+  # bootstrap/deployment automation (infra/ansible) and its tests; the control node uses its own venv
+  "ansible-core>=2.19,<2.22",
+  "ansible-lint>=25",
 ]
 # LiteLLM proxy on .225 runs in its own venv (its pinned deps must not leak into the orchestrator venv)
 litellm-proxy = ["litellm[proxy]==1.104.2"]

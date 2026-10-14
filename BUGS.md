@@ -503,6 +503,30 @@ Noch keine.
 - Tatsächlich: `validate_request_env` only allowed `policies.sandbox.env_allowlist` (PATH, HOME, LANG, LC_ALL, CI, PYTHONDONTWRITEBYTECODE) → every sandbox migration failed; the unit tests used fake executors and missed it
 - Fix: `hermclaw.core.config.RUNTIME_SANDBOX_ENV` (names only the runtime sets – tool calls of the model carry no environment) + `SandboxPolicy.request_env_allowlist`; the podman/docker sandbox validates against it, so an operator override of `env_allowlist` cannot break migrations or the verifier's `CI=1`. A test scans `hermclaw/dbtools` for every env name it sets.
 
+### BUG-085 – PostgreSQL config validation treated pending-restart settings as errors (first live run on .225 would always fail)
+- Phase: P01 · Komponente: bootstrap · Severity: P1 · blockierend: ja · Status: **behoben** (Regressionstest in den bootstrap-Tests)
+- Reproduktion: Running cluster with default shared_buffers; write conf.d/hermclaw.conf with shared_buffers=2GB; run the old validation query on pg_file_settings before the restart handler.
+- Erwartet: Validation passes; the restart handler applies the new value.
+- Tatsächlich: pg_file_settings returns 'setting could not be applied' for postmaster-context parameters, so the role failed with 'PostgreSQL configuration errors'. FIXED: new roles/postgresql/tasks/validate_config.yml ignores restart-only rows that are merely pending, validates all values with 'postgres -C', and rolls back pg_hba.conf and the drop-in (backup: true, a new broken drop-in is removed). Regression tests in test_bootstrap_postgresql.
+
+### BUG-086 – nginx baseline site always listened on [::]; nginx -t fails on kernels without IPv6
+- Phase: P01 · Komponente: bootstrap · Severity: P2 · blockierend: nein · Status: **behoben** (Regressionstest in den bootstrap-Tests)
+- Reproduktion: Render hermclaw-next.conf.j2 and run nginx -t on a host without IPv6 (ipv6.disable=1), e.g. this build sandbox.
+- Erwartet: Config test succeeds.
+- Tatsächlich: 'socket() [::]:80 failed (97: Address family not supported by protocol)'. FIXED: listen [::] only when nginx_listen_ipv6 is true, which defaults to whether the host has an IPv6 address. Regression test test_ipv6_listener_follows_the_host; real nginx -t passes.
+
+### BUG-087 – No Secure Boot check before building the DKMS NVIDIA driver on .224
+- Phase: P01 · Komponente: bootstrap · Severity: P2 · blockierend: nein · Status: **behoben** (Regressionstest in den bootstrap-Tests)
+- Reproduktion: .224 with Secure Boot enabled and no MOK enrolled; run the nvidia role.
+- Erwartet: A clear refusal up front with remediation steps.
+- Tatsächlich: The driver would build but its unsigned modules would not load; nvidia-smi fails only after the install. FIXED: roles/nvidia/tasks/secureboot.yml reads the EFI SecureBoot variable and refuses unless nvidia_secureboot_mok_enrolled is true. Test test_nvidia_secure_boot_guard (5 cases).
+
+### BUG-088 – ansible-lint production profile: 2 name[template] violations
+- Phase: P01 · Komponente: bootstrap · Severity: P3 · blockierend: nein · Status: **behoben** (Regressionstest in den bootstrap-Tests)
+- Reproduktion: ansible-lint --offline --profile=production playbooks/*.yml roles
+- Erwartet: 0 violations
+- Tatsächlich: Fixed in roles/ollama/tasks/gpu_check.yml:40 and main.yml:135 (Jinja moved to the end of the task name).
+
 ## Template
 
 ### BUG-XXX – Titel

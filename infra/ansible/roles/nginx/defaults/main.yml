@@ -3,6 +3,9 @@
 nginx_site_name: hermclaw-next
 nginx_server_name: "{{ hermclaw_web_server_name | default('_') }}"
 nginx_listen_port: 80
+# Also listen on [::] (IPv6). Default: only when the host has an IPv6 address - nginx refuses to
+# start with `listen [::]:...` on a kernel without IPv6 (ipv6.disable=1, "Address family not supported").
+nginx_listen_ipv6: "{{ ansible_facts['all_ipv6_addresses'] | default([]) | length > 0 }}"
 # Only claim default_server when no other site does (never take over existing sites).
 nginx_default_server: false
 nginx_api_upstream: "http://{{ hermclaw_orchestrator_ip }}:{{ hermclaw_api_port }}"

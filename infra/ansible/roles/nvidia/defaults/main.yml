@@ -82,3 +82,7 @@ nvidia_expected_vram_mib_min: 8000
 # (otherwise: fail with a hint and continue after a manual reboot).
 nvidia_allow_reboot: false
 nvidia_reboot_timeout: 900
+
+# Secure Boot: DKMS modules are unsigned unless the DKMS MOK key was enrolled (tasks/secureboot.yml).
+nvidia_secureboot_efivar: /sys/firmware/efi/efivars/SecureBoot-8be4df61-93ca-11d2-aa0d-e3c2c3b5bb4b
+nvidia_secureboot_mok_enrolled: false

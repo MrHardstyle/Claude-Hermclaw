@@ -56,3 +56,5 @@
 | P18/D-005 | Remote-Executor | `pytest tests/integration/test_tools_remote_executor.py` | 5 passed | gegen `.222` |
 | P11 | Repository Intelligence | `pytest tests/*/test_repo_intelligence_*.py` | 91 passed, 1 live deselektiert (pgvector, ripgrep, tree-sitter) | – |
 | P12 | Research Engine | `pytest tests/*/test_research_*.py` | 143 passed, 2 live deselektiert | SearXNG auf `.225:8888` |
+| P01 | Clean Bootstrap (Ansible-Rollen, systemd-Units, Skripte) | `pytest tests/integration/test_bootstrap_{infra,roles,converge,nginx,postgresql,tooling}.py` (einzeln, ≈13 min; braucht podman, PostgreSQL-Server-Binaries + runuser, systemd-analyze, shellcheck, Images nginx:1.28 + python:3.12-slim) | 92 passed (inkl. ansible-lint production profile, echtes nginx -t + SSE in Podman, Wegwerf-PostgreSQL-Cluster mit gerenderter Konfiguration, Converge im Container) | Playbooks gegen `.222–.226` (BLOCKER-001) |
+| P27 | Database Tools | `pytest tests/*/test_dbtools_*.py` (+ `tests/unit/test_sandbox_runtime_env.py`) | 193 passed (echtes PostgreSQL, pg_dump/pg_restore, Alembic in Wegwerf-DB) | Zieldatenbanken aus `config/databases.yaml` |

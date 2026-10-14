@@ -29,21 +29,21 @@ Legende: `[x]` erledigt mit Evidence · `[~]` erledigt, Live-Verifikation auf Zi
 
 ## P01 – Clean System Bootstrap
 
-- [ ] 1.1 Debian-Zielversion festhalten. — Evidence: –
-- [ ] 1.2 `hermclaw` User. — Evidence: –
-- [ ] 1.3 Verzeichnisse. — Evidence: –
-- [ ] 1.4 SSH Keys. — Evidence: –
-- [ ] 1.5 Python. — Evidence: –
-- [ ] 1.6 venv/tooling. — Evidence: –
-- [ ] 1.7 PostgreSQL. — Evidence: –
-- [ ] 1.8 pgvector. — Evidence: –
-- [ ] 1.9 Git. — Evidence: –
-- [ ] 1.10 Podman. — Evidence: –
-- [ ] 1.11 Node/Vite Buildtooling auf `.223`. — Evidence: –
-- [ ] 1.12 Nginx auf `.223`. — Evidence: –
-- [ ] 1.13 systemd units Skeleton. — Evidence: –
-- [ ] 1.14 Ansible inventory/roles. — Evidence: –
-- [ ] 1.15 reproducible bootstrap test. — Evidence: –
+- [x] 1.1 Debian-Zielversion festhalten. — Evidence: Target fixed as hermclaw_debian_major=13 / hermclaw_debian_codename=trixie in group_vars/all.yml (research 20261008-001). Asserted in roles/common/tasks/assert.yml and by scripts/bootstrap/check-host.sh. Tests: test_bootstrap_infra::test_check_host_accepts_debian_13_and_rejects_others, test_check_ho
+- [~] 1.2 `hermclaw` User. — Evidence: roles/common/tasks/users.yml: hermclaw system user/group with a locked password and nologin, plus the restricted hermclaw-admin runtime login (sudoers allowlist checked with visudo, privileged groups refused). Converge test checks passwd/shadow/groups. Not yet run on the real hosts (BLOCKER-001).
+- [~] 1.3 Verzeichnisse. — Evidence: roles/common/defaults common_directories + tasks/directories.yml (/opt/hermclaw, /etc/hermclaw 0750, /etc/hermclaw/ssh, /var/lib/hermclaw/{workspaces,artifacts,repos}, /var/log/hermclaw, /etc/credstore.encrypted 0700). Exact modes asserted in test_bootstrap_converge. Live run blocked.
+- [~] 1.4 SSH Keys. — Evidence: roles/common/tasks/ssh_keys.yml: ed25519 runtime and backup keys generated on the orchestrator only; authorized_keys line 'restrict,from="<orchestrator ip>"'; known_hosts filled over the trusted Ansible connection, no TOFU (research 20261008-021). Converge test checks the key pair, the exact authori
+- [~] 1.5 Python. — Evidence: roles/common/tasks/python.yml: python3 with a >=3.12 gate. test_bootstrap_tooling::test_python_version_gate_and_venv (fake 3.11 refused, 3.12/3.13 accepted); venv check in the converge test. Live run blocked.
+- [~] 1.6 venv/tooling. — Evidence: python3-venv/pip/pipx/build-essential/libpq-dev plus a root-owned app venv /opt/hermclaw/venv created only if missing (creates:). test_bootstrap_tooling creates a real venv twice; converge test checks sys.prefix. Live run blocked.
+- [~] 1.7 PostgreSQL. — Evidence: roles/postgresql: PGDG deb822 repo + pin, postgresql-17, localhost-only hermclaw.conf, pg_hba (peer locally, scram only on 127.0.0.1/::1), cluster port guard, new tasks/validate_config.yml (postgres -C + pg_hba_file_rules/pg_file_settings, rollback), idempotent role/db DDL. Tests: test_bootstrap_pos
+- [~] 1.8 pgvector. — Evidence: pgvector >= 0.8.2 (CVE-2026-3172) is enforced twice: dpkg version in tasks/verify_pgvector.yml and the active extversion in tasks/database.yml. test_bootstrap_postgresql::test_verify_pgvector_package_versions covers 7 Debian version strings (epoch, revision, 0.10 vs 0.8). test_database_tasks_refuse_
+- [~] 1.9 Git. — Evidence: roles/common/tasks/git.yml: git in base packages, >= 2.39 gate. test_bootstrap_tooling::test_git_version_gate (fake and real git); git runs in the converge test. Live run blocked.
+- [~] 1.10 Podman. — Evidence: roles/podman: packages, version >= 5.0, non-overlapping subuid/subgid, containers.conf drop-in, user@.service.d/delegate.conf, linger, podman info assertion. Converge test checks subuid/subgid, delegate.conf and the linger flag; test_bootstrap_roles::test_ollama_firewall_blocks_foreign_sources runs 
+- [~] 1.11 Node/Vite Buildtooling auf `.223`. — Evidence: roles/nodejs: NodeSource node_22.x repo + pin, gate major 22 and >= 22.12.0 (Vite, research -018). test_bootstrap_tooling::test_node_version_gate (6 cases + missing) and test_node_version_gate_with_the_real_node; test_role_input_validation nodejs-*. NodeSource install on .223 blocked.
+- [~] 1.12 Nginx auf `.223`. — Evidence: roles/nginx: webroot /var/www/hermclaw-next, baseline site with unbuffered SSE locations, guards against foreign sites, nginx -t with rollback, and IPv6 listen now conditional (fix). Tests in test_bootstrap_nginx, against a real nginx 1.28 container: test_nginx_accepts_the_rendered_site_and_rejects_
+- [~] 1.13 systemd units Skeleton. — Evidence: roles/systemd_skeleton + infra/systemd/*.j2: hermclaw-api, -scheduler, -litellm, -backup.service/.timer, -exec-worker, -model-worker, SearXNG Quadlet, ollama drop-in, wol@ and firewall units; secrets via LoadCredentialEncrypted with hermclaw-credential/hermclaw-cred-env; units installed but not enab
+- [x] 1.14 Ansible inventory/roles. — Evidence: inventory/hosts.example.yml, ansible.cfg, bootstrap.yml/site.yml, 9 roles (common, postgresql, podman, nodejs, nginx, nvidia [new Secure Boot guard], ollama, wol_target, systemd_skeleton), scripts/bootstrap/bootstrap-control-node.sh. Tests: test_playbook_syntax_check[*], test_bootstrap_playbook_stru
+- [x] 1.15 reproducible bootstrap test. — Evidence: tests/integration/test_bootstrap_{infra,roles,converge,nginx,postgresql,tooling}.py: 92 passed. Covers YAML parsing, syntax-check, rendering every template, systemd-analyze verify, idempotency guards on command tasks, no_log on secrets, shellcheck, the real converge on Debian 13 with second run and 
 
 ## P02 – Backend Skeleton
 

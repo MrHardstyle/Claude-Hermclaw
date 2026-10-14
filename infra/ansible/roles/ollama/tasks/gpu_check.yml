@@ -37,7 +37,7 @@
   ansible.builtin.set_fact:
     ollama_gpu_devices: "{{ ollama_gpu_journal.stdout_lines | select('search', 'inference compute') | list }}"
 
-- name: Assert that Ollama runs on the {{ ollama_expected_gpu_library }} GPU
+- name: Assert that Ollama runs on the GPU library {{ ollama_expected_gpu_library }}
   ansible.builtin.assert:
     that:
       - ollama_gpu_journal.stdout is not search('driver too old', ignorecase=true)

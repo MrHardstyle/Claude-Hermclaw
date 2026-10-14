@@ -39,3 +39,7 @@ postgresql_settings:
 # Additional pg_hba lines (type, database, user, address, method). They are evaluated
 # after the postgres and Hermclaw rules and before the generic local rules (first match wins).
 postgresql_hba_extra: []
+
+# Debian layout of the cluster (pg_createcluster): server binaries and configuration directory.
+postgresql_bin_dir: "/usr/lib/postgresql/{{ postgresql_version }}/bin"
+postgresql_conf_dir: "/etc/postgresql/{{ postgresql_version }}/{{ postgresql_cluster }}"

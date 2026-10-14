@@ -9,7 +9,7 @@ Everything here runs locally without the target hosts (BLOCKER-001):
 * idempotency lint: command/shell/raw/script tasks need creates/removes or changed_when
 * the shell scripts (check-host, bootstrap-control-node, hermclaw-credential,
   hermclaw-cred-env) are executed for real
-* optional: ansible-lint (production profile) when available (HERMCLAW_ANSIBLE_LINT or PATH)
+* ansible-lint (production profile; dev extra – HERMCLAW_ANSIBLE_LINT, the venv or PATH)
 """
 
 from __future__ import annotations
@@ -47,11 +47,42 @@ WORKER_IDS = ["exec-222", "model-224"]
 KEY_B64 = "AAAAC3NzaC1lZDI1NTE5AAAAIHRlc3Qta2V5LWZvci1oZXJtY2xhdy1ib290c3RyYXA"
 
 TASK_KEYWORDS = {
-    "name", "when", "tags", "register", "loop", "loop_control", "with_items", "vars", "become", "become_user",
-    "delegate_to", "run_once", "notify", "changed_when", "failed_when", "check_mode", "environment", "args",
-    "no_log", "until", "retries", "delay", "block", "rescue", "always", "ignore_errors", "listen", "timeout",
-    "diff", "any_errors_fatal", "throttle", "module_defaults", "collections", "debugger", "become_method",
-}  # fmt: skip
+    "name",
+    "when",
+    "tags",
+    "register",
+    "loop",
+    "loop_control",
+    "with_items",
+    "vars",
+    "become",
+    "become_user",
+    "delegate_to",
+    "run_once",
+    "notify",
+    "changed_when",
+    "failed_when",
+    "check_mode",
+    "environment",
+    "args",
+    "no_log",
+    "until",
+    "retries",
+    "delay",
+    "block",
+    "rescue",
+    "always",
+    "ignore_errors",
+    "listen",
+    "timeout",
+    "diff",
+    "any_errors_fatal",
+    "throttle",
+    "module_defaults",
+    "collections",
+    "debugger",
+    "become_method",
+}
 COMMAND_MODULES = {"ansible.builtin.command", "ansible.builtin.shell", "ansible.builtin.raw", "ansible.builtin.script"}
 
 
@@ -73,9 +104,10 @@ def _ansible_env(tmp_path: Path) -> dict[str, str]:
     return env
 
 
-def _run(argv: list[str], *, env: Mapping[str, str] | None = None, cwd: Path = ANSIBLE_DIR,
-         timeout: int = 300, input_text: str | None = None) -> subprocess.CompletedProcess[str]:  # fmt: skip
-    return subprocess.run(  # noqa: S603 - fixed argv built by the test
+def _run(
+    argv: list[str], *, env: Mapping[str, str] | None = None, cwd: Path = ANSIBLE_DIR, timeout: int = 300, input_text: str | None = None
+) -> subprocess.CompletedProcess[str]:
+    return subprocess.run(
         argv,
         cwd=cwd,
         env=dict(env) if env is not None else None,
@@ -198,7 +230,7 @@ def _render(tmp_path: Path, out: Path, overrides: Mapping[str, Any]) -> dict[str
     return rendered
 
 
-def _render_vars(paths: Mapping[str, str] | None = None) -> dict[str, Any]:
+def _render_vars(paths: Mapping[str, Any] | None = None) -> dict[str, Any]:
     inv = yaml.safe_load(EXAMPLE_INVENTORY.read_text(encoding="utf-8"))
     values: dict[str, Any] = dict(inv["all"]["vars"])
     values.pop("ansible_user", None)
@@ -307,17 +339,23 @@ def test_port_plan_is_in_sync_and_matches_bauplan() -> None:
     gv = yaml.safe_load(GROUP_VARS.read_text(encoding="utf-8"))
     plan = {(g, e["port"], e["service"]) for g, entries in gv["hermclaw_port_plan"].items() for e in entries}
     assert plan == ports, "check-host.sh PORT_PLAN and group_vars hermclaw_port_plan differ"
-    expect_names = {
-        (g, e["port"]): ",".join(e["expect"]) for g, entries in gv["hermclaw_port_plan"].items() for e in entries
-    }
+    expect_names = {(g, e["port"]): ",".join(e["expect"]) for g, entries in gv["hermclaw_port_plan"].items() for e in entries}
     text = (SCRIPTS_DIR / "check-host.sh").read_text(encoding="utf-8")
     for (group, port), names in expect_names.items():
         assert re.search(rf"^{group} {port} \S+ {re.escape(names)}$", text, re.M), (group, port)
     by_group = {(g, p) for g, p, _ in ports}
     # Bauplan §6
-    for required in [("orchestrator", 8000), ("orchestrator", 4000), ("orchestrator", 5432), ("orchestrator", 9100),
-                     ("webui", 80), ("webui", 443), ("execution_workers", 8787), ("model_workers", 8787),
-                     ("model_workers", 11434)]:  # fmt: skip
+    for required in [
+        ("orchestrator", 8000),
+        ("orchestrator", 4000),
+        ("orchestrator", 5432),
+        ("orchestrator", 9100),
+        ("webui", 80),
+        ("webui", 443),
+        ("execution_workers", 8787),
+        ("model_workers", 8787),
+        ("model_workers", 11434),
+    ]:
         assert required in by_group
     assert gv["hermclaw_api_port"] == 8000 and gv["hermclaw_litellm_port"] == 4000
     assert gv["hermclaw_postgres_port"] == 5432 and gv["hermclaw_ollama_port"] == 11434
@@ -329,8 +367,11 @@ def test_unit_plan_is_in_sync() -> None:
     defaults = yaml.safe_load((ROLES_DIR / "systemd_skeleton" / "defaults" / "main.yml").read_text(encoding="utf-8"))
     expected = {(g, u) for g, lst in defaults["systemd_skeleton_units"].items() for u in lst}
     # installed by the wol_target and ollama roles instead of systemd_skeleton
-    expected |= {("execution_workers", "hermclaw-wol@.service"), ("model_workers", "hermclaw-wol@.service"),
-                 ("model_workers", "hermclaw-ollama-firewall.service")}  # fmt: skip
+    expected |= {
+        ("execution_workers", "hermclaw-wol@.service"),
+        ("model_workers", "hermclaw-wol@.service"),
+        ("model_workers", "hermclaw-ollama-firewall.service"),
+    }
     assert units == expected
     for _, unit in units:
         assert (SYSTEMD_DIR / unit).exists() or (SYSTEMD_DIR / f"{unit}.j2").exists(), unit
@@ -409,8 +450,11 @@ def test_rendered_postgresql_is_local_only(rendered: dict[str, Path]) -> None:
     assert "password_encryption = 'scram-sha-256'" in conf
     assert "log_line_prefix = '%m [%p] %q%u@%d '" in conf
     assert "shared_buffers = 2GB" in conf
-    hba = [ln.split() for ln in rendered["postgresql/pg_hba.conf"].read_text(encoding="utf-8").splitlines()
-           if ln.strip() and not ln.startswith("#")]  # fmt: skip
+    hba = [
+        ln.split()
+        for ln in rendered["postgresql/pg_hba.conf"].read_text(encoding="utf-8").splitlines()
+        if ln.strip() and not ln.startswith("#")
+    ]
     assert ["local", "hermclaw", "hermclaw", "peer"] in hba
     for rule in hba:
         assert rule[-1] in {"peer", "scram-sha-256"}, rule
@@ -434,12 +478,14 @@ def test_postgresql_conf_quotes_hostile_values(tmp_path: Path) -> None:
 
 def test_pg_hba_extra_rules_precede_the_generic_rules(tmp_path: Path) -> None:
     """pg_hba is first-match: operator rules must be evaluated before the catch-all lines."""
-    extra = [{"type": "local", "database": "hermclaw", "user": "reporting", "method": "reject"},
-             {"type": "host", "database": "hermclaw", "user": "backup", "address": "127.0.0.1/32",
-              "method": "scram-sha-256"}]  # fmt: skip
+    extra = [
+        {"type": "local", "database": "hermclaw", "user": "reporting", "method": "reject"},
+        {"type": "host", "database": "hermclaw", "user": "backup", "address": "127.0.0.1/32", "method": "scram-sha-256"},
+    ]
     out = _render(tmp_path, tmp_path / "hba", _render_vars({"postgresql_hba_extra": extra}))
-    hba = [ln.split() for ln in out["postgresql/pg_hba.conf"].read_text(encoding="utf-8").splitlines()
-           if ln.strip() and not ln.startswith("#")]  # fmt: skip
+    hba = [
+        ln.split() for ln in out["postgresql/pg_hba.conf"].read_text(encoding="utf-8").splitlines() if ln.strip() and not ln.startswith("#")
+    ]
     reject = hba.index(["local", "hermclaw", "reporting", "reject"])
     backup = hba.index(["host", "hermclaw", "backup", "127.0.0.1/32", "scram-sha-256"])
     generic_local = hba.index(["local", "all", "all", "peer"])
@@ -456,8 +502,14 @@ def test_rendered_nginx_site_supports_sse(rendered: dict[str, Path]) -> None:
     assert "server_name hermclaw.lan;" in site
     assert "default_server" not in site
     sse = site[site.index("events/stream$") : site.index("location /api/ {")]
-    for directive in ("proxy_buffering off;", "proxy_cache off;", "gzip off;", "proxy_http_version 1.1;",
-                      'proxy_set_header Connection "";', "proxy_read_timeout 3600s;"):  # fmt: skip
+    for directive in (
+        "proxy_buffering off;",
+        "proxy_cache off;",
+        "gzip off;",
+        "proxy_http_version 1.1;",
+        'proxy_set_header Connection "";',
+        "proxy_read_timeout 3600s;",
+    ):
         assert directive in sse, directive
     assert re.search(r"location ~ \^/api/\(jobs/\[\^/\]\+/\)\?events/stream\$", site)
     assert re.fullmatch(r"\^/api/\(jobs/\[\^/\]\+/\)\?events/stream\$", r"^/api/(jobs/[^/]+/)?events/stream$")
@@ -496,7 +548,7 @@ def test_rendered_units_load_credentials_not_secrets(rendered: dict[str, Path]) 
                 assert not re.search(r"(?i)(passw|apikey)=", line), f"{key}: secret-looking value in {line}"
 
 
-def test_rendered_environment_files(rendered: dict[str, Path]) -> None:
+def test_rendered_environment_files(rendered: dict[str, Path], monkeypatch: pytest.MonkeyPatch) -> None:
     env = {}
     for line in rendered["systemd/hermclaw.env"].read_text(encoding="utf-8").splitlines():
         if line and not line.startswith("#"):
@@ -509,8 +561,16 @@ def test_rendered_environment_files(rendered: dict[str, Path]) -> None:
     # the settings model accepts the rendered values
     from hermclaw.core.settings import Settings
 
-    settings = Settings(**{k[len("HERMCLAW_") :].lower(): v for k, v in env.items() if k != "HERMCLAW_WORKER_TOKEN_REFS"})
+    # the settings model reads the rendered file from the environment, exactly as systemd passes it
+    for key in [k for k in os.environ if k.startswith("HERMCLAW_")]:
+        monkeypatch.delenv(key)
+    for key, value in env.items():
+        monkeypatch.setenv(key, value)
+    settings = Settings()
     assert settings.env == "production" and str(settings.config_dir) == "/etc/hermclaw"
+    assert settings.database_url == env["HERMCLAW_DATABASE_URL"] and settings.api_port == 8000
+    assert settings.worker_token_refs == {w: f"cred:worker-token-{w}" for w in WORKER_IDS}
+    assert settings.api_token_ref == "cred:api-admin-token" and settings.log_json is True
     execution = rendered["systemd/worker-execution.env"].read_text(encoding="utf-8")
     model = rendered["systemd/worker-model.env"].read_text(encoding="utf-8")
     assert "WORKER_KIND=execution" in execution and "WORKER_POLICIES_FILE=/etc/hermclaw/policies.yaml" in execution
@@ -616,11 +676,18 @@ def _stub_paths(root: Path) -> dict[str, str]:
         "nvidia_persistenced_bin": str(root / "usr/bin/nvidia-persistenced"),
         "ollama_firewall_nft_bin": str(root / "usr/sbin/nft"),
     }
-    for exe in ("opt/hermclaw/venv/bin/hermclaw", "opt/hermclaw/venv/bin/hermclaw-exec-worker",
-                "opt/hermclaw/venv/bin/hermclaw-model-worker", "opt/hermclaw/bin/hermclaw-cred-env",
-                "opt/hermclaw/bin/hermclaw-backup", "opt/litellm/venv/bin/litellm",
-                "opt/ollama/current/bin/ollama", "usr/sbin/ethtool", "usr/bin/nvidia-persistenced",
-                "usr/sbin/nft"):  # fmt: skip
+    for exe in (
+        "opt/hermclaw/venv/bin/hermclaw",
+        "opt/hermclaw/venv/bin/hermclaw-exec-worker",
+        "opt/hermclaw/venv/bin/hermclaw-model-worker",
+        "opt/hermclaw/bin/hermclaw-cred-env",
+        "opt/hermclaw/bin/hermclaw-backup",
+        "opt/litellm/venv/bin/litellm",
+        "opt/ollama/current/bin/ollama",
+        "usr/sbin/ethtool",
+        "usr/bin/nvidia-persistenced",
+        "usr/sbin/nft",
+    ):
         p = root / exe
         p.parent.mkdir(parents=True, exist_ok=True)
         p.write_text("#!/bin/sh\nexit 0\n", encoding="utf-8")
@@ -655,10 +722,17 @@ def test_rendered_units_pass_systemd_analyze_verify(tmp_path: Path) -> None:
     dropin_dir.mkdir()
     shutil.move(str(out["systemd/ollama-hermclaw.conf"]), dropin_dir / "hermclaw.conf")
     assert {u.name for u in units} >= {
-        "hermclaw-api.service", "hermclaw-scheduler.service", "hermclaw-litellm.service", "hermclaw-backup.service",
-        "hermclaw-backup.timer", "hermclaw-exec-worker.service", "hermclaw-model-worker.service", "ollama.service",
-        "hermclaw-ollama-firewall.service", "nvidia-persistenced.service",
-    }  # fmt: skip
+        "hermclaw-api.service",
+        "hermclaw-scheduler.service",
+        "hermclaw-litellm.service",
+        "hermclaw-backup.service",
+        "hermclaw-backup.timer",
+        "hermclaw-exec-worker.service",
+        "hermclaw-model-worker.service",
+        "ollama.service",
+        "hermclaw-ollama-firewall.service",
+        "nvidia-persistenced.service",
+    }
     res = _run([analyze, "verify", *[str(u) for u in units]], cwd=unit_dir, timeout=120)
     problems = [ln for ln in res.stderr.splitlines() if SYSTEMD_ERROR.search(ln) and "sysinit.target" not in ln]
     assert res.returncode == 0 and not problems, res.stderr
@@ -688,8 +762,13 @@ def test_searxng_quadlet_dryrun(rendered: dict[str, Path], tmp_path: Path) -> No
     assert res.returncode == 0, res.stderr
     assert "---hermclaw-searxng.service---" in res.stdout
     exec_start = next(ln for ln in res.stdout.splitlines() if ln.startswith("ExecStart="))
-    for flag in ("--publish 127.0.0.1:8888:8080", "--cap-drop=all", "--security-opt=no-new-privileges",
-                 "--secret hermclaw-searxng-secret,type=env,target=SEARXNG_SECRET", "/etc/searxng:ro"):  # fmt: skip
+    for flag in (
+        "--publish 127.0.0.1:8888:8080",
+        "--cap-drop=all",
+        "--security-opt=no-new-privileges",
+        "--secret hermclaw-searxng-secret,type=env,target=SEARXNG_SECRET",
+        "/etc/searxng:ro",
+    ):
         assert flag in exec_start, flag
 
 
@@ -697,14 +776,23 @@ def test_searxng_quadlet_dryrun(rendered: dict[str, Path], tmp_path: Path) -> No
 
 
 def test_ansible_lint_production_profile(tmp_path: Path) -> None:
-    lint = os.environ.get("HERMCLAW_ANSIBLE_LINT") or shutil.which("ansible-lint")
+    venv_lint = VENV_BIN / "ansible-lint"
+    lint = os.environ.get("HERMCLAW_ANSIBLE_LINT") or (str(venv_lint) if venv_lint.exists() else shutil.which("ansible-lint"))
     if not lint or not Path(lint).exists():
         pytest.skip("ansible-lint not available (set HERMCLAW_ANSIBLE_LINT=/path/to/ansible-lint)")
     env = _ansible_env(tmp_path)
     env["PATH"] = f"{Path(lint).parent}{os.pathsep}{env['PATH']}"
     res = _run(
-        [lint, "--offline", "--profile=production", "--format=pep8", "playbooks/bootstrap.yml", "playbooks/site.yml",
-         "playbooks/inventory.yml", "roles"],  # fmt: skip
+        [
+            lint,
+            "--offline",
+            "--profile=production",
+            "--format=pep8",
+            "playbooks/bootstrap.yml",
+            "playbooks/site.yml",
+            "playbooks/inventory.yml",
+            "roles",
+        ],
         env=env,
         timeout=600,
     )
@@ -714,7 +802,7 @@ def test_ansible_lint_production_profile(tmp_path: Path) -> None:
 # --------------------------------------------------------------------------------------------- scripts
 
 
-SCRIPTS = sorted(SCRIPTS_DIR.glob("*.sh")) + [SYSTEMD_DIR / "hermclaw-cred-env"]
+SCRIPTS = [*sorted(SCRIPTS_DIR.glob("*.sh")), SYSTEMD_DIR / "hermclaw-cred-env"]
 
 
 @pytest.mark.parametrize("script", SCRIPTS, ids=lambda p: p.name)
@@ -729,8 +817,9 @@ def test_shell_scripts_are_valid(script: Path) -> None:
         assert res.returncode == 0, res.stdout
 
 
-def _cred_env(tmp_path: Path, args: list[str], creds: Mapping[str, str] | None = None,
-              set_dir: bool = True) -> subprocess.CompletedProcess[str]:  # fmt: skip
+def _cred_env(
+    tmp_path: Path, args: list[str], creds: Mapping[str, str] | None = None, set_dir: bool = True
+) -> subprocess.CompletedProcess[str]:
     cdir = tmp_path / "creds"
     cdir.mkdir(exist_ok=True)
     for name, value in (creds or {}).items():
@@ -744,8 +833,14 @@ def _cred_env(tmp_path: Path, args: list[str], creds: Mapping[str, str] | None =
 def test_cred_env_exports_credentials_and_execs(tmp_path: Path) -> None:
     res = _cred_env(
         tmp_path,
-        ["LITELLM_MASTER_KEY=litellm-master-key", "OTHER=other", "--", sys.executable, "-c",
-         "import os; print(os.environ['LITELLM_MASTER_KEY'] + '|' + os.environ['OTHER'])"],  # fmt: skip
+        [
+            "LITELLM_MASTER_KEY=litellm-master-key",
+            "OTHER=other",
+            "--",
+            sys.executable,
+            "-c",
+            "import os; print(os.environ['LITELLM_MASTER_KEY'] + '|' + os.environ['OTHER'])",
+        ],
         {"litellm-master-key": "sk-first-line\nsecond-line\n", "other": "o"},
     )
     assert res.returncode == 0, res.stderr
@@ -767,9 +862,7 @@ def test_cred_env_exports_credentials_and_execs(tmp_path: Path) -> None:
         (["K=c", "true"], {"c": "v"}, True, 64),
     ],
 )
-def test_cred_env_rejects_bad_input(
-    tmp_path: Path, args: list[str], creds: dict[str, str], set_dir: bool, code: int
-) -> None:
+def test_cred_env_rejects_bad_input(tmp_path: Path, args: list[str], creds: dict[str, str], set_dir: bool, code: int) -> None:
     res = _cred_env(tmp_path, args, creds, set_dir)
     assert res.returncode == code, res.stderr
     assert "v" not in res.stdout
@@ -873,23 +966,21 @@ def test_check_host_reports_json_and_refuses_non_debian() -> None:
         assert f"port:{port}" in checks
     assert "unit:hermclaw-api.service" in checks
     os_release = Path("/etc/os-release").read_text(encoding="utf-8")
-    is_trixie = 'ID=debian' in os_release and 'VERSION_ID="13"' in os_release
+    is_trixie = "ID=debian" in os_release and 'VERSION_ID="13"' in os_release
     assert (checks["os"]["status"] == "OK") is is_trixie
     if not is_trixie:
         assert res.returncode == 1 and report["failures"] >= 1
     assert report["failures"] == sum(1 for c in report["checks"] if c["status"] == "FAIL")
 
 
-@pytest.mark.parametrize("args", [[], ["--role"], ["--role", "Bad;rm"], ["--role", "webui", "--min-ram-mb", "x"],
-                                  ["--bogus"]])  # fmt: skip
+@pytest.mark.parametrize("args", [[], ["--role"], ["--role", "Bad;rm"], ["--role", "webui", "--min-ram-mb", "x"], ["--bogus"]])
 def test_check_host_usage_errors(args: list[str]) -> None:
     assert _check_host(*args).returncode == 64
 
 
 def test_bootstrap_control_node_creates_but_never_overwrites_inventory(tmp_path: Path) -> None:
     inventory = tmp_path / "inv" / "hosts.yml"
-    argv = [str(SCRIPTS_DIR / "bootstrap-control-node.sh"), "--ansible-bin-dir", str(VENV_BIN),
-            "--inventory", str(inventory)]  # fmt: skip
+    argv = [str(SCRIPTS_DIR / "bootstrap-control-node.sh"), "--ansible-bin-dir", str(VENV_BIN), "--inventory", str(inventory)]
     env = _ansible_env(tmp_path)
     res = _run(argv, env=env, cwd=tmp_path, timeout=600)
     assert res.returncode == 0, res.stdout + res.stderr
@@ -910,8 +1001,14 @@ def test_bootstrap_control_node_rejects_incomplete_inventory(tmp_path: Path) -> 
     inventory = tmp_path / "hosts.yml"
     inventory.write_text("all:\n  children:\n    orchestrator:\n      hosts:\n        o: {}\n", encoding="utf-8")
     res = _run(
-        [str(SCRIPTS_DIR / "bootstrap-control-node.sh"), "--ansible-bin-dir", str(VENV_BIN), "--inventory",
-         str(inventory), "--skip-syntax-check"],  # fmt: skip
+        [
+            str(SCRIPTS_DIR / "bootstrap-control-node.sh"),
+            "--ansible-bin-dir",
+            str(VENV_BIN),
+            "--inventory",
+            str(inventory),
+            "--skip-syntax-check",
+        ],
         env=_ansible_env(tmp_path),
         cwd=tmp_path,
     )
@@ -937,8 +1034,23 @@ VALIDATION_CASES: list[tuple[str, str, dict[str, Any], str]] = [
     ("common-forced-command-ok", "common", {"common_ssh_forced_command": "/usr/local/bin/hermclaw-ssh-gate"}, "PASS"),
     ("common-shared-admin-login", "common", {"ansible_user": "hermclaw-admin"}, "FAIL"),
     ("common-shared-admin-allowed", "common", {"ansible_user": "hermclaw-admin", "common_allow_shared_admin_login": True}, "PASS"),
-    ("common-known-hosts-ok", "common", {"common_known_hosts_extra": [f"gitlab.lan,192.168.178.226 ssh-ed25519 {KEY_B64}", f"[192.168.178.60]:2222 ecdsa-sha2-nistp256 {KEY_B64}="]}, "PASS"),
-    ("common-known-hosts-newline", "common", {"common_known_hosts_extra": [f"gitlab.lan ssh-ed25519 {KEY_B64}\n* ssh-ed25519 {KEY_B64}"]}, "FAIL"),
+    (
+        "common-known-hosts-ok",
+        "common",
+        {
+            "common_known_hosts_extra": [
+                f"gitlab.lan,192.168.178.226 ssh-ed25519 {KEY_B64}",
+                f"[192.168.178.60]:2222 ecdsa-sha2-nistp256 {KEY_B64}=",
+            ]
+        },
+        "PASS",
+    ),
+    (
+        "common-known-hosts-newline",
+        "common",
+        {"common_known_hosts_extra": [f"gitlab.lan ssh-ed25519 {KEY_B64}\n* ssh-ed25519 {KEY_B64}"]},
+        "FAIL",
+    ),
     ("common-known-hosts-marker", "common", {"common_known_hosts_extra": [f"@cert-authority * ssh-ed25519 {KEY_B64}"]}, "FAIL"),
     ("common-known-hosts-wildcard", "common", {"common_known_hosts_extra": [f"* ssh-ed25519 {KEY_B64}"]}, "FAIL"),
     ("common-known-hosts-bad-type", "common", {"common_known_hosts_extra": [f"gitlab.lan ssh-dss {KEY_B64}"]}, "FAIL"),
@@ -947,10 +1059,34 @@ VALIDATION_CASES: list[tuple[str, str, dict[str, Any], str]] = [
     ("pg-listen-lan", "postgresql", {"postgresql_listen_addresses": "0.0.0.0"}, "FAIL"),
     ("pg-db-injection", "postgresql", {"postgresql_db_name": "hermclaw; drop"}, "FAIL"),
     ("pg-vulnerable-pgvector", "postgresql", {"postgresql_pgvector_min_version": "0.8.1"}, "FAIL"),
-    ("pg-hba-trust", "postgresql", {"postgresql_hba_extra": [{"type": "host", "database": "all", "user": "all", "address": "0.0.0.0/0", "method": "trust"}]}, "FAIL"),
-    ("pg-hba-host-without-address", "postgresql", {"postgresql_hba_extra": [{"type": "host", "database": "hermclaw", "user": "hermclaw", "method": "scram-sha-256"}]}, "FAIL"),
-    ("pg-hba-newline", "postgresql", {"postgresql_hba_extra": [{"type": "local", "database": "all\nhost all all 0.0.0.0/0 trust", "user": "x", "method": "peer"}]}, "FAIL"),
-    ("pg-hba-ok", "postgresql", {"postgresql_hba_extra": [{"type": "host", "database": "hermclaw", "user": "backup", "address": "127.0.0.1/32", "method": "scram-sha-256"}]}, "PASS"),
+    (
+        "pg-hba-trust",
+        "postgresql",
+        {"postgresql_hba_extra": [{"type": "host", "database": "all", "user": "all", "address": "0.0.0.0/0", "method": "trust"}]},
+        "FAIL",
+    ),
+    (
+        "pg-hba-host-without-address",
+        "postgresql",
+        {"postgresql_hba_extra": [{"type": "host", "database": "hermclaw", "user": "hermclaw", "method": "scram-sha-256"}]},
+        "FAIL",
+    ),
+    (
+        "pg-hba-newline",
+        "postgresql",
+        {"postgresql_hba_extra": [{"type": "local", "database": "all\nhost all all 0.0.0.0/0 trust", "user": "x", "method": "peer"}]},
+        "FAIL",
+    ),
+    (
+        "pg-hba-ok",
+        "postgresql",
+        {
+            "postgresql_hba_extra": [
+                {"type": "host", "database": "hermclaw", "user": "backup", "address": "127.0.0.1/32", "method": "scram-sha-256"}
+            ]
+        },
+        "PASS",
+    ),
     ("nginx-defaults", "nginx", {"hermclaw_web_server_name": "hermclaw.lan"}, "PASS"),
     ("nginx-server-name-injection", "nginx", {"hermclaw_web_server_name": "x; return 301 http://evil"}, "FAIL"),
     ("nginx-upstream-injection", "nginx", {"nginx_api_upstream": "http://192.168.178.225:8000/; deny all"}, "FAIL"),
@@ -973,8 +1109,18 @@ VALIDATION_CASES: list[tuple[str, str, dict[str, Any], str]] = [
     ("ollama-gpu-library-unknown", "ollama", {"ollama_expected_gpu_library": "ROCm"}, "FAIL"),
     ("ollama-gpu-check-off", "ollama", {"ollama_expected_gpu_library": ""}, "PASS"),
     ("ollama-below-minimum", "ollama", {"ollama_version": "0.30.1"}, "FAIL"),
-    ("ollama-firewall-sources-ok", "ollama", {"ollama_firewall_allowed_sources": ["192.168.178.225", "192.168.178.0/24", "fd00::/8", "::1"]}, "PASS"),
-    ("ollama-firewall-source-injection", "ollama", {"ollama_firewall_allowed_sources": ["192.168.178.225 } accept; tcp dport 22 drop; ip saddr {"]}, "FAIL"),
+    (
+        "ollama-firewall-sources-ok",
+        "ollama",
+        {"ollama_firewall_allowed_sources": ["192.168.178.225", "192.168.178.0/24", "fd00::/8", "::1"]},
+        "PASS",
+    ),
+    (
+        "ollama-firewall-source-injection",
+        "ollama",
+        {"ollama_firewall_allowed_sources": ["192.168.178.225 } accept; tcp dport 22 drop; ip saddr {"]},
+        "FAIL",
+    ),
     ("ollama-firewall-source-newline", "ollama", {"ollama_firewall_allowed_sources": ["192.168.178.225\n"]}, "FAIL"),
     ("ollama-firewall-bad-cidr", "ollama", {"ollama_firewall_allowed_sources": ["192.168.178.0/33"]}, "FAIL"),
     ("ollama-firewall-bad-ip", "ollama", {"ollama_firewall_allowed_sources": ["192.168.178.256"]}, "FAIL"),
@@ -985,8 +1131,12 @@ VALIDATION_CASES: list[tuple[str, str, dict[str, Any], str]] = [
     ("nvidia-590-drops-pascal", "nvidia", {"nvidia_driver_branch": "590"}, "FAIL"),
     # Debian's 550 drives Pascal, but Ollama >= 0.30 ignores CC 6.1 GPUs below driver 570 (research 026 O7)
     ("nvidia-debian-550", "nvidia", {"nvidia_source": "debian", "nvidia_driver_branch": "550"}, "FAIL"),
-    ("nvidia-debian-550-without-ollama", "nvidia",
-     {"nvidia_source": "debian", "nvidia_driver_branch": "550", "nvidia_allow_branch_below_ollama_minimum": True}, "PASS"),
+    (
+        "nvidia-debian-550-without-ollama",
+        "nvidia",
+        {"nvidia_source": "debian", "nvidia_driver_branch": "550", "nvidia_allow_branch_below_ollama_minimum": True},
+        "PASS",
+    ),
     ("nvidia-cuda-570", "nvidia", {"nvidia_source": "cuda", "nvidia_driver_branch": "570"}, "PASS"),
     ("nvidia-bad-min-branch", "nvidia", {"nvidia_min_driver_branch": "57x"}, "FAIL"),
     ("nvidia-unknown-source", "nvidia", {"nvidia_source": "ppa"}, "FAIL"),
@@ -1126,9 +1276,7 @@ def listener() -> Iterator[tuple[int, str]]:
         "s = socket.socket(); s.bind(('127.0.0.1', 0)); s.listen()\n"
         "print(s.getsockname()[1], flush=True); time.sleep(120)\n"
     )
-    proc = subprocess.Popen(  # noqa: S603 - fixed argv
-        [sys.executable, "-c", code, "hermclaw-preflight-marker"], stdout=subprocess.PIPE, text=True
-    )
+    proc = subprocess.Popen([sys.executable, "-c", code, "hermclaw-preflight-marker"], stdout=subprocess.PIPE, text=True)
     try:
         assert proc.stdout is not None
         port = int(proc.stdout.readline())
@@ -1139,12 +1287,27 @@ def listener() -> Iterator[tuple[int, str]]:
         proc.wait(timeout=10)
 
 
-def _check_host_with(tmp_path: Path, plan: str, *args: str, os_release: str = FAKE_TRIXIE,
-                     env: Mapping[str, str] | None = None) -> tuple[int, dict[str, Any]]:  # fmt: skip
+def _check_host_with(
+    tmp_path: Path, plan: str, *args: str, os_release: str = FAKE_TRIXIE, env: Mapping[str, str] | None = None
+) -> tuple[int, dict[str, Any]]:
     rel = tmp_path / "os-release"
     rel.write_text(os_release, encoding="utf-8")
-    argv = ["bash", str(SCRIPTS_DIR / "check-host.sh"), "--role", "orchestrator", "--json", "--os-release", str(rel),
-            "--min-cpus", "0", "--min-ram-mb", "0", "--min-disk-gb", "0", *args]  # fmt: skip
+    argv = [
+        "bash",
+        str(SCRIPTS_DIR / "check-host.sh"),
+        "--role",
+        "orchestrator",
+        "--json",
+        "--os-release",
+        str(rel),
+        "--min-cpus",
+        "0",
+        "--min-ram-mb",
+        "0",
+        "--min-disk-gb",
+        "0",
+        *args,
+    ]
     if plan:
         plan_file = tmp_path / "plan"
         plan_file.write_text(plan, encoding="utf-8")
@@ -1187,25 +1350,31 @@ def test_check_host_detects_port_conflicts(tmp_path: Path, listener: tuple[int, 
     # the Ansible role hands the plan over through the environment
     rel = tmp_path / "os-release-env"
     rel.write_text(FAKE_TRIXIE, encoding="utf-8")
-    res = _run(["bash", str(SCRIPTS_DIR / "check-host.sh"), "--role", "webui", "--json", "--os-release", str(rel)],
-               env={**os.environ, "HERMCLAW_PORT_PLAN": f"webui {port} demo nginx\n"}, cwd=REPO)  # fmt: skip
+    res = _run(
+        ["bash", str(SCRIPTS_DIR / "check-host.sh"), "--role", "webui", "--json", "--os-release", str(rel)],
+        env={**os.environ, "HERMCLAW_PORT_PLAN": f"webui {port} demo nginx\n"},
+        cwd=REPO,
+    )
     checks = {c["check"]: c for c in json.loads(res.stdout)["checks"]}
     assert checks[f"port:{port}"]["status"] == "FAIL" and "port:80" not in checks
 
 
 @pytest.mark.parametrize(
     "plan",
-    ["orchestrator 8000 api", "orchestrator 70000 api x", "Orchestrator 80 api x", "orchestrator 80 api x;rm",
-     "orchestrator 80 api x extra"],  # fmt: skip
+    [
+        "orchestrator 8000 api",
+        "orchestrator 70000 api x",
+        "Orchestrator 80 api x",
+        "orchestrator 80 api x;rm",
+        "orchestrator 80 api x extra",
+    ],
 )
 def test_check_host_rejects_invalid_port_plans(tmp_path: Path, plan: str) -> None:
     plan_file = tmp_path / "plan"
     plan_file.write_text(plan + "\n", encoding="utf-8")
-    res = _run(["bash", str(SCRIPTS_DIR / "check-host.sh"), "--role", "orchestrator", "--port-plan", str(plan_file)],
-               cwd=REPO)  # fmt: skip
+    res = _run(["bash", str(SCRIPTS_DIR / "check-host.sh"), "--role", "orchestrator", "--port-plan", str(plan_file)], cwd=REPO)
     assert res.returncode == 64, res.stdout + res.stderr
-    missing = _run(["bash", str(SCRIPTS_DIR / "check-host.sh"), "--role", "webui", "--port-plan", str(tmp_path / "nope")],
-                   cwd=REPO)  # fmt: skip
+    missing = _run(["bash", str(SCRIPTS_DIR / "check-host.sh"), "--role", "webui", "--port-plan", str(tmp_path / "nope")], cwd=REPO)
     assert missing.returncode == 64
 
 
@@ -1218,7 +1387,8 @@ def test_rendered_worker_env_is_accepted_by_the_worker_daemons(tmp_path: Path) -
     shutil.copy(REPO / "config" / "capabilities.example.yaml", etc / "capabilities.yaml")
     shutil.copy(REPO / "config" / "policies.example.yaml", etc / "policies.yaml")
     out = _render(tmp_path, tmp_path / "workers", _render_vars({"hermclaw_config_dir": str(etc)}))
-    from worker.common.settings import WorkerDaemonSettings, WorkerKind
+    from hermclaw.contracts.common import WorkerKind
+    from worker.common.settings import WorkerDaemonSettings
 
     for kind, worker_id in ((WorkerKind.execution, "exec-222"), (WorkerKind.model, "model-224")):
         env: dict[str, str] = {}
@@ -1243,8 +1413,9 @@ def test_credential_helper_with_real_systemd_creds(tmp_path: Path) -> None:
         pytest.skip("systemd-creds not installed")
     store = tmp_path / "credstore"
     env = {**os.environ, "HERMCLAW_CREDSTORE_DIR": str(store), "HERMCLAW_CREDS_WITH_KEY": "auto-initrd"}
-    probe = _run(["systemd-creds", "encrypt", "--with-key=auto-initrd", "--name=probe", "-", str(tmp_path / "p")],
-                 input_text="x", cwd=tmp_path)  # fmt: skip
+    probe = _run(
+        ["systemd-creds", "encrypt", "--with-key=auto-initrd", "--name=probe", "-", str(tmp_path / "p")], input_text="x", cwd=tmp_path
+    )
     if probe.returncode != 0:
         pytest.skip(f"systemd-creds cannot encrypt here: {probe.stderr.strip()[:200]}")
     res = _credential(env, "set", "gitlab-token", stdin="glpat-REALSECRET-42\n")
@@ -1260,6 +1431,7 @@ def test_credential_helper_with_real_systemd_creds(tmp_path: Path) -> None:
     assert _credential(env, "check", "other-token").returncode == 65
     res = _credential(env, "generate", "worker-token-exec-222")
     assert res.returncode == 0, res.stderr
-    dec = _run(["systemd-creds", "decrypt", "--name=worker-token-exec-222",
-                str(store / "hermclaw-worker-token-exec-222"), "-"], cwd=tmp_path)  # fmt: skip
+    dec = _run(
+        ["systemd-creds", "decrypt", "--name=worker-token-exec-222", str(store / "hermclaw-worker-token-exec-222"), "-"], cwd=tmp_path
+    )
     assert re.fullmatch(r"[A-Za-z0-9_-]{43}", dec.stdout), "32 random bytes, base64url without padding"

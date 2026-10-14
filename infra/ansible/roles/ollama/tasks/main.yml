@@ -132,7 +132,7 @@
         # present, CUDA runner libraries missing) is extracted again instead of counting as installed
         creates: "{{ ollama_install_root }}/{{ ollama_version }}/.hermclaw-extracted"
 
-    - name: Mark the extraction of {{ ollama_version }} as complete
+    - name: Mark the extraction as complete for {{ ollama_version }}
       ansible.builtin.copy:
         content: "ollama {{ ollama_version }} {{ ollama_archive }}\n"
         dest: "{{ ollama_install_root }}/{{ ollama_version }}/.hermclaw-extracted"

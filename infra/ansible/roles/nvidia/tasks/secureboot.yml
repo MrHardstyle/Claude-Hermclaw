@@ -1,0 +1,23 @@
+# Secure Boot guard (research 20261014-026, decision 1). The driver kernel modules are built by
+# DKMS and unsigned unless the DKMS MOK key is enrolled: with Secure Boot on they would not load,
+# and the role would only notice after the install (nvidia-smi fails). The EFI variable holds 4
+# attribute bytes followed by the state (1 = enabled); no variable = legacy boot / no Secure Boot.
+- name: Read the Secure Boot state
+  ansible.builtin.command:
+    argv: [od, -An, -tu1, -j4, -N1, "{{ nvidia_secureboot_efivar }}"]
+  register: nvidia_secureboot
+  changed_when: false
+  failed_when: false
+  check_mode: false
+
+- name: Refuse Secure Boot without an enrolled DKMS signing key
+  ansible.builtin.assert:
+    that: >-
+      nvidia_secureboot.rc != 0
+      or nvidia_secureboot.stdout | trim != '1'
+      or nvidia_secureboot_mok_enrolled | bool
+    fail_msg: >-
+      Secure Boot is enabled on {{ inventory_hostname }}: the DKMS-built NVIDIA modules would not load.
+      Disable Secure Boot in the firmware setup, or enrol the DKMS key (mokutil --import /var/lib/dkms/mok.pub,
+      reboot, confirm in MokManager) and set nvidia_secureboot_mok_enrolled: true.
+    quiet: true

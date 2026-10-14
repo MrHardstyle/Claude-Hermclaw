@@ -1,0 +1,97 @@
+# Validate the written configuration against the running cluster before the handlers apply it
+# (reload for pg_hba.conf, restart for the drop-in). A broken file is rolled back and the play
+# stops, so the running server keeps its last good configuration.
+#
+# Two independent checks (tested against a real server by tests/integration/test_bootstrap_postgresql.py):
+#  * `postgres -C` parses postgresql.conf with every include exactly like a server start (syntax,
+#    unknown parameters, invalid values of *all* parameters incl. restart-only ones such as
+#    shared_buffers) and exits non-zero on any error; safe while the cluster is running.
+#  * pg_hba_file_rules / pg_file_settings report errors with line numbers. A restart-only
+#    (postmaster context) parameter whose new value is merely pending ("setting could not be
+#    applied" until the restart handler runs, e.g. shared_buffers on the first run) is not an
+#    error here - its value was already validated by `postgres -C`.
+- name: Parse the configuration with the server binary (postgres -C)
+  ansible.builtin.command:
+    argv:
+      - "{{ postgresql_bin_dir }}/postgres"
+      - -D
+      - "{{ postgresql_conf_dir }}"
+      - -C
+      - data_directory
+  become: true
+  become_user: postgres
+  register: postgresql_config_parse
+  changed_when: false
+  failed_when: false
+
+- name: Query pg_hba_file_rules and pg_file_settings for errors
+  ansible.builtin.command:
+    argv:
+      - psql
+      - -X
+      - -q
+      - -tA
+      - -v
+      - ON_ERROR_STOP=1
+      - -p
+      - "{{ postgresql_port }}"
+      - -d
+      - postgres
+      - -c
+      - >-
+        SELECT 'hba:' || line_number || ':' || error FROM pg_hba_file_rules WHERE error IS NOT NULL
+        UNION ALL
+        SELECT 'conf:' || f.sourcefile || ':' || f.sourceline || ':' || coalesce(f.name, '') || ': ' || f.error
+        FROM pg_file_settings f LEFT JOIN pg_settings s ON s.name = f.name
+        WHERE f.error IS NOT NULL
+        AND NOT (s.context = 'postmaster' AND f.error = 'setting could not be applied')
+  become: true
+  become_user: postgres
+  register: postgresql_config_errors
+  changed_when: false
+
+- name: Collect configuration errors
+  ansible.builtin.set_fact:
+    postgresql_config_problems: >-
+      {{ postgresql_config_errors.stdout_lines
+         + ([('postgres -C: ' ~ ((postgresql_config_parse.stderr | default('')) | trim | truncate(600)))]
+            if postgresql_config_parse.rc != 0 else []) }}
+
+- name: Roll back and stop on configuration errors
+  when: postgresql_config_problems | length > 0
+  block:
+    - name: Restore the previous pg_hba.conf
+      ansible.builtin.copy:
+        src: "{{ postgresql_hba.backup_file }}"
+        dest: "{{ postgresql_conf_dir }}/pg_hba.conf"
+        remote_src: true
+        owner: postgres
+        group: postgres
+        mode: "0640"
+      when: postgresql_hba is defined and postgresql_hba.backup_file is defined
+
+    - name: Restore the previous settings drop-in
+      ansible.builtin.copy:
+        src: "{{ postgresql_conf.backup_file }}"
+        dest: "{{ postgresql_conf_dir }}/conf.d/hermclaw.conf"
+        remote_src: true
+        owner: postgres
+        group: postgres
+        mode: "0644"
+      when: postgresql_conf is defined and postgresql_conf.backup_file is defined
+
+    # a drop-in created by this run had no predecessor: remove it so a later restart is safe
+    - name: Remove a newly created settings drop-in
+      ansible.builtin.file:
+        path: "{{ postgresql_conf_dir }}/conf.d/hermclaw.conf"
+        state: absent
+      when:
+        - postgresql_conf is defined
+        - postgresql_conf is changed
+        - postgresql_conf.backup_file is not defined
+
+    - name: Stop on configuration errors
+      ansible.builtin.fail:
+        msg: >-
+          PostgreSQL configuration errors (previous files restored where a backup existed, nothing
+          reloaded or restarted): {{ postgresql_config_problems }}

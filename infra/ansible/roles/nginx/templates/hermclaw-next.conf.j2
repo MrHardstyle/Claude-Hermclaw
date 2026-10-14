@@ -10,7 +10,9 @@ upstream hermclaw_api {
 
 server {
     listen {{ nginx_listen_port }}{{ ' default_server' if nginx_default_server | bool else '' }};
+{% if nginx_listen_ipv6 | bool %}
     listen [::]:{{ nginx_listen_port }}{{ ' default_server' if nginx_default_server | bool else '' }};
+{% endif %}
     server_name {{ nginx_server_name }};
 
     root {{ hermclaw_webroot }};
