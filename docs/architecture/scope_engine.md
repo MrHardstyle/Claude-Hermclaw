@@ -195,11 +195,9 @@ All events carry `job_id`/`step_id` (and `attempt_id` when given); `source_type=
   expire-on-commit sessions).
 - `tests/failure/test_scope_failures.py` – provider outage, missing workspace, listing timeout, concurrency.
 
-## Known limitations / shared follow-ups
+## Known limitations
 
-- `GitStatusEntry` has no `orig_path`; `hermclaw/gitops/reader.py` drops rename origins. The audit fails closed
-  until the producer carries the origin (`derive_changes_from_status` already reads `orig_path` when present).
 - `ScopeContract` has no per-path operations; the designated-delete restriction is enforced by the audit, not
   by tool-time `ScopeGuard` checks.
-- `ScopeGuard` compiles the escape `[[]` into a regex that Python flags with a `FutureWarning`
-  ("possible nested set"); escaping `[` inside character classes in `guard._glob_regex` removes it.
+- Resolved follow-ups: rename origins are carried end to end (`GitStatusEntry.orig_path`, filled by
+  `hermclaw/gitops/reader.py`), and `ScopeGuard` escapes `[` inside character classes (no `FutureWarning`).
