@@ -32,7 +32,7 @@
 - name: Find the missing tags
   ansible.builtin.set_fact:
     hermclaw_worker_missing_models: >-
-      {% set installed = hermclaw_worker_ollama_list.stdout_lines[1:] | map('split') | map('first') | list %}
+      {%- set installed = hermclaw_worker_ollama_list.stdout_lines[1:] | map('split') | map('first') | list -%}
       {{ hermclaw_worker_wanted_models | reject('in', installed)
          | reject('in', installed | map('regex_replace', ':latest$', '') | list) | list }}
 
@@ -66,9 +66,9 @@
         quiet: true
       vars:
         hermclaw_worker_need_gb: >-
-          {% set total = namespace(gb=hermclaw_worker_model_disk_headroom_gb | float) %}{% for tag in hermclaw_worker_missing_models
-          %}{% set total.gb = total.gb + (hermclaw_worker_model_sizes_gb[tag] | default(hermclaw_worker_model_default_size_gb) | float)
-          %}{% endfor %}{{ total.gb | round(1) }}
+          {%- set total = namespace(gb=hermclaw_worker_model_disk_headroom_gb | float) -%}{%- for tag in hermclaw_worker_missing_models
+          -%}{%- set total.gb = total.gb + (hermclaw_worker_model_sizes_gb[tag] | default(hermclaw_worker_model_default_size_gb) | float)
+          -%}{%- endfor -%}{{ total.gb | round(1) }}
 
     - name: Check for a model pull that is still running
       ansible.builtin.command:
@@ -120,7 +120,7 @@
     - name: Find tags that are still missing
       ansible.builtin.set_fact:
         hermclaw_worker_still_missing: >-
-          {% set installed = hermclaw_worker_ollama_after.stdout_lines[1:] | map('split') | map('first') | list %}
+          {%- set installed = hermclaw_worker_ollama_after.stdout_lines[1:] | map('split') | map('first') | list -%}
           {{ hermclaw_worker_wanted_models | reject('in', installed)
              | reject('in', installed | map('regex_replace', ':latest$', '') | list) | list }}
 

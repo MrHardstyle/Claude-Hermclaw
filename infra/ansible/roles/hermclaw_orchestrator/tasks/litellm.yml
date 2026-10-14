@@ -67,7 +67,7 @@
           - --no-index
           - --find-links
           - "{{ hermclaw_orchestrator_litellm_payload_dir }}/wheelhouse"
-          - --only-binary=:all:
+          - "--only-binary=:all:"
           - --no-cache-dir
           - --require-hashes
           - --requirement

@@ -18,64 +18,64 @@
 - name: Read the configuration templates of release {{ hermclaw_version }}
   ansible.builtin.set_fact:
     hermclaw_config_examples: >-
-      {% set out = {} %}{% for name in hermclaw_config_names %}{% set _ = out.update({name:
-      lookup('ansible.builtin.file', hermclaw_release_dir ~ '/config/' ~ name ~ '.example.yaml') | from_yaml}) %}{% endfor %}{{ out }}
+      {%- set out = {} -%}{%- for name in hermclaw_config_names -%}{%- set _ = out.update({name:
+      lookup('ansible.builtin.file', hermclaw_release_dir ~ '/config/' ~ name ~ '.example.yaml') | from_yaml}) -%}{%- endfor -%}{{ out }}
 
 - name: Derive the hosts.yaml values only the inventory knows
   ansible.builtin.set_fact:
     hermclaw_config_inventory_patches: >-
-      {% set out = {} %}
-      {% for group in hermclaw_config_inventory_groups %}{% for host in groups.get(group, []) %}
-      {% set hv = hostvars[host] %}
-      {% set host_id = hv.hermclaw_host_id | default(hv.hermclaw_worker_id | default('')) %}
-      {% if host_id | length > 0 %}
-      {% set patch = {'address': hv.ansible_host | default(host)} %}
-      {% if group in ['execution_workers', 'model_workers'] %}
-      {% set _ = patch.update({'worker_api': 'http://' ~ (hv.ansible_host | default(host)) ~ ':' ~ hermclaw_worker_port}) %}
-      {% set wol = {} %}
-      {% if hv.wol_mac is defined %}{% set _ = wol.update({'mac': hv.wol_mac | string}) %}{% endif %}
-      {% if hermclaw_lan_broadcast is defined %}{% set _ = wol.update({'broadcast': hermclaw_lan_broadcast}) %}{% endif %}
-      {% if wol | length > 0 %}{% set _ = patch.update({'wake_on_lan': wol}) %}{% endif %}
-      {% endif %}
-      {% set _ = out.update({host_id: (out.get(host_id, {}) | combine(patch, recursive=true))}) %}
-      {% endif %}
-      {% endfor %}{% endfor %}
+      {%- set out = {} -%}
+      {%- for group in hermclaw_config_inventory_groups -%}{%- for host in groups.get(group, []) -%}
+      {%- set hv = hostvars[host] -%}
+      {%- set host_id = hv.hermclaw_host_id | default(hv.hermclaw_worker_id | default('')) -%}
+      {%- if host_id | length > 0 -%}
+      {%- set patch = {'address': hv.ansible_host | default(host)} -%}
+      {%- if group in ['execution_workers', 'model_workers'] -%}
+      {%- set _ = patch.update({'worker_api': 'http://' ~ (hv.ansible_host | default(host)) ~ ':' ~ hermclaw_worker_port}) -%}
+      {%- set wol = {} -%}
+      {%- if hv.wol_mac is defined -%}{%- set _ = wol.update({'mac': hv.wol_mac | string}) -%}{%- endif -%}
+      {%- if hermclaw_lan_broadcast is defined -%}{%- set _ = wol.update({'broadcast': hermclaw_lan_broadcast}) -%}{%- endif -%}
+      {%- if wol | length > 0 -%}{%- set _ = patch.update({'wake_on_lan': wol}) -%}{%- endif -%}
+      {%- endif -%}
+      {%- set _ = out.update({host_id: (out.get(host_id, {}) | combine(patch, recursive=true))}) -%}
+      {%- endif -%}
+      {%- endfor -%}{%- endfor -%}
       {{ out }}
 
 - name: Merge examples, overrides and inventory values
   ansible.builtin.set_fact:
     hermclaw_config_data: >-
-      {% set out = {} %}
-      {% for name in hermclaw_config_names %}
-      {% set data = hermclaw_config_examples[name] %}
-      {% if name == 'policies' and hermclaw_config_sandbox_toolchain_images | bool %}
-      {% set images = {} %}
-      {% for toolchain in hermclaw_sandbox_toolchains %}
-      {% set _ = images.update({toolchain: 'localhost/hermclaw-sandbox-' ~ toolchain ~ ':' ~ hermclaw_sandbox_image_version}) %}
-      {% endfor %}
-      {% set data = data | combine({'sandbox': {'image': images[hermclaw_sandbox_default_toolchain], 'images': images}}, recursive=true) %}
-      {% endif %}
-      {% set data = data | combine(hermclaw_config_overrides.get(name, {}), recursive=true) %}
-      {% if name == 'hosts' %}
-      {% set entries = data.get('hosts', []) %}
-      {% set ids = entries | map(attribute='id') | list %}
-      {% set by_id = dict(ids | zip(entries)) | combine(hermclaw_config_inventory_patches, hermclaw_config_host_overrides, recursive=true) %}
-      {% set merged = [] %}
-      {% for host_id in ids + (hermclaw_config_host_overrides.keys() | list | difference(ids)) %}
-      {% set entry = by_id[host_id] %}
-      {% if entry.role | default('') == 'webui' %}
-      {% set services = [] %}
-      {% for svc in entry.services | default([]) %}
-      {% set _ = services.append(svc | combine({'http_path': hermclaw_config_webui_probe_path}) if svc.name == 'nginx' else svc) %}
-      {% endfor %}
-      {% set entry = entry | combine({'services': services}) %}
-      {% endif %}
-      {% set _ = merged.append(entry) %}
-      {% endfor %}
-      {% set data = data | combine({'hosts': merged}) %}
-      {% endif %}
-      {% set _ = out.update({name: data}) %}
-      {% endfor %}
+      {%- set out = {} -%}
+      {%- for name in hermclaw_config_names -%}
+      {%- set data = hermclaw_config_examples[name] -%}
+      {%- if name == 'policies' and hermclaw_config_sandbox_toolchain_images | bool -%}
+      {%- set images = {} -%}
+      {%- for toolchain in hermclaw_sandbox_toolchains -%}
+      {%- set _ = images.update({toolchain: 'localhost/hermclaw-sandbox-' ~ toolchain ~ ':' ~ hermclaw_sandbox_image_version}) -%}
+      {%- endfor -%}
+      {%- set data = data | combine({'sandbox': {'image': images[hermclaw_sandbox_default_toolchain], 'images': images}}, recursive=true) -%}
+      {%- endif -%}
+      {%- set data = data | combine(hermclaw_config_overrides.get(name, {}), recursive=true) -%}
+      {%- if name == 'hosts' -%}
+      {%- set entries = data.get('hosts', []) -%}
+      {%- set ids = entries | map(attribute='id') | list -%}
+      {%- set by_id = dict(ids | zip(entries)) | combine(hermclaw_config_inventory_patches, hermclaw_config_host_overrides, recursive=true) -%}
+      {%- set merged = [] -%}
+      {%- for host_id in ids + (hermclaw_config_host_overrides.keys() | list | difference(ids)) -%}
+      {%- set entry = by_id[host_id] -%}
+      {%- if entry.role | default('') == 'webui' -%}
+      {%- set services = [] -%}
+      {%- for svc in entry.services | default([]) -%}
+      {%- set _ = services.append(svc | combine({'http_path': hermclaw_config_webui_probe_path}) if svc.name == 'nginx' else svc) -%}
+      {%- endfor -%}
+      {%- set entry = entry | combine({'services': services}) -%}
+      {%- endif -%}
+      {%- set _ = merged.append(entry) -%}
+      {%- endfor -%}
+      {%- set data = data | combine({'hosts': merged}) -%}
+      {%- endif -%}
+      {%- set _ = out.update({name: data}) -%}
+      {%- endfor -%}
       {{ out }}
 
 - name: Find Wake-on-LAN hosts without a real MAC address
@@ -110,10 +110,10 @@
 - name: Render the configuration files
   ansible.builtin.set_fact:
     hermclaw_config_rendered: >-
-      {% set out = {} %}{% for name in hermclaw_config_names %}{% set _ = out.update({name:
+      {%- set out = {} -%}{%- for name in hermclaw_config_names -%}{%- set _ = out.update({name:
       "# Managed by Hermclaw - generated by playbooks/deploy.yml (role hermclaw_config) from config/" ~ name
       ~ ".example.yaml of the deployed release\n"
       ~ "# and the inventory (hermclaw_config_overrides, hermclaw_config_host_overrides, addresses, MACs). Do not edit\n"
       ~ "# here: the next deployment overwrites manual changes and keeps the old file as " ~ name ~ ".yaml.<time>~.\n"
       ~ "# Change the inventory instead or list the file in hermclaw_config_unmanaged (docs/operations/deployment.md).\n"
-      ~ (hermclaw_config_data[name] | to_nice_yaml(indent=2, sort_keys=false, width=1000))}) %}{% endfor %}{{ out }}
+      ~ (hermclaw_config_data[name] | to_nice_yaml(indent=2, sort_keys=false, width=1000))}) -%}{%- endfor -%}{{ out }}

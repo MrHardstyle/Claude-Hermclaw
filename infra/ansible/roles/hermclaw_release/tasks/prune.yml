@@ -24,10 +24,10 @@
 - name: Decide which releases to keep
   ansible.builtin.set_fact:
     hermclaw_release_keep: >-
-      {% set active = (hermclaw_release_active.stat.lnk_target | default('') | basename | regex_replace('^venv-', ''))
-         if hermclaw_release_active.stat.islnk | default(false) else hermclaw_version %}
-      {% set others = hermclaw_release_venvs.files | sort(attribute='mtime', reverse=true)
-         | map(attribute='path') | map('basename') | map('regex_replace', '^venv-', '') | reject('equalto', active) | list %}
+      {%- set active = (hermclaw_release_active.stat.lnk_target | default('') | basename | regex_replace('^venv-', ''))
+         if hermclaw_release_active.stat.islnk | default(false) else hermclaw_version -%}
+      {%- set others = hermclaw_release_venvs.files | sort(attribute='mtime', reverse=true)
+         | map(attribute='path') | map('basename') | map('regex_replace', '^venv-', '') | reject('equalto', active) | list -%}
       {{ ([active, hermclaw_version] + others[:hermclaw_keep_releases | int]) | unique }}
 
 - name: Delete venvs of pruned releases

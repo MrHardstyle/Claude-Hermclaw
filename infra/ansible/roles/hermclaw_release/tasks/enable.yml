@@ -20,9 +20,9 @@
     - name: Collect the WantedBy= targets
       ansible.builtin.set_fact:
         hermclaw_release_enable_links: >-
-          {% set out = [] %}{% for r in hermclaw_release_enable_raw.results %}{% for line in (r.content | b64decode)
-          | regex_findall('(?m)^WantedBy=(.+)$') %}{% for target in line.split() %}{% set _ = out.append({'unit':
-          r.item, 'target': target}) %}{% endfor %}{% endfor %}{% endfor %}{{ out }}
+          {%- set out = [] -%}{%- for r in hermclaw_release_enable_raw.results -%}{%- for line in (r.content | b64decode)
+          | regex_findall('(?m)^WantedBy=(.+)$') -%}{%- for target in line.split() -%}{%- set _ = out.append({'unit':
+          r.item, 'target': target}) -%}{%- endfor -%}{%- endfor -%}{%- endfor -%}{{ out }}
 
     - name: Require an [Install] section in every unit to enable
       ansible.builtin.assert:
