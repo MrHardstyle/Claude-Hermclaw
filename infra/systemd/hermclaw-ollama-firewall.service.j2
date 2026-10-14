@@ -1,0 +1,25 @@
+# Managed by Hermclaw – restricts the Ollama port on the model worker (.224) to loopback and
+# the orchestrator (role ollama). Loads the dedicated table inet hermclaw_ollama from
+# {{ ollama_firewall_nft_file }}; it is re-applied when nftables.service restarts or
+# reloads (which flush the ruleset) and removed again on stop.
+[Unit]
+Description=Hermclaw firewall for the Ollama port
+DefaultDependencies=no
+After=nftables.service local-fs.target
+Before=network-pre.target ollama.service shutdown.target
+Wants=network-pre.target
+Conflicts=shutdown.target
+PartOf=nftables.service
+ReloadPropagatedFrom=nftables.service
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+ExecStart={{ ollama_firewall_nft_bin }} -f {{ ollama_firewall_nft_file }}
+ExecReload={{ ollama_firewall_nft_bin }} -f {{ ollama_firewall_nft_file }}
+ExecStop={{ ollama_firewall_nft_bin }} delete table inet hermclaw_ollama
+ProtectHome=yes
+PrivateTmp=yes
+
+[Install]
+WantedBy=multi-user.target
