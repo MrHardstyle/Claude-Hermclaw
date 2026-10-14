@@ -12,6 +12,9 @@ import pytest
 
 ROOT = Path(__file__).resolve().parents[1]
 ADMIN_URL = os.environ.get("HERMCLAW_TEST_ADMIN_URL", "postgresql://postgres@127.0.0.1:5432/postgres")
+# a template with the pgvector extension lets a non-superuser (CREATEDB) role create the throw-away databases
+# (scripts/ops/live-acceptance.sh --prepare-db on the orchestrator)
+TEMPLATE_DB = os.environ.get("HERMCLAW_TEST_TEMPLATE_DB", "")
 
 
 def _db_available() -> bool:
@@ -31,7 +34,7 @@ def db_url() -> Iterator[str]:
         pytest.skip("PostgreSQL not available (set HERMCLAW_TEST_ADMIN_URL)")
     name = f"hermclaw_test_{uuid.uuid4().hex[:10]}"
     with psycopg.connect(ADMIN_URL, autocommit=True) as conn:
-        conn.execute(f'CREATE DATABASE "{name}"')
+        conn.execute(f'CREATE DATABASE "{name}"' + (f' TEMPLATE "{TEMPLATE_DB}"' if TEMPLATE_DB else ""))
     base = ADMIN_URL.rsplit("/", 1)[0]
     url = f"{base.replace('postgresql://', 'postgresql+psycopg://', 1)}/{name}"
     os.environ["HERMCLAW_DATABASE_URL"] = url
