@@ -1,0 +1,12 @@
+# Hermclaw Next – weekly restore test, Sunday 04:30 (after the 02:30 backup; the backup lock serialises both).
+[Unit]
+Description=Hermclaw Next weekly restore test (Sunday 04:30)
+
+[Timer]
+OnCalendar=Sun *-*-* 04:30:00
+AccuracySec=1min
+Persistent=true
+Unit=hermclaw-restore-test.service
+
+[Install]
+WantedBy=timers.target

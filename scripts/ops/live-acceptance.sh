@@ -18,8 +18,9 @@
 #   sudo scripts/ops/live-acceptance.sh --cleanup-db     # drop the test role, template and leftover test databases
 #   scripts/ops/live-acceptance.sh --list
 #
-# Suites: orchestrator (.225): workers models repo_intelligence research sshtools wol gitops
+# Suites: orchestrator (.225): workers models repo_intelligence research sshtools wol gitops backup
 #         execution worker (.222): sandbox
+# `backup` writes one real backup set to Terra (.60), restore-tests it and applies the retention policy.
 # Default: every suite of this host's role (orchestrator: /etc/hermclaw/hermclaw.env, execution worker:
 # /etc/hermclaw/worker.env + the hermclaw-exec-worker unit). `gitops` needs a throw-away GitLab project:
 #   HERMCLAW_LIVE_GITLAB_PROJECT=hermclaw/sandbox HERMCLAW_LIVE_GITLAB_API=http://192.168.178.226 \
@@ -47,7 +48,7 @@ PGPORT_="${HERMCLAW_ACCEPTANCE_PGPORT:-5432}"
 TEST_ROLE=hermclaw_acceptance
 TEMPLATE_DB=hermclaw_acceptance_tpl
 URL_FILE="${CONFIG_DIR}/secrets/acceptance-test-admin-url"
-ORCHESTRATOR_SUITES=(workers models repo_intelligence research sshtools wol gitops)
+ORCHESTRATOR_SUITES=(workers models repo_intelligence research sshtools wol gitops backup)
 WORKER_SUITES=(sandbox)
 
 log() { printf '%s\n' "live-acceptance: $*" >&2; }
@@ -70,6 +71,7 @@ suite_files() {
         sshtools) echo tests/integration/test_sshtools_live.py ;;
         wol) echo tests/integration/test_wol_live.py ;;
         gitops) echo tests/integration/test_gitops_live.py ;;
+        backup) echo tests/integration/test_backup_live.py ;;
         sandbox) echo tests/integration/test_sandbox_podman.py ;;
         *) return 1 ;;
     esac
@@ -221,6 +223,16 @@ configure_suite() { # sets UNIT_PROPS/UNIT_ENV for a suite; returns 3 to skip it
             UNIT_ENV+=(-E "HERMCLAW_LIVE_GITLAB_TOKEN_REF=cred:gitlab-token"
                 -E "HERMCLAW_LIVE_SSH_KEY_REF=${HERMCLAW_LIVE_SSH_KEY_REF:-file:${CONFIG_DIR}/ssh/id_ed25519}"
                 -E "HERMCLAW_LIVE_KNOWN_HOSTS=${HERMCLAW_LIVE_KNOWN_HOSTS:-${CONFIG_DIR}/ssh/known_hosts}")
+            ;;
+        backup)
+            [[ -r "${CONFIG_DIR}/backup.yaml" ]] || {
+                log "backup: no ${CONFIG_DIR}/backup.yaml – skipped"
+                return 3
+            }
+            # the production database, data paths and the manifest signing key of the backup service
+            UNIT_PROPS+=(-p "EnvironmentFile=${CONFIG_DIR}/hermclaw.env")
+            [[ -r "${CREDSTORE}/hermclaw-backup-manifest-key" ]] && add_cred backup-manifest-key
+            UNIT_ENV+=(-E "HERMCLAW_BACKUP_CONFIG=${CONFIG_DIR}/backup.yaml")
             ;;
         sandbox)
             local uid

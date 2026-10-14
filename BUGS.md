@@ -561,6 +561,24 @@ Noch keine.
 - Tatsächlich: `docs/operations/bootstrap.md:213` and `INSTALLATION.md` ("token: …" prose read as an assignment), `docs/research/20261014-026…:101` (`CMAKE_CUDA_ARCHITECTURES=…` read as high entropy), `searxng-settings.yml.j2:8` (a fixed `secret_key` placeholder – SearXNG would have started with that known key if the podman secret were missing)
 - Fix: prose rephrased; the settings template sets no `secret_key` (only the podman secret `SEARXNG_SECRET`, SearXNG refuses to start on its shipped default); the research table writes the CMake value without `=`. The scanner stays strict (it also guards job diffs).
 
+### BUG-094 – Same-second backup sets were ordered by their random id suffix, so retention could keep the wrong 'newest' set
+- Phase: P33 · Komponente: backup · Severity: P2 · blockierend: nein · Status: **behoben** (Regressionstest in den backup-Tests)
+- Reproduktion: Two create_backup runs within the same UTC second, then retention with keep_last=1 (test_prune_after_backup_protects_the_new_set failed intermittently).
+- Erwartet: Sets sort by creation time.
+- Tatsächlich: Fixed: set ids now carry milliseconds (hermclaw-YYYYmmddTHHMMSSmmmZ-<6hex>). Ids with second precision stay valid. Regression test: test_backup_units.py::test_set_ids_and_signature; the formerly flaky test passed 3 repeat runs.
+
+### BUG-095 – Partial-attempt build_tarball fsynced before the tar end blocks and gzip trailer were written
+- Phase: P33 · Komponente: backup · Severity: P3 · blockierend: nein · Status: **behoben** (Regressionstest in den backup-Tests)
+- Reproduktion: Code review of the interrupted attempt's archive.py.
+- Erwartet: fsync after the TarFile closes.
+- Tatsächlich: Fixed (fsync moved after the tar close).
+
+### BUG-096 – A misconfigured staging_dir equal to or nested with a local target could let the stale-staging cleanup delete real backup sets
+- Phase: P33 · Komponente: backup · Severity: P1 · blockierend: nein · Status: **behoben** (Regressionstest in den backup-Tests)
+- Reproduktion: BackupConfig(staging_dir=<local target path>).
+- Erwartet: Refused.
+- Tatsächlich: Fixed: check_staging_separate raises BACKUP_CONFIG_INVALID. Regression test: test_backup_failures.py::test_staging_inside_the_target_is_refused.
+
 ## Template
 
 ### BUG-XXX – Titel

@@ -1,0 +1,44 @@
+# Hermclaw Next – backup configuration (P33, Bauplan §36, research 20261008-022).
+# Copy to /etc/hermclaw/backup.yaml (0640 root:hermclaw). An example file is never used implicitly.
+# Reference: hermclaw/backup/config.py (BackupConfig), procedure: docs/operations/backup-restore.md
+backup:
+  # Target Terra/Unraid .60: rsync over SSH with the dedicated backup key (hosts.yaml entry terra-60 provides
+  # address, user, port and key; known_hosts is Hermclaw's own /etc/hermclaw/ssh/known_hosts).
+  target:
+    kind: rsync
+    host_id: terra-60
+    path: /mnt/user/backups/hermclaw      # with an rrsync forced command: path relative to the rrsync dir, e.g. "."
+    key_ref: file:/etc/hermclaw/ssh/backup_ed25519
+    known_hosts: /etc/hermclaw/ssh/known_hosts
+    remote_rsync_path: /usr/bin/rsync
+    bwlimit_kbps: 60000                     # ~60 MB/s, keeps the LAN usable during the 02:30 run
+    io_timeout_seconds: 300
+  # Alternative: the Unraid share mounted on .225 (NFS/SMB, see infra/backup/unraid-share-setup.md).
+  # require_mount: refuse to write when the share is not mounted (no silent fill of the local disk).
+  # target: {kind: local, path: /mnt/terra-backup/hermclaw, require_mount: true}
+
+  staging_dir: /var/lib/hermclaw/backup/staging   # private (0700) staging, removed after every run
+  # database_url: defaults to HERMCLAW_DATABASE_URL (socket + peer auth: no password at all)
+  # database_password_ref: cred:hermclaw-db-password
+  # config_dir / artifacts_dir: default HERMCLAW_CONFIG_DIR and <HERMCLAW_DATA_DIR>/artifacts
+  credstore_dirs: []                      # e.g. [/etc/credstore.encrypted] – ENCRYPTED blobs only (see docs)
+  config_exclude_extra: []                # on top of secrets/, private/, *.key, *.pem, *_ed25519, … (always)
+  record_exports: [research_runs, research_sources, research_claims, research_claim_sources, deployments]
+  include_globals: true                   # pg_dumpall --globals-only --no-role-passwords (skipped if not permitted)
+  dump_compress_level: 6
+  manifest_signing_key_ref: cred:backup-manifest-key   # HMAC-SHA256 of MANIFEST.json (LoadCredentialEncrypted)
+  lock_wait_seconds: 7200
+  retention:
+    keep_last: 2
+    keep_daily: 7
+    keep_weekly: 4
+    keep_monthly: 3
+    stale_partial_hours: 24
+    prune_after_backup: true
+  restore_test:
+    # admin_url: default = the Hermclaw connection to the maintenance DB "postgres" (role needs CREATEDB)
+    template: hermclaw_restore_template   # has the extension "vector" (created once by the superuser)
+    db_prefix: hermclaw_restoretest
+    jobs: 1
+    timeout_seconds: 21600
+    work_dir: /var/lib/hermclaw/backup/restore-test

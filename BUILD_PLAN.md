@@ -429,12 +429,12 @@ Legende: `[x]` erledigt mit Evidence · `[~]` erledigt, Live-Verifikation auf Zi
 
 ## P33 – Backup/Restore
 
-- [ ] 33.1 PostgreSQL backup. — Evidence: –
-- [ ] 33.2 config backup. — Evidence: –
-- [ ] 33.3 artifacts. — Evidence: –
-- [ ] 33.4 `.60` target. — Evidence: –
-- [ ] 33.5 restore environment. — Evidence: –
-- [ ] 33.6 restore verification. — Evidence: –
+- [x] 33.1 PostgreSQL backup. — Evidence: hermclaw/backup/backup.py dump_database: a REPEATABLE READ READ ONLY transaction calls pg_export_snapshot. In that same snapshot it takes the exact count(*) of every table, the alembic revision, the extensions and the encoding, then runs pg_dump --format=custom --snapshot=<id>. The password goes onl
+- [x] 33.2 config backup. — Evidence: backup.py build_config_tarball + archive.py: the config dir is archived without symlinks. Always excluded: secrets/, private/, *.key, *.pem, *.p12, *.token, *_ed25519, id_* and similar; files whose content sniffs as a private key; text files containing a plaintext secret (value refs cred:/file:/env:
+- [x] 33.3 artifacts. — Evidence: backup.py build_artifacts_tarball + _export_records: the artifact store plus records/<table>.jsonl (research_runs, research_sources, research_claims, research_claim_sources, deployments = deployment manifests), exported with row_to_json through a server-side cursor in the dump snapshot. Row counts p
+- [~] 33.4 `.60` target. — Evidence: hermclaw/backup/transfer.py. LocalStore copies into <set>.partial, re-reads sha256 against the manifest, then renames atomically; an unmounted share fails and is never created (require_mount option). RsyncStore runs rsync -a --partial over ssh with a dedicated key, -F /dev/null, BatchMode, Identitie
+- [x] 33.5 restore environment. — Evidence: hermclaw/backup/restore.py restore_test: verifies the set first, then creates a clean temporary database <prefix>_<8hex> (TEMPLATE template0 with the source encoding, or a configured template that already has vector). Extensions are created up front, and EXTENSION / COMMENT ON EXTENSION entries are 
+- [x] 33.6 restore verification. — Evidence: verify.py verify_set_dir checks manifest schema and set id, the HMAC signature, size and sha256 of every file, every tarball read to its end (gzip CRC; members relative, no '..', regular files or dirs only), file counts per directory and JSONL line counts, and pg_restore --list. restore.py compare_w
 
 ## P34 – Recovery
 

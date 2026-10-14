@@ -1,0 +1,12 @@
+# Hermclaw Next – daily backup at 02:30 (missed runs are caught up after boot: Persistent=true).
+[Unit]
+Description=Hermclaw Next daily backup (02:30)
+
+[Timer]
+OnCalendar=*-*-* 02:30:00
+AccuracySec=1min
+Persistent=true
+Unit=hermclaw-backup.service
+
+[Install]
+WantedBy=timers.target

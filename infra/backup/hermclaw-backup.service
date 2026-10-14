@@ -1,0 +1,45 @@
+# Hermclaw Next – daily backup (P33): PostgreSQL dump + globals + config + artifacts -> Terra/Unraid .60.
+# Started by hermclaw-backup.timer (02:30). Procedure and disaster recovery: docs/operations/backup-restore.md
+[Unit]
+Description=Hermclaw Next backup (PostgreSQL, config, artifacts -> Terra .60)
+Documentation=file:///opt/hermclaw/share/doc/hermclaw/backup-restore.md
+After=network-online.target postgresql.service
+Wants=network-online.target
+ConditionPathExists=/etc/hermclaw/backup.yaml
+
+[Service]
+Type=oneshot
+User=hermclaw
+Group=hermclaw
+EnvironmentFile=/etc/hermclaw/hermclaw.env
+Environment=HERMCLAW_BACKUP_CONFIG=/etc/hermclaw/backup.yaml
+# secrets as systemd credentials (research 20261008-020) – referenced as cred:<name> in backup.yaml
+LoadCredentialEncrypted=backup-manifest-key:/etc/credstore.encrypted/hermclaw-backup-manifest-key
+# LoadCredentialEncrypted=hermclaw-db-password:/etc/credstore.encrypted/hermclaw-db-password
+ExecStart=/opt/hermclaw/bin/hermclaw-backup create
+# 75 = another backup operation holds the lock (the next timer run retries)
+SuccessExitStatus=75
+Nice=10
+IOSchedulingClass=idle
+TimeoutStartSec=6h
+UMask=0077
+ReadWritePaths=/var/lib/hermclaw
+# local target (mounted share) only:
+# ReadWritePaths=/mnt/terra-backup/hermclaw
+ReadOnlyPaths=/etc/hermclaw
+NoNewPrivileges=yes
+PrivateTmp=yes
+PrivateDevices=yes
+ProtectSystem=strict
+ProtectHome=yes
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectControlGroups=yes
+ProtectClock=yes
+ProtectHostname=yes
+RestrictSUIDSGID=yes
+RestrictNamespaces=yes
+LockPersonality=yes
+SystemCallArchitectures=native
+RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6
+CapabilityBoundingSet=

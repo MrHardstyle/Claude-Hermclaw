@@ -1,0 +1,24 @@
+#!/bin/bash
+# Hermclaw Next – restore test (P33 33.5/33.6). Called by hermclaw-restore-test.service (weekly timer).
+#
+#   hermclaw-restore-test [SET|--latest] [options]
+#
+# Restores the newest complete backup set (default) or SET into a clean temporary database, compares tables, row
+# counts, alembic revision and checksums with the manifest, writes RESTORE_REPORT.json next to the backup and
+# always drops the temporary database. Exit 0 = passed, 1 = failed (see the JSON report on stdout).
+set -euo pipefail
+
+here="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+repo="$(cd "${here}/../.." && pwd)"
+python="${HERMCLAW_PYTHON:-}"
+if [[ -z "${python}" ]]; then
+    for candidate in /opt/hermclaw/venv/bin/python "${repo}/.venv/bin/python"; do
+        if [[ -x "${candidate}" ]]; then
+            python="${candidate}"
+            break
+        fi
+    done
+fi
+python="${python:-python3}"
+
+exec "${python}" -m hermclaw.backup restore-test "$@"

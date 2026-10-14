@@ -1,0 +1,32 @@
+#!/bin/bash
+# Hermclaw Next – backup run (P33, Bauplan §36). Called by hermclaw-backup.service (timer 02:30).
+#
+#   hermclaw-backup [create options]          create a backup set, transfer it to the target, apply retention
+#   hermclaw-backup <command> [options]       any command of `python -m hermclaw.backup` (list, verify, prune, …)
+#
+# Configuration: --config / $HERMCLAW_BACKUP_CONFIG / <config_dir>/backup.yaml. Output: one JSON document on
+# stdout, JSON logs on stderr. Exit codes: 0 ok, 1 verification failed, 2 config error, 3 failure, 75 locked.
+# Python: $HERMCLAW_PYTHON, else /opt/hermclaw/venv/bin/python, else the repository .venv, else python3.
+set -euo pipefail
+
+here="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+repo="$(cd "${here}/../.." && pwd)"
+python="${HERMCLAW_PYTHON:-}"
+if [[ -z "${python}" ]]; then
+    for candidate in /opt/hermclaw/venv/bin/python "${repo}/.venv/bin/python"; do
+        if [[ -x "${candidate}" ]]; then
+            python="${candidate}"
+            break
+        fi
+    done
+fi
+python="${python:-python3}"
+
+case "${1:-}" in
+    create | verify | restore-test | restore-full | list | prune | -h | --help)
+        exec "${python}" -m hermclaw.backup "$@"
+        ;;
+    *)
+        exec "${python}" -m hermclaw.backup create "$@"
+        ;;
+esac

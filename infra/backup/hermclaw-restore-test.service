@@ -1,0 +1,42 @@
+# Hermclaw Next – weekly restore test (P33 33.5/33.6): newest backup set -> clean temporary database ->
+# tables, row counts, alembic revision and checksums compared with the manifest; RESTORE_REPORT.json is written
+# next to the backup on .60, event backup.restore_test.passed|failed. The temporary database is always dropped.
+[Unit]
+Description=Hermclaw Next restore test (newest backup set)
+Documentation=file:///opt/hermclaw/share/doc/hermclaw/backup-restore.md
+After=network-online.target postgresql.service hermclaw-backup.service
+Wants=network-online.target
+ConditionPathExists=/etc/hermclaw/backup.yaml
+
+[Service]
+Type=oneshot
+User=hermclaw
+Group=hermclaw
+EnvironmentFile=/etc/hermclaw/hermclaw.env
+Environment=HERMCLAW_BACKUP_CONFIG=/etc/hermclaw/backup.yaml
+LoadCredentialEncrypted=backup-manifest-key:/etc/credstore.encrypted/hermclaw-backup-manifest-key
+ExecStart=/opt/hermclaw/bin/hermclaw-restore-test --latest
+SuccessExitStatus=75
+Nice=10
+IOSchedulingClass=idle
+TimeoutStartSec=8h
+UMask=0077
+ReadWritePaths=/var/lib/hermclaw
+# ReadWritePaths=/mnt/terra-backup/hermclaw
+ReadOnlyPaths=/etc/hermclaw
+NoNewPrivileges=yes
+PrivateTmp=yes
+PrivateDevices=yes
+ProtectSystem=strict
+ProtectHome=yes
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectControlGroups=yes
+ProtectClock=yes
+ProtectHostname=yes
+RestrictSUIDSGID=yes
+RestrictNamespaces=yes
+LockPersonality=yes
+SystemCallArchitectures=native
+RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6
+CapabilityBoundingSet=
