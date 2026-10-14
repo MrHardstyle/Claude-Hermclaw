@@ -42,7 +42,7 @@ WebUI and workers. Every step can be repeated; a rerun reports `changed=0`.
 ```sh
 git clone <hermclaw-next repository> && cd hermclaw-next
 scripts/bootstrap/bootstrap-control-node.sh
-#   * ansible-core (>=2.19,<2.22) in ~/.local/share/hermclaw/ansible-venv
+#   * ansible-core (>=2.21.5,<2.22, research R-029) in ~/.local/share/hermclaw/ansible-venv
 #   * creates infra/ansible/inventory/hosts.yml from hosts.example.yml (never overwrites)
 #   * validates the inventory and syntax-checks every playbook
 ```

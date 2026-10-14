@@ -165,7 +165,7 @@ GitLab (.226) und Terra (.60) werden **nicht** neu installiert. Sie brauchen nur
 
 ## 4. Admin-Rechner (Ansible-Steuerrechner)
 
-Ein beliebiger Linux- oder macOS-Rechner mit `git`, `ssh` und Python ≥ 3.11 (ansible-core 2.19+). Sie können
+Ein beliebiger Linux- oder macOS-Rechner mit `git`, `ssh` und Python 3.12–3.14 (ansible-core 2.21, Research R-029). Sie können
 dafür auch den Orchestrator .225 selbst verwenden.
 
 ### 4.1 Repository holen und Ansible einrichten
@@ -175,7 +175,7 @@ git clone https://github.com/MrHardstyle/Claude-Hermclaw.git hermclaw-next
 cd hermclaw-next
 git checkout v0.1.0rc1            # oder der Release-Branch/Tag, den Sie installieren
 scripts/bootstrap/bootstrap-control-node.sh
-#   * installiert ansible-core (>=2.19,<2.22) in ~/.local/share/hermclaw/ansible-venv
+#   * installiert ansible-core (>=2.21.5,<2.22, research R-029) in ~/.local/share/hermclaw/ansible-venv
 #   * legt infra/ansible/inventory/hosts.yml aus hosts.example.yml an (überschreibt nie)
 #   * prüft das Inventar und alle Playbooks (Syntax)
 export ANSIBLE_CONFIG=$PWD/infra/ansible/ansible.cfg

@@ -11,7 +11,7 @@
 #                                  [--python PYTHON] [--skip-syntax-check]
 # Defaults: --venv ~/.local/share/hermclaw/ansible-venv
 #           --inventory <repo>/infra/ansible/inventory/hosts.yml
-# Environment: HERMCLAW_ANSIBLE_CORE_SPEC (default "ansible-core>=2.19,<2.22")
+# Environment: HERMCLAW_ANSIBLE_CORE_SPEC (default "ansible-core>=2.21.5,<2.22")
 set -euo pipefail
 
 SCRIPT_DIR=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
@@ -24,7 +24,7 @@ INVENTORY="${ANSIBLE_DIR}/inventory/hosts.yml"
 ANSIBLE_BIN_DIR=""
 PYTHON="python3"
 SYNTAX_CHECK=1
-ANSIBLE_CORE_SPEC="${HERMCLAW_ANSIBLE_CORE_SPEC:-ansible-core>=2.19,<2.22}"
+ANSIBLE_CORE_SPEC="${HERMCLAW_ANSIBLE_CORE_SPEC:-ansible-core>=2.21.5,<2.22}"
 
 log() { printf '[bootstrap-control-node] %s\n' "$*"; }
 die() { printf '[bootstrap-control-node] ERROR: %s\n' "$*" >&2; exit 1; }
@@ -42,7 +42,7 @@ while [[ $# -gt 0 ]]; do
 done
 
 [[ "$ANSIBLE_CORE_SPEC" =~ ^ansible-core([<>=!~]=?[0-9][0-9.]*)?(,[<>=!~]=?[0-9][0-9.]*)*$ ]] \
-    || die "HERMCLAW_ANSIBLE_CORE_SPEC must look like 'ansible-core>=2.19,<2.22'"
+    || die "HERMCLAW_ANSIBLE_CORE_SPEC must look like 'ansible-core>=2.21.5,<2.22'"
 
 # --- 1. ansible-core ------------------------------------------------------------------------
 if [[ -n "$ANSIBLE_BIN_DIR" ]]; then
@@ -50,8 +50,8 @@ if [[ -n "$ANSIBLE_BIN_DIR" ]]; then
     log "using existing Ansible in ${ANSIBLE_BIN_DIR}"
 else
     command -v "$PYTHON" >/dev/null 2>&1 || die "${PYTHON} not found (Debian: apt install python3 python3-venv)"
-    "$PYTHON" -c 'import sys; sys.exit(0 if sys.version_info >= (3, 11) else 1)' \
-        || die "${PYTHON} is older than 3.11 (ansible-core 2.19+ needs >= 3.11)"
+    "$PYTHON" -c 'import sys; sys.exit(0 if sys.version_info >= (3, 12) else 1)' \
+        || die "${PYTHON} is older than 3.12 (the ansible-core 2.21 controller needs Python 3.12-3.14)"
     if [[ ! -x "${VENV}/bin/python" ]]; then
         log "creating virtualenv ${VENV}"
         mkdir -p "$(dirname "$VENV")"
