@@ -534,6 +534,13 @@ Noch keine.
 - Tatsächlich: the single-quote phrase pattern matched from the apostrophe across the line break; ripgrep refuses multi-line fixed patterns, so the whole lexical signal failed (`REPO_PATTERN_INVALID`, ranking degraded)
 - Fix: phrases are single-line, a single quote must not touch a word (apostrophes), and `lexical_patterns` never emits a pattern with a newline/NUL
 
+### BUG-090 – `hermclaw doctor` accepted a production install running on the shipped example configuration
+- Phase: P39 · Komponente: doctor · Severity: P2 · blockierend: nein · Status: **behoben** (`tests/integration/test_doctor.py::test_production_refuses_example_configuration_and_flags_placeholder_macs`)
+- Reproduktion: production install without `/etc/hermclaw/hosts.yaml` (only `hosts.example.yaml`), or with the inventory's placeholder MACs
+- Erwartet: doctor fails / warns before the first job
+- Tatsächlich: `load_config` silently falls back to `<name>.example.yaml` (meant for checkouts and tests) and doctor reported everything ok; Wake-on-LAN with `00:00:00:00:..` MACs never wakes a worker
+- Fix: check `config:files` (production: fail when any of hosts/models/policies/capabilities/logging is only available as example) and `config:wake_on_lan` (warn on placeholder MACs)
+
 ## Template
 
 ### BUG-XXX – Titel

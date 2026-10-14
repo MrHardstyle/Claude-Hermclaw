@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import os
+import shutil
 import subprocess
 import sys
 import uuid
@@ -16,7 +17,7 @@ import pytest
 from sqlalchemy import delete, text
 
 from hermclaw.contracts.worker import WORKER_PROTOCOL_VERSION
-from hermclaw.core.config import get_config
+from hermclaw.core.config import get_config, load_config
 from hermclaw.core.settings import Settings
 from hermclaw.doctor import MIN_PGVECTOR, Doctor, _version_tuple
 from hermclaw.persistence.migrate import head_revision
@@ -215,3 +216,31 @@ async def test_cli_doctor_offline_json(db_url: str, tmp_path: Path) -> None:
 async def test_version_compare() -> None:
     assert _version_tuple("0.8.2") >= MIN_PGVECTOR and _version_tuple("0.10.0") >= MIN_PGVECTOR
     assert _version_tuple("0.8.1") < MIN_PGVECTOR and _version_tuple("0.6.0") < MIN_PGVECTOR
+
+
+async def test_production_refuses_example_configuration_and_flags_placeholder_macs(db: Any, tmp_path: Path) -> None:
+    """A production install must run on its own /etc/hermclaw/<name>.yaml files, not on the shipped examples; the
+    example hosts file still carries placeholder MAC addresses, which would make Wake-on-LAN silently useless."""
+    cfg = get_config()
+    examples = tmp_path / "etc-examples"
+    examples.mkdir()
+    for f in (ROOT / "config").glob("*.example.yaml"):
+        shutil.copy(f, examples / f.name)
+    prod = settings(tmp_path).model_copy(update={"env": "production", "config_dir": examples})
+    checks = by_name(await doctor(cfg, prod, db, Endpoints(cfg), offline=True).run())
+    assert checks["config:files"].status == "fail" and "hosts.yaml" in checks["config:files"].detail
+    assert checks["config:wake_on_lan"].status == "warn" and "exec-222" in checks["config:wake_on_lan"].detail
+    real = tmp_path / "etc"
+    real.mkdir()
+    for f in (ROOT / "config").glob("*.example.yaml"):
+        shutil.copy(f, real / f.name.replace(".example", ""))
+    hosts = real / "hosts.yaml"
+    hosts.write_text(hosts.read_text(encoding="utf-8").replace("00:00:00:00:02:22", "3c:7c:3f:12:34:56"), encoding="utf-8")
+    cfg_real = load_config(real)
+    ok = by_name(
+        await doctor(
+            cfg_real, settings(tmp_path).model_copy(update={"env": "production", "config_dir": real}), db, Endpoints(cfg_real), offline=True
+        ).run()
+    )
+    assert ok["config:files"].status == "ok" and "(example)" not in ok["config:files"].detail
+    assert "exec-222" not in ok["config:wake_on_lan"].detail and "model-224" in ok["config:wake_on_lan"].detail

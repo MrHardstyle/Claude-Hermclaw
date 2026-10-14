@@ -5,6 +5,8 @@ jobs?" with one line per check (``ok`` / ``warn`` / ``fail`` / ``skip``) and an 
 
 * ``config``       – every architecture role has an enabled model profile (Gemma planner, Qwen3-Coder worker,
                      Qwen3.8 heavy reviewer, Qwen3 router, embedding), sandbox toolchain aliases (R-022), worker hosts;
+                     production reads real ``<name>.yaml`` files (not the ``.example.yaml`` fallback) and no
+                     Wake-on-LAN host still carries a placeholder MAC address;
 * ``database``     – reachable, migrated to the release's Alembic head, pgvector ≥ 0.8.2 (CVE-2026-3172);
 * ``paths``        – data directories exist, are writable and have free space (disk thresholds of the runtime);
 * ``api_tokens``   – at least one active admin token exists (``hermclaw token-create``);
@@ -38,6 +40,7 @@ from hermclaw.core.settings import Settings
 
 Status = Literal["ok", "warn", "fail", "skip"]
 REQUIRED_ROLES = ("planner", "coder", "heavy", "fast", "embedding")
+CONFIG_FILES = ("hosts", "models", "policies", "capabilities", "logging")  # hermclaw.core.config.load_config
 TOOLCHAIN_ALIASES = ("python", "node", "php", "generic")
 MIN_PGVECTOR = (0, 8, 2)
 HEARTBEAT_STALE_SECONDS = 120
@@ -99,6 +102,11 @@ def _free_mb(path: Path) -> int:
     while not probe.exists() and probe != probe.parent:
         probe = probe.parent
     return int(shutil.disk_usage(probe).free // (1024 * 1024))
+
+
+def _placeholder_mac(mac: str) -> bool:
+    """The example/inventory placeholders (``00:00:00:00:..``) or an empty MAC."""
+    return not mac or mac.lower().startswith("00:00:00:00:")
 
 
 class Doctor:
@@ -169,6 +177,26 @@ class Doctor:
             )
         else:
             self.add("config:sandbox_images", "ok", ", ".join(f"{k}={v}" for k, v in sorted(sandbox.images.items())))
+        cdir = Path(self.settings.config_dir)
+        fallback = [n for n in CONFIG_FILES if not (cdir / f"{n}.yaml").is_file()]
+        if fallback and self.settings.env == "production":
+            self.add(
+                "config:files",
+                "fail",
+                f"{cdir} has no {', '.join(f'{n}.yaml' for n in fallback)} – the shipped .example.yaml defaults are in use "
+                "(deploy the configuration, docs/operations/INSTALLATION.md)",
+            )
+        else:
+            files = ", ".join(f"{n}.yaml" + (" (example)" if n in fallback else "") for n in CONFIG_FILES)
+            self.add("config:files", "ok", f"{cdir}: {files}")
+        placeholder = [h.id for h in self.config.hosts.hosts if h.wake_on_lan.enabled and _placeholder_mac(h.wake_on_lan.mac)]
+        if placeholder:
+            self.add(
+                "config:wake_on_lan",
+                "warn",
+                f"placeholder MAC address for {', '.join(placeholder)} in hosts.yaml – Wake-on-LAN cannot wake them "
+                "(set the real MAC: ip -br link on the host)",
+            )
         kinds = {h.worker_kind for h in self.worker_hosts()}
         lacking = [k for k in ("execution", "model") if k not in kinds]
         if lacking:
