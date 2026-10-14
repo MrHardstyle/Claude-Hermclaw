@@ -128,3 +128,17 @@ def test_meta_characters_in_quotes_still_need_a_shell_rule(gate: Gate, tmp_path:
     assert gate.run(f"echo 'a;b' && touch {flag}").returncode == 126
     assert gate.run("echo 'a;b'").returncode == 126  # 'echo [a-z]+' is a plain rule, the ';' needs a shell: rule
     assert not flag.exists()
+
+
+def test_expansion_characters_need_a_shell_rule(gate: Gate, tmp_path: Path) -> None:
+    # 'echo [a-z]+' means one word; brace expansion (bash as /bin/sh), globs and '~' would turn it into other words
+    (tmp_path / "abc").write_text("x")
+    for command in ("echo {a,b}", "echo a*", "echo a?c", "echo [ab]", "echo a]", "echo ~root"):
+        res = gate.run(command)
+        assert res.returncode == 126 and b"not allowed" in res.stderr, command
+    assert gate.run("echo plain").stdout == b"plain\n"  # the plain rule itself still works
+    allow = tmp_path / "shell-allowlist"
+    allow.write_text("shell:echo \\{[a-z,]+\\}\n")
+    os.chmod(allow, 0o644)
+    res = gate.run("echo {a,b}", allowlist=allow)
+    assert res.returncode == 0 and res.stdout in (b"{a,b}\n", b"a b\n")  # dash keeps the braces, bash expands them

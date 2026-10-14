@@ -724,3 +724,42 @@ async def test_gate_forced_command_over_real_ssh(sshd: SshdServer, sessionmaker:
     assert target.read_bytes() == b"through the gate\n"
     log = sshd.syslog.read_text()
     assert "allowed" in log and "rejected" in log and "reason=no-matching-rule" in log
+
+
+async def test_upload_to_security_critical_path_always_needs_approval(sshd: SshdServer, sessionmaker: object, tmp_path: Path) -> None:
+    # even with require_approval_for_mutations off, replacing login keys is destructive (approval every time)
+    tools = build_tools(sshd, sessionmaker, tmp_path, require_approval=False)
+    job_id = await _job(sessionmaker)
+    ctx = _ctx(job_id)
+    keys = tmp_path / "victim" / ".ssh" / "authorized_keys"
+    keys.parent.mkdir(parents=True)
+    keys.write_text("ssh-ed25519 AAAAoriginal operator\n")
+    attacker = b"ssh-ed25519 AAAAattacker evil\n"
+    first = await tools.ssh_upload("lab", attacker, str(keys), mode="0600", ctx=ctx)
+    assert first.outcome == SshOutcome.approval_required and first.classification == "destructive", first.render()
+    assert first.data["critical_path"] is True and "login keys" in first.reason
+    assert keys.read_text() == "ssh-ed25519 AAAAoriginal operator\n"
+    assert await _runs(sessionmaker, ctx.step_id) == []  # nothing ran
+    (event,) = await _events(sessionmaker, ctx.step_id)
+    assert event.payload["outcome"] == "approval_required" and event.payload["critical_path"] is True
+    async with sessionmaker() as s, s.begin():  # type: ignore[operator]
+        await grant_approval(s, job_id, first.approval_token or "", approved_by="op")
+    ok = await tools.ssh_upload("lab", attacker, str(keys), mode="0600", approval_token=first.approval_token, ctx=ctx)
+    assert ok.outcome == SshOutcome.ok and keys.read_bytes() == attacker
+    (run,) = await _runs(sessionmaker, ctx.step_id)
+    assert run.classification == "destructive"
+    # an ordinary target in the same session still runs without approval (policy flag honoured)
+    plain = await tools.ssh_upload("lab", b"x\n", str(tmp_path / "victim" / "plain.txt"), ctx=ctx)
+    assert plain.outcome == SshOutcome.ok and plain.classification == "mutate"
+
+
+async def test_upload_refuses_world_writable_modes(sshd: SshdServer, sessionmaker: object, tmp_path: Path) -> None:
+    tools = build_tools(sshd, sessionmaker, tmp_path, require_approval=False)
+    ctx = _ctx(await _job(sessionmaker))
+    for mode in ("0666", "0777", "0602", "4755", "abc"):
+        target = tmp_path / f"ww-{mode}.txt"
+        res = await tools.ssh_upload("lab", b"x", str(target), mode=mode, ctx=ctx)
+        assert res.outcome == SshOutcome.denied and res.code == "SSH_UPLOAD_INVALID", mode
+        assert not target.exists()
+    ok = await tools.ssh_upload("lab", b"x", str(tmp_path / "ww-ok.txt"), mode="0775", ctx=ctx)
+    assert ok.outcome == SshOutcome.ok and stat.S_IMODE((tmp_path / "ww-ok.txt").stat().st_mode) == 0o775

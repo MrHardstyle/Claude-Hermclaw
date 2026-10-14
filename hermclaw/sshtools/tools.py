@@ -68,7 +68,7 @@ from hermclaw.sshtools.errors import (
     SshTransportError,
 )
 from hermclaw.sshtools.keys import KeyManager
-from hermclaw.sshtools.policy import APPROVAL_TOKEN_RE, SshClassification, SshCommandPolicy, SshDecision, Verdict
+from hermclaw.sshtools.policy import APPROVAL_TOKEN_RE, SshClassification, SshCommandClass, SshCommandPolicy, SshDecision, Verdict
 from hermclaw.sshtools.registry import HOST_ID_RE, HostRegistry, SshHost
 from hermclaw.sshtools.separation import assert_ssh_allowed
 from hermclaw.tools.output import clip_middle, excerpt, strip_ansi
@@ -81,6 +81,20 @@ DEFAULT_MAX_UPLOAD_BYTES = 16 * 1024 * 1024
 _EVENT_COMMAND_CHARS = 500
 _REMOTE_PATH_RE = re.compile(r"^/[A-Za-z0-9._@+-][A-Za-z0-9._/@+-]{0,998}$")
 _MODE_RE = re.compile(r"^0?[0-7]{3}$")  # no setuid/setgid/sticky bits through uploads
+#: replacing these changes who may log in or escalate, or disables the host-side gate: an upload there is
+#: ``destructive`` (always needs an operator approval, even when mutations do not)
+CRITICAL_REMOTE_FILES = frozenset(
+    {
+        "/etc/sudoers", "/etc/passwd", "/etc/shadow", "/etc/group", "/etc/gshadow", "/etc/subuid", "/etc/subgid",
+        "/etc/fstab", "/etc/crontab", "/etc/environment", "/etc/ld.so.preload", "/etc/ld.so.conf", "/etc/profile",
+        "/etc/bash.bashrc", "/usr/local/bin/hermclaw-ssh-gate",
+    }
+)  # fmt: skip
+CRITICAL_REMOTE_DIRS = (
+    "/etc/sudoers.d/", "/etc/ssh/", "/etc/pam.d/", "/etc/security/", "/etc/hermclaw/", "/etc/profile.d/",
+    "/etc/ld.so.conf.d/", "/etc/cron.d/", "/etc/cron.hourly/", "/etc/cron.daily/", "/etc/cron.weekly/",
+    "/etc/cron.monthly/", "/var/spool/cron/", "/boot/", "/root/",
+)  # fmt: skip
 UNIT_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9@._:-]{0,199}$")
 UPLOAD_OK_MARKER = "hermclaw-upload: ok"
 _SYSTEMD_UNAVAILABLE = (
@@ -241,17 +255,46 @@ def _remote_path_problem(remote_path: str) -> str | None:
 
 
 def _normalise_mode(mode: str) -> str | None:
-    return mode.rjust(4, "0") if _MODE_RE.match(mode) else None
+    """``0644``-style mode without special bits and without world write (a world-writable server file is an escalation)."""
+    if not _MODE_RE.match(mode) or int(mode, 8) & 0o002:
+        return None
+    return mode.rjust(4, "0")
 
 
-def read_upload_source(path: Path, max_bytes: int) -> bytes:
-    """Read a regular local file without following a final symlink, bounded by ``max_bytes``."""
+def critical_remote_path(remote_path: str) -> str | None:
+    """Why replacing ``remote_path`` is security critical (login, privilege, boot, gate config), else ``None``."""
+    parts = remote_path.split("/")
+    if ".ssh" in parts or parts[-1].startswith("authorized_keys"):
+        return "it changes SSH login keys"
+    if remote_path in CRITICAL_REMOTE_FILES or remote_path.startswith(CRITICAL_REMOTE_DIRS):
+        return "it changes accounts, privileges, login/boot configuration or the hermclaw ssh gate"
+    return None
+
+
+def _opened_path(fd: int) -> Path | None:
+    """Real path of an open descriptor (Linux ``/proc``); ``None`` where that is not available."""
+    try:
+        return Path(os.readlink(f"/proc/self/fd/{fd}"))
+    except OSError:
+        return None
+
+
+def read_upload_source(path: Path, max_bytes: int, *, within: Path | None = None) -> bytes:
+    """Read a regular local file without following a final symlink, bounded by ``max_bytes``.
+
+    ``within``: the opened file must (still) lie below this directory – closes the window between resolving a
+    workspace path and opening it, in which a directory component could be swapped for a symlink.
+    """
     flags = os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0) | getattr(os, "O_CLOEXEC", 0)
     try:
         fd = os.open(path, flags)
     except OSError as exc:
         raise SshPolicyError(f"upload source {path.name!r} cannot be opened: {exc.strerror}", code=SSH_UPLOAD_INVALID) from None
     with os.fdopen(fd, "rb") as fh:
+        if within is not None:
+            opened = _opened_path(fh.fileno())
+            if opened is not None and within.resolve() not in opened.parents:
+                raise SshPolicyError(f"upload source {path.name!r} resolves outside the workspace", code=SSH_UPLOAD_INVALID)
         st = os.fstat(fh.fileno())
         if not stat.S_ISREG(st.st_mode):
             raise SshPolicyError(f"upload source {path.name!r} is not a regular file", code=SSH_UPLOAD_INVALID)
@@ -291,10 +334,12 @@ class SshTools:
         *,
         secret_store: SecretStore | None = None,
         runtime_dir: Path | None = None,
-        compound_allowlist: Sequence[str] = (),
+        compound_allowlist: Sequence[str] | None = None,
         ssh_binary: str = "ssh",
     ) -> SshTools:
-        policy = SshCommandPolicy(config.policies.commands, config.policies.ssh, compound_allowlist=compound_allowlist)
+        """``compound_allowlist`` defaults to ``policies.ssh.compound_allowlist``."""
+        allowed = config.policies.ssh.compound_allowlist if compound_allowlist is None else compound_allowlist
+        policy = SshCommandPolicy(config.policies.commands, config.policies.ssh, compound_allowlist=allowed)
         runner = SshRunner(
             HostRegistry.from_config(config),
             KeyManager(secret_store=secret_store, runtime_dir=runtime_dir),
@@ -360,7 +405,7 @@ class SshTools:
         problem = _remote_path_problem(remote_path)
         norm_mode = _normalise_mode(mode)
         if problem is None and norm_mode is None:
-            problem = "mode must be an octal permission like 0644 (no setuid/setgid/sticky bits)"
+            problem = "mode must be an octal permission like 0644 (no setuid/setgid/sticky bits, not world-writable)"
         content = b""
         if problem is None:
             try:
@@ -374,8 +419,13 @@ class SshTools:
         command = " ".join([*parts, shlex.quote(remote_path), digest, norm_mode])
         call = _Call(call.tool, call.host, call.ctx, f"upload {remote_path} (mode {norm_mode}, {len(content)} bytes, sha256 {digest})")
         subject = f"ssh_upload {remote_path} mode={norm_mode} sha256={digest}"  # the approval covers exactly this content
-        decision = self.policy.decide_builtin(gate, "mutate", subject, step_id=call.ctx.step_id, reason="upload writes a file")
-        extra = {"remote_path": remote_path, "bytes": len(content), "sha256": digest, "mode": norm_mode}
+        critical = critical_remote_path(remote_path)
+        kind: SshCommandClass = "destructive" if critical else "mutate"
+        reason = f"upload overwrites a security-critical file: {critical}" if critical else "upload writes a file"
+        decision = self.policy.decide_builtin(gate, kind, subject, step_id=call.ctx.step_id, reason=reason)
+        extra: dict[str, Any] = {"remote_path": remote_path, "bytes": len(content), "sha256": digest, "mode": norm_mode}
+        if critical:
+            extra["critical_path"] = True
         planned = _Planned(gate, command, decision, builtin=True, stdin=content, extra=extra)
         result = await self._run_planned(call, planned, approval_token=approval_token, timeout=timeout)
         if result.outcome == SshOutcome.ok and UPLOAD_OK_MARKER not in result.stdout:
@@ -677,6 +727,7 @@ _EVENT_DATA_KEYS = (
     "unit",
     "sudo",
     "compound",
+    "critical_path",
     "audit_incomplete",
 )
 
@@ -730,6 +781,8 @@ def _systemd_missing(result: SshToolResult) -> bool:
 
 
 __all__ = [
+    "CRITICAL_REMOTE_DIRS",
+    "CRITICAL_REMOTE_FILES",
     "DEFAULT_MAX_UPLOAD_BYTES",
     "UNIT_RE",
     "UPLOAD_OK_MARKER",
@@ -737,5 +790,6 @@ __all__ = [
     "SshOutcome",
     "SshToolResult",
     "SshTools",
+    "critical_remote_path",
     "read_upload_source",
 ]

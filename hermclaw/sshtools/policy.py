@@ -559,7 +559,7 @@ class SshCommandPolicy:
         return SshDecision(
             Verdict.approval_required,
             cls,
-            f"{cls.kind} command on '{host.id}' needs an operator approval ({token})",
+            f"{cls.kind} command on '{host.id}' needs an operator approval ({token}): {cls.reason}",
             SSH_APPROVAL_REQUIRED,
             token,
         )

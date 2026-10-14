@@ -13,8 +13,10 @@
 #     (interactive login), more than one line or control characters -> rejected;
 #   * the allow-list has one extended regular expression (grep -E) per line; '#' lines and empty lines are
 #     ignored; a rule must match the WHOLE command (grep -x);
-#   * commands containing shell metacharacters ( ; & | ` $ ( ) < > \ ) only match rules written as
-#     'shell:<regex>' – chaining/substitution needs an explicit opt-in, exactly like the runtime policy;
+#   * commands containing shell metacharacters ( ; & | ` $ ( ) < > \ ) or expansion characters
+#     ( { } * ? [ ] ~ : brace expansion where /bin/sh is bash, globbing, tilde expansion ) only match rules
+#     written as 'shell:<regex>' – chaining, substitution and anything the shell would turn into more or other
+#     arguments than the rule's author saw need an explicit opt-in, exactly like the runtime policy;
 #   * the allow-list must be a regular file owned by root (or the gate's user) and not group/world writable;
 #   * every decision is logged to syslog (facility auth, tag hermclaw-ssh-gate); allowed commands are run with
 #     'exec /bin/sh -c', so the exit status is the command's own; rejected commands exit 126.
@@ -74,6 +76,7 @@ fi
 has_meta=no
 case $cmd in
     *[\;\&\|\`\$\(\)\<\>\\]*) has_meta=yes ;;
+    *[\{\}\*\?\~]* | *\[* | *\]*) has_meta=yes ;; # expansion: {a,b} (bash as sh), globs, ~user
 esac
 
 lineno=0

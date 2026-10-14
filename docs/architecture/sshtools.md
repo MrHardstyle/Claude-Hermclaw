@@ -26,7 +26,7 @@ capability, host allow-list, command policy, approval, pre-flight, execution and
 registry = HostRegistry.from_config(config)          # raises SshConfigError for a broken entry at startup
 registry.get(host_id) -> SshHost                     # SshPolicyError SSH_HOST_UNKNOWN / SSH_HOST_NOT_ALLOWED
 
-tools = SshTools.from_config(config, sessionmaker, secret_store=None, runtime_dir=None, compound_allowlist=())
+tools = SshTools.from_config(config, sessionmaker, secret_store=None, runtime_dir=None)  # compound_allowlist defaults to policies.ssh.compound_allowlist
 await tools.ssh_read(host, command, ctx=SshCallContext(...), timeout=None) -> SshToolResult
 await tools.ssh_command(host, command, approval_token=None, ctx=..., timeout=None) -> SshToolResult
 await tools.ssh_upload(host, source: Path | bytes, remote_path, mode="0644", approval_token=None, ctx=...) -> SshToolResult
@@ -149,11 +149,19 @@ ssh -F /dev/null -o BatchMode=yes -o StrictHostKeyChecking=yes -o UserKnownHosts
   exists, runs `chmod <mode>`, then `mv -f` into place. The replacement is atomic, and the target's symlink is not
   followed.
 - A failed upload leaves no temp file behind.
-- `remote_path` must be absolute, normalised and made only of `[A-Za-z0-9._@+-/]`. `mode` is `0?[0-7]{3}`, so there
-  are no setuid, setgid or sticky bits.
+- `remote_path` must be absolute, normalised and made only of `[A-Za-z0-9._@+-/]`. `mode` is `0?[0-7]{3}` without
+  the world-write bit, so there are no setuid, setgid or sticky bits and no world-writable files (`0666`/`0777` are
+  refused).
+- An upload is `mutate`. It is `destructive`, so it needs an approval even when `require_approval_for_mutations` is
+  off, when it replaces a security-critical file (`critical_remote_path`). That covers any `.ssh/` path or
+  `authorized_keys*`, `/etc/sudoers*`, `passwd`/`shadow`/`group`, `/etc/ssh/`, `/etc/pam.d/`, `/etc/security/`,
+  cron, `ld.so.preload`, `profile`, `/boot/`, `/root/`, and the gate itself (`/etc/hermclaw/`,
+  `/usr/local/bin/hermclaw-ssh-gate`). Results and events carry `critical_path: true`.
 - The approval subject includes path, mode and SHA-256. Changed content needs a new approval.
 - Through the provider, the source is a workspace file. Traversal, empty or `.` segments, symlink escapes, `.git`
   and `policies.scope.always_forbidden` (`.env`, `*.pem` …) are refused, and file contents never reach the audit.
+  After opening, the descriptor's real path (`/proc/self/fd`) must still lie inside the workspace. This closes the
+  window in which a directory component could be swapped for a symlink between resolving and opening.
 
 **Service status.** `ssh_service_status` runs two runtime-built read commands:
 `systemctl is-active <unit>` and `systemctl status --no-pager --full --lines=40 <unit>`. The unit name is validated.
@@ -194,8 +202,11 @@ restrict,from="192.168.178.225",command="/usr/local/bin/hermclaw-ssh-gate" ssh-e
 - It refuses an allow-list that is missing, is a symlink, has a foreign owner, or is group/world-writable.
 - The allow-list has one ERE per line, matched against the whole line (`grep -Ex`). Lines starting with `#` are
   comments.
-- Commands containing `; & | ` `` ` `` ` $ ( ) < > \` match only rules written as `shell:<regex>`. For example, the
-  upload script needs `shell:sh -c .* hermclaw-upload /srv/app/.*`.
+- Commands containing `; & | ` `` ` `` ` $ ( ) < > \` (chaining, substitution, redirection) or the expansion
+  characters `{ } * ? [ ] ~` match only rules written as `shell:<regex>`. A plain rule such as
+  `systemctl restart [^ ]+` therefore cannot be widened by brace expansion (`{nginx,ssh}` where `/bin/sh` is bash),
+  globs or `~user` into more or other arguments than its author saw. For example, the upload script needs
+  `shell:sh -c .* hermclaw-upload /srv/app/.*`.
 - Allowed commands run via `exec /bin/sh -c` and keep their exit status. stdin stays the SSH channel, because the
   allow-list is read on fd 4.
 - Rejected commands exit 126.
@@ -214,14 +225,14 @@ All tests run against a **real OpenSSH server**: `sshd -D` on a free 127.0.0.1 p
 | file | covers |
 |---|---|
 | `tests/unit/test_sshtools_policy.py` | classification matrix, sudo exactness, chaining, read bypass regressions (`VAR=` prefix, `cat.sh`, `ip a a`, `ss -D`, `systemctl -H`, `nginx -c`, …), tokens |
-| `tests/unit/test_sshtools_registry_keys.py` | registry validation (option-like addresses, unsafe paths), key/known_hosts permission checks, hashed known_hosts lookup, cred materialisation, stale key purge, keypair + `authorized_keys` line, separation checks |
-| `tests/unit/test_sshtools_gate.py` | gate with `SSH_ORIGINAL_COMMAND` (dash/bash/busybox): whole-line rules, `shell:` rules, stdin passthrough, untrusted allow-list, syslog |
-| `tests/integration/test_sshtools_sshd.py` | argv hardening, timeout kill, cancellation, output cap + redaction, stdin, host-key pinning (MITM refusal), cred keys, read/mutate/approval single-use/concurrency, sudo/compound allow-lists, capability gate, audit rows + events, upload (atomic, mode, checksum, approvals bound to content), service status incl. no-systemd, gate over real ssh |
+| `tests/unit/test_sshtools_registry_keys.py` | registry validation (option-like addresses, unsafe paths), key/known_hosts permission checks, hashed known_hosts lookup, cred materialisation, stale key purge, keypair + `authorized_keys` line, separation checks, critical remote paths, upload source containment after open |
+| `tests/unit/test_sshtools_gate.py` | gate with `SSH_ORIGINAL_COMMAND` (dash/bash/busybox): whole-line rules, `shell:` rules for metacharacters and expansion characters, stdin passthrough, untrusted allow-list, syslog |
+| `tests/integration/test_sshtools_sshd.py` | argv hardening, timeout kill, cancellation, output cap + redaction, stdin, host-key pinning (MITM refusal), cred keys, read/mutate/approval single-use/concurrency, sudo/compound allow-lists, capability gate, audit rows + events, upload (atomic, mode, no world-writable modes, checksum, approvals bound to content, critical paths always need approval), service status incl. no-systemd, gate over real ssh |
 | `tests/integration/test_sshtools_provider.py` | `SshOpsProvider` dispatch, workspace upload source rules |
 | `tests/failure/test_sshtools_failures.py` | host down, unroutable host (ConnectTimeout), missing ssh client, pre-flight failures keep approvals, session dropped by the host, audit failure flagged |
 | `tests/integration/test_sshtools_live.py` | `@pytest.mark.live` checks of the real hosts (BLOCKER-001) |
 
-Test-only system packages: `openssh-server`/`openssh-client` 9.6p1 (present in the build container) and `shellcheck` 0.9.0 (installed with `apt-get install shellcheck` for the gate lint test; skipped when absent).
+Test-only system packages: `openssh-server`/`openssh-client` 9.6p1 (present in the build container), `shellcheck` 0.9.0 (installed with `apt-get install shellcheck` for the gate lint test; skipped when absent) and `busybox` 1.36.1 (installed with `apt-get install busybox` so the gate tests also run under busybox sh; that shell is skipped when absent).
 
 ## 7. Residual risks / limits
 
@@ -231,6 +242,11 @@ Test-only system packages: `openssh-server`/`openssh-client` 9.6p1 (present in t
 - Mutating commands that open network connections without an ssh-like tool (`rsync -e ssh`, `nc`, `curl`) are not
   forbidden. They are `mutate` and need an approval when `require_approval_for_mutations` is set, which is the
   default.
+- `read` commands run with the admin user's permissions, so whatever that user can read, the model can see. Redaction
+  only catches known secret shapes and registered literals. Keep the admin user unprivileged and grant `sudo`
+  only for exact `allow_sudo_commands` entries.
+- The gate logs the requested command (first 400 characters) to the host's auth syslog unredacted. Do not pass
+  secrets on remote command lines; uploads stream their content on stdin.
 - A remote process that ignores the closed connection may outlive a killed ssh client. The gate and `timeout` on
   the host bound that side.
 - An approval consumed by a run that then fails at transport level is not restored. The operator re-approves, and

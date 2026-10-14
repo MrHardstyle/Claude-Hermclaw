@@ -274,3 +274,55 @@ def test_stale_materialised_keys_of_dead_processes_are_purged(tmp_path: Path) ->
     assert KeyManager(runtime_dir=runtime).private_runtime_dir() == runtime
     assert not stale.exists() and own.exists() and unrelated.exists()
     assert purge_stale_keys(runtime) == 0
+
+
+# ---------------------------------------------------------------------------------------------- upload helpers (26.5)
+@pytest.mark.parametrize(
+    ("remote_path", "critical"),
+    [
+        ("/home/admin/.ssh/authorized_keys", True),
+        ("/root/.ssh/authorized_keys2", True),
+        ("/srv/app/.ssh/config", True),
+        ("/etc/ssh/sshd_config", True),
+        ("/etc/ssh/sshd_config.d/10-hermclaw.conf", True),
+        ("/etc/sudoers", True),
+        ("/etc/sudoers.d/hermclaw", True),
+        ("/etc/passwd", True),
+        ("/etc/shadow", True),
+        ("/etc/pam.d/sshd", True),
+        ("/etc/cron.d/backup", True),
+        ("/etc/ld.so.preload", True),
+        ("/etc/hermclaw/ssh-allowlist", True),
+        ("/usr/local/bin/hermclaw-ssh-gate", True),
+        ("/boot/grub/grub.cfg", True),
+        ("/srv/app/config.yaml", False),
+        ("/etc/nginx/sites-available/app.conf", False),
+        ("/etc/systemd/system/app.service", False),
+        ("/etc/sudoers-notes.txt", False),
+        ("/home/admin/ssh/notes", False),
+    ],
+)
+def test_critical_remote_paths(remote_path: str, critical: bool) -> None:
+    from hermclaw.sshtools.tools import critical_remote_path
+
+    assert (critical_remote_path(remote_path) is not None) is critical
+
+
+def test_upload_source_must_stay_inside_the_workspace_after_open(tmp_path: Path) -> None:
+    from hermclaw.sshtools.errors import SshPolicyError
+    from hermclaw.sshtools.tools import read_upload_source
+
+    workspace = tmp_path / "ws"
+    (workspace / "conf").mkdir(parents=True)
+    (workspace / "conf" / "app.conf").write_bytes(b"inside\n")
+    outside = tmp_path / "outside"
+    outside.mkdir()
+    (outside / "app.conf").write_bytes(b"secret outside\n")
+    assert read_upload_source(workspace / "conf" / "app.conf", 1000, within=workspace) == b"inside\n"
+    # a directory component swapped for a symlink after resolve(): O_NOFOLLOW only guards the last component
+    (workspace / "conf" / "app.conf").unlink()
+    (workspace / "conf").rmdir()
+    (workspace / "conf").symlink_to(outside)
+    with pytest.raises(SshPolicyError, match="outside the workspace"):
+        read_upload_source(workspace / "conf" / "app.conf", 1000, within=workspace)
+    assert read_upload_source(workspace / "conf" / "app.conf", 1000) == b"secret outside\n"  # no 'within': plain read

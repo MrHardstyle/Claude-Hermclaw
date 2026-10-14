@@ -258,3 +258,21 @@ def test_read_bypasses_are_not_reads(command: str) -> None:
 )
 def test_genuine_reads_stay_reads(command: str) -> None:
     assert _policy().classify(HOST, command).kind == "read", command
+
+
+def test_from_config_uses_the_configured_compound_allowlist() -> None:
+    from typing import Any, cast
+
+    from hermclaw.sshtools.policy import Verdict
+    from hermclaw.sshtools.tools import SshTools
+
+    config = load_config()
+    rule = r"systemctl restart [a-z]+ && systemctl is-active [a-z]+"
+    ssh = config.policies.ssh.model_copy(update={"compound_allowlist": [rule], "allowed_hosts": []})
+    config = config.model_copy(update={"policies": config.policies.model_copy(update={"ssh": ssh})})
+    sm = cast(Any, None)  # no database access while deciding
+    chained = "systemctl restart nginx && systemctl is-active nginx"
+    configured = SshTools.from_config(config, sm).policy.decide(HOST, chained, step_id="s")
+    assert configured.verdict == Verdict.approval_required  # allow-listed chain: the normal mutate path
+    explicit = SshTools.from_config(config, sm, compound_allowlist=()).policy.decide(HOST, chained, step_id="s")
+    assert explicit.verdict == Verdict.deny and explicit.code == "SSH_COMPOUND_NOT_ALLOWED"  # explicit override wins

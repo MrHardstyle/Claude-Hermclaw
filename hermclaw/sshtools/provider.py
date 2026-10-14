@@ -95,7 +95,7 @@ class SshOpsProvider:
         elif call.tool == ToolName.ssh_upload and isinstance(args, SshUploadArgs):
             try:
                 source = resolve_workspace_file(call.workspace.path, args.path, forbidden_globs=self.forbidden_upload_globs)
-                content = await asyncio.to_thread(read_upload_source, source, self.tools.max_upload_bytes)
+                content = await asyncio.to_thread(read_upload_source, source, self.tools.max_upload_bytes, within=call.workspace.path)
             except SshPolicyError as exc:
                 result = await self.tools.record_refusal(
                     "ssh_upload", args.host, exc.message, exc.code, ctx=ctx, display=f"upload {args.path[:200]} -> {args.remote_path[:300]}"
