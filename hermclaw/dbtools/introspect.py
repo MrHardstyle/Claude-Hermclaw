@@ -10,6 +10,7 @@ rendering for the model and a fingerprint used by the sandbox migration check.
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import hashlib
 import json
 from typing import Any
@@ -136,7 +137,7 @@ def _describe_tables(engine: Engine, insp: Inspector, schema: str | None, names:
             }
             for c in cols.get(key, [])
         ]
-        pk = pks.get(key) or {}
+        pk: dict[str, Any] = dict(pks.get(key) or {})
         pk_cols = list(pk.get("constrained_columns") or [])
         indexes = [
             {
@@ -172,7 +173,8 @@ def _describe_tables(engine: Engine, insp: Inspector, schema: str | None, names:
                 key=lambda ck: (str(ck["name"]), ck["sqltext"]),
             ),
         }
-        comment = (comments.get(key) or {}).get("text")
+        comment_info: dict[str, Any] = dict(comments.get(key) or {})
+        comment = comment_info.get("text")
         if comment:
             table["comment"] = comment
         tables.append(table)
@@ -191,10 +193,8 @@ def _describe_views(insp: Inspector, schema: str | None, dialect: str) -> list[d
     views: list[dict[str, Any]] = []
     names = [(v, False) for v in insp.get_view_names(schema=schema)]
     if dialect == "postgresql":
-        try:
+        with contextlib.suppress(NotImplementedError):
             names += [(v, True) for v in insp.get_materialized_view_names(schema=schema)]
-        except NotImplementedError:
-            pass
     for name, materialized in sorted(names):
         try:
             definition = insp.get_view_definition(name, schema=schema) or ""

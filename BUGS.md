@@ -492,6 +492,10 @@ Noch keine.
 ### BUG-082 – Operations provider skip log used the reserved LogRecord key `module` (scheduler start crashed at INFO level)
 - Phase: P39 · Komponente: runtime/ops · Severity: P1 · blockierend: ja · Status: **behoben** before release (`tests/integration/test_runtime_ops.py::test_missing_optional_provider_is_skipped_with_info_logging`; found by `tests/failure/test_recovery_process_kill.py`)
 
+### BUG-083 – test_remote_execution_without_a_ready_worker… was order-dependent (shared test DB had a ready worker without token)
+- Phase: P39 · Komponente: tests · Severity: P4 · blockierend: nein · Status: **behoben** (precondition explicit: execution workers set offline; `test_workers_execution_daemon.py` + `test_runtime_services.py` together green; found by the P27 agent)
+- Tatsächlich: with a ready worker left by another test the pool selected it and raised WorkerAuthFailed (correct runtime behaviour) instead of the expected WorkerUnreachable
+
 ## Template
 
 ### BUG-XXX – Titel

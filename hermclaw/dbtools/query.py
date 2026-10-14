@@ -14,7 +14,6 @@ Two independent layers:
 from __future__ import annotations
 
 import asyncio
-import base64
 import contextlib
 import datetime as dt
 import json
@@ -262,14 +261,26 @@ async def query_readonly(
     if conn.kind == TargetKind.postgresql:
         checked = check_readonly(sql, "postgresql")
         return await query_postgres(
-            conn, checked, params, row_limit=row_limit, timeout_seconds=timeout_seconds, connect_timeout=connect_timeout, max_cell_chars=max_cell_chars
+            conn,
+            checked,
+            params,
+            row_limit=row_limit,
+            timeout_seconds=timeout_seconds,
+            connect_timeout=connect_timeout,
+            max_cell_chars=max_cell_chars,
         )
     if conn.kind == TargetKind.sqlite:
         checked = check_readonly(sql, "sqlite")
         try:
             return await asyncio.wait_for(
                 asyncio.to_thread(
-                    query_sqlite_sync, conn, checked, params, row_limit=row_limit, timeout_seconds=timeout_seconds, max_cell_chars=max_cell_chars
+                    query_sqlite_sync,
+                    conn,
+                    checked,
+                    params,
+                    row_limit=row_limit,
+                    timeout_seconds=timeout_seconds,
+                    max_cell_chars=max_cell_chars,
                 ),
                 timeout_seconds + 15,
             )

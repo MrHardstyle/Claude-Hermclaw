@@ -74,7 +74,7 @@ async def run_process(
     *,
     env: Mapping[str, str] | None = None,
     cwd: Path | None = None,
-    timeout: float,
+    timeout: float,  # noqa: ASYNC109 – kills the process group on expiry
     stdin_data: bytes | None = None,
     max_output_bytes: int = DEFAULT_OUTPUT_BYTES,
 ) -> ProcessResult:
@@ -166,7 +166,7 @@ class MigrationCommandRunner(Protocol):
         """Directory for a SQLite sandbox file the command can reach (``None``: a private temp dir is fine)."""
         ...
 
-    async def run(self, argv: Sequence[str], *, cwd: Path, env: Mapping[str, str], timeout: float) -> ProcessResult: ...
+    async def run(self, argv: Sequence[str], *, cwd: Path, env: Mapping[str, str], timeout: float) -> ProcessResult: ...  # noqa: ASYNC109
 
 
 class LocalMigrationRunner:
@@ -180,7 +180,7 @@ class LocalMigrationRunner:
     def sqlite_dir(self, project_root: Path) -> Path | None:
         return None
 
-    async def run(self, argv: Sequence[str], *, cwd: Path, env: Mapping[str, str], timeout: float) -> ProcessResult:
+    async def run(self, argv: Sequence[str], *, cwd: Path, env: Mapping[str, str], timeout: float) -> ProcessResult:  # noqa: ASYNC109
         if get_settings().env == "production" and not self.allow_production:
             raise DbToolError(
                 "project migration commands run only in the execution sandbox in production (no sandbox executor configured)",
@@ -216,9 +216,11 @@ class ExecutorMigrationRunner:
     def sqlite_dir(self, project_root: Path) -> Path | None:
         return self.workspace.path / ".hermclaw-dbsandbox"
 
-    async def run(self, argv: Sequence[str], *, cwd: Path, env: Mapping[str, str], timeout: float) -> ProcessResult:
-        root = self.workspace.path.resolve()
-        rel = cwd.resolve().relative_to(root).as_posix()  # ValueError: outside the workspace
+    async def run(self, argv: Sequence[str], *, cwd: Path, env: Mapping[str, str], timeout: float) -> ProcessResult:  # noqa: ASYNC109
+        try:
+            rel = await asyncio.to_thread(_relative_cwd, self.workspace.path, cwd)
+        except ValueError:
+            return ProcessResult(list(argv), None, error="migration command directory is outside the workspace", runner="sandbox")
         command = shlex.join(list(argv)) if rel in ("", ".") else f"cd {shlex.quote(rel)} && {shlex.join(list(argv))}"
         started = time.monotonic()
         req = ExecutionRequest(
@@ -248,6 +250,10 @@ class ExecutorMigrationRunner:
             error=res.error,
             runner="sandbox",
         )
+
+
+def _relative_cwd(root: Path, cwd: Path) -> str:
+    return cwd.resolve().relative_to(root.resolve()).as_posix()  # ValueError: outside the workspace
 
 
 __all__ = [

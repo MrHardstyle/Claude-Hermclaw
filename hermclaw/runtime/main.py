@@ -159,6 +159,13 @@ class SchedulerProcess:
         async with self.sm() as s, s.begin():
             workers = await services.registry.register_from_config(s, self.config.hosts, self.config.capabilities)
         recovered = await services.resources.recover()
+        for hook in services.ops.startup_hooks if services.ops is not None else []:
+            try:  # e.g. drop sandbox databases of crashed runs (dbtools); never blocks the start
+                await hook()
+            except Exception as exc:
+                log.warning(
+                    "operations startup hook failed", extra={"hook": getattr(hook, "__qualname__", "?"), "error": type(exc).__name__}
+                )
         monitor = OfflineMonitor(self.sm, services.registry)
         monitor.start()
         if services.disk is not None:

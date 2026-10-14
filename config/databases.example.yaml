@@ -1,0 +1,32 @@
+# Hermclaw Next – target databases of user projects for the database tools (P27, docs/architecture/dbtools.md).
+# Copy to /etc/hermclaw/databases.yaml. The file is optional: without it no target is known (migration generation and
+# sandbox application still work). These are the databases of *your projects*, never Hermclaw's own database.
+#
+# Secret references: cred:<name> (systemd credential, production), file:<path> (0600), env:/literal: only outside
+# production. Production targets are always read-only (introspection + read-only queries).
+targets: []
+#  - name: shop
+#    dsn_ref: cred:shop-db-dsn            # postgresql://reader@db.lan:5432/shop?sslmode=require
+#    password_ref: cred:shop-db-password  # optional, overrides the DSN's password
+#    kind: postgresql                     # postgresql | sqlite (mysql is accepted but reported as unsupported)
+#    environment: production              # production | staging | sandbox; production forces read_only
+#    read_only: true
+#  - name: app-sqlite
+#    dsn_ref: file:/etc/hermclaw/secrets/app-sqlite.dsn
+#    kind: sqlite
+#    environment: staging
+
+# Throw-away databases for applying generated migrations (db_migration_apply_sandbox, db_restore_test).
+# Use a NON-production PostgreSQL server; the role needs CREATEDB + CREATEROLE.
+# sandbox:
+#   admin_dsn_ref: cred:sandbox-pg-admin
+#   name_prefix: hermclaw_sbx_
+#   client_host: 192.168.178.225          # how the execution worker (.222) reaches that server
+#   orphan_max_age_hours: 6               # sandboxes of crashed runs are dropped at scheduler start
+
+# limits:
+#   default_row_limit: 100
+#   max_row_limit: 5000
+#   default_timeout_seconds: 30
+#   max_timeout_seconds: 600
+#   migration_timeout_seconds: 900

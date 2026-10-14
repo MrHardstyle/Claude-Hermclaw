@@ -44,6 +44,7 @@ log = get_logger(__name__)
 COMMENT_PREFIX = "hermclaw-sandbox"
 _COMMENT_RE = re.compile(r"created=(\S+)")
 SCRAM_ITERATIONS = 4096
+ROLE_VALIDITY = timedelta(days=1)
 
 
 def scram_verifier(password: str, *, salt: bytes | None = None, iterations: int = SCRAM_ITERATIONS) -> str:
@@ -100,9 +101,7 @@ class PgSandboxServer:
         try:
             return await psycopg.AsyncConnection.connect(autocommit=True, **conn.psycopg_kwargs(connect_timeout=self.connect_timeout))
         except psycopg.Error as exc:
-            raise DbToolError(
-                f"sandbox server {self.admin.display()} is not reachable: {_msg(exc)}", code=DB_SANDBOX_UNAVAILABLE
-            ) from None
+            raise DbToolError(f"sandbox server {self.admin.display()} is not reachable: {_msg(exc)}", code=DB_SANDBOX_UNAVAILABLE) from None
 
     async def create(self, *, label: str = "") -> SandboxDatabase:
         name = f"{self.prefix}{uuid.uuid4().hex[:12]}"
@@ -111,7 +110,7 @@ class PgSandboxServer:
         self.redactor.add_literal(password)
         DEFAULT_REDACTOR.add_literal(password)
         ident = sql.Identifier(name)
-        valid_until = (datetime.now(UTC) + timedelta(days=1)).strftime("%Y-%m-%d %H:%M:%S+00")
+        valid_until = (datetime.now(UTC) + ROLE_VALIDITY).strftime("%Y-%m-%d %H:%M:%S+00")
         comment = f"{COMMENT_PREFIX} created={datetime.now(UTC).isoformat()} label={re.sub(r'[^A-Za-z0-9_.:-]', '_', label)[:80]}"
         aconn = await self._admin_connect()
         created_role = created_db = False
@@ -195,15 +194,20 @@ class PgSandboxServer:
     async def list_sandboxes(self) -> list[tuple[str, datetime | None]]:
         aconn = await self._admin_connect()
         try:
+            pattern = self.prefix.replace("_", r"\_") + "%"
+            # databases *and* roles: a crash between CREATE ROLE and CREATE DATABASE leaves a role only
             cur = await aconn.execute(
-                "SELECT datname, shobj_description(oid, 'pg_database') FROM pg_database WHERE datname LIKE %s ORDER BY datname",
-                (self.prefix.replace("_", r"\_") + "%",),
+                "SELECT n.name, shobj_description(d.oid, 'pg_database'), r.rolvaliduntil "
+                "FROM (SELECT datname AS name FROM pg_database WHERE datname LIKE %s "
+                "      UNION SELECT rolname FROM pg_roles WHERE rolname LIKE %s) n "
+                "LEFT JOIN pg_database d ON d.datname = n.name LEFT JOIN pg_roles r ON r.rolname = n.name ORDER BY 1",
+                (pattern, pattern),
             )
             rows = await cur.fetchall()
         finally:
             await aconn.close()
         out: list[tuple[str, datetime | None]] = []
-        for name, comment in rows:
+        for name, comment, valid_until in rows:
             if not self.policy.is_sandbox_name(str(name)):
                 continue
             created: datetime | None = None
@@ -211,6 +215,8 @@ class PgSandboxServer:
             if m and str(comment).startswith(COMMENT_PREFIX):
                 with contextlib.suppress(ValueError):
                     created = datetime.fromisoformat(m.group(1))
+            if created is None and isinstance(valid_until, datetime):
+                created = valid_until - ROLE_VALIDITY  # still being created (no comment yet) or a role-only leftover
             out.append((str(name), created))
         return out
 
@@ -253,6 +259,22 @@ class SqliteSandboxes:
             raise DbToolError(f"SQLite sandbox could not be created: {exc}", code=DB_SANDBOX_FAILED) from None
         conn = ConnectionInfo(kind=TargetKind.sqlite, path=path)
         return SandboxDatabase(TargetKind.sqlite, directory.name, conn, conn, directory=directory)
+
+    def cleanup_orphans(self, *, max_age: timedelta, now: datetime | None = None) -> list[str]:
+        """Remove SQLite sandbox directories older than ``max_age`` (crashed runs) below the sandbox base directory."""
+        current = (now or datetime.now(UTC)).timestamp()
+        root = self.base_dir or Path(tempfile.gettempdir())
+        removed: list[str] = []
+        if not root.is_dir():
+            return removed
+        for entry in root.iterdir():
+            if not entry.name.startswith(self.prefix) or entry.is_symlink() or not entry.is_dir():
+                continue
+            with contextlib.suppress(OSError):
+                if current - entry.stat().st_mtime >= max_age.total_seconds():
+                    shutil.rmtree(entry)
+                    removed.append(entry.name)
+        return removed
 
     def drop(self, sandbox: SandboxDatabase) -> bool:
         directory = sandbox.directory

@@ -357,13 +357,13 @@ Legende: `[x]` erledigt mit Evidence · `[~]` erledigt, Live-Verifikation auf Zi
 
 ## P27 – DB Tools
 
-- [ ] 27.1 introspection. — Evidence: –
-- [ ] 27.2 readonly query. — Evidence: –
-- [ ] 27.3 migrations. — Evidence: –
-- [ ] 27.4 sandbox apply. — Evidence: –
-- [ ] 27.5 backup. — Evidence: –
-- [ ] 27.6 restore test. — Evidence: –
-- [ ] 27.7 policy. — Evidence: –
+- [x] 27.1 introspection. — Evidence: hermclaw/dbtools/introspect.py (describe/describe_sync via SQLAlchemy get_multi_* in a read-only session, render, fingerprint) + DbTools.db_introspect. Tests: tests/integration/test_dbtools_query.py::test_introspect_postgres_fixture_schema (real PG16 schema: types, nullability, defaults, identity, P
+- [x] 27.2 readonly query. — Evidence: hermclaw/dbtools/sqlguard.py (dialect lexer, single read statement, no data-modifying CTE/INTO/COPY/locking, function deny-list incl. qualified/quoted/comment-separated names, U&"" identifiers rejected) + hermclaw/dbtools/query.py (PG: default_transaction_read_only + SET TRANSACTION READ ONLY + stat
+- [x] 27.3 migrations. — Evidence: hermclaw/dbtools/migrations.py detect_framework (alembic ini/pyproject/Flask-Migrate, django, raw SQL paired/Flyway/dbmate/goose/sql-migrate/generic, knex/laravel/prisma/rails reported) + generate_migration (alembic file_template + deterministic revision id via ast-parsed graph, Django NNNN_slug wit
+- [x] 27.4 sandbox apply. — Evidence: hermclaw/dbtools/sandbox.py (PgSandboxServer: CREATE DATABASE hermclaw_sbx_<12hex> + isolated SCRAM role, always dropped; SqliteSandboxes) + migrations.py drivers (RawSqlDriver in-process as sandbox role / hardened SQLite, AlembicDriver via project alembic with post-check of alembic_version in the s
+- [x] 27.5 backup. — Evidence: hermclaw/dbtools/backup.py BackupService.backup: PG pg_dump --format=custom with PGPASSWORD in env (never argv) on a pg_export_snapshot shared with exact row counts; SQLite backup API in one read txn; files 0600/0700, .partial+rename; artifacts row kind=backup with sha256/size/metadata. Tests: tests
+- [x] 27.6 restore test. — Evidence: hermclaw/dbtools/backup.py BackupService.restore_test: checksum/size + path-in-backup-dir check, sandbox DB, TOC filtered (COMMENT ON EXTENSION/EVENT TRIGGER), extensions pre-created by admin, pg_restore --no-owner --no-privileges --exit-on-error as isolated role, table list + exact counts compared;
+- [x] 27.7 policy. — Evidence: hermclaw/dbtools/policy.py (DbPolicy capability gate + target matrix + sandbox-name guard; DbAuditor db.tool events + command_runs before/after each external command, redacted) + targets.py (production forces read_only) + tools.py DbTools._call (exactly one event per call incl. denied/timed_out/canc
 
 ## P28 – Container/Proxy Tools
 

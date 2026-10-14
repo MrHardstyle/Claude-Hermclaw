@@ -438,7 +438,9 @@ class TargetRegistry:
 
     def resolve(self, name_or_target: str | DatabaseTarget) -> ResolvedTarget:
         target = self.get(name_or_target) if isinstance(name_or_target, str) else name_or_target
-        conn = resolve_connection(target.dsn_ref, target.kind, password_ref=target.password_ref, secrets=self.secrets, redactor=self.redactor)
+        conn = resolve_connection(
+            target.dsn_ref, target.kind, password_ref=target.password_ref, secrets=self.secrets, redactor=self.redactor
+        )
         return ResolvedTarget(target, conn)
 
 

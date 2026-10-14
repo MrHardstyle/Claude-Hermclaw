@@ -239,9 +239,8 @@ def tokenize(sql: str, dialect: Dialect) -> list[Token]:
             tokens.append(Token("string", sql[start:i], start, i))
             continue
         if ch in "uU" and sql.startswith('&"', i + 1):
-            i = _skip_quoted(sql, i + 2, '"', backslash=False)
-            tokens.append(Token("qident", sql[start + 3 : i - 1].replace('""', '"'), start, i))
-            continue
+            # escapes (U&"\0070g_…") would hide a function name from the deny-list – never needed for reading
+            raise reject('Unicode-escaped identifiers (U&"…") are not allowed')
         if ch == '"':
             i = _skip_quoted(sql, i, '"', backslash=False)
             tokens.append(Token("qident", sql[start + 1 : i - 1].replace('""', '"'), start, i))

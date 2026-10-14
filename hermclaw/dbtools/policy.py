@@ -18,11 +18,14 @@ afterwards). DSNs appear only in their credential-free form; all payloads go thr
 
 from __future__ import annotations
 
+import asyncio
 import re
+import shlex
 import uuid
-from collections.abc import Iterable
+from collections.abc import Iterable, Mapping, Sequence
 from dataclasses import dataclass
 from enum import StrEnum
+from pathlib import Path
 from typing import Any
 
 from sqlalchemy import update
@@ -39,7 +42,7 @@ from hermclaw.dbtools.errors import (
     DbPolicyError,
     DbToolError,
 )
-from hermclaw.dbtools.runner import ProcessResult
+from hermclaw.dbtools.runner import MigrationCommandRunner, ProcessResult, run_process
 from hermclaw.dbtools.targets import DatabaseTarget, TargetEnvironment, TargetKind, redact_dsn
 from hermclaw.events.store import append_event
 from hermclaw.persistence.models import CommandRun
@@ -159,7 +162,9 @@ class DbAuditor:
         self.sessionmaker = sessionmaker
         self.redactor = redactor
 
-    async def command_started(self, ctx: DbCallContext, display: str, *, classification: str, cwd: str | None, runner: str) -> uuid.UUID | None:
+    async def command_started(
+        self, ctx: DbCallContext, display: str, *, classification: str, cwd: str | None, runner: str
+    ) -> uuid.UUID | None:
         if self.sessionmaker is None:
             return None
         run_id = uuid.uuid4()
@@ -208,6 +213,54 @@ class DbAuditor:
         except Exception:
             log.exception("db tool command_runs row could not be completed", extra={"command_run_id": str(run_id)})
 
+    async def run_command(
+        self,
+        ctx: DbCallContext,
+        argv: Sequence[str],
+        *,
+        env: Mapping[str, str],
+        timeout: float,  # noqa: ASYNC109 – forwarded to run_process (kills on expiry)
+        classification: str,
+        display: str | None = None,
+        cwd: Path | None = None,
+        stdin_data: bytes | None = None,
+    ) -> ProcessResult:
+        """Run a local client tool (pg_dump, pg_restore …) with a ``command_runs`` row written before it starts."""
+        shown = display or shlex.join([str(a) for a in argv])
+        run_id = await self.command_started(ctx, shown, classification=classification, cwd=str(cwd) if cwd else None, runner="local")
+        try:
+            result = await run_process(argv, env=env, cwd=cwd, timeout=timeout, stdin_data=stdin_data)
+        except asyncio.CancelledError:
+            await asyncio.shield(self.command_finished(run_id, ProcessResult(list(argv), None, error="cancelled")))
+            raise
+        await self.command_finished(run_id, result)
+        return result
+
+    async def run_migration_command(
+        self,
+        ctx: DbCallContext,
+        runner: MigrationCommandRunner,
+        argv: Sequence[str],
+        *,
+        display: str,
+        env: Mapping[str, str],
+        cwd: Path,
+        timeout: float,  # noqa: ASYNC109 – forwarded to the runner contract
+    ) -> ProcessResult:
+        """Run a project migration command through ``runner`` (sandbox executor / local) with a ``command_runs`` row."""
+        run_id = await self.command_started(ctx, display, classification="db_migration", cwd=str(cwd), runner=runner.name)
+        try:
+            result = await runner.run(argv, cwd=cwd, env=env, timeout=timeout)
+        except asyncio.CancelledError:
+            await asyncio.shield(self.command_finished(run_id, ProcessResult(list(argv), None, error="cancelled")))
+            raise
+        except Exception as exc:
+            result = ProcessResult(list(argv), None, error=f"{type(exc).__name__}: {redact_dsn(self.redactor.text(str(exc)))[:500]}")
+            if hasattr(exc, "code"):
+                result.extra["code"] = str(exc.code)
+        await self.command_finished(run_id, result)
+        return result
+
     async def event(
         self,
         tool: str,
@@ -219,7 +272,9 @@ class DbAuditor:
         source_id: str | None = None,
         severity: Severity | None = None,
     ) -> bool:
-        body = clean_payload(self.redactor, {"tool": tool, "outcome": outcome.value, "actor": ctx.actor, "capability": ctx.capability, **payload})
+        body = clean_payload(
+            self.redactor, {"tool": tool, "outcome": outcome.value, "actor": ctx.actor, "capability": ctx.capability, **payload}
+        )
         if self.sessionmaker is None:
             log.info("db tool call", extra={"tool": tool, "outcome": outcome.value})
             return False

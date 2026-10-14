@@ -53,7 +53,7 @@ from hermclaw.runtime.driver import DriverSettings, RuntimeJobDriver
 from hermclaw.runtime.handlers import RepoInfoStepHandler, ReviewStepHandler, VerifyStepHandler, _workspace
 from hermclaw.runtime.health import DiskMonitor
 from hermclaw.runtime.images import ImageDefaultingExecutor, SandboxImageSelector
-from hermclaw.runtime.ops import OpsBundle, build_ops
+from hermclaw.runtime.ops import OpsBundle, WorkspaceExecutor, build_ops
 from hermclaw.runtime.research_step import ResearchRunner, ResearchStepHandler
 from hermclaw.runtime.scratch import ScratchWorkspaces
 from hermclaw.scheduler.handlers import StepHandler, StepRunContext
@@ -332,7 +332,9 @@ def build_services(
 
     scratch = ScratchWorkspaces(sessionmaker, git, Path(settings.data_dir) / "scratch")  # repository-less jobs (R-026)
     # operations tools (P26–P28): SSH (+ database/container providers when installed); tests may inject their own
-    ops_bundle = OpsBundle(ov.ops) if ov.ops is not None else build_ops(config, sessionmaker, settings)
+    ops_bundle = (
+        OpsBundle(ov.ops) if ov.ops is not None else build_ops(config, sessionmaker, settings, executor=WorkspaceExecutor(executor_for))
+    )
     artifacts = artifacts_dir or Path(settings.artifacts_dir)
 
     deps = ImplementDeps(

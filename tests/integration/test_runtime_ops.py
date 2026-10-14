@@ -165,3 +165,44 @@ async def test_missing_optional_provider_is_skipped_with_info_logging(
     bundle = ops.build_ops(get_config(), sessionmaker, _settings(tmp_path))
     assert bundle.names == ["ssh"]
     assert any("not installed" in r.getMessage() for r in caplog.records)
+
+
+async def test_database_tools_are_wired_with_the_sandbox_executor(sessionmaker: Any, tmp_path: Path) -> None:
+    """P27 in the runtime: DB tools in the composite provider, migration commands through the workspace executor,
+    orphan sandbox clean-up as a scheduler startup hook."""
+    from hermclaw.contracts.tools import DB_TOOLS
+    from hermclaw.runtime.ops import WorkspaceExecutor
+
+    services = build_services(get_config(), _settings(tmp_path), sessionmaker, overrides=ServiceOverrides(chat=StackModels()))
+    try:
+        assert services.ops is not None and "dbtools" in services.ops.names
+        assert all(services.ops.provider.provides(t) for t in DB_TOOLS)  # type: ignore[union-attr]
+        db_provider = next(p for p in services.ops.provider.providers if type(p).__name__ == "DbOpsProvider")  # type: ignore[union-attr]
+        assert isinstance(db_provider.executor, WorkspaceExecutor)
+        assert len(services.ops.startup_hooks) == 1
+        await services.ops.startup_hooks[0]()  # no sandbox server configured: nothing to drop, no error
+    finally:
+        await services.aclose()
+
+
+async def test_workspace_executor_uses_the_per_workspace_factory(tmp_path: Path) -> None:
+    from hermclaw.contracts.worker import CommandResult
+    from hermclaw.core.interfaces import ExecutionRequest, WorkspaceHandle
+    from hermclaw.runtime.ops import WorkspaceExecutor
+
+    seen: list[Any] = []
+
+    class Inner:
+        async def run(self, ws: WorkspaceHandle, req: ExecutionRequest) -> CommandResult:
+            seen.append((ws.id, req.command))
+            return CommandResult(request_id="r", exit_code=0)
+
+    async def factory(ws: WorkspaceHandle, step: Any) -> Inner:
+        assert step is None
+        return Inner()
+
+    ws = WorkspaceHandle(
+        id=uuid.uuid4(), job_id=uuid.uuid4(), path=tmp_path, branch="b", base_branch="main", base_sha="0" * 40, repository_key="r"
+    )
+    res = await WorkspaceExecutor(factory).run(ws, ExecutionRequest(command="alembic upgrade head"))  # type: ignore[arg-type]
+    assert res.exit_code == 0 and seen == [(ws.id, "alembic upgrade head")]

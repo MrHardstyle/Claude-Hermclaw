@@ -97,6 +97,9 @@ async def test_build_services_wires_every_handler_and_the_execution_mode(world: 
 async def test_remote_execution_without_a_ready_worker_is_reported_not_run_locally(world: World) -> None:
     cfg = get_config()
     prod = Settings(env="production", data_dir=world.settings.data_dir, instance_id=f"t-{uuid.uuid4().hex[:6]}", wake_on_lan=False)
+    async with world.sessionmaker() as s:  # precondition: no dispatchable execution worker (other tests register some)
+        await s.execute(update(Worker).where(Worker.kind == "execution").values(state="offline"))
+        await s.commit()
     services = build_services(cfg, prod, world.sessionmaker, overrides=overrides(StackModels()))
     ws = await world.engine.create_workspace(await world.job(), world.repo.id)
     with pytest.raises(WorkerUnreachable):
