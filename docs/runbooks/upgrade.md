@@ -59,7 +59,7 @@ see `docs/operations/backup-restore.md`).
 
 | Component | Upgrade rule |
 |---|---|
-| LiteLLM (`/opt/hermclaw/litellm-venv`) | pinned (`litellm[proxy]==1.104.2`); bump only with the empirical gateway tests (`tests/integration/test_models_litellm_proxy.py`) green against the new version; regenerate config with `hermclaw litellm-config` |
+| LiteLLM (`/opt/litellm/venv`, `systemd_skeleton_litellm_venv`) | pinned (`litellm[proxy]==1.104.2`); bump only with the empirical gateway tests (`tests/integration/test_models_litellm_proxy.py`) green against the new version; regenerate config with `hermclaw litellm-config` |
 | Ollama (`.224`) | pinned version; upgrade only after the GPU smoke test (`hermclaw-model-worker selftest`); never above the last driver branch supporting Pascal (R580, research R-017) |
 | Models | tags are fixed per role in `config/models.yaml`; a new tag is a config change + `scripts/ops/hermclaw-model-pull`; embedding model changes trigger a re-index (embedding_model per chunk) |
 | UI (`.223`) | static build; deploy playbook copies the new `ui/dist` into `/var/www/hermclaw-next` atomically (directory swap) |
