@@ -538,13 +538,13 @@ Legende: `[x]` erledigt mit Evidence · `[~]` erledigt, Live-Verifikation auf Zi
 
 ## P41 – RELEASE CANDIDATE
 
-- [ ] 41.1 Version. — Evidence: –
-- [ ] 41.2 Changelog. — Evidence: –
-- [ ] 41.3 Architektur-Doku. — Evidence: –
-- [ ] 41.4 Admin Runbook. — Evidence: –
-- [ ] 41.5 Disaster Recovery. — Evidence: –
+- [x] 41.1 Version. — Evidence: version 0.1.0rc1 (PEP 440) in pyproject.toml and hermclaw/__init__.py (hermclaw --version), protocol version 1
+- [x] 41.2 Changelog. — Evidence: CHANGELOG.md [0.1.0rc1] – added (core, operations, quality), changed (D-010/D-011/D-012), security, fixed (111 bugs), limitations
+- [x] 41.3 Architektur-Doku. — Evidence: docs/architecture/overview.md (processes/hosts, job lifecycle, model roles, safety boundaries, index of all 27 component documents) + docs/architecture/*.md
+- [x] 41.4 Admin Runbook. — Evidence: docs/runbooks/admin.md (daily/weekly checks, job/repository/token control, workers/models, logs, incidents)
+- [x] 41.5 Disaster Recovery. — Evidence: docs/runbooks/disaster-recovery.md (per host, credentials, backup target) + docs/operations/backup-restore.md (restore-full procedure, tested by tests/integration/test_backup_restore.py)
 - [ ] 41.6 Upgrade Path. — Evidence: –
-- [ ] 41.7 known limitations. — Evidence: –
+- [x] 41.7 known limitations. — Evidence: docs/operations/known-limitations.md (live verification pending, GPU/model limits, functional and operational limits)
 - [ ] 41.8 all tests final. — Evidence: –
 - [ ] 41.9 release tag. — Evidence: –
 
