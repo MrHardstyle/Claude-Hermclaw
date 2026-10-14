@@ -27,58 +27,54 @@ Usually neither is needed.
 
 ## 2. Deploy on `.223`
 
-1. Copy `ui/dist/` to `/srv/hermclaw/ui/` on `.223`. Do this atomically: rsync to `ui.new/`, then `mv`.
-2. Optional: to point the UI at another API origin without a rebuild, edit
-   `<meta name="hermclaw-api-base" content="">` in `index.html`. An empty value means same origin `/api`, which is
+The UI is deployed by `infra/ansible/playbooks/deploy.yml` (role `hermclaw_ui`, P32 32.2; operator guide:
+`docs/operations/deployment.md`). Do not copy files by hand.
+
+1. **Build once per release on the control node**: `scripts/deploy/build-release.sh` runs `npm ci && npm run build`
+   on a clean copy of `ui/` and packs `ui/dist/` into `dist/release-<version>/hermclaw-ui-<version>.tar.gz` (sha256
+   in the release's `SHA256SUMS`). The script refuses a build whose `index.html` contains an inline `<script>`,
+   `<style>`, `style=` or `on…=` attribute, because the Content-Security-Policy below would block it. `.223` needs no
+   npm registry access and builds nothing at deploy time. The deployed bundle is the one the E2E suite ran against, and
+   a rollback reuses the exact old bundle. Node 22 on `.223` (role `nodejs`) stays available for manual rebuilds,
+   e.g. with `HERMCLAW_UI_BASE`.
+2. **Versioned directories, atomic switch**: every release is unpacked into
+   `<hermclaw_webroot>-releases/<version>/` (default `/var/www/hermclaw-next-releases/0.1.0rc1/`, owner
+   `root:www-data`). The marker file `<version>.release` sits next to that directory, outside the served tree.
+   `hermclaw_webroot` (`/var/www/hermclaw-next`, `playbooks/group_vars/all.yml`) is a **symlink** to the active
+   release. It is replaced with one `rename(2)`, so a request never sees a half-copied tree. The first deployment
+   replaces the bootstrap's placeholder directory. A webroot that holds anything other than that placeholder is kept
+   as `hermclaw-next.pre-release-<time>`. The active release and `hermclaw_keep_releases` (default 3) previous ones
+   are kept. After a switch the playbook runs `nginx -t` and only then reloads nginx.
+3. Optional: to point the UI at another API origin without a rebuild, edit
+   `<meta name="hermclaw-api-base" content="">` in `index.html` of the active release (it is overwritten by the next
+   deployment; prefer a rebuild with `VITE_HERMCLAW_API_BASE`). An empty value means same origin `/api`, which is
    the recommended setup.
-3. Nginx site (template). The SSE blocks follow research R-014: no buffering, no gzip, and a long read timeout.
+4. **Nginx site**: one template, `infra/ansible/roles/nginx/templates/hermclaw-next.conf.j2`, rendered identically by
+   the bootstrap and the deployment into `/etc/nginx/sites-available/hermclaw-next.conf`. It contains:
+   * `root /var/www/hermclaw-next` (the symlink), SPA fallback `try_files $uri $uri/ /index.html`, `index.html` with
+     `Cache-Control: no-cache`, `/assets/` with `public, max-age=31536000, immutable`, and a 404 for missing assets;
+   * the SSE location `^/api/(jobs/[^/]+/)?events/stream$` (research R-014/R-028): HTTP/1.1 with upstream keepalive,
+     no buffering, no cache, no gzip, `proxy_read_timeout 3600s`; `/api/` with `X-Forwarded-*` headers;
+   * the security headers in every location that sets its own `add_header`. nginx 1.26 does not merge
+     `add_header` levels. The headers are `Content-Security-Policy` (`nginx_csp`: `default-src 'none'; script-src
+     'self'; style-src 'self'; img-src 'self' blob:; media-src 'self' blob:; font-src 'self'; connect-src 'self';
+     manifest-src 'self'; base-uri 'none'; form-action 'self'; frame-ancestors 'none'; object-src 'none'`, plus
+     `upgrade-insecure-requests` with TLS), `X-Content-Type-Options`, `X-Frame-Options: DENY`,
+     `Referrer-Policy: same-origin`, `Cross-Origin-Opener-Policy`, `Cross-Origin-Resource-Policy` and
+     `Permissions-Policy`;
+   * `GET /healthz` returns `200 ok` for the readiness probe in `hosts.yaml` (`webui-223`, `http_path: /healthz`);
+   * an access log **without query strings** (`log_format hermclaw_noquery`), because the SSE URLs carry
+     `?access_token=`;
+   * optional TLS (`nginx_tls_enabled: true`): port 443 with `http2 on` (lifts the six-connections limit for the
+     EventSources), TLS 1.2/1.3. Port 80 then only serves `/healthz` and a 301 to HTTPS. The certificate is either
+     generated on `.223` (`nginx_tls_source: self-signed`: ECDSA P-256, SAN = the server names and the host address,
+     397 days, renewed 30 days before expiry) or yours (`nginx_tls_source: provided`, `nginx_tls_cert_src` /
+     `nginx_tls_key_src` on the control node, e.g. from the LAN CA of research 20261014-028).
+     `Strict-Transport-Security` is sent only with `nginx_hsts_max_age` > 0, and only once every client trusts the
+     certificate.
 
-```nginx
-upstream hermclaw_api { server 192.168.178.225:8000; keepalive 16; }
-
-server {
-    listen 80;
-    server_name hermclaw.lan 192.168.178.223;
-    root /srv/hermclaw/ui;
-
-    add_header Content-Security-Policy "default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' blob: data:; media-src 'self' blob:; connect-src 'self'; font-src 'self'; object-src 'none'; base-uri 'self'; form-action 'self'; frame-ancestors 'none'" always;
-    add_header X-Content-Type-Options nosniff always;
-    add_header Referrer-Policy no-referrer always;
-
-    # SPA: client-side routes (/jobs/<id>/plan …) fall back to index.html.
-    # Caching via `expires`, not add_header: an add_header inside a location would drop the security headers above.
-    location / {
-        try_files $uri /index.html;
-        expires -1;
-    }
-    location /assets/ {
-        expires max;   # file names are content-hashed
-    }
-
-    # SSE streams: unbuffered, long-lived; the URL carries ?access_token= → never write it to the access log
-    location ~ ^/api/(jobs/[^/]+/)?events/stream$ {
-        proxy_pass http://hermclaw_api;
-        proxy_http_version 1.1;
-        proxy_set_header Connection "";
-        proxy_set_header Host $host;
-        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
-        proxy_buffering off;
-        proxy_cache off;
-        gzip off;
-        proxy_read_timeout 1h;
-        access_log off;
-    }
-
-    location /api/ {
-        proxy_pass http://hermclaw_api;
-        proxy_http_version 1.1;
-        proxy_set_header Connection "";
-        proxy_set_header Host $host;
-        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
-        client_max_body_size 2m;
-    }
-}
-```
+   Set `hermclaw_web_server_name` in the inventory (default `hermclaw.lan 192.168.178.223`). The site is not the
+   default server, so a request to a name that is not listed reaches Debian's default site instead.
 
 Notes:
 
@@ -97,8 +93,13 @@ Notes:
 
 From a LAN machine:
 
+The deployment runs the first three checks itself (role `hermclaw_ui`, from the control node). With TLS, use
+`https://` and `-k` (or `--cacert`) for a self-signed certificate.
+
 ```bash
+curl -fsS http://192.168.178.223/healthz                     # ok (also with TLS: port 80 keeps answering it)
 curl -fsS http://192.168.178.223/ | grep -q '<div id="root">'
+curl -fsSI http://192.168.178.223/ | grep -i content-security-policy
 curl -fsS http://192.168.178.223/api/health
 curl -fsS -H "Authorization: Bearer $TOKEN" http://192.168.178.223/api/stats
 # SSE through Nginx: events must arrive immediately (not in blocks), heartbeats as ": heartbeat"
@@ -167,6 +168,8 @@ browsers are pre-installed. If the `@playwright/test` version does not match the
 | Badge stays "Verbindung unterbrochen" | `/api/.../events/stream` is blocked or 404 at the proxy. Check the Nginx SSE location and the `access_token` query parameter |
 | Events arrive in bursts | Proxy buffering. Check `proxy_buffering off` and `gzip off` in the SSE location |
 | Stream "Live verbunden" but silent | Half-open upstream. The job view detects it within one reconciliation round (≤ 15 s + 5 s) and reconnects. Check proxy timeouts |
-| Deep link `/jobs/<id>` gives 404 on reload | Missing `try_files $uri /index.html` |
+| Deep link `/jobs/<id>` gives 404 on reload | Missing `try_files $uri $uri/ /index.html` (the site is generated by the nginx role; re-run `playbooks/deploy.yml --limit webui`) |
+| Blank page, console reports a Content-Security-Policy violation | An inline script or style crept into the build. `build-release.sh` refuses such an `index.html`; fix the source and rebuild the release |
+| `http://192.168.178.223/` shows the Debian default page | The address is not in `hermclaw_web_server_name` |
 | Worker detail shows "benötigt ein Admin-Token" | Token without the `admin` scope (expected for read tokens) |
 | Media preview shows an error | Artifact file missing under `HERMCLAW_DATA_DIR/artifacts` on `.225`, or no read access |
