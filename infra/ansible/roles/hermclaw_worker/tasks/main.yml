@@ -1,0 +1,79 @@
+# hermclaw_worker – .222 / .224 after hermclaw_release (venv-<version> installed) and hermclaw_config.
+- name: Validate the worker settings
+  ansible.builtin.assert:
+    that:
+      - hermclaw_worker_kind in ['execution', 'model']
+      - hermclaw_worker_health_url is match('^http://[A-Za-z0-9.:-]+/health$')
+      - (hermclaw_worker_model_pull_timeout | string) is match('^[0-9]+$')
+      - (hermclaw_worker_model_pull_poll | string) is match('^[1-9][0-9]*$')
+      - hermclaw_worker_ollama_bin is match('^/[A-Za-z0-9._/-]+$')
+      - hermclaw_worker_model_sizes_gb is mapping
+    fail_msg: invalid worker deployment setting
+    quiet: true
+
+- name: Install the media packages of the model worker
+  ansible.builtin.apt:
+    name: "{{ hermclaw_worker_model_packages }}"
+    state: present
+    install_recommends: false
+  when:
+    - hermclaw_worker_kind == 'model'
+    - hermclaw_install_packages | bool
+
+- name: Check the credentials of {{ hermclaw_worker_unit }}
+  ansible.builtin.include_role:
+    name: hermclaw_release
+    tasks_from: credentials.yml
+  vars:
+    hermclaw_release_credential_units: ["{{ hermclaw_worker_unit }}"]
+
+- name: Enable {{ hermclaw_worker_unit }}
+  ansible.builtin.include_role:
+    name: hermclaw_release
+    tasks_from: enable.yml
+  vars:
+    hermclaw_release_enable: ["{{ hermclaw_worker_unit }}"]
+
+- name: Sandbox images
+  ansible.builtin.import_tasks: sandbox_images.yml
+  when:
+    - hermclaw_worker_kind == 'execution'
+    - hermclaw_worker_build_sandbox_images | bool
+
+- name: Switch to release {{ hermclaw_version }}
+  ansible.builtin.include_role:
+    name: hermclaw_release
+    tasks_from: switch.yml
+
+- name: Start the worker daemon (restart on a new release, configuration or unit)
+  ansible.builtin.systemd_service:
+    name: "{{ hermclaw_worker_unit }}"
+    state: >-
+      {{ 'restarted' if (hermclaw_release_switched | bool or hermclaw_config_changed | default(false) | bool
+         or (systemd_skeleton_unit_files | default({})) is changed
+         or (systemd_skeleton_worker_env_file | default({})) is changed) else 'started' }}
+  when: hermclaw_manage_services | bool
+
+- name: Wait for the worker /health (status ok, version {{ hermclaw_version }})
+  ansible.builtin.uri:
+    url: "{{ hermclaw_worker_health_url }}"
+    return_content: true
+    status_code: [200, 503]
+  register: hermclaw_worker_health
+  until: >-
+    hermclaw_worker_health.status == 200
+    and hermclaw_worker_health.json.status | default('') == 'ok'
+    and hermclaw_worker_health.json.worker_version | default('') == hermclaw_version
+  retries: "{{ hermclaw_worker_health_retries }}"
+  delay: "{{ hermclaw_worker_health_delay }}"
+  check_mode: false
+  when:
+    - hermclaw_manage_services | bool
+    - not ansible_check_mode
+
+- name: Ollama models
+  ansible.builtin.import_tasks: models.yml
+  when:
+    - hermclaw_worker_kind == 'model'
+    - hermclaw_worker_pull_models | bool
+    - hermclaw_manage_services | bool

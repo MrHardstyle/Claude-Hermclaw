@@ -26,19 +26,14 @@ KillMode=mixed
 TimeoutStopSec=60s
 UMask=0027
 WorkingDirectory={{ hermclaw_data_dir }}
-# Rootless Podman needs user namespaces and the setuid newuidmap/newgidmap helpers,
-# so NoNewPrivileges/RestrictNamespaces/PrivateDevices stay off here; isolation of the
-# executed code comes from the sandbox (--network=none, --cap-drop=ALL, read-only rootfs).
+# Rootless Podman needs user namespaces and the setuid newuidmap/newgidmap helpers. For a User= service systemd
+# implies NoNewPrivileges for every one of ProtectKernelTunables/-Modules/-Logs, ProtectClock, ProtectHostname,
+# RestrictRealtime, LockPersonality, SystemCallArchitectures, RestrictAddressFamilies, RestrictSUIDSGID,
+# RestrictNamespaces, PrivateDevices, SystemCallFilter and MemoryDenyWriteExecute (systemd 257
+# context_has_no_new_privileges, research 20261014-029 C2/C16), which breaks newuidmap - so only mount-namespace
+# protections are used here (no ProtectHome: it hides /run/user). Isolation of the executed code comes from the
+# sandbox (--network=none, --cap-drop=ALL, --security-opt=no-new-privileges, read-only rootfs, rootless userns).
 ProtectSystem=full
-ProtectKernelTunables=yes
-ProtectKernelModules=yes
-ProtectKernelLogs=yes
-ProtectClock=yes
-ProtectHostname=yes
-RestrictRealtime=yes
-LockPersonality=yes
-SystemCallArchitectures=native
-RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6 AF_NETLINK
 
 [Install]
 WantedBy=multi-user.target

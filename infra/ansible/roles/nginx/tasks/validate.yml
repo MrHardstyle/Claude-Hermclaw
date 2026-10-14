@@ -10,3 +10,27 @@
       - nginx_client_max_body_size is match('^[0-9]+[kmg]?$')
       - nginx_sse_read_timeout is match('^[0-9]+[smhd]?$')
     quiet: true
+
+- name: Validate the TLS and header settings
+  ansible.builtin.assert:
+    that:
+      - nginx_tls_enabled | bool in [true, false]
+      - nginx_tls_port | int > 0 and nginx_tls_port | int < 65536
+      - nginx_tls_port | int != nginx_listen_port | int
+      - nginx_tls_source in ['self-signed', 'provided']
+      - nginx_tls_dir is match('^/[A-Za-z0-9._/-]+$')
+      - nginx_tls_cert is match('^/[A-Za-z0-9._/-]+$')
+      - nginx_tls_key is match('^/[A-Za-z0-9._/-]+$')
+      - (nginx_tls_self_signed_days | string) is match('^[0-9]{1,3}$') and nginx_tls_self_signed_days | int <= 397
+      - (nginx_hsts_max_age | string) is match('^[0-9]{1,9}$')
+      - nginx_csp is match("^[A-Za-z0-9 ;:'/.*_+=-]+$")
+      - nginx_permissions_policy is match("^[A-Za-z0-9 =(),*'/.:_-]+$")
+      - not (nginx_tls_enabled | bool and nginx_tls_source == 'provided')
+        or (nginx_tls_cert_src | length > 0 and nginx_tls_key_src | length > 0)
+      - not (nginx_tls_enabled | bool and nginx_tls_source == 'self-signed')
+        or (nginx_tls_san | length > 0 and nginx_tls_san | reject('match', '^(DNS:[A-Za-z0-9.-]+|IP:[0-9.]+)$') | list | length == 0)
+    fail_msg: >-
+      invalid TLS/header settings: ports 1-65535 and different, nginx_tls_source self-signed|provided (provided needs
+      nginx_tls_cert_src and nginx_tls_key_src), self-signed needs a DNS server name or an IPv4 ansible_host for the
+      certificate (nginx_tls_san), at most 397 days, CSP/Permissions-Policy without double quotes, backslashes or line breaks.
+    quiet: true

@@ -1,0 +1,17 @@
+# Input validation of the orchestrator role (tests/integration/test_deploy_infra.py::test_deploy_input_validation).
+- name: Validate the orchestrator settings
+  ansible.builtin.assert:
+    that:
+      - hermclaw_orchestrator_litellm_link is match('^/[A-Za-z0-9._/-]+$')
+      - hermclaw_orchestrator_litellm_link is not search('/\.\.?(/|$)')
+      - hermclaw_orchestrator_litellm_config is match('^/[A-Za-z0-9._/-]+$')
+      - hermclaw_orchestrator_litellm_url is match('^http://[A-Za-z0-9.-]+:[0-9]{1,5}$')
+      - hermclaw_orchestrator_api_url is match('^http://[A-Za-z0-9.-]+:[0-9]{1,5}$')
+      - (hermclaw_orchestrator_litellm_keep | string) is match('^[0-9]{1,2}$')
+      - hermclaw_orchestrator_admin_token_credential is match('^[a-z0-9][a-z0-9_.-]{0,62}$')
+      - hermclaw_orchestrator_admin_token_name is match('^[A-Za-z0-9][A-Za-z0-9_.-]{0,99}$')
+      - hermclaw_orchestrator_units | select('match', '^hermclaw-[a-z0-9-]+\.(service|timer)$') | list | length == hermclaw_orchestrator_units | length
+    fail_msg: >-
+      invalid orchestrator deployment setting (LiteLLM link/config must be absolute paths, URLs http://host:port,
+      the admin token credential/name plain identifiers, units hermclaw-*.service|timer)
+    quiet: true

@@ -1,0 +1,42 @@
+# 32.3 – sandbox toolchain images of policies.sandbox (hermclaw_config renders the same names), built rootless
+# as hermclaw with the release's build script; existing tags are skipped (idempotent).
+- name: Look up the hermclaw UID
+  ansible.builtin.getent:
+    database: passwd
+    key: "{{ hermclaw_user }}"
+
+- name: Remember the runtime directory of hermclaw
+  ansible.builtin.set_fact:
+    hermclaw_worker_runtime_dir: "/run/user/{{ ansible_facts.getent_passwd[hermclaw_user][1] }}"
+
+- name: Check which sandbox images exist
+  ansible.builtin.command:
+    argv: [podman, image, exists, "localhost/hermclaw-sandbox-{{ item }}:{{ hermclaw_sandbox_image_version }}"]
+    chdir: /
+  become: true
+  become_user: "{{ hermclaw_user }}"
+  environment:
+    XDG_RUNTIME_DIR: "{{ hermclaw_worker_runtime_dir }}"
+  loop: "{{ hermclaw_sandbox_toolchains }}"
+  register: hermclaw_worker_images
+  changed_when: false
+  failed_when: hermclaw_worker_images.rc not in [0, 1]
+  check_mode: false
+
+- name: Build the missing sandbox images (rootless, hermclaw-build-sandbox-images)
+  ansible.builtin.command:
+    argv:
+      - "{{ hermclaw_bin_dir }}/hermclaw-build-sandbox-images"
+      - --only
+      - "{{ hermclaw_worker_images.results | selectattr('rc', 'equalto', 1) | map(attribute='item') | join(',') }}"
+      - --version
+      - "{{ hermclaw_sandbox_image_version }}"
+    chdir: /
+  become: true
+  become_user: "{{ hermclaw_user }}"
+  environment:
+    XDG_RUNTIME_DIR: "{{ hermclaw_worker_runtime_dir }}"
+    HERMCLAW_SANDBOX_IMAGES_DIR: "{{ hermclaw_worker_sandbox_images_dir }}"
+  timeout: "{{ hermclaw_worker_sandbox_build_timeout | int }}"
+  changed_when: true
+  when: hermclaw_worker_images.results | selectattr('rc', 'equalto', 1) | list | length > 0

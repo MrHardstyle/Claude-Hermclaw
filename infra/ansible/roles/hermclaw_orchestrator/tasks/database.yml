@@ -1,0 +1,84 @@
+# 32.1 / 32.10 – database schema of the release, decided before any service is stopped. The new release's own
+# `hermclaw doctor --offline --json` (as hermclaw, production environment, via the operator CLI) reports the
+# revision of the database against the release head. Sets hermclaw_orchestrator_migrate (upgrade needed) and
+# hermclaw_orchestrator_downgrade (rollback below the database's revision, see docs/runbooks/upgrade.md).
+- name: Read the database revision with the new release (hermclaw doctor --offline --json)
+  ansible.builtin.command:
+    argv: ["{{ hermclaw_cli_wrapper }}", --venv, "{{ hermclaw_orchestrator_venv }}", doctor, --offline, --json]
+  register: hermclaw_orchestrator_doctor_offline
+  changed_when: false
+  check_mode: false
+  failed_when: >-
+    hermclaw_orchestrator_doctor_offline.rc not in [0, 1]
+    or not (hermclaw_orchestrator_doctor_offline.stdout | trim).startswith('{')
+
+- name: Extract the database check
+  ansible.builtin.set_fact:
+    hermclaw_orchestrator_db: >-
+      {{ (hermclaw_orchestrator_doctor_offline.stdout | from_json).checks | selectattr('name', 'equalto', 'database') | first }}
+
+- name: Require a reachable database
+  ansible.builtin.assert:
+    that: hermclaw_orchestrator_db.status == 'ok' or 'migrate' in hermclaw_orchestrator_db.detail
+    fail_msg: >-
+      database check of hermclaw {{ hermclaw_version }} failed: {{ hermclaw_orchestrator_db.detail }}
+      (PostgreSQL running? systemctl status postgresql@17-main; HERMCLAW_DATABASE_URL in {{ hermclaw_config_dir }}/hermclaw.env)
+    quiet: true
+
+- name: Decide the schema change
+  ansible.builtin.set_fact:
+    hermclaw_orchestrator_db_revision: "{{ hermclaw_orchestrator_db.data.revision | default('') }}"
+    hermclaw_orchestrator_migrate: "{{ hermclaw_orchestrator_db.status != 'ok' }}"
+    hermclaw_orchestrator_downgrade: false
+
+- name: Check whether the new release knows the database revision
+  ansible.builtin.command:
+    argv:
+      - "{{ hermclaw_orchestrator_venv }}/bin/python"
+      - -I
+      - -c
+      - |
+        import sys
+        from alembic.script import ScriptDirectory
+        from hermclaw.persistence.migrate import alembic_config
+        try:
+            known = ScriptDirectory.from_config(alembic_config()).get_revision(sys.argv[1]) is not None
+        except Exception:
+            known = False
+        print("known" if known else "unknown")
+      - "{{ hermclaw_orchestrator_db_revision }}"
+  register: hermclaw_orchestrator_revision_known
+  changed_when: false
+  check_mode: false
+  when:
+    - hermclaw_orchestrator_migrate | bool
+    - hermclaw_orchestrator_db_revision | length > 0
+
+- name: Plan the schema downgrade of the rollback
+  when:
+    - hermclaw_orchestrator_revision_known is not skipped
+    - hermclaw_orchestrator_revision_known.stdout == 'unknown'
+  block:
+    - name: Find the installed release that knows revision {{ hermclaw_orchestrator_db_revision }}
+      ansible.builtin.stat:
+        path: "{{ hermclaw_venv }}"
+        follow: false
+        get_checksum: false
+      register: hermclaw_orchestrator_active_venv
+
+    - name: Stop - the database is newer than release {{ hermclaw_version }}
+      ansible.builtin.fail:
+        msg: >-
+          The database is at schema revision {{ hermclaw_orchestrator_db_revision }}, which release {{ hermclaw_version }}
+          (head {{ hermclaw_release_meta.alembic_head }}) does not know: it was migrated by a newer release. Nothing has been
+          stopped or switched. Either re-run with -e hermclaw_orchestrator_allow_schema_downgrade=true (after a backup:
+          sudo -u hermclaw /opt/hermclaw/venv/bin/python -m hermclaw.backup create) to downgrade the schema with the
+          migrations of the active release {{ hermclaw_orchestrator_active_venv.stat.lnk_target | default('?') }}, or restore
+          the pre-upgrade backup (docs/runbooks/upgrade.md, "Rollback").
+      when: not hermclaw_orchestrator_allow_schema_downgrade | bool
+
+    - name: Downgrade with the active release's migrations
+      ansible.builtin.set_fact:
+        hermclaw_orchestrator_downgrade: true
+        hermclaw_orchestrator_downgrade_venv: >-
+          {{ hermclaw_install_dir }}/{{ hermclaw_orchestrator_active_venv.stat.lnk_target | default('') | basename }}

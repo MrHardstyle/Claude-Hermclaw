@@ -1,0 +1,43 @@
+# Input validation of the deployment (tested by tests/integration/test_deploy_infra.py::test_deploy_input_validation).
+- name: Validate the release version
+  ansible.builtin.assert:
+    that:
+      - hermclaw_version is defined
+      - hermclaw_version is string
+      - hermclaw_version is match('^[0-9]+(\.[0-9]+)*((a|b|rc)[0-9]+)?(\.post[0-9]+)?(\.dev[0-9]+)?$')
+    fail_msg: >-
+      hermclaw_version '{{ hermclaw_version | default('(undefined)') }}' is not a canonical PEP 440 version string
+      (quoted, e.g. "0.1.0rc1" - the name of dist/release-<version>/ printed by scripts/deploy/build-release.sh).
+    quiet: true
+
+- name: Validate the release layout settings
+  ansible.builtin.assert:
+    that:
+      - (hermclaw_keep_releases | string) is match('^[0-9]{1,2}$')
+      - hermclaw_install_dir is match('^/[A-Za-z0-9._/-]+$')
+      - hermclaw_releases_dir is match('^/[A-Za-z0-9._/-]+$')
+      - hermclaw_webroot is match('^/[A-Za-z0-9._/-]+$')
+      - hermclaw_ui_releases_dir is match('^/[A-Za-z0-9._/-]+$')
+      - hermclaw_litellm_root is match('^/[A-Za-z0-9._/-]+$')
+      - hermclaw_cli_wrapper is match('^/[A-Za-z0-9._/-]+$')
+      - (hermclaw_install_dir ~ hermclaw_releases_dir ~ hermclaw_webroot ~ hermclaw_ui_releases_dir ~ hermclaw_litellm_root) is not search('/\.\.?(/|$)')
+      - hermclaw_venv | dirname == hermclaw_install_dir
+      - hermclaw_ui_releases_dir != hermclaw_webroot
+      - hermclaw_release_python is match('^/[A-Za-z0-9._/-]+$')
+      - hermclaw_sandbox_toolchains | select('match', '^[a-z][a-z0-9-]{0,30}$') | list | length == hermclaw_sandbox_toolchains | length
+      - hermclaw_sandbox_default_toolchain in hermclaw_sandbox_toolchains
+      - (hermclaw_sandbox_image_version | string) is match('^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$')
+    fail_msg: >-
+      invalid deployment setting: hermclaw_keep_releases must be 0-99, the paths absolute without '..',
+      hermclaw_venv must live directly in hermclaw_install_dir, sandbox toolchains lowercase names
+      (the default one among them) and hermclaw_sandbox_image_version a tag.
+    quiet: true
+
+- name: Validate the SSH gate allow-list
+  ansible.builtin.assert:
+    that:
+      - hermclaw_release_ssh_gate_allowlist is sequence
+      - hermclaw_release_ssh_gate_allowlist is not string
+      - hermclaw_release_ssh_gate_allowlist | select('search', '[\r\n]') | list | length == 0
+    fail_msg: hermclaw_release_ssh_gate_allowlist must be a list of single-line regular expressions
+    quiet: true

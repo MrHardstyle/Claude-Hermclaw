@@ -1,5 +1,6 @@
 # nginx – presentation control plane on .223 (P01 1.12; research 20261008-014).
-# Baseline site; the deployment phase replaces it with infra/nginx/hermclaw-next.conf.
+# One site template for the bootstrap and the deployment (P32 32.7): SSE proxy, security headers + CSP for the
+# static build, optional TLS. Both playbooks render the same file (site.yml stays idempotent).
 nginx_site_name: hermclaw-next
 nginx_server_name: "{{ hermclaw_web_server_name | default('_') }}"
 nginx_listen_port: 80
@@ -15,3 +16,33 @@ nginx_webroot_owner: root
 nginx_webroot_group: www-data
 # Main configuration that must include sites-enabled/ (Debian layout).
 nginx_main_conf_path: /etc/nginx/nginx.conf
+
+# --- Security headers (research 20261014-028 A7, A10-A12) ------------------------------------------------------
+# The Vite build has no inline script/style (scripts/deploy/build-release.sh refuses inline <script>); previews are
+# blob: URLs. With TLS on, upgrade-insecure-requests is appended. No double quotes or line breaks.
+nginx_csp: >-
+  default-src 'none'; script-src 'self'; style-src 'self'; img-src 'self' blob:; media-src 'self' blob:;
+  font-src 'self'; connect-src 'self'; manifest-src 'self'; base-uri 'none'; form-action 'self';
+  frame-ancestors 'none'; object-src 'none'
+nginx_permissions_policy: "camera=(), microphone=(), geolocation=(), usb=()"
+
+# --- TLS (optional) ---------------------------------------------------------------------------------------------
+# On: port nginx_tls_port serves the site (HTTP/2), port nginx_listen_port only /healthz and a 301 to HTTPS.
+nginx_tls_enabled: false
+nginx_tls_port: 443
+# self-signed = key + certificate generated on the host (ECDSA P-256, SAN = server names + address, renewed 30 days
+# before expiry); provided = nginx_tls_cert_src / nginx_tls_key_src copied from the control node (e.g. your LAN CA,
+# research 20261014-028 "TLS with an internal CA").
+nginx_tls_source: self-signed
+nginx_tls_cert_src: ""
+nginx_tls_key_src: ""
+nginx_tls_dir: /etc/nginx/tls
+nginx_tls_cert: "{{ nginx_tls_dir }}/hermclaw-web.crt"
+nginx_tls_key: "{{ nginx_tls_dir }}/hermclaw-web.key"
+# <= 397 days: accepted by every current browser/OS for a server certificate
+nginx_tls_self_signed_days: 397
+nginx_tls_san: >-
+  {{ (nginx_server_name.split() | reject('equalto', '_') | reject('search', '[*~]') | map('regex_replace', '^', 'DNS:') | list)
+     + (['IP:' ~ ansible_host] if ansible_host | default('') is match('^[0-9.]+$') else []) }}
+# Strict-Transport-Security max-age (seconds) - only once every client trusts the certificate; 0 = not sent.
+nginx_hsts_max_age: 0

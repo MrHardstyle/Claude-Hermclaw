@@ -1,0 +1,31 @@
+# 32.8 – admin API token: `hermclaw token-create` runs once (services' context) and its output goes straight into
+# the encrypted credential; the token never reaches Ansible's output, a log or a command line. The credential file
+# is the "done" marker. Delete it (and revoke the DB token) to create a new one.
+- name: Check for the admin token credential
+  ansible.builtin.stat:
+    path: "{{ hermclaw_credstore_dir }}/hermclaw-{{ hermclaw_orchestrator_admin_token_credential }}"
+    get_checksum: false
+  register: hermclaw_orchestrator_admin_token_stat
+
+- name: Create the admin API token and store it as credential {{ hermclaw_orchestrator_admin_token_credential }}
+  ansible.builtin.shell:
+    cmd: >-
+      set -o pipefail;
+      {{ hermclaw_cli_wrapper | quote }} token-create {{ hermclaw_orchestrator_admin_token_name | quote }} --scopes admin
+      | tail -n 1 | grep -E '^[A-Za-z0-9_-]{32,}$'
+      | {{ (hermclaw_bin_dir ~ '/hermclaw-credential') | quote }} set {{ hermclaw_orchestrator_admin_token_credential | quote }}
+    executable: /bin/bash
+  environment:
+    HERMCLAW_CREDSTORE_DIR: "{{ hermclaw_credstore_dir }}"
+  no_log: true
+  changed_when: true
+  when: not hermclaw_orchestrator_admin_token_stat.stat.exists
+
+- name: Check that the admin token credential decrypts
+  ansible.builtin.command:
+    argv: ["{{ hermclaw_bin_dir }}/hermclaw-credential", check, "{{ hermclaw_orchestrator_admin_token_credential }}"]
+  environment:
+    HERMCLAW_CREDSTORE_DIR: "{{ hermclaw_credstore_dir }}"
+  changed_when: false
+  check_mode: false
+  when: not (ansible_check_mode and not hermclaw_orchestrator_admin_token_stat.stat.exists)

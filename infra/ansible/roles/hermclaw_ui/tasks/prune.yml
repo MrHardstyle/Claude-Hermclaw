@@ -1,0 +1,30 @@
+# Keep the active UI build and the hermclaw_keep_releases most recently unpacked others.
+- name: Read the active UI build
+  ansible.builtin.stat:
+    path: "{{ hermclaw_webroot }}"
+    follow: false
+    get_checksum: false
+  register: hermclaw_ui_active
+
+- name: Find the unpacked UI builds
+  ansible.builtin.find:
+    paths: ["{{ hermclaw_ui_releases_dir }}"]
+    file_type: directory
+  register: hermclaw_ui_builds
+
+- name: Decide which UI builds to keep
+  ansible.builtin.set_fact:
+    hermclaw_ui_keep: >-
+      {% set active = (hermclaw_ui_active.stat.lnk_target | default('') | basename)
+         if hermclaw_ui_active.stat.islnk | default(false) else hermclaw_version %}
+      {% set others = hermclaw_ui_builds.files | sort(attribute='mtime', reverse=true)
+         | map(attribute='path') | map('basename') | reject('equalto', active) | list %}
+      {{ ([active, hermclaw_version] + others[:hermclaw_keep_releases | int]) | unique }}
+
+- name: Delete pruned UI builds and their markers
+  ansible.builtin.file:
+    path: "{{ item }}"
+    state: absent
+  loop: >-
+    {% set out = [] %}{% for build in hermclaw_ui_builds.files | map(attribute='path') | list %}{% if build | basename
+    not in hermclaw_ui_keep %}{% set _ = out.extend([build, build ~ '.release']) %}{% endif %}{% endfor %}{{ out }}

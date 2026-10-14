@@ -1,0 +1,12 @@
+galaxy_info:
+  role_name: hermclaw_release
+  namespace: hermclaw
+  author: Hermclaw Next
+  description: "Versioned Hermclaw releases: payload, venv-<version>, atomic switch, pruning, credential checks"
+  license: proprietary
+  min_ansible_version: "2.17"
+  platforms:
+    - name: Debian
+      versions:
+        - trixie
+dependencies: []

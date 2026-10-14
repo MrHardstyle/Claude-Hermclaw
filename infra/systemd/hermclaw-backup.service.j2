@@ -5,6 +5,9 @@ Description=Hermclaw Next backup
 After=network-online.target postgresql.service
 Wants=network-online.target
 ConditionFileIsExecutable={{ systemd_skeleton_backup_command }}
+# the timer is enabled by the deployment; until backup.yaml is configured (P33, docs/operations/backup-restore.md)
+# a run is skipped instead of failing every night
+ConditionPathExists={{ hermclaw_config_dir }}/backup.yaml
 
 [Service]
 Type=oneshot

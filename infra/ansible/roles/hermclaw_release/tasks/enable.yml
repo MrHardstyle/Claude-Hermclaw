@@ -1,0 +1,49 @@
+# Enable units for boot. With a running systemd (hermclaw_manage_services) this is `systemctl enable`; image or
+# chroot builds without systemd get the same [Install] WantedBy= symlinks that systemctl would create.
+# Input: hermclaw_release_enable (unit names below hermclaw_release_systemd_dir). Starting is up to the caller.
+- name: Enable the units
+  ansible.builtin.systemd_service:
+    name: "{{ item }}"
+    enabled: true
+  loop: "{{ hermclaw_release_enable }}"
+  when: hermclaw_manage_services | bool
+
+- name: Enable the units for the next boot (no running systemd)
+  when: not hermclaw_manage_services | bool
+  block:
+    - name: Read the [Install] sections
+      ansible.builtin.slurp:
+        src: "{{ hermclaw_release_systemd_dir }}/{{ item }}"
+      loop: "{{ hermclaw_release_enable }}"
+      register: hermclaw_release_enable_raw
+
+    - name: Collect the WantedBy= targets
+      ansible.builtin.set_fact:
+        hermclaw_release_enable_links: >-
+          {% set out = [] %}{% for r in hermclaw_release_enable_raw.results %}{% for line in (r.content | b64decode)
+          | regex_findall('(?m)^WantedBy=(.+)$') %}{% for target in line.split() %}{% set _ = out.append({'unit':
+          r.item, 'target': target}) %}{% endfor %}{% endfor %}{% endfor %}{{ out }}
+
+    - name: Require an [Install] section in every unit to enable
+      ansible.builtin.assert:
+        that: hermclaw_release_enable_links | map(attribute='unit') | unique | length == hermclaw_release_enable | length
+        fail_msg: "units without WantedBy=: {{ hermclaw_release_enable | difference(hermclaw_release_enable_links | map(attribute='unit')) }}"
+        quiet: true
+
+    - name: Create the .wants directories
+      ansible.builtin.file:
+        path: "{{ hermclaw_release_systemd_dir }}/{{ item }}.wants"
+        state: directory
+        owner: root
+        group: root
+        mode: "0755"
+      loop: "{{ hermclaw_release_enable_links | map(attribute='target') | unique }}"
+
+    - name: Link the units into their targets
+      ansible.builtin.file:
+        src: "{{ hermclaw_release_systemd_dir }}/{{ item.unit }}"
+        dest: "{{ hermclaw_release_systemd_dir }}/{{ item.target }}.wants/{{ item.unit }}"
+        state: link
+      loop: "{{ hermclaw_release_enable_links }}"
+      loop_control:
+        label: "{{ item.target }}.wants/{{ item.unit }}"

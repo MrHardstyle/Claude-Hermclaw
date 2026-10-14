@@ -1,4 +1,8 @@
-# Hermclaw Next – complete site. The deployment phase (P32) appends its plays below the
-# bootstrap; until then site.yml == bootstrap.yml.
+# Hermclaw Next – complete site: clean system bootstrap (P01) followed by the deployment of a release (P32).
+#   ansible-playbook playbooks/site.yml -e hermclaw_version=<version>     (needs dist/release-<version>/)
+# Both parts are idempotent and render the same files (a second run reports changed=0).
 - name: Clean system bootstrap (P01)
   ansible.builtin.import_playbook: bootstrap.yml
+
+- name: Deployment of the release (P32)
+  ansible.builtin.import_playbook: deploy.yml

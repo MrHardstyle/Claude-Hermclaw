@@ -1,0 +1,47 @@
+# Keep the active release and the hermclaw_keep_releases most recently installed others (by install time = mtime
+# of venv-<version>, which its completion marker sets); delete the rest together with their payloads. The venv
+# the symlink points to is never deleted.
+- name: Read the active venv
+  ansible.builtin.stat:
+    path: "{{ hermclaw_venv }}"
+    follow: false
+    get_checksum: false
+  register: hermclaw_release_active
+
+- name: Find the installed release venvs
+  ansible.builtin.find:
+    paths: ["{{ hermclaw_install_dir }}"]
+    patterns: ["venv-*"]
+    file_type: directory
+  register: hermclaw_release_venvs
+
+- name: Find the unpacked payloads
+  ansible.builtin.find:
+    paths: ["{{ hermclaw_releases_dir }}"]
+    file_type: directory
+  register: hermclaw_release_payloads
+
+- name: Decide which releases to keep
+  ansible.builtin.set_fact:
+    hermclaw_release_keep: >-
+      {% set active = (hermclaw_release_active.stat.lnk_target | default('') | basename | regex_replace('^venv-', ''))
+         if hermclaw_release_active.stat.islnk | default(false) else hermclaw_version %}
+      {% set others = hermclaw_release_venvs.files | sort(attribute='mtime', reverse=true)
+         | map(attribute='path') | map('basename') | map('regex_replace', '^venv-', '') | reject('equalto', active) | list %}
+      {{ ([active, hermclaw_version] + others[:hermclaw_keep_releases | int]) | unique }}
+
+- name: Delete venvs of pruned releases
+  ansible.builtin.file:
+    path: "{{ item }}"
+    state: absent
+  loop: >-
+    {{ hermclaw_release_venvs.files | map(attribute='path')
+       | reject('in', hermclaw_release_keep | map('regex_replace', '^', hermclaw_install_dir ~ '/venv-') | list) | list }}
+
+- name: Delete payloads of pruned releases
+  ansible.builtin.file:
+    path: "{{ item }}"
+    state: absent
+  loop: >-
+    {{ hermclaw_release_payloads.files | map(attribute='path')
+       | reject('in', hermclaw_release_keep | map('regex_replace', '^', hermclaw_releases_dir ~ '/') | list) | list }}

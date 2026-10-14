@@ -7,25 +7,43 @@ all:
     # account is created by the bootstrap as the runtime's restricted SSH user (sudo allowlist only).
     ansible_user: admin
     ansible_become: true
-    hermclaw_version: "0.1.0-rc1"
+    # Release to deploy (playbooks/deploy.yml, site.yml): the canonical PEP 440 version of
+    # dist/release-<version>/ built by scripts/deploy/build-release.sh. Override with -e hermclaw_version=<v>.
+    hermclaw_version: "0.1.0rc1"
     hermclaw_orchestrator_ip: 192.168.178.225
     hermclaw_lan_broadcast: 192.168.178.255
+    # Previous releases kept on every host for a network-free rollback (in addition to the active one).
+    # hermclaw_keep_releases: 3
+    # Configuration overrides deep-merged into config/<name>.example.yaml (docs/operations/deployment.md):
+    # hermclaw_config_overrides:
+    #   policies: {git: {create_merge_request: true}}
+    # hermclaw_config_host_overrides:
+    #   exec-222: {labels: {lease_resources: "code-executor-222"}}
   children:
     orchestrator:
       hosts:
         hermclaw-orchestrator:
           ansible_host: 192.168.178.225
+          hermclaw_host_id: orchestrator-225       # id in /etc/hermclaw/hosts.yaml
     webui:
       hosts:
         hermclaw-webui:
           ansible_host: 192.168.178.223
-          # nginx server_name of the Hermclaw site; "_" = catch-all (only if no other default site exists)
-          hermclaw_web_server_name: hermclaw.lan
+          hermclaw_host_id: webui-223
+          # nginx server_name of the Hermclaw site (names and/or addresses; "_" = catch-all, only if no other
+          # default site exists). Keep the address in it so http://192.168.178.223/ reaches Hermclaw.
+          hermclaw_web_server_name: hermclaw.lan 192.168.178.223
+          # HTTPS (P32 32.7): self-signed certificate generated on .223, or your own (nginx_tls_source: provided,
+          # nginx_tls_cert_src / nginx_tls_key_src = files on the control node). Port 80 then redirects.
+          # nginx_tls_enabled: true
+          # nginx_tls_source: self-signed
     execution_workers:
       hosts:
         hermclaw-exec-222:
           ansible_host: 192.168.178.222
           hermclaw_worker_id: exec-222
+          # REQUIRED before playbooks/deploy.yml: the real MAC of the Wake-on-LAN interface (`ip -br link` on the
+          # host, or the P00 inventory results). The deployment refuses the placeholder.
           wol_mac: "00:00:00:00:00:00"   # TODO: real MAC from inventory (P00)
           wol_interface: ""              # empty = interface of the default route
     model_workers:
@@ -33,16 +51,18 @@ all:
         hermclaw-model-224:
           ansible_host: 192.168.178.224
           hermclaw_worker_id: model-224
-          wol_mac: "00:00:00:00:00:00"   # TODO: real MAC from inventory (P00)
+          wol_mac: "00:00:00:00:00:00"   # TODO: real MAC from inventory (P00), REQUIRED for the deployment
           wol_interface: ""
     # Not bootstrapped by playbooks/bootstrap.yml (not Debian 13 Hermclaw hosts);
-    # listed for playbooks/inventory.yml and documentation only.
+    # listed for playbooks/inventory.yml, known_hosts and hosts.yaml (addresses) only.
     gitlab:
       hosts:
         gitlab-226:
           ansible_host: 192.168.178.226
+          hermclaw_host_id: gitlab-226
     backup:
       hosts:
         terra-60:
           ansible_host: 192.168.178.60
           ansible_user: root            # Unraid typically uses root
+          hermclaw_host_id: terra-60

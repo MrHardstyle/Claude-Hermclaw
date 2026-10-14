@@ -1,0 +1,40 @@
+# hermclaw_config – /etc/hermclaw/*.yaml from the release's config/*.example.yaml plus the inventory (P32 32.1).
+#
+# Strategy for operator edits (docs/operations/deployment.md "Configuration"): the deployment owns these files.
+# They are rendered from the examples of the deployed release, deep-merged with hermclaw_config_overrides
+# (mappings merge key by key, lists are replaced) and with the facts only the inventory knows (addresses, worker
+# API URLs, Wake-on-LAN MAC addresses). The complete set is validated with the new release's
+# `hermclaw config-check` before any live file changes; a replaced file is kept as <name>.yaml.<timestamp>~.
+# Manual edits on a host are overwritten by the next deployment (`--check --diff` shows them as drift). A file
+# listed in hermclaw_config_unmanaged is created once and never overwritten (and validated as it is).
+hermclaw_config_names: [hosts, models, policies, capabilities, logging, databases]
+# Files installed per inventory group (the workers read capabilities.yaml and, .222 only, policies.yaml).
+hermclaw_config_install:
+  orchestrator: [hosts, models, policies, capabilities, logging, databases]
+  execution_workers: [capabilities, policies]
+  model_workers: [capabilities]
+
+# {<name>: mapping} deep-merged into config/<name>.example.yaml, e.g.
+#   hermclaw_config_overrides:
+#     policies: {coder: {max_turns: 24}, git: {create_merge_request: true}}
+#     models: {profiles: [...]}            # lists replace the example's list as a whole
+hermclaw_config_overrides: {}
+# {<hosts.yaml id>: mapping} deep-merged into that entry of hosts.yaml (after the inventory-derived values);
+# ids that the example does not know are appended as new (complete) host entries.
+hermclaw_config_host_overrides: {}
+# Names of files the deployment creates once and then leaves to the operator.
+hermclaw_config_unmanaged: []
+
+# Inventory groups whose hosts patch hosts.yaml: address = ansible_host; workers also worker_api and
+# wake_on_lan {mac: wol_mac, broadcast: hermclaw_lan_broadcast}. The entry is found by hermclaw_host_id
+# (inventory, default hermclaw_worker_id).
+hermclaw_config_inventory_groups: [orchestrator, webui, execution_workers, model_workers, gitlab, backup]
+# Readiness probe of nginx in hosts.yaml (2xx without redirects, also when port 80 redirects to HTTPS).
+hermclaw_config_webui_probe_path: /healthz
+# Wake-on-LAN cannot wake a host with a placeholder MAC (00:00:00:00:..); the deployment refuses it.
+hermclaw_config_allow_placeholder_macs: false
+# policies.sandbox.image/images -> the toolchain images built on .222 (hermclaw_sandbox_toolchains, R-022).
+hermclaw_config_sandbox_toolchain_images: true
+
+hermclaw_config_staging_dir: "{{ hermclaw_config_dir }}/deploy-staging"
+hermclaw_config_venv: "{{ hermclaw_install_dir }}/venv-{{ hermclaw_version }}"

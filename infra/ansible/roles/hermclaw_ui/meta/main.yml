@@ -1,0 +1,12 @@
+galaxy_info:
+  role_name: hermclaw_ui
+  namespace: hermclaw
+  author: Hermclaw Next
+  description: "Hermclaw web UI release on .223: versioned build directories and an atomic webroot symlink"
+  license: proprietary
+  min_ansible_version: "2.17"
+  platforms:
+    - name: Debian
+      versions:
+        - trixie
+dependencies: []

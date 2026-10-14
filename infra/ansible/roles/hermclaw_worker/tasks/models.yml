@@ -1,0 +1,143 @@
+# 32.6 – the Ollama tags of the enabled models.yaml profiles on this model host (roles fixed: Gemma planner,
+# Qwen3-Coder 30B coder, Qwen3.8 27B heavy reviewer, Qwen3 8B fast router, EmbeddingGemma). Missing tags are pulled
+# by the release's hermclaw-model-pull in a transient unit (hermclaw-model-pull.service) that Ansible polls.
+- name: Decide the model tags of this host
+  ansible.builtin.set_fact:
+    hermclaw_worker_profiles: >-
+      {{ hermclaw_config_data.models.profiles | rejectattr('enabled', 'defined') | list
+         + (hermclaw_config_data.models.profiles | selectattr('enabled', 'defined') | selectattr('enabled') | list) }}
+
+- name: Collect the wanted tags
+  ansible.builtin.set_fact:
+    hermclaw_worker_wanted_models: >-
+      {{ hermclaw_worker_profiles
+         | selectattr('host', 'undefined') | map(attribute='model') | list
+         + (hermclaw_worker_profiles | selectattr('host', 'defined')
+            | selectattr('host', 'equalto', systemd_skeleton_worker_id | default(hermclaw_worker_id)) | map(attribute='model') | list)
+         | unique | sort }}
+    hermclaw_worker_embedding_model: >-
+      {{ (hermclaw_worker_profiles | selectattr('role', 'equalto', 'embedding') | map(attribute='model') | list + [''])[0] }}
+    hermclaw_worker_planner_fallback: >-
+      {{ hermclaw_worker_profiles | selectattr('role', 'equalto', 'planner_fallback') | list | length > 0 }}
+
+- name: List the installed models
+  ansible.builtin.command:
+    argv: ["{{ hermclaw_worker_ollama_bin }}", list]
+  environment:
+    OLLAMA_HOST: "{{ hermclaw_worker_ollama_url }}"
+  register: hermclaw_worker_ollama_list
+  changed_when: false
+  check_mode: false
+
+- name: Find the missing tags
+  ansible.builtin.set_fact:
+    hermclaw_worker_missing_models: >-
+      {% set installed = hermclaw_worker_ollama_list.stdout_lines[1:] | map('split') | map('first') | list %}
+      {{ hermclaw_worker_wanted_models | reject('in', installed)
+         | reject('in', installed | map('regex_replace', ':latest$', '') | list) | list }}
+
+- name: Pull the missing models
+  when: hermclaw_worker_missing_models | length > 0
+  block:
+    - name: Read the models directory from the Ollama drop-in
+      ansible.builtin.slurp:
+        src: "{{ hermclaw_worker_ollama_dropin }}"
+      register: hermclaw_worker_dropin
+
+    - name: Measure the free space of the models directory
+      ansible.builtin.command:
+        argv:
+          - df
+          - --block-size=1G
+          - --output=avail
+          - "{{ (hermclaw_worker_dropin.content | b64decode | regex_search('(?m)^Environment=OLLAMA_MODELS=(\\S+)$', '\\1')
+                 | default(['/var/lib/ollama'], true))[0] }}"
+      register: hermclaw_worker_df
+      changed_when: false
+      check_mode: false
+
+    - name: Require enough disk space for the download
+      ansible.builtin.assert:
+        that: (hermclaw_worker_df.stdout_lines[-1] | trim | int) >= hermclaw_worker_need_gb | float
+        fail_msg: >-
+          {{ hermclaw_worker_missing_models | join(', ') }} need about {{ hermclaw_worker_need_gb }} GB (download sizes +
+          {{ hermclaw_worker_model_disk_headroom_gb }} GB headroom), {{ hermclaw_worker_df.stdout_lines[-1] | trim }} GB
+          are free on the models directory. Free disk space or move OLLAMA_MODELS (ollama_models_dir), then re-run.
+        quiet: true
+      vars:
+        hermclaw_worker_need_gb: >-
+          {% set total = namespace(gb=hermclaw_worker_model_disk_headroom_gb | float) %}{% for tag in hermclaw_worker_missing_models
+          %}{% set total.gb = total.gb + (hermclaw_worker_model_sizes_gb[tag] | default(hermclaw_worker_model_default_size_gb) | float)
+          %}{% endfor %}{{ total.gb | round(1) }}
+
+    - name: Check for a model pull that is still running
+      ansible.builtin.command:
+        argv: [systemctl, is-active, hermclaw-model-pull.service]
+      register: hermclaw_worker_pull_active
+      changed_when: false
+      failed_when: false
+      check_mode: false
+
+    - name: Forget the result of an earlier failed pull
+      ansible.builtin.command:
+        argv: [systemctl, reset-failed, hermclaw-model-pull.service]
+      register: hermclaw_worker_pull_reset
+      changed_when: false
+      failed_when: false
+      when: hermclaw_worker_pull_active.stdout | trim not in ['active', 'activating']
+
+    - name: Start hermclaw-model-pull as a transient unit
+      ansible.builtin.command:
+        argv: >-
+          {{ ['systemd-run', '--unit=hermclaw-model-pull', '--description=Hermclaw model pull (playbooks/deploy.yml)',
+              '--setenv=OLLAMA_HOST=' ~ hermclaw_worker_ollama_url, '--property=TimeoutStartSec=infinity',
+              hermclaw_bin_dir ~ '/hermclaw-model-pull', '--ollama', hermclaw_worker_ollama_bin]
+             + ([] if hermclaw_worker_planner_fallback | bool else ['--skip-fallback-planner'])
+             + (['--embedding', hermclaw_worker_embedding_model] if hermclaw_worker_embedding_model | length > 0 else []) }}
+      changed_when: true
+      when: hermclaw_worker_pull_active.stdout | trim not in ['active', 'activating']
+
+    - name: Wait for the model pull (polls, survives a dropped SSH session)
+      ansible.builtin.command:
+        argv: [systemctl, is-active, hermclaw-model-pull.service]
+      register: hermclaw_worker_pull_state
+      until: hermclaw_worker_pull_state.stdout | trim not in ['active', 'activating']
+      retries: "{{ (hermclaw_worker_model_pull_timeout | int / hermclaw_worker_model_pull_poll | int) | round(0, 'ceil') | int }}"
+      delay: "{{ hermclaw_worker_model_pull_poll | int }}"
+      changed_when: false
+      failed_when: false
+      check_mode: false
+
+    - name: List the installed models after the pull
+      ansible.builtin.command:
+        argv: ["{{ hermclaw_worker_ollama_bin }}", list]
+      environment:
+        OLLAMA_HOST: "{{ hermclaw_worker_ollama_url }}"
+      register: hermclaw_worker_ollama_after
+      changed_when: false
+      check_mode: false
+
+    - name: Find tags that are still missing
+      ansible.builtin.set_fact:
+        hermclaw_worker_still_missing: >-
+          {% set installed = hermclaw_worker_ollama_after.stdout_lines[1:] | map('split') | map('first') | list %}
+          {{ hermclaw_worker_wanted_models | reject('in', installed)
+             | reject('in', installed | map('regex_replace', ':latest$', '') | list) | list }}
+
+    - name: Read the log of the model pull
+      ansible.builtin.command:
+        argv: [journalctl, --unit=hermclaw-model-pull.service, --lines=40, --no-pager, --output=cat]
+      register: hermclaw_worker_pull_log
+      changed_when: false
+      check_mode: false
+      when: hermclaw_worker_still_missing | length > 0
+
+    - name: Require every model of models.yaml
+      ansible.builtin.assert:
+        that: hermclaw_worker_still_missing | length == 0
+        fail_msg: >-
+          still missing on {{ inventory_hostname }}: {{ hermclaw_worker_still_missing | join(', ') }}
+          (hermclaw-model-pull: {{ hermclaw_worker_pull_state.stdout | default('?') | trim }}). Last log lines:
+          {{ hermclaw_worker_pull_log.stdout_lines | default([]) | join(' | ') | truncate(1500) }}
+          - pull by hand: sudo OLLAMA_HOST={{ hermclaw_worker_ollama_url }} {{ hermclaw_worker_ollama_bin }} pull <tag>
+        quiet: true

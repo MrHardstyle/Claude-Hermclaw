@@ -1,0 +1,102 @@
+# hermclaw_config – render, validate (complete set, new release) and install /etc/hermclaw/*.yaml.
+# Sets hermclaw_config_changed (a live file of this host changed: the services must be restarted).
+- name: Compute the configuration
+  ansible.builtin.import_tasks: data.yml
+
+- name: Decide which files this host gets
+  ansible.builtin.set_fact:
+    hermclaw_config_host_files: >-
+      {{ group_names | select('in', hermclaw_config_install.keys() | list)
+         | map('extract', hermclaw_config_install) | flatten | unique }}
+
+- name: Check for unmanaged files the operator maintains
+  ansible.builtin.stat:
+    path: "{{ hermclaw_config_dir }}/{{ item }}.yaml"
+    get_checksum: false
+  loop: "{{ hermclaw_config_unmanaged }}"
+  register: hermclaw_config_unmanaged_stat
+
+- name: Create the staging directory for the validation
+  ansible.builtin.file:
+    path: "{{ hermclaw_config_staging_dir }}"
+    state: directory
+    owner: root
+    group: "{{ hermclaw_group }}"
+    mode: "0750"
+
+# the staging directory always holds the complete set: hermclaw config-check (load_config) needs all files
+- name: Stage the generated configuration
+  ansible.builtin.copy:
+    content: "{{ hermclaw_config_rendered[item] }}"
+    dest: "{{ hermclaw_config_staging_dir }}/{{ item }}.yaml"
+    owner: root
+    group: "{{ hermclaw_group }}"
+    mode: "0640"
+  loop: >-
+    {{ hermclaw_config_names | difference(hermclaw_config_unmanaged_stat.results
+       | selectattr('stat.exists') | map(attribute='item') | list) }}
+  register: hermclaw_config_staged
+
+- name: Stage the operator's unmanaged files as they are
+  ansible.builtin.copy:
+    src: "{{ hermclaw_config_dir }}/{{ item }}.yaml"
+    dest: "{{ hermclaw_config_staging_dir }}/{{ item }}.yaml"
+    remote_src: true
+    owner: root
+    group: "{{ hermclaw_group }}"
+    mode: "0640"
+  loop: "{{ hermclaw_config_unmanaged_stat.results | selectattr('stat.exists') | map(attribute='item') | list }}"
+  register: hermclaw_config_staged_unmanaged
+
+- name: Check for the new release's venv
+  ansible.builtin.stat:
+    path: "{{ hermclaw_config_venv }}/bin/hermclaw"
+    get_checksum: false
+  register: hermclaw_config_venv_stat
+
+# check mode: the staged files were not written when they would change, so there is nothing to validate yet
+- name: Validate the complete configuration with the new release (hermclaw config-check)
+  ansible.builtin.command:
+    argv: ["{{ hermclaw_config_venv }}/bin/hermclaw", config-check]
+  environment:
+    HERMCLAW_CONFIG_DIR: "{{ hermclaw_config_staging_dir }}"
+    HERMCLAW_ENV: production
+    PYTHONDONTWRITEBYTECODE: "1"
+  register: hermclaw_config_check
+  changed_when: false
+  failed_when: false
+  check_mode: false
+  when:
+    - hermclaw_config_venv_stat.stat.exists
+    - not (ansible_check_mode and (hermclaw_config_staged is changed or hermclaw_config_staged_unmanaged is changed))
+
+- name: Stop when the configuration is invalid (live files unchanged)
+  ansible.builtin.fail:
+    msg: >-
+      hermclaw config-check rejects the configuration rendered for {{ inventory_hostname }}
+      ({{ hermclaw_config_staging_dir }}, live files in {{ hermclaw_config_dir }} not touched):
+      {{ hermclaw_config_check.stderr | default('') | trim | truncate(1500) }}
+  when:
+    - hermclaw_config_check is not skipped
+    - hermclaw_config_check.rc != 0
+
+- name: Remember the validated summary
+  ansible.builtin.set_fact:
+    hermclaw_config_summary: "{{ hermclaw_config_check.stdout | from_json }}"
+  when: hermclaw_config_check is not skipped
+
+- name: Install the configuration
+  ansible.builtin.copy:
+    content: "{{ hermclaw_config_rendered[item] }}"
+    dest: "{{ hermclaw_config_dir }}/{{ item }}.yaml"
+    owner: root
+    group: "{{ hermclaw_group }}"
+    mode: "0640"
+    backup: true
+    force: "{{ item not in hermclaw_config_unmanaged }}"
+  loop: "{{ hermclaw_config_host_files }}"
+  register: hermclaw_config_installed
+
+- name: Remember whether the live configuration changed
+  ansible.builtin.set_fact:
+    hermclaw_config_changed: "{{ hermclaw_config_installed is changed }}"

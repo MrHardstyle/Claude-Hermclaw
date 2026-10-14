@@ -1,0 +1,12 @@
+galaxy_info:
+  role_name: hermclaw_config
+  namespace: hermclaw
+  author: Hermclaw Next
+  description: "Hermclaw /etc/hermclaw/*.yaml from the release examples and the inventory, validated by config-check"
+  license: proprietary
+  min_ansible_version: "2.17"
+  platforms:
+    - name: Debian
+      versions:
+        - trixie
+dependencies: []

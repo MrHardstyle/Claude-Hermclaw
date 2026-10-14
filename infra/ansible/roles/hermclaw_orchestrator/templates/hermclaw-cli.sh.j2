@@ -1,0 +1,66 @@
+#!/bin/bash
+# Managed by Hermclaw - operator CLI of the orchestrator (P32 32.8b; playbooks/deploy.yml, role hermclaw_orchestrator).
+#
+#   sudo hermclaw doctor                              sudo hermclaw repo-add NAME URL [--project-id ID ...]
+#   sudo hermclaw token-create NAME --scopes read     sudo hermclaw job-submit PROMPT [--repo NAME ...]
+#   sudo hermclaw --venv {{ hermclaw_install_dir }}/venv-<version> migrate    another installed release (deployment)
+#   sudo hermclaw --alembic current                   alembic of the release (schema rollback, docs/runbooks/upgrade.md)
+#
+# Runs {{ hermclaw_venv }}/bin/hermclaw exactly like the services do: as {{ hermclaw_user }} in a transient systemd
+# service (systemd-run --pipe --wait --collect) with EnvironmentFile={{ hermclaw_config_dir }}/hermclaw.env and the
+# encrypted credentials of hermclaw-scheduler.service (LoadCredentialEncrypted=). The secrets exist only in that
+# service's $CREDENTIALS_DIRECTORY - never in the caller's environment, on a command line or in a log.
+# Exit codes: the command's own; 64 usage, 69 release not installed, 77 not root, 78 configuration missing.
+set -euo pipefail
+
+venv={{ hermclaw_venv }}
+tool=hermclaw
+while [[ $# -gt 0 ]]; do
+    case "$1" in
+        --venv)
+            [[ $# -ge 2 ]] || { echo "hermclaw: --venv needs a directory" >&2; exit 64; }
+            venv=$2
+            shift 2
+            ;;
+        --alembic)
+            tool=alembic
+            shift
+            ;;
+        *) break ;;
+    esac
+done
+if [[ $EUID -ne 0 ]]; then
+    echo "hermclaw: run as root (sudo hermclaw ...): the CLI runs as {{ hermclaw_user }} with the services' credentials" >&2
+    exit 77
+fi
+if [[ ! "$venv" =~ ^/[A-Za-z0-9._/-]+$ || "$venv" == *..* || ! -x "${venv}/bin/${tool}" ]]; then
+    echo "hermclaw: ${venv}/bin/${tool} is not installed" >&2
+    exit 69
+fi
+env_file={{ hermclaw_config_dir }}/hermclaw.env
+if [[ ! -r "$env_file" ]]; then
+    echo "hermclaw: ${env_file} is missing (run playbooks/bootstrap.yml and playbooks/deploy.yml)" >&2
+    exit 78
+fi
+
+props=(-p "EnvironmentFile=${env_file}" -p "WorkingDirectory={{ hermclaw_data_dir }}" -p UMask=0027
+       -E "HOME={{ hermclaw_home }}" -E PYTHONDONTWRITEBYTECODE=1)
+missing=()
+for cred in {{ (systemd_skeleton_credentials.scheduler + (systemd_skeleton_worker_ids | map('regex_replace', '^', 'worker-token-') | list)) | unique | join(' ') }}; do
+    file="{{ hermclaw_credstore_dir }}/hermclaw-${cred}"
+    if [[ -e "$file" ]]; then
+        props+=(-p "LoadCredentialEncrypted=${cred}:${file}")
+    else
+        missing+=("$cred")
+    fi
+done
+if [[ -n "${missing[*]:-}" ]]; then
+    echo "hermclaw: credential(s) not available: ${missing[*]} - commands that need them will fail" >&2
+fi
+cmd=("${venv}/bin/${tool}")
+if [[ "$tool" == alembic ]]; then
+    cmd+=(-c "${venv}/share/hermclaw/alembic.ini")
+fi
+exec "${HERMCLAW_SYSTEMD_RUN:-systemd-run}" --quiet --pipe --wait --collect --service-type=exec \
+    --unit="hermclaw-cli-$$" --description="Hermclaw CLI (${tool} ${1:-})" \
+    --uid={{ hermclaw_user }} --gid={{ hermclaw_group }} "${props[@]}" -- "${cmd[@]}" "$@"

@@ -1,0 +1,155 @@
+# hermclaw_orchestrator – .225 after hermclaw_release (venv-<version> installed, not active) and hermclaw_config
+# (validated configuration installed). Order: LiteLLM -> credentials -> units enabled -> schema decision ->
+# drain (stop scheduler, API) -> migrate -> atomic switch -> restart -> health -> admin token.
+- name: Validate the orchestrator settings
+  ansible.builtin.import_tasks: validate.yml
+
+- name: Install the operator CLI {{ hermclaw_cli_wrapper }}
+  ansible.builtin.template:
+    src: hermclaw-cli.sh.j2
+    dest: "{{ hermclaw_cli_wrapper }}"
+    owner: root
+    group: root
+    mode: "0755"
+
+- name: LiteLLM proxy
+  ansible.builtin.import_tasks: litellm.yml
+
+- name: Check the credentials of the orchestrator units
+  ansible.builtin.include_role:
+    name: hermclaw_release
+    tasks_from: credentials.yml
+  vars:
+    hermclaw_release_credential_units: "{{ hermclaw_orchestrator_units | map('regex_replace', '\\.timer$', '.service') | list }}"
+
+- name: Enable the orchestrator units
+  ansible.builtin.include_role:
+    name: hermclaw_release
+    tasks_from: enable.yml
+  vars:
+    hermclaw_release_enable: "{{ hermclaw_orchestrator_units }}"
+
+- name: Inspect the active release
+  ansible.builtin.stat:
+    path: "{{ hermclaw_venv }}"
+    follow: false
+    get_checksum: false
+  register: hermclaw_orchestrator_active
+
+- name: Decide whether the release switches
+  ansible.builtin.set_fact:
+    hermclaw_orchestrator_switch_pending: >-
+      {{ not (hermclaw_orchestrator_active.stat.islnk | default(false)
+              and hermclaw_orchestrator_active.stat.lnk_target | basename == 'venv-' ~ hermclaw_version) }}
+    hermclaw_orchestrator_migrate: false
+    hermclaw_orchestrator_downgrade: false
+
+- name: Database schema of the release
+  ansible.builtin.include_tasks: database.yml
+  when: hermclaw_orchestrator_run_database_tasks | bool
+
+# graceful: the scheduler checkpoints running steps and releases its leases on SIGTERM (TimeoutStopSec=90s)
+- name: Drain - stop the scheduler and the API before the schema change and the switch
+  ansible.builtin.systemd_service:
+    name: "{{ item }}"
+    state: stopped
+  loop: [hermclaw-scheduler.service, hermclaw-api.service]
+  when:
+    - hermclaw_manage_services | bool
+    - hermclaw_orchestrator_switch_pending | bool or hermclaw_orchestrator_migrate | bool
+
+- name: Migrate the database schema (once, as hermclaw, production environment, before the restart)
+  when:
+    - hermclaw_orchestrator_run_database_tasks | bool
+    - hermclaw_orchestrator_migrate | bool
+  block:
+    - name: Downgrade the schema with the newer release's migrations to {{ hermclaw_release_meta.alembic_head }}
+      ansible.builtin.command:
+        argv:
+          - "{{ hermclaw_cli_wrapper }}"
+          - --venv
+          - "{{ hermclaw_orchestrator_downgrade_venv }}"
+          - --alembic
+          - downgrade
+          - "{{ hermclaw_release_meta.alembic_head }}"
+      register: hermclaw_orchestrator_downgrade_run
+      changed_when: true
+      when: hermclaw_orchestrator_downgrade | bool
+
+    - name: Run hermclaw migrate of release {{ hermclaw_version }}
+      ansible.builtin.command:
+        argv: ["{{ hermclaw_cli_wrapper }}", --venv, "{{ hermclaw_orchestrator_venv }}", migrate]
+      register: hermclaw_orchestrator_migrate_run
+      changed_when: true
+
+    - name: Read the database revision after the migration
+      ansible.builtin.command:
+        argv: ["{{ hermclaw_cli_wrapper }}", --venv, "{{ hermclaw_orchestrator_venv }}", doctor, --offline, --json]
+      register: hermclaw_orchestrator_doctor_after
+      changed_when: false
+      failed_when: >-
+        hermclaw_orchestrator_doctor_after.rc not in [0, 1]
+        or ((hermclaw_orchestrator_doctor_after.stdout | from_json).checks
+            | selectattr('name', 'equalto', 'database') | first).status != 'ok'
+  rescue:
+    - name: Start the previous release again (the schema change failed, nothing was switched)
+      ansible.builtin.systemd_service:
+        name: "{{ item }}"
+        state: started
+      loop: [hermclaw-api.service, hermclaw-scheduler.service]
+      when: hermclaw_manage_services | bool
+
+    - name: Stop after the failed schema change
+      ansible.builtin.fail:
+        msg: >-
+          The schema change for release {{ hermclaw_version }} failed in '{{ ansible_failed_task.name | default('?') }}':
+          {{ (ansible_failed_result.stderr | default('') ~ ' ' ~ ansible_failed_result.stdout | default('')) | trim | truncate(2000) }}
+          - the previous release keeps running (venv not switched). PostgreSQL rolls a failed Alembic revision
+          back; check with: sudo {{ hermclaw_cli_wrapper }} --alembic current
+
+- name: Switch to release {{ hermclaw_version }}
+  ansible.builtin.include_role:
+    name: hermclaw_release
+    tasks_from: switch.yml
+
+- name: Decide the restarts
+  ansible.builtin.set_fact:
+    hermclaw_orchestrator_restart: >-
+      {{ hermclaw_release_switched | bool or hermclaw_config_changed | default(false) | bool
+         or hermclaw_orchestrator_migrate | bool
+         or (systemd_skeleton_unit_files | default({})) is changed
+         or (systemd_skeleton_env_file | default({})) is changed }}
+
+- name: Start LiteLLM (restart after a new venv, config or unit)
+  ansible.builtin.systemd_service:
+    name: hermclaw-litellm.service
+    state: "{{ 'restarted' if hermclaw_orchestrator_litellm_restart | bool else 'started' }}"
+  when: hermclaw_manage_services | bool
+
+- name: Start SearXNG and the services
+  when: hermclaw_manage_services | bool
+  block:
+    - name: SearXNG (rootless Quadlet of {{ hermclaw_user }})
+      ansible.builtin.import_tasks: searxng.yml
+      when: hermclaw_orchestrator_searxng | bool
+
+    - name: Start the API and the scheduler (restart on a new release, configuration or unit)
+      ansible.builtin.systemd_service:
+        name: "{{ item }}"
+        state: "{{ 'restarted' if hermclaw_orchestrator_restart | bool else 'started' }}"
+      loop: [hermclaw-api.service, hermclaw-scheduler.service]
+
+    - name: Start the backup timer
+      ansible.builtin.systemd_service:
+        name: hermclaw-backup.timer
+        state: started
+
+- name: Health checks of the orchestrator
+  ansible.builtin.import_tasks: health.yml
+  when: hermclaw_manage_services | bool
+
+- name: Admin API token (once, stored only as an encrypted credential)
+  ansible.builtin.import_tasks: token.yml
+  when:
+    - hermclaw_orchestrator_admin_token | bool
+    - hermclaw_orchestrator_run_database_tasks | bool

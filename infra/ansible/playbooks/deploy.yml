@@ -1,0 +1,74 @@
+# Hermclaw Next – P32 deployment of a release onto the bootstrapped Debian 13 hosts (docs/operations/deployment.md,
+# docs/architecture/deployment.md).
+#
+#   scripts/deploy/build-release.sh                                 # control node: dist/release-<version>/
+#   cd infra/ansible
+#   ansible-playbook playbooks/deploy.yml -e hermclaw_version=0.1.0rc1 --check --diff   # dry run
+#   ansible-playbook playbooks/deploy.yml -e hermclaw_version=0.1.0rc1                  # deploy / upgrade
+#   ansible-playbook playbooks/deploy.yml -e hermclaw_version=<previous>                # rollback
+#   ansible-playbook playbooks/site.yml                                                 # bootstrap + deploy
+#
+# Order: preflight on every host (nothing changes before all checks passed) -> orchestrator .225 (release venv,
+# config, LiteLLM, migration, switch, services) -> execution worker .222 -> model worker .224 -> web UI .223 ->
+# hermclaw doctor. Idempotent: a second run and a --check run report changed=0. Live runs: BLOCKER-001 here.
+
+- name: Deployment preflight (release, inventory, credentials) - read-only
+  hosts: orchestrator:webui:execution_workers:model_workers
+  become: true
+  any_errors_fatal: true
+  tags: [always]
+  tasks:
+    - name: Check the release, the bootstrap and the credentials
+      ansible.builtin.include_role:
+        name: hermclaw_release
+        tasks_from: preflight.yml
+
+    - name: Check the rendered configuration (MAC addresses, overrides)
+      ansible.builtin.include_role:
+        name: hermclaw_config
+        tasks_from: data.yml
+
+- name: Orchestrator .225 - runtime, configuration, LiteLLM, migration, services, SearXNG
+  hosts: orchestrator
+  become: true
+  roles:
+    - role: systemd_skeleton
+    - role: hermclaw_release
+    - role: hermclaw_config
+    - role: hermclaw_orchestrator
+
+- name: Execution worker .222 - runtime, sandbox images, worker daemon
+  hosts: execution_workers
+  become: true
+  roles:
+    - role: systemd_skeleton
+    - role: hermclaw_release
+    - role: hermclaw_config
+    - role: hermclaw_worker
+
+- name: Model worker .224 - runtime, worker daemon, Ollama models
+  hosts: model_workers
+  become: true
+  roles:
+    - role: systemd_skeleton
+    - role: hermclaw_release
+    - role: hermclaw_config
+    - role: hermclaw_worker
+
+- name: Web UI .223 - nginx site, UI build, SSH gate
+  hosts: webui
+  become: true
+  roles:
+    - role: nginx
+    - role: hermclaw_ui
+  tasks:
+    - name: Install the operator scripts of the release
+      ansible.builtin.include_role:
+        name: hermclaw_release
+        tasks_from: scripts.yml
+
+- name: Verify the deployment (hermclaw doctor in the services' context)
+  hosts: orchestrator
+  become: true
+  roles:
+    - role: hermclaw_verify

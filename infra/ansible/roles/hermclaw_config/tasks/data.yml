@@ -1,0 +1,119 @@
+# Compute hermclaw_config_data {<name>: mapping} and hermclaw_config_rendered {<name>: text}. Pure data (the
+# examples are read on the control node), so the preflight can run it before anything changes.
+- name: Validate the configuration settings
+  ansible.builtin.assert:
+    that:
+      - hermclaw_config_overrides is mapping
+      - hermclaw_config_overrides.keys() | difference(hermclaw_config_names) | length == 0
+      - hermclaw_config_overrides.values() | reject('mapping') | list | length == 0
+      - hermclaw_config_host_overrides is mapping
+      - hermclaw_config_host_overrides.values() | reject('mapping') | list | length == 0
+      - hermclaw_config_unmanaged | difference(hermclaw_config_names) | length == 0
+      - hermclaw_config_install.values() | flatten | difference(hermclaw_config_names) | length == 0
+    fail_msg: >-
+      hermclaw_config_overrides must map file names ({{ hermclaw_config_names | join(', ') }}) to mappings,
+      hermclaw_config_host_overrides host ids to mappings, hermclaw_config_unmanaged list known file names.
+    quiet: true
+
+- name: Read the configuration templates of release {{ hermclaw_version }}
+  ansible.builtin.set_fact:
+    hermclaw_config_examples: >-
+      {% set out = {} %}{% for name in hermclaw_config_names %}{% set _ = out.update({name:
+      lookup('ansible.builtin.file', hermclaw_release_dir ~ '/config/' ~ name ~ '.example.yaml') | from_yaml}) %}{% endfor %}{{ out }}
+
+- name: Derive the hosts.yaml values only the inventory knows
+  ansible.builtin.set_fact:
+    hermclaw_config_inventory_patches: >-
+      {% set out = {} %}
+      {% for group in hermclaw_config_inventory_groups %}{% for host in groups.get(group, []) %}
+      {% set hv = hostvars[host] %}
+      {% set host_id = hv.hermclaw_host_id | default(hv.hermclaw_worker_id | default('')) %}
+      {% if host_id | length > 0 %}
+      {% set patch = {'address': hv.ansible_host | default(host)} %}
+      {% if group in ['execution_workers', 'model_workers'] %}
+      {% set _ = patch.update({'worker_api': 'http://' ~ (hv.ansible_host | default(host)) ~ ':' ~ hermclaw_worker_port}) %}
+      {% set wol = {} %}
+      {% if hv.wol_mac is defined %}{% set _ = wol.update({'mac': hv.wol_mac | string}) %}{% endif %}
+      {% if hermclaw_lan_broadcast is defined %}{% set _ = wol.update({'broadcast': hermclaw_lan_broadcast}) %}{% endif %}
+      {% if wol | length > 0 %}{% set _ = patch.update({'wake_on_lan': wol}) %}{% endif %}
+      {% endif %}
+      {% set _ = out.update({host_id: (out.get(host_id, {}) | combine(patch, recursive=true))}) %}
+      {% endif %}
+      {% endfor %}{% endfor %}
+      {{ out }}
+
+- name: Merge examples, overrides and inventory values
+  ansible.builtin.set_fact:
+    hermclaw_config_data: >-
+      {% set out = {} %}
+      {% for name in hermclaw_config_names %}
+      {% set data = hermclaw_config_examples[name] %}
+      {% if name == 'policies' and hermclaw_config_sandbox_toolchain_images | bool %}
+      {% set images = {} %}
+      {% for toolchain in hermclaw_sandbox_toolchains %}
+      {% set _ = images.update({toolchain: 'localhost/hermclaw-sandbox-' ~ toolchain ~ ':' ~ hermclaw_sandbox_image_version}) %}
+      {% endfor %}
+      {% set data = data | combine({'sandbox': {'image': images[hermclaw_sandbox_default_toolchain], 'images': images}}, recursive=true) %}
+      {% endif %}
+      {% set data = data | combine(hermclaw_config_overrides.get(name, {}), recursive=true) %}
+      {% if name == 'hosts' %}
+      {% set entries = data.get('hosts', []) %}
+      {% set ids = entries | map(attribute='id') | list %}
+      {% set by_id = dict(ids | zip(entries)) | combine(hermclaw_config_inventory_patches, hermclaw_config_host_overrides, recursive=true) %}
+      {% set merged = [] %}
+      {% for host_id in ids + (hermclaw_config_host_overrides.keys() | list | difference(ids)) %}
+      {% set entry = by_id[host_id] %}
+      {% if entry.role | default('') == 'webui' %}
+      {% set services = [] %}
+      {% for svc in entry.services | default([]) %}
+      {% set _ = services.append(svc | combine({'http_path': hermclaw_config_webui_probe_path}) if svc.name == 'nginx' else svc) %}
+      {% endfor %}
+      {% set entry = entry | combine({'services': services}) %}
+      {% endif %}
+      {% set _ = merged.append(entry) %}
+      {% endfor %}
+      {% set data = data | combine({'hosts': merged}) %}
+      {% endif %}
+      {% set _ = out.update({name: data}) %}
+      {% endfor %}
+      {{ out }}
+
+- name: Find Wake-on-LAN hosts without a real MAC address
+  ansible.builtin.set_fact:
+    hermclaw_config_bad_macs: >-
+      {{ hermclaw_config_data.hosts.hosts | selectattr('wake_on_lan', 'defined')
+         | selectattr('wake_on_lan.enabled', 'defined') | selectattr('wake_on_lan.enabled')
+         | rejectattr('wake_on_lan.mac', 'defined') | map(attribute='id') | list
+         + (hermclaw_config_data.hosts.hosts | selectattr('wake_on_lan', 'defined')
+            | selectattr('wake_on_lan.enabled', 'defined') | selectattr('wake_on_lan.enabled')
+            | selectattr('wake_on_lan.mac', 'defined')
+            | rejectattr('wake_on_lan.mac', 'match', '^([0-9A-Fa-f]{2}:){5}[0-9A-Fa-f]{2}$') | map(attribute='id') | list) }}
+    hermclaw_config_placeholder_macs: >-
+      {{ hermclaw_config_data.hosts.hosts | selectattr('wake_on_lan', 'defined')
+         | selectattr('wake_on_lan.enabled', 'defined') | selectattr('wake_on_lan.enabled')
+         | selectattr('wake_on_lan.mac', 'defined')
+         | selectattr('wake_on_lan.mac', 'match', '^00:00:00:00:') | map(attribute='id') | list }}
+
+- name: Require real Wake-on-LAN MAC addresses
+  ansible.builtin.assert:
+    that:
+      - hermclaw_config_bad_macs | length == 0
+      - hermclaw_config_placeholder_macs | length == 0 or hermclaw_config_allow_placeholder_macs | bool
+    fail_msg: >-
+      Wake-on-LAN is enabled for {{ (hermclaw_config_bad_macs + hermclaw_config_placeholder_macs) | unique | join(', ') }}
+      but hosts.yaml would get no valid or only a placeholder MAC address (00:00:00:00:..): the orchestrator could
+      never wake the host. Set wol_mac of the host in the inventory to the real address (`ip -br link` on the host,
+      or the P00 inventory results), or disable it with hermclaw_config_host_overrides: {<id>: {wake_on_lan:
+      {enabled: false}}}.
+    quiet: true
+
+- name: Render the configuration files
+  ansible.builtin.set_fact:
+    hermclaw_config_rendered: >-
+      {% set out = {} %}{% for name in hermclaw_config_names %}{% set _ = out.update({name:
+      "# Managed by Hermclaw - generated by playbooks/deploy.yml (role hermclaw_config) from config/" ~ name
+      ~ ".example.yaml of the deployed release\n"
+      ~ "# and the inventory (hermclaw_config_overrides, hermclaw_config_host_overrides, addresses, MACs). Do not edit\n"
+      ~ "# here: the next deployment overwrites manual changes and keeps the old file as " ~ name ~ ".yaml.<time>~.\n"
+      ~ "# Change the inventory instead or list the file in hermclaw_config_unmanaged (docs/operations/deployment.md).\n"
+      ~ (hermclaw_config_data[name] | to_nice_yaml(indent=2, sort_keys=false, width=1000))}) %}{% endfor %}{{ out }}

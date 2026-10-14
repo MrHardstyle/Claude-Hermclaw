@@ -1,0 +1,32 @@
+# SearXNG runs as a rootless Quadlet user unit of hermclaw (systemd_skeleton renders it; once the host is deployed
+# the Quadlet carries [Install] WantedBy=default.target, so it also starts with the lingering user manager at boot).
+# daemon-reload alone does not start an inactive unit (research 20261014-027 S10): start it explicitly.
+- name: Reload the hermclaw user manager (Quadlet generator)
+  ansible.builtin.command:
+    argv: [systemctl, --user, "--machine={{ hermclaw_user }}@.host", daemon-reload]
+  changed_when: false
+
+- name: Check the SearXNG unit
+  ansible.builtin.command:
+    argv: [systemctl, --user, "--machine={{ hermclaw_user }}@.host", is-active, hermclaw-searxng.service]
+  register: hermclaw_orchestrator_searxng_active
+  changed_when: false
+  failed_when: false
+  check_mode: false
+
+- name: Start SearXNG
+  ansible.builtin.command:
+    argv: [systemctl, --user, "--machine={{ hermclaw_user }}@.host", start, hermclaw-searxng.service]
+  changed_when: true
+  when: hermclaw_orchestrator_searxng_active.stdout | trim != 'active'
+
+- name: Wait for SearXNG /healthz
+  ansible.builtin.uri:
+    url: "{{ hermclaw_orchestrator_searxng_url }}/healthz"
+    return_content: true
+  register: hermclaw_orchestrator_searxng_health
+  until: hermclaw_orchestrator_searxng_health.status == 200
+  retries: "{{ hermclaw_orchestrator_searxng_retries }}"
+  delay: "{{ hermclaw_orchestrator_searxng_delay }}"
+  check_mode: false
+  when: not ansible_check_mode

@@ -1,0 +1,49 @@
+# 32.9 – the UI and the API as a browser reaches them: from the control node through nginx on .223.
+- name: Check /healthz of the web host
+  ansible.builtin.uri:
+    url: "{{ hermclaw_ui_base_url }}/healthz"
+    headers:
+      Host: "{{ hermclaw_ui_host_header }}"
+    validate_certs: "{{ hermclaw_ui_validate_certs }}"
+    return_content: true
+  register: hermclaw_ui_healthz
+  until: hermclaw_ui_healthz.status == 200
+  retries: "{{ hermclaw_ui_health_retries }}"
+  delay: "{{ hermclaw_ui_health_delay }}"
+  delegate_to: localhost
+  become: false
+  check_mode: false
+
+- name: Check that / serves the UI build with the Content-Security-Policy
+  ansible.builtin.uri:
+    url: "{{ hermclaw_ui_base_url }}/"
+    headers:
+      Host: "{{ hermclaw_ui_host_header }}"
+    validate_certs: "{{ hermclaw_ui_validate_certs }}"
+    return_content: true
+  register: hermclaw_ui_index_page
+  failed_when: >-
+    hermclaw_ui_index_page.status != 200
+    or '<div id="root">' not in hermclaw_ui_index_page.content | default('')
+    or 'content_security_policy' not in hermclaw_ui_index_page
+  delegate_to: localhost
+  become: false
+  check_mode: false
+
+- name: Check /api/health through nginx (API {{ hermclaw_version }})
+  ansible.builtin.uri:
+    url: "{{ hermclaw_ui_base_url }}/api/health"
+    headers:
+      Host: "{{ hermclaw_ui_host_header }}"
+    validate_certs: "{{ hermclaw_ui_validate_certs }}"
+    return_content: true
+  register: hermclaw_ui_api_health
+  until: >-
+    hermclaw_ui_api_health.status == 200
+    and hermclaw_ui_api_health.json.status | default('') == 'ok'
+    and hermclaw_ui_api_health.json.version | default('') == hermclaw_version
+  retries: "{{ hermclaw_ui_health_retries }}"
+  delay: "{{ hermclaw_ui_health_delay }}"
+  delegate_to: localhost
+  become: false
+  check_mode: false

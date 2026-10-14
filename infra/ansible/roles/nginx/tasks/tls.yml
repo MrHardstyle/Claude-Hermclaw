@@ -1,0 +1,90 @@
+# Optional TLS of the Hermclaw site (P32 32.7): certificate + key in {{ nginx_tls_dir }} before the site that
+# references them is written and tested (nginx -t). Rendered by bootstrap and deployment alike.
+- name: Create the TLS directory
+  ansible.builtin.file:
+    path: "{{ nginx_tls_dir }}"
+    state: directory
+    owner: root
+    group: root
+    mode: "0755"
+
+- name: Install the provided certificate (chain)
+  ansible.builtin.copy:
+    src: "{{ nginx_tls_cert_src }}"
+    dest: "{{ nginx_tls_cert }}"
+    owner: root
+    group: root
+    mode: "0644"
+  when: nginx_tls_source == 'provided'
+  notify: Reload nginx
+
+- name: Install the provided private key
+  ansible.builtin.copy:
+    src: "{{ nginx_tls_key_src }}"
+    dest: "{{ nginx_tls_key }}"
+    owner: root
+    group: root
+    mode: "0600"
+  no_log: true
+  diff: false
+  when: nginx_tls_source == 'provided'
+  notify: Reload nginx
+
+- name: Self-signed certificate
+  when: nginx_tls_source == 'self-signed'
+  block:
+    - name: Check for the self-signed certificate
+      ansible.builtin.stat:
+        path: "{{ nginx_tls_cert }}"
+        get_checksum: false
+      register: nginx_tls_cert_stat
+
+    - name: Check whether the certificate expires within 30 days
+      ansible.builtin.command:
+        argv: [openssl, x509, -checkend, "2592000", -noout, -in, "{{ nginx_tls_cert }}"]
+      register: nginx_tls_checkend
+      changed_when: false
+      failed_when: nginx_tls_checkend.rc not in [0, 1]
+      check_mode: false
+      when: nginx_tls_cert_stat.stat.exists
+
+    - name: Generate the key and the self-signed certificate (ECDSA P-256)
+      ansible.builtin.command:
+        argv:
+          - openssl
+          - req
+          - -x509
+          - -newkey
+          - ec
+          - -pkeyopt
+          - ec_paramgen_curve:P-256
+          - -sha256
+          - -days
+          - "{{ nginx_tls_self_signed_days | string }}"
+          - -noenc
+          - -keyout
+          - "{{ nginx_tls_key }}"
+          - -out
+          - "{{ nginx_tls_cert }}"
+          - -subj
+          - "/CN={{ (nginx_tls_san | select('match', '^DNS:') | map('regex_replace', '^DNS:', '') | list
+                     + nginx_tls_san | map('regex_replace', '^IP:', '') | list)[0] }}"
+          - -addext
+          - "subjectAltName={{ nginx_tls_san | join(',') }}"
+          - -addext
+          - "basicConstraints=critical,CA:FALSE"
+          - -addext
+          - "keyUsage=critical,digitalSignature"
+          - -addext
+          - extendedKeyUsage=serverAuth
+      changed_when: true
+      when: not nginx_tls_cert_stat.stat.exists or nginx_tls_checkend.rc | default(0) == 1
+      notify: Reload nginx
+
+    - name: Restrict the private key
+      ansible.builtin.file:
+        path: "{{ nginx_tls_key }}"
+        owner: root
+        group: root
+        mode: "0600"
+      when: not (ansible_check_mode and not nginx_tls_cert_stat.stat.exists)

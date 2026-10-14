@@ -1,0 +1,115 @@
+# Preflight of playbooks/deploy.yml (first play, any_errors_fatal): everything below is read-only except the
+# local "deployed" fact at the end, so a failure stops the run before any host has been changed.
+- name: Validate the deployment settings
+  ansible.builtin.import_tasks: validate.yml
+
+- name: Check the release on the control node
+  delegate_to: localhost
+  become: false
+  run_once: true
+  block:
+    - name: Check for release.json of {{ hermclaw_version }}
+      ansible.builtin.stat:
+        path: "{{ hermclaw_release_dir }}/release.json"
+      register: hermclaw_release_json_stat
+
+    - name: Require a release built by scripts/deploy/build-release.sh
+      ansible.builtin.assert:
+        that: hermclaw_release_json_stat.stat.exists
+        fail_msg: >-
+          {{ hermclaw_release_dir }}/release.json does not exist. Build the release on the control node first
+          (scripts/deploy/build-release.sh writes dist/release-<version>/) or point hermclaw_release_root at the
+          directory that holds release-{{ hermclaw_version }}/.
+        quiet: true
+
+    - name: Verify every file of the release (SHA256SUMS)
+      ansible.builtin.command:
+        argv: [sha256sum, --check, --quiet, --strict, SHA256SUMS]
+        chdir: "{{ hermclaw_release_dir }}"
+      changed_when: false
+      check_mode: false
+
+- name: Read the release metadata
+  ansible.builtin.set_fact:
+    hermclaw_release_meta: "{{ lookup('ansible.builtin.file', hermclaw_release_dir ~ '/release.json') | from_json }}"
+
+- name: Check the release metadata
+  ansible.builtin.assert:
+    that:
+      - hermclaw_release_meta.name == 'hermclaw'
+      - hermclaw_release_meta.version == hermclaw_version
+      - hermclaw_release_meta.alembic_head is match('^[0-9A-Za-z_]+$')
+      - hermclaw_release_meta.litellm.venv_name is match('^venv-[0-9A-Za-z._-]+$')
+      - (hermclaw_release_dir ~ '/' ~ hermclaw_release_meta.runtime.payload) is file
+      - (hermclaw_release_dir ~ '/' ~ hermclaw_release_meta.litellm.payload) is file
+      - (hermclaw_release_dir ~ '/' ~ hermclaw_release_meta.ui.payload) is file
+    fail_msg: >-
+      {{ hermclaw_release_dir }} is not a complete release of hermclaw {{ hermclaw_version }}
+      (release.json says {{ hermclaw_release_meta.name | default('?') }} {{ hermclaw_release_meta.version | default('?') }}).
+    quiet: true
+
+- name: Check that the host has been bootstrapped
+  ansible.builtin.stat:
+    path: "{{ item }}"
+  loop:
+    - "{{ hermclaw_install_dir }}"
+    - "{{ hermclaw_config_dir }}"
+    - "{{ hermclaw_bin_dir }}"
+  register: hermclaw_release_bootstrap_paths
+
+- name: Require the bootstrap (playbooks/bootstrap.yml) before the deployment
+  ansible.builtin.assert:
+    that: hermclaw_release_bootstrap_paths.results | rejectattr('stat.exists') | list | length == 0
+    fail_msg: >-
+      {{ hermclaw_release_bootstrap_paths.results | rejectattr('stat.exists') | map(attribute='item') | join(', ') }}
+      missing on {{ inventory_hostname }} - run playbooks/bootstrap.yml (or playbooks/site.yml) first.
+    quiet: true
+
+- name: Checks of the Python runtime hosts
+  when: group_names | intersect(hermclaw_release_python_groups) | length > 0
+  block:
+    - name: Read the Python version of {{ hermclaw_release_python }}
+      ansible.builtin.command:
+        argv: ["{{ hermclaw_release_python }}", -c, "import sys; print('%d.%d' % sys.version_info[:2])"]
+      register: hermclaw_release_host_python
+      changed_when: false
+      check_mode: false
+
+    - name: Require the CPython minor version the release was built for
+      ansible.builtin.assert:
+        that: hermclaw_release_host_python.stdout == hermclaw_release_meta.python.version
+        fail_msg: >-
+          {{ inventory_hostname }} runs Python {{ hermclaw_release_host_python.stdout }}, the release was built for
+          CPython {{ hermclaw_release_meta.python.version }} - build it with that interpreter
+          (scripts/deploy/build-release.sh --python ...).
+        quiet: true
+
+- name: Check the credentials of this host's units
+  ansible.builtin.include_tasks:
+    file: credentials.yml
+  vars:
+    hermclaw_release_credential_units: >-
+      {{ group_names | select('in', hermclaw_release_units.keys() | list)
+         | map('extract', hermclaw_release_units) | flatten | unique }}
+  when: group_names | intersect(hermclaw_release_units.keys() | list) | length > 0
+
+- name: Create the local facts directory
+  ansible.builtin.file:
+    path: "{{ hermclaw_release_facts_dir }}"
+    state: directory
+    owner: root
+    group: root
+    mode: "0755"
+
+- name: Mark the host as deployed (ansible_local.hermclaw)
+  ansible.builtin.copy:
+    content: "{{ {'deployed': true, 'managed_by': 'Hermclaw playbooks/deploy.yml'} | to_nice_json }}\n"
+    dest: "{{ hermclaw_release_facts_dir }}/hermclaw.fact"
+    owner: root
+    group: root
+    mode: "0644"
+
+- name: Re-read the local facts
+  ansible.builtin.setup:
+    gather_subset: ["!all", "!min", local]
+    fact_path: "{{ hermclaw_release_facts_dir }}"

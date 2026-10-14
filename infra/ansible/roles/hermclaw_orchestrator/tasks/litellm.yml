@@ -1,0 +1,212 @@
+# 32.5 – LiteLLM proxy in its own venv (its pins must not leak into the runtime venv, R-006): the requirement is
+# the litellm-proxy extra of pyproject.toml, resolved and hash-locked at release build time (release.json).
+# <litellm_root>/venv-<litellm version>-<lock sha> is keyed by the lock, so hermclaw upgrades that keep the same
+# LiteLLM lock reuse the installed venv. Sets hermclaw_orchestrator_litellm_restart.
+- name: Decide the LiteLLM venv of release {{ hermclaw_version }}
+  ansible.builtin.set_fact:
+    hermclaw_orchestrator_litellm_venv: "{{ hermclaw_litellm_root }}/{{ hermclaw_release_meta.litellm.venv_name }}"
+    hermclaw_orchestrator_litellm_payload_dir: "{{ hermclaw_litellm_root }}/payload-{{ hermclaw_release_meta.litellm.venv_name }}"
+
+- name: Create the LiteLLM directory
+  ansible.builtin.file:
+    path: "{{ hermclaw_litellm_root }}"
+    state: directory
+    owner: root
+    group: root
+    mode: "0755"
+
+- name: Check for the installed LiteLLM venv
+  ansible.builtin.stat:
+    path: "{{ hermclaw_orchestrator_litellm_venv }}/.hermclaw-litellm"
+  register: hermclaw_orchestrator_litellm_marker
+
+- name: Install LiteLLM offline from the hash-checked lock
+  when: not hermclaw_orchestrator_litellm_marker.stat.exists
+  block:
+    - name: Remove an interrupted LiteLLM install
+      ansible.builtin.file:
+        path: "{{ item }}"
+        state: absent
+      loop:
+        - "{{ hermclaw_orchestrator_litellm_venv }}"
+        - "{{ hermclaw_orchestrator_litellm_payload_dir }}"
+
+    - name: Create the LiteLLM payload directory
+      ansible.builtin.file:
+        path: "{{ hermclaw_orchestrator_litellm_payload_dir }}"
+        state: directory
+        owner: root
+        group: root
+        mode: "0755"
+
+    - name: Copy and unpack the LiteLLM payload
+      ansible.builtin.unarchive:
+        src: "{{ hermclaw_release_dir }}/{{ hermclaw_release_meta.litellm.payload }}"
+        dest: "{{ hermclaw_orchestrator_litellm_payload_dir }}"
+        owner: root
+        group: root
+
+    - name: Verify the LiteLLM payload (SHA256SUMS)
+      ansible.builtin.command:
+        argv: [sha256sum, --check, --quiet, --strict, SHA256SUMS]
+        chdir: "{{ hermclaw_orchestrator_litellm_payload_dir }}"
+      changed_when: false
+
+    - name: Create the LiteLLM venv
+      ansible.builtin.command:
+        argv: ["{{ hermclaw_orchestrator_python }}", -m, venv, "{{ hermclaw_orchestrator_litellm_venv }}"]
+        creates: "{{ hermclaw_orchestrator_litellm_venv }}/bin/python"
+
+    - name: Install the LiteLLM lock offline
+      ansible.builtin.command:
+        argv:
+          - "{{ hermclaw_orchestrator_litellm_venv }}/bin/python"
+          - -m
+          - pip
+          - install
+          - --no-index
+          - --find-links
+          - "{{ hermclaw_orchestrator_litellm_payload_dir }}/wheelhouse"
+          - --only-binary=:all:
+          - --no-cache-dir
+          - --require-hashes
+          - --requirement
+          - "{{ hermclaw_orchestrator_litellm_payload_dir }}/requirements.lock"
+      environment:
+        PIP_DISABLE_PIP_VERSION_CHECK: "1"
+        PIP_NO_INPUT: "1"
+        PIP_ROOT_USER_ACTION: ignore
+      changed_when: true
+
+    - name: Check the LiteLLM dependencies (pip check)
+      ansible.builtin.command:
+        argv: ["{{ hermclaw_orchestrator_litellm_venv }}/bin/python", -m, pip, check]
+      changed_when: false
+
+    # GHSA-5mg7-485q-xm76: litellm 1.82.7/1.82.8 shipped a credential stealer as litellm_init.pth
+    - name: Look for the litellm_init.pth implant
+      ansible.builtin.find:
+        paths: ["{{ hermclaw_orchestrator_litellm_venv }}"]
+        patterns: ["litellm_init.pth"]
+        recurse: true
+        hidden: true
+      register: hermclaw_orchestrator_litellm_pth
+
+    - name: Refuse a compromised LiteLLM venv
+      ansible.builtin.assert:
+        that: hermclaw_orchestrator_litellm_pth.matched == 0
+        fail_msg: >-
+          {{ hermclaw_orchestrator_litellm_pth.files | map(attribute='path') | join(', ') }} found - this venv runs a
+          credential stealer at interpreter start (GHSA-5mg7-485q-xm76). Delete {{ hermclaw_orchestrator_litellm_venv }},
+          rotate litellm-master-key and rebuild the release with a clean LiteLLM pin.
+        quiet: true
+
+    - name: Make the LiteLLM venv root-owned and world-readable
+      ansible.builtin.file:
+        path: "{{ hermclaw_orchestrator_litellm_venv }}"
+        state: directory
+        recurse: true
+        follow: false
+        owner: root
+        group: root
+        mode: "u=rwX,go=rX"
+
+    - name: Mark the LiteLLM venv as complete
+      ansible.builtin.copy:
+        content: "{{ {'requirements': hermclaw_release_meta.litellm.requirements, 'lock_sha256': hermclaw_release_meta.litellm.lock_sha256} | to_nice_json }}\n"
+        dest: "{{ hermclaw_orchestrator_litellm_venv }}/.hermclaw-litellm"
+        owner: root
+        group: root
+        mode: "0644"
+
+    - name: Remove the unpacked LiteLLM payload
+      ansible.builtin.file:
+        path: "{{ hermclaw_orchestrator_litellm_payload_dir }}"
+        state: absent
+
+- name: Verify the installed LiteLLM version
+  ansible.builtin.command:
+    argv:
+      - "{{ hermclaw_orchestrator_litellm_venv }}/bin/python"
+      - -I
+      - -c
+      - "import importlib.metadata as m, sys; v = m.version('litellm'); print(v); sys.exit(0 if v == sys.argv[1] else 1)"
+      - "{{ hermclaw_release_meta.litellm.version }}"
+  changed_when: false
+  check_mode: false
+  when: not (ansible_check_mode and not hermclaw_orchestrator_litellm_marker.stat.exists)
+
+- name: Inspect {{ hermclaw_orchestrator_litellm_link }}
+  ansible.builtin.stat:
+    path: "{{ hermclaw_orchestrator_litellm_link }}"
+    follow: false
+    get_checksum: false
+  register: hermclaw_orchestrator_litellm_link_stat
+
+- name: Keep a manually created LiteLLM venv directory (no data loss)
+  ansible.builtin.command:
+    argv:
+      - mv
+      - --no-target-directory
+      - --
+      - "{{ hermclaw_orchestrator_litellm_link }}"
+      - "{{ hermclaw_orchestrator_litellm_link }}.pre-release-{{ now(utc=true, fmt='%Y%m%dT%H%M%SZ') }}"
+  changed_when: true
+  when:
+    - hermclaw_orchestrator_litellm_link_stat.stat.exists
+    - hermclaw_orchestrator_litellm_link_stat.stat.isdir
+    - not hermclaw_orchestrator_litellm_link_stat.stat.islnk
+
+- name: Activate the LiteLLM venv (atomic symlink switch)
+  ansible.builtin.file:
+    src: "{{ hermclaw_orchestrator_litellm_venv | relpath(hermclaw_orchestrator_litellm_link | dirname) }}"
+    dest: "{{ hermclaw_orchestrator_litellm_link }}"
+    state: link
+  register: hermclaw_orchestrator_litellm_switch
+  when: >-
+    not (ansible_check_mode and hermclaw_orchestrator_litellm_link_stat.stat.isdir | default(false)
+    and not hermclaw_orchestrator_litellm_link_stat.stat.islnk)
+
+- name: Generate the LiteLLM config from the validated models.yaml (hermclaw litellm-config)
+  ansible.builtin.command:
+    argv: ["{{ hermclaw_orchestrator_venv }}/bin/hermclaw", litellm-config, "-", --config-dir, "{{ hermclaw_orchestrator_config_staging }}"]
+  environment:
+    HERMCLAW_ENV: production
+    PYTHONDONTWRITEBYTECODE: "1"
+  register: hermclaw_orchestrator_litellm_generated
+  changed_when: false
+  check_mode: false
+  when: hermclaw_config_check is not skipped
+
+- name: Write {{ hermclaw_orchestrator_litellm_config }}
+  ansible.builtin.copy:
+    content: "{{ hermclaw_orchestrator_litellm_generated.stdout }}\n"
+    dest: "{{ hermclaw_orchestrator_litellm_config }}"
+    owner: root
+    group: "{{ hermclaw_group }}"
+    mode: "0640"
+    backup: true
+  register: hermclaw_orchestrator_litellm_config_file
+  when: hermclaw_orchestrator_litellm_generated is not skipped
+
+- name: Find the LiteLLM venvs
+  ansible.builtin.find:
+    paths: ["{{ hermclaw_litellm_root }}"]
+    patterns: ["venv-*"]
+    file_type: directory
+  register: hermclaw_orchestrator_litellm_venvs
+
+- name: Delete LiteLLM venvs beyond the kept ones
+  ansible.builtin.file:
+    path: "{{ item }}"
+    state: absent
+  loop: >-
+    {{ (hermclaw_orchestrator_litellm_venvs.files | sort(attribute='mtime', reverse=true) | map(attribute='path')
+        | reject('equalto', hermclaw_orchestrator_litellm_venv) | list)[hermclaw_orchestrator_litellm_keep | int:] }}
+
+- name: Remember whether LiteLLM must be restarted
+  ansible.builtin.set_fact:
+    hermclaw_orchestrator_litellm_restart: >-
+      {{ hermclaw_orchestrator_litellm_switch is changed
+         or hermclaw_orchestrator_litellm_config_file is changed
+         or (systemd_skeleton_unit_files | default({})) is changed }}

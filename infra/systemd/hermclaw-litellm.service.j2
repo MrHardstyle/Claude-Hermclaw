@@ -13,7 +13,9 @@ Type=exec
 User={{ hermclaw_user }}
 Group={{ hermclaw_group }}
 Environment=LITELLM_LOG=INFO
-Environment=LITELLM_TELEMETRY=False
+# bundled model cost map instead of a download from GitHub at every start; no admin UI login path (R-027 L11)
+Environment=LITELLM_LOCAL_MODEL_COST_MAP=True
+Environment=DISABLE_ADMIN_UI=True
 Environment=HOME={{ hermclaw_data_dir }}
 LoadCredentialEncrypted=litellm-master-key:{{ hermclaw_credstore_dir }}/hermclaw-litellm-master-key
 ExecStart={{ hermclaw_bin_dir }}/hermclaw-cred-env LITELLM_MASTER_KEY=litellm-master-key -- {{ systemd_skeleton_litellm_venv }}/bin/litellm --config {{ hermclaw_config_dir }}/litellm.yaml --host {{ systemd_skeleton_litellm_bind }} --port {{ hermclaw_litellm_port }}

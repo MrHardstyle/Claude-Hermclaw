@@ -61,3 +61,29 @@ hermclaw_port_plan:
 hermclaw_install_packages: true
 hermclaw_manage_services: true
 hermclaw_timezone: Europe/Berlin
+
+# --- Deployment (P32, playbooks/deploy.yml, docs/operations/deployment.md) ----
+# hermclaw_version comes from the inventory or `-e hermclaw_version=<v>`: the canonical PEP 440 version of a
+# release built by scripts/deploy/build-release.sh (dist/release-<v>/, e.g. 0.1.0rc1).
+# Release directory on the control node.
+hermclaw_release_root: "{{ playbook_dir }}/../../../dist"
+hermclaw_release_dir: "{{ hermclaw_release_root }}/release-{{ hermclaw_version }}"
+# Unpacked release payloads (wheelhouse, sandbox images, metadata) and versioned venvs on the hosts:
+# <install_dir>/releases/<v> and <install_dir>/venv-<v>; hermclaw_venv is the symlink to the active venv and
+# <install_dir>/current the symlink to the active payload.
+hermclaw_releases_dir: "{{ hermclaw_install_dir }}/releases"
+# Previous releases kept for a network-free rollback, in addition to the active one (venvs, payloads, UI builds).
+hermclaw_keep_releases: 3
+# UI builds on .223: <webroot>-releases/<v>/, hermclaw_webroot becomes the symlink to the active build.
+hermclaw_ui_releases_dir: "{{ hermclaw_webroot }}-releases"
+# LiteLLM proxy venvs on .225: <litellm_root>/venv-<litellm version>-<lock>; the unit's venv path
+# (systemd_skeleton_litellm_venv, /opt/litellm/venv) is the symlink to the active one.
+hermclaw_litellm_root: /opt/litellm
+# Operator CLI on the orchestrator: runs the Hermclaw CLI in the services' context (systemd-run).
+hermclaw_cli_wrapper: /usr/local/sbin/hermclaw
+# Sandbox toolchain images built on the execution worker (scripts/ops/hermclaw-build-sandbox-images) and
+# referenced by policies.sandbox (orchestrator and worker): localhost/hermclaw-sandbox-<toolchain>:<version>.
+# Bump hermclaw_sandbox_image_version to rebuild them (existing tags are never rebuilt).
+hermclaw_sandbox_toolchains: [python, node, php, generic]
+hermclaw_sandbox_image_version: "1"
+hermclaw_sandbox_default_toolchain: generic

@@ -1,0 +1,12 @@
+galaxy_info:
+  role_name: hermclaw_orchestrator
+  namespace: hermclaw
+  author: Hermclaw Next
+  description: "Hermclaw orchestrator deployment: LiteLLM, migration, services, SearXNG, admin token, health"
+  license: proprietary
+  min_ansible_version: "2.17"
+  platforms:
+    - name: Debian
+      versions:
+        - trixie
+dependencies: []

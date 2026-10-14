@@ -1,4 +1,4 @@
-# nginx – webroot and baseline site on .223 (P01 1.12)
+# nginx – webroot and the Hermclaw site on .223 (P01 1.12, P32 32.7: headers/CSP, optional TLS)
 - name: Validate the nginx settings
   ansible.builtin.import_tasks: validate.yml
   tags: [nginx]
@@ -53,6 +53,11 @@
   ansible.builtin.import_tasks: sites_include.yml
   when: hermclaw_install_packages | bool
   tags: [nginx]
+
+- name: TLS certificate and key
+  ansible.builtin.import_tasks: tls.yml
+  when: nginx_tls_enabled | bool
+  tags: [nginx, tls]
 
 - name: Install and validate the site
   tags: [nginx]

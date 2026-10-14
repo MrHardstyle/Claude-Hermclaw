@@ -87,6 +87,7 @@
     owner: root
     group: "{{ hermclaw_group }}"
     mode: "0640"
+  register: systemd_skeleton_env_file
   when: "'orchestrator' in group_names"
   tags: [systemd]
 
@@ -97,6 +98,7 @@
     owner: root
     group: "{{ hermclaw_group }}"
     mode: "0640"
+  register: systemd_skeleton_worker_env_file
   vars:
     systemd_skeleton_worker_kind: "{{ 'execution' if 'execution_workers' in group_names else 'model' }}"
   when: group_names | intersect(['execution_workers', 'model_workers']) | length > 0
@@ -110,6 +112,7 @@
     group: root
     mode: "0644"
   loop: "{{ systemd_skeleton_host_units }}"
+  register: systemd_skeleton_unit_files
   notify: Reload systemd
   tags: [systemd]
 

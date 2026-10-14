@@ -22,6 +22,15 @@
     fail_msg: "python3 {{ common_python_version.stdout }} is older than {{ common_python_min_version }}"
     quiet: true
 
+# After the first deployment (P32, playbooks/deploy.yml) hermclaw_venv is a symlink to the active release venv
+# (venv-<version>); the bootstrap then leaves it alone and only checks that the active release works.
+- name: Inspect the application virtualenv path
+  ansible.builtin.stat:
+    path: "{{ hermclaw_venv }}"
+    follow: false
+    get_checksum: false
+  register: common_venv_path
+
 - name: Create the application virtualenv (owned by root, read-only for services)
   ansible.builtin.command:
     argv:
@@ -30,7 +39,9 @@
       - venv
       - "{{ hermclaw_venv }}"
     creates: "{{ hermclaw_venv }}/bin/python"
-  when: common_create_venv | bool
+  when:
+    - common_create_venv | bool
+    - not common_venv_path.stat.islnk | default(false)
 
 - name: Check that the virtualenv works
   ansible.builtin.command:
@@ -38,8 +49,21 @@
       - "{{ hermclaw_venv }}/bin/python"
       - -c
       - "import sys, venv; assert sys.prefix != sys.base_prefix"
+  register: common_venv_check
   changed_when: false
+  failed_when: false
   check_mode: false
   when:
     - common_create_venv | bool
-    - not ansible_check_mode
+    - not (ansible_check_mode and not common_venv_path.stat.exists)
+
+- name: Require a working virtualenv
+  ansible.builtin.assert:
+    that: common_venv_check.rc == 0
+    fail_msg: >-
+      {{ hermclaw_venv }}{{ (' -> ' ~ common_venv_path.stat.lnk_target) if common_venv_path.stat.islnk | default(false) else '' }}
+      does not work ({{ common_venv_check.stderr | default(common_venv_check.msg | default('')) | trim | truncate(300) }})
+      - {{ 'the active release venv is broken or was removed: re-run playbooks/deploy.yml'
+           if common_venv_path.stat.islnk | default(false) else 'remove it and re-run the bootstrap' }}.
+    quiet: true
+  when: common_venv_check is not skipped

@@ -1,0 +1,31 @@
+# Operator scripts of the release (scripts/ops/) that belong to this host, root-owned 0755. Copied from the
+# release directory on the control node, so .223 (no runtime payload) gets its SSH gate the same way.
+- name: Install the operator scripts of release {{ hermclaw_version }}
+  ansible.builtin.copy:
+    src: "{{ hermclaw_release_dir }}/scripts/ops/{{ item.name }}"
+    dest: "{{ item.dest }}/{{ item.name }}"
+    owner: root
+    group: root
+    mode: "0755"
+  loop: >-
+    {{ group_names | select('in', hermclaw_release_operator_scripts.keys() | list)
+       | map('extract', hermclaw_release_operator_scripts) | flatten | unique(attribute='name') }}
+  loop_control:
+    label: "{{ item.dest }}/{{ item.name }}"
+  when: (hermclaw_release_dir ~ '/scripts/ops/' ~ item.name) is file
+
+- name: Write the SSH gate allow-list
+  ansible.builtin.copy:
+    content: |
+      # Managed by Hermclaw - allow-list of scripts/ops/hermclaw-ssh-gate (one extended regular expression per
+      # line, matched against the whole command; 'shell:<regex>' for commands with shell metacharacters).
+      {% for rule in hermclaw_release_ssh_gate_allowlist %}
+      {{ rule }}
+      {% endfor %}
+    dest: "{{ hermclaw_release_ssh_gate_allowlist_file }}"
+    owner: root
+    group: root
+    mode: "0644"
+  when:
+    - hermclaw_release_ssh_gate_allowlist | length > 0
+    - group_names | intersect(['webui', 'execution_workers', 'model_workers']) | length > 0

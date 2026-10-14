@@ -1,0 +1,9 @@
+# hermclaw_verify – end of the deployment (P32 32.9): `hermclaw doctor` on the orchestrator in the services'
+# context (operator CLI: systemd-run as hermclaw with EnvironmentFile + LoadCredentialEncrypted), after every host
+# of the run is deployed. A failing check stops the play and prints the doctor report.
+hermclaw_verify_doctor: "{{ hermclaw_manage_services | bool }}"
+# per probe HTTP timeout (seconds) of the doctor
+hermclaw_verify_doctor_timeout: 10
+# Doctor checks whose "fail" is reported but tolerated, e.g. ["models:model-224"] with hermclaw_worker_pull_models:
+# false, or ["research"] while SearXNG's upstream engines are blocked. Empty = every failure is fatal.
+hermclaw_verify_doctor_tolerate: []

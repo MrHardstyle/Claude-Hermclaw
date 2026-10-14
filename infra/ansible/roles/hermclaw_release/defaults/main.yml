@@ -1,0 +1,54 @@
+# hermclaw_release – building blocks of the deployment shared by every host (P32 32.1, 32.3, 32.4, 32.8, 32.10):
+# preflight, release payload + versioned venv, atomic switch, pruning, operator scripts, credential checks and
+# unit enablement. Release layout: docs/architecture/deployment.md.
+
+# Debian 13's python3 (CPython 3.13, research 20261014-029); the release must be built for the same minor.
+hermclaw_release_python: "{{ common_python_bin | default('/usr/bin/python3') }}"
+hermclaw_release_payload: "hermclaw-runtime-{{ hermclaw_version }}.tar"
+hermclaw_release_venv_dir: "{{ hermclaw_install_dir }}/venv-{{ hermclaw_version }}"
+hermclaw_release_unpack_dir: "{{ hermclaw_releases_dir }}/{{ hermclaw_version }}"
+hermclaw_release_current_link: "{{ hermclaw_install_dir }}/current"
+# written last into a complete venv / payload; a directory without it is an interrupted install and is replaced
+hermclaw_release_venv_marker: .hermclaw-release
+hermclaw_release_unpack_marker: .hermclaw-unpacked
+
+# Inventory groups whose hosts run the Python runtime (venv) and the payloads they need from the release.
+hermclaw_release_python_groups: [orchestrator, execution_workers, model_workers]
+# Console entry points each group verifies after the install (its units start them).
+hermclaw_release_entry_points:
+  orchestrator: [hermclaw]
+  execution_workers: [hermclaw, hermclaw-exec-worker]
+  model_workers: [hermclaw, hermclaw-model-worker]
+
+# Operator scripts of the release (scripts/ops/) per group: installed root-owned 0755. The SSH gate goes where
+# the forced command of the runtime key expects it (common_ssh_forced_command, scripts/ops/hermclaw-ssh-gate).
+hermclaw_release_operator_scripts:
+  orchestrator:
+    - {name: hermclaw-backup, dest: "{{ hermclaw_bin_dir }}"}
+    - {name: hermclaw-restore-test, dest: "{{ hermclaw_bin_dir }}"}
+  execution_workers:
+    - {name: hermclaw-build-sandbox-images, dest: "{{ hermclaw_bin_dir }}"}
+    - {name: hermclaw-ssh-gate, dest: /usr/local/bin}
+  model_workers:
+    - {name: hermclaw-model-pull, dest: "{{ hermclaw_bin_dir }}"}
+    - {name: hermclaw-ssh-gate, dest: /usr/local/bin}
+  webui:
+    - {name: hermclaw-ssh-gate, dest: /usr/local/bin}
+# Allow-list of the SSH gate (/etc/hermclaw/ssh-allowlist, one ERE per line, see scripts/ops/hermclaw-ssh-gate).
+# Empty = the deployment never touches an existing allow-list.
+hermclaw_release_ssh_gate_allowlist: []
+hermclaw_release_ssh_gate_allowlist_file: "{{ hermclaw_config_dir }}/ssh-allowlist"
+
+# Units (per group) whose credentials are checked by the preflight and which the host roles enable.
+hermclaw_release_units:
+  orchestrator: [hermclaw-litellm.service, hermclaw-api.service, hermclaw-scheduler.service, hermclaw-backup.service]
+  execution_workers: [hermclaw-exec-worker.service]
+  model_workers: [hermclaw-model-worker.service]
+hermclaw_release_systemd_dir: /etc/systemd/system
+# Also decrypt every credential once (hermclaw-credential check, the value is never shown): catches blobs that
+# were encrypted on another host or whose TPM2/PCR binding no longer matches (status 243/CREDENTIALS).
+hermclaw_release_check_credentials_decrypt: "{{ hermclaw_manage_services | bool }}"
+
+# Host-local Ansible fact (ansible_local.hermclaw): marks a host as deployed, so that the bootstrap renders the
+# same files as the deployment afterwards (SearXNG Quadlet [Install], playbooks/site.yml stays idempotent).
+hermclaw_release_facts_dir: /etc/ansible/facts.d

@@ -1,0 +1,156 @@
+# hermclaw_ui – unpack the UI build of the release into a versioned directory and switch the webroot symlink.
+- name: Validate the UI settings
+  ansible.builtin.assert:
+    that:
+      - hermclaw_ui_release_dir is match('^/[A-Za-z0-9._/-]+$')
+      - hermclaw_ui_releases_dir | dirname == hermclaw_webroot | dirname
+      - hermclaw_ui_base_url is match('^https?://[A-Za-z0-9.:-]+$')
+      - hermclaw_ui_host_header is match('^[A-Za-z0-9.-]+$')
+    fail_msg: >-
+      invalid UI deployment setting: hermclaw_ui_releases_dir must be a sibling of hermclaw_webroot
+      ({{ hermclaw_webroot | dirname }}), the health URL http(s)://host[:port] and the Host header a plain name
+    quiet: true
+
+- name: Read the release metadata
+  ansible.builtin.set_fact:
+    hermclaw_ui_meta: "{{ lookup('ansible.builtin.file', hermclaw_release_dir ~ '/release.json') | from_json }}"
+
+- name: Create the UI releases directory
+  ansible.builtin.file:
+    path: "{{ hermclaw_ui_releases_dir }}"
+    state: directory
+    owner: "{{ hermclaw_ui_owner }}"
+    group: "{{ hermclaw_ui_group }}"
+    mode: "0755"
+
+- name: Check for the unpacked UI build of {{ hermclaw_version }}
+  ansible.builtin.stat:
+    path: "{{ hermclaw_ui_release_dir }}.release"
+  register: hermclaw_ui_marker
+
+- name: Unpack the UI build of {{ hermclaw_version }}
+  when: not hermclaw_ui_marker.stat.exists
+  block:
+    - name: Remove an interrupted unpack
+      ansible.builtin.file:
+        path: "{{ hermclaw_ui_release_dir }}"
+        state: absent
+
+    - name: Create the UI release directory
+      ansible.builtin.file:
+        path: "{{ hermclaw_ui_release_dir }}"
+        state: directory
+        owner: "{{ hermclaw_ui_owner }}"
+        group: "{{ hermclaw_ui_group }}"
+        mode: "0755"
+
+    - name: Copy and unpack the UI build
+      ansible.builtin.unarchive:
+        src: "{{ hermclaw_release_dir }}/{{ hermclaw_ui_meta.ui.payload }}"
+        dest: "{{ hermclaw_ui_release_dir }}"
+        owner: "{{ hermclaw_ui_owner }}"
+        group: "{{ hermclaw_ui_group }}"
+
+    - name: Check the unpacked build
+      ansible.builtin.stat:
+        path: "{{ hermclaw_ui_release_dir }}/index.html"
+        get_checksum: false
+      register: hermclaw_ui_index
+
+    - name: Require index.html in the UI build
+      ansible.builtin.assert:
+        that: hermclaw_ui_index.stat.exists or ansible_check_mode
+        fail_msg: "{{ hermclaw_ui_meta.ui.payload }} has no index.html"
+        quiet: true
+
+    - name: Mark the UI build as complete
+      ansible.builtin.copy:
+        content: "{{ {'version': hermclaw_version, 'payload': hermclaw_ui_meta.ui.payload} | to_nice_json }}\n"
+        dest: "{{ hermclaw_ui_release_dir }}.release"
+        owner: root
+        group: root
+        mode: "0644"
+
+- name: Inspect the webroot {{ hermclaw_webroot }}
+  ansible.builtin.stat:
+    path: "{{ hermclaw_webroot }}"
+    follow: false
+    get_checksum: false
+  register: hermclaw_ui_webroot
+
+- name: Replace the bootstrap's webroot directory (no data loss)
+  when:
+    - hermclaw_ui_webroot.stat.exists
+    - hermclaw_ui_webroot.stat.isdir
+    - not hermclaw_ui_webroot.stat.islnk
+  block:
+    - name: List the webroot directory
+      ansible.builtin.find:
+        paths: ["{{ hermclaw_webroot }}"]
+        file_type: any
+        hidden: true
+      register: hermclaw_ui_webroot_files
+
+    - name: Read the placeholder page
+      ansible.builtin.slurp:
+        src: "{{ hermclaw_webroot }}/index.html"
+      register: hermclaw_ui_placeholder
+      when: hermclaw_ui_webroot_files.files | map(attribute='path') | map('basename') | list == ['index.html']
+
+    - name: Decide whether the webroot holds only the placeholder
+      ansible.builtin.set_fact:
+        hermclaw_ui_only_placeholder: >-
+          {{ hermclaw_ui_placeholder is not skipped
+             and hermclaw_ui_placeholder_marker in (hermclaw_ui_placeholder.content | default('') | b64decode) }}
+
+    - name: Remove the placeholder webroot
+      ansible.builtin.file:
+        path: "{{ hermclaw_webroot }}"
+        state: absent
+      when: hermclaw_ui_only_placeholder | bool
+
+    - name: Keep a webroot with other content under a .pre-release-<time> name
+      ansible.builtin.command:
+        argv:
+          - mv
+          - --no-target-directory
+          - --
+          - "{{ hermclaw_webroot }}"
+          - "{{ hermclaw_webroot }}.pre-release-{{ now(utc=true, fmt='%Y%m%dT%H%M%SZ') }}"
+      changed_when: true
+      when: not hermclaw_ui_only_placeholder | bool
+
+- name: Activate the UI build (atomic symlink switch) of {{ hermclaw_version }}
+  ansible.builtin.file:
+    src: "{{ hermclaw_ui_release_dir | relpath(hermclaw_webroot | dirname) }}"
+    dest: "{{ hermclaw_webroot }}"
+    state: link
+  register: hermclaw_ui_switch
+  when: >-
+    not (ansible_check_mode and hermclaw_ui_webroot.stat.isdir | default(false) and not hermclaw_ui_webroot.stat.islnk)
+
+- name: Prune old UI builds
+  ansible.builtin.import_tasks: prune.yml
+
+# static files need no reload; it drops open-file caches an operator may have configured - only after nginx -t
+- name: Test the nginx configuration before the reload
+  ansible.builtin.command:
+    argv: [nginx, -t, -q]
+  changed_when: false
+  when:
+    - hermclaw_ui_switch is changed
+    - hermclaw_manage_services | bool
+
+- name: Reload nginx
+  ansible.builtin.systemd_service:
+    name: nginx
+    state: reloaded
+  when:
+    - hermclaw_ui_switch is changed
+    - hermclaw_manage_services | bool
+
+- name: Health checks through the web host
+  ansible.builtin.import_tasks: health.yml
+  when:
+    - hermclaw_ui_health | bool
+    - not ansible_check_mode

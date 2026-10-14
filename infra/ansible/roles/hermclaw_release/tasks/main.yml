@@ -1,0 +1,166 @@
+# hermclaw_release – unpack the runtime payload and install it into a fresh venv-<version> (offline, hash-checked).
+# Nothing here touches the active release: the switch (switch.yml) happens later, when the host role is ready.
+- name: Validate the deployment settings
+  ansible.builtin.import_tasks: validate.yml
+
+- name: Read the release metadata
+  ansible.builtin.set_fact:
+    hermclaw_release_meta: "{{ lookup('ansible.builtin.file', hermclaw_release_dir ~ '/release.json') | from_json }}"
+  when: hermclaw_release_meta is not defined or hermclaw_release_meta.version != hermclaw_version
+
+- name: Create the releases directory
+  ansible.builtin.file:
+    path: "{{ hermclaw_releases_dir }}"
+    state: directory
+    owner: root
+    group: root
+    mode: "0755"
+
+# ---------------------------------------------------------------------------------------------- payload
+- name: Check for the unpacked payload of {{ hermclaw_version }}
+  ansible.builtin.stat:
+    path: "{{ hermclaw_release_unpack_dir }}/{{ hermclaw_release_unpack_marker }}"
+  register: hermclaw_release_unpacked
+
+- name: Transfer and unpack the release payload
+  when: not hermclaw_release_unpacked.stat.exists
+  block:
+    - name: Remove an interrupted unpack of {{ hermclaw_version }}
+      ansible.builtin.file:
+        path: "{{ hermclaw_release_unpack_dir }}"
+        state: absent
+
+    - name: Create the payload directory of {{ hermclaw_version }}
+      ansible.builtin.file:
+        path: "{{ hermclaw_release_unpack_dir }}"
+        state: directory
+        owner: root
+        group: root
+        mode: "0755"
+
+    - name: Copy and unpack the runtime payload
+      ansible.builtin.unarchive:
+        src: "{{ hermclaw_release_dir }}/{{ hermclaw_release_payload }}"
+        dest: "{{ hermclaw_release_unpack_dir }}"
+        owner: root
+        group: root
+
+    - name: Verify the unpacked payload (SHA256SUMS)
+      ansible.builtin.command:
+        argv: [sha256sum, --check, --quiet, --strict, SHA256SUMS]
+        chdir: "{{ hermclaw_release_unpack_dir }}"
+      changed_when: false
+
+    - name: Mark the payload as complete
+      ansible.builtin.copy:
+        content: "{{ hermclaw_version }} {{ hermclaw_release_meta.runtime.lock_sha256 }}\n"
+        dest: "{{ hermclaw_release_unpack_dir }}/{{ hermclaw_release_unpack_marker }}"
+        owner: root
+        group: root
+        mode: "0644"
+
+# ---------------------------------------------------------------------------------------------- venv
+- name: Check for the installed venv of {{ hermclaw_version }}
+  ansible.builtin.stat:
+    path: "{{ hermclaw_release_venv_dir }}/{{ hermclaw_release_venv_marker }}"
+  register: hermclaw_release_venv_stat
+
+- name: Install the release into a fresh venv
+  when: not hermclaw_release_venv_stat.stat.exists
+  block:
+    # a venv cannot be moved (absolute shebangs, research 029 B2): it is created at its final path
+    - name: Remove an interrupted install of {{ hermclaw_version }}
+      ansible.builtin.file:
+        path: "{{ hermclaw_release_venv_dir }}"
+        state: absent
+
+    - name: Create the venv {{ hermclaw_release_venv_dir }}
+      ansible.builtin.command:
+        argv: ["{{ hermclaw_release_python }}", -m, venv, "{{ hermclaw_release_venv_dir }}"]
+        creates: "{{ hermclaw_release_venv_dir }}/bin/python"
+
+    - name: Install the release offline from the hash-checked wheelhouse lock
+      ansible.builtin.command:
+        argv:
+          - "{{ hermclaw_release_venv_dir }}/bin/python"
+          - -m
+          - pip
+          - install
+          - --no-index
+          - --find-links
+          - "{{ hermclaw_release_unpack_dir }}/wheelhouse"
+          - --only-binary=:all:
+          - --no-cache-dir
+          - --require-hashes
+          - --requirement
+          - "{{ hermclaw_release_unpack_dir }}/requirements.lock"
+      environment:
+        PIP_DISABLE_PIP_VERSION_CHECK: "1"
+        PIP_NO_INPUT: "1"
+        PIP_ROOT_USER_ACTION: ignore
+      changed_when: true
+
+    - name: Check the installed dependencies (pip check)
+      ansible.builtin.command:
+        argv: ["{{ hermclaw_release_venv_dir }}/bin/python", -m, pip, check]
+      changed_when: false
+
+    # services run as hermclaw and only read the venv (ProtectSystem=strict)
+    - name: Make the venv root-owned and world-readable
+      ansible.builtin.file:
+        path: "{{ hermclaw_release_venv_dir }}"
+        state: directory
+        recurse: true
+        follow: false
+        owner: root
+        group: root
+        mode: "u=rwX,go=rX"
+
+    - name: Mark the venv as complete
+      ansible.builtin.copy:
+        content: "{{ {'version': hermclaw_version, 'lock_sha256': hermclaw_release_meta.runtime.lock_sha256,
+                       'python': hermclaw_release_meta.python.version} | to_nice_json }}\n"
+        dest: "{{ hermclaw_release_venv_dir }}/{{ hermclaw_release_venv_marker }}"
+        owner: root
+        group: root
+        mode: "0644"
+
+- name: Verify the release venv (version, entry points, imports)
+  ansible.builtin.command:
+    argv: >-
+      {{ [hermclaw_release_venv_dir ~ '/bin/python', '-I', '-c', hermclaw_release_verify_script, hermclaw_version]
+         + (group_names | select('in', hermclaw_release_entry_points.keys() | list)
+            | map('extract', hermclaw_release_entry_points) | flatten | unique) }}
+  vars:
+    hermclaw_release_verify_script: |
+      import importlib.metadata as md, sys
+      version, wanted = sys.argv[1], sys.argv[2:]
+      dist = md.distribution("hermclaw")
+      if dist.version != version:
+          sys.exit(f"hermclaw {dist.version} installed, expected {version}")
+      eps = {e.name: e for e in dist.entry_points if e.group == "console_scripts"}
+      for name in wanted:
+          if name not in eps:
+              sys.exit(f"console entry point {name} missing")
+          try:
+              eps[name].load()
+          except Exception as exc:
+              sys.exit(f"console entry point {name} = {eps[name].value} cannot be loaded: {type(exc).__name__}: {exc}")
+      import hermclaw.cli, hermclaw.persistence.migrate
+      print(f"hermclaw {version}: {', '.join(wanted)} ok")
+  register: hermclaw_release_verify
+  changed_when: false
+  check_mode: false
+  when: not (ansible_check_mode and not hermclaw_release_venv_stat.stat.exists)
+
+- name: Run hermclaw --help of the new release
+  ansible.builtin.command:
+    argv: ["{{ hermclaw_release_venv_dir }}/bin/hermclaw", --help]
+  environment:
+    PYTHONDONTWRITEBYTECODE: "1"
+  changed_when: false
+  check_mode: false
+  when: not (ansible_check_mode and not hermclaw_release_venv_stat.stat.exists)
+
+- name: Operator scripts
+  ansible.builtin.import_tasks: scripts.yml

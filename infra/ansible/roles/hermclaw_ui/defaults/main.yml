@@ -1,0 +1,30 @@
+# hermclaw_ui – static UI build of the release on .223 (P32 32.2).
+#
+# The UI is built once per release on the control node by scripts/deploy/build-release.sh (npm ci && npm run build
+# from ui/package-lock.json): the deployed bundle is the one the E2E suite ran against, its checksum is part of the
+# release, .223 needs neither the npm registry nor a build at deploy time, and a rollback reuses the exact old
+# bundle. (Node 22 on .223, role nodejs, stays available for operator rebuilds, e.g. HERMCLAW_UI_BASE builds.)
+#
+# Layout: <hermclaw_ui_releases_dir>/<version>/ (unpacked bundle) + <version>.release (completion marker, outside the
+# served tree); hermclaw_webroot -> <releases>/<version> is switched atomically; old builds are pruned
+# (hermclaw_keep_releases).
+hermclaw_ui_payload: "hermclaw-ui-{{ hermclaw_version }}.tar.gz"
+hermclaw_ui_release_dir: "{{ hermclaw_ui_releases_dir }}/{{ hermclaw_version }}"
+hermclaw_ui_owner: "{{ nginx_webroot_owner | default('root') }}"
+hermclaw_ui_group: "{{ nginx_webroot_group | default('www-data') }}"
+# the bootstrap's placeholder page (roles/nginx/templates/index.html.j2); a webroot holding only it is replaced
+hermclaw_ui_placeholder_marker: "Managed by Hermclaw – placeholder"
+
+# 32.9 – checks through .223 from the control node after the switch: /healthz, / (index.html + CSP), /api/health
+hermclaw_ui_health: "{{ hermclaw_manage_services | bool }}"
+hermclaw_ui_base_url: >-
+  {{ ('https://' if nginx_tls_enabled | default(false) | bool else 'http://') ~ (ansible_host | default(inventory_hostname))
+     ~ ((':' ~ nginx_tls_port) if nginx_tls_enabled | default(false) | bool and nginx_tls_port | default(443) | int != 443 else '')
+     ~ ((':' ~ nginx_listen_port) if not nginx_tls_enabled | default(false) | bool and nginx_listen_port | default(80) | int != 80 else '') }}
+# Host header of the checks: the first real server_name (the site is not necessarily the default server)
+hermclaw_ui_host_header: >-
+  {{ ((nginx_server_name | default('_')).split() | reject('equalto', '_') | list + [ansible_host | default(inventory_hostname)])[0] }}
+# self-signed or LAN-CA certificates are usually not trusted by the control node
+hermclaw_ui_validate_certs: false
+hermclaw_ui_health_retries: 15
+hermclaw_ui_health_delay: 2

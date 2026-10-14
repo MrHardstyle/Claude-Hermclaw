@@ -1,0 +1,40 @@
+# hermclaw_worker – worker daemons on .222 (execution) and .224 (model/media) (P32 32.3, 32.4, 32.6).
+hermclaw_worker_kind: "{{ 'execution' if 'execution_workers' in group_names else 'model' }}"
+hermclaw_worker_unit: "{{ 'hermclaw-exec-worker.service' if hermclaw_worker_kind == 'execution' else 'hermclaw-model-worker.service' }}"
+hermclaw_worker_venv: "{{ hermclaw_install_dir }}/venv-{{ hermclaw_version }}"
+# /health of the daemon (unauthenticated), on its LAN bind address (worker.env WORKER_BIND)
+hermclaw_worker_health_url: "http://{{ systemd_skeleton_worker_bind | default(ansible_host | default('127.0.0.1')) }}:{{ hermclaw_worker_port }}/health"
+hermclaw_worker_health_retries: 30
+hermclaw_worker_health_delay: 2
+
+# --- execution worker: sandbox toolchain images (rootless Podman of hermclaw, R-022) ----------------------
+# Built with the release's scripts/ops/hermclaw-build-sandbox-images; tags that exist are never rebuilt (bump
+# hermclaw_sandbox_image_version for new images). Needs Podman, the user manager and network for the base images.
+hermclaw_worker_build_sandbox_images: "{{ hermclaw_manage_services | bool }}"
+hermclaw_worker_sandbox_build_timeout: 7200
+hermclaw_worker_sandbox_images_dir: "{{ hermclaw_releases_dir }}/{{ hermclaw_version }}/sandbox-images"
+
+# --- model worker -----------------------------------------------------------------------------------------
+# media pipeline (NVENC on Pascal via Debian's ffmpeg, research 20261014-026 F1-F4)
+hermclaw_worker_model_packages: [ffmpeg]
+# 32.6: pull the model tags of models.yaml with scripts/ops/hermclaw-model-pull (opt-out). Runs as a transient
+# unit polled by Ansible, so a dropped SSH session does not abort a multi-hour download; tags that are already
+# installed are not pulled again.
+hermclaw_worker_pull_models: true
+hermclaw_worker_ollama_bin: /usr/local/bin/ollama
+hermclaw_worker_ollama_url: "http://127.0.0.1:{{ hermclaw_ollama_port }}"
+hermclaw_worker_model_pull_timeout: 21600
+hermclaw_worker_model_pull_poll: 30
+# disk precheck: free space on the OLLAMA_MODELS file system >= sum(missing tags) + headroom (download sizes from
+# research 20261014-026; unknown tags count with the default)
+hermclaw_worker_model_sizes_gb:
+  "gemma4:26b": 18
+  "gemma4:12b": 8
+  "qwen3-coder:30b": 19
+  "qwen3.8:27b": 18
+  "qwen3:8b": 5.2
+  "embeddinggemma:300m": 0.7
+hermclaw_worker_model_default_size_gb: 20
+hermclaw_worker_model_disk_headroom_gb: 10
+# Ollama's drop-in (role ollama) names the models directory (OLLAMA_MODELS)
+hermclaw_worker_ollama_dropin: /etc/systemd/system/ollama.service.d/hermclaw.conf

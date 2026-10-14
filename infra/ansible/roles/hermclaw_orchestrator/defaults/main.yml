@@ -1,0 +1,40 @@
+# hermclaw_orchestrator – deployment of .225 (P32 32.1, 32.5, 32.8, 32.9): operator CLI, LiteLLM proxy venv +
+# config, schema migration before the restart, services, SearXNG, admin API token, health checks.
+
+# LiteLLM: unit path of the venv (symlink) and the generated config (`hermclaw litellm-config`, models.yaml).
+hermclaw_orchestrator_litellm_link: "{{ systemd_skeleton_litellm_venv | default(hermclaw_litellm_root ~ '/venv') }}"
+hermclaw_orchestrator_litellm_config: "{{ hermclaw_config_dir }}/litellm.yaml"
+hermclaw_orchestrator_litellm_url: "http://{{ systemd_skeleton_litellm_bind | default('127.0.0.1') }}:{{ hermclaw_litellm_port }}"
+# previous LiteLLM venvs kept next to the active one
+hermclaw_orchestrator_litellm_keep: 1
+
+# Tasks that need PostgreSQL and a running systemd (systemd-run): migration, admin token, database revision.
+hermclaw_orchestrator_run_database_tasks: "{{ hermclaw_manage_services | bool }}"
+# Rollback to a release that does not know the database's newer schema revision: downgrade it with the newer,
+# still installed release's migrations (docs/runbooks/upgrade.md). Off: the play stops and explains the options.
+hermclaw_orchestrator_allow_schema_downgrade: false
+
+# 32.8 admin API token: created once with `hermclaw token-create` (admin scope) and stored only as the encrypted
+# credential <credstore>/hermclaw-<name>; read it with
+#   sudo systemd-creds decrypt --name=api-operator-token /etc/credstore.encrypted/hermclaw-api-operator-token -
+hermclaw_orchestrator_admin_token: true
+hermclaw_orchestrator_admin_token_credential: api-operator-token
+hermclaw_orchestrator_admin_token_name: "operator-admin-{{ now(utc=true, fmt='%Y%m%d%H%M%S') }}"
+
+# Units of the orchestrator (enabled by the deployment; systemd_skeleton installs them).
+hermclaw_orchestrator_units: [hermclaw-litellm.service, hermclaw-api.service, hermclaw-scheduler.service, hermclaw-backup.timer]
+hermclaw_orchestrator_searxng: "{{ systemd_skeleton_searxng_enabled | default(true) }}"
+hermclaw_orchestrator_searxng_url: "http://127.0.0.1:{{ hermclaw_searxng_port }}"
+
+# Health checks after the restart (32.9)
+hermclaw_orchestrator_api_url: "http://{{ hermclaw_orchestrator_ip }}:{{ hermclaw_api_port }}"
+hermclaw_orchestrator_health_retries: 30
+hermclaw_orchestrator_health_delay: 2
+# the first SearXNG start pulls the image (TimeoutStartSec=300 in the Quadlet)
+hermclaw_orchestrator_searxng_retries: 60
+hermclaw_orchestrator_searxng_delay: 5
+
+# shared with the other deployment roles (same values, kept here so this role does not depend on their defaults)
+hermclaw_orchestrator_venv: "{{ hermclaw_install_dir }}/venv-{{ hermclaw_version }}"
+hermclaw_orchestrator_python: "{{ common_python_bin | default('/usr/bin/python3') }}"
+hermclaw_orchestrator_config_staging: "{{ hermclaw_config_staging_dir | default(hermclaw_config_dir ~ '/deploy-staging') }}"

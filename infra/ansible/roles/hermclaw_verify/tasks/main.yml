@@ -1,0 +1,46 @@
+# hermclaw_verify – installation check of the whole deployment with the deployed release's own doctor.
+- name: Validate the verification settings
+  ansible.builtin.assert:
+    that:
+      - hermclaw_verify_doctor_tolerate is sequence
+      - hermclaw_verify_doctor_tolerate is not string
+      - (hermclaw_verify_doctor_timeout | string) is match('^[0-9]+(\.[0-9]+)?$')
+    fail_msg: hermclaw_verify_doctor_tolerate must be a list of doctor check names, the timeout a number
+    quiet: true
+
+- name: Run hermclaw doctor in the services' context
+  ansible.builtin.command:
+    argv: ["{{ hermclaw_cli_wrapper }}", doctor, --json, --timeout, "{{ hermclaw_verify_doctor_timeout | string }}"]
+  register: hermclaw_verify_doctor_run
+  changed_when: false
+  failed_when: >-
+    hermclaw_verify_doctor_run.rc not in [0, 1]
+    or not (hermclaw_verify_doctor_run.stdout | trim).startswith('{')
+  check_mode: false
+  when: hermclaw_verify_doctor | bool
+
+- name: Evaluate the doctor report
+  when: hermclaw_verify_doctor | bool
+  block:
+    - name: Collect the failed checks
+      ansible.builtin.set_fact:
+        hermclaw_verify_report: "{{ hermclaw_verify_doctor_run.stdout | from_json }}"
+        hermclaw_verify_failed: >-
+          {{ (hermclaw_verify_doctor_run.stdout | from_json).checks | selectattr('status', 'equalto', 'fail')
+             | rejectattr('name', 'in', hermclaw_verify_doctor_tolerate) | list }}
+
+    - name: Show the doctor report
+      ansible.builtin.debug:
+        msg: >-
+          {{ hermclaw_verify_report.checks | map(attribute='status') | map('upper') | zip(hermclaw_verify_report.checks
+             | map(attribute='name'), hermclaw_verify_report.checks | map(attribute='detail')) | map('join', '  ') | list }}
+
+    - name: Stop when the installation is not able to run jobs
+      ansible.builtin.fail:
+        msg: |-
+          hermclaw doctor on {{ inventory_hostname }} reports {{ hermclaw_verify_failed | length }} failed check(s):
+          {% for c in hermclaw_verify_failed %}
+          FAIL  {{ c.name }}  {{ c.detail }}
+          {% endfor %}
+          Full report: sudo {{ hermclaw_cli_wrapper }} doctor
+      when: hermclaw_verify_failed | length > 0

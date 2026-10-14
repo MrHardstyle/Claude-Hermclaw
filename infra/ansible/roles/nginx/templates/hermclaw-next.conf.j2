@@ -1,32 +1,90 @@
-# Managed by Hermclaw – baseline nginx site for Hermclaw Next (P01 1.12).
-# Static React build from {{ hermclaw_webroot }}, API proxy to {{ nginx_api_upstream }}.
-# SSE endpoints are proxied unbuffered (research 20261008-014). The deployment phase
-# replaces this file with infra/nginx/hermclaw-next.conf (TLS, rate limits, headers).
+# Managed by Hermclaw - nginx site of Hermclaw Next on .223 (P01 1.12, P32 32.7; research 20261008-014, 20261014-028).
+# Static React build from {{ hermclaw_webroot }} (a symlink to the active build in {{ hermclaw_ui_releases_dir | default(hermclaw_webroot ~ '-releases') }}),
+# API proxy to {{ nginx_api_upstream }}. SSE endpoints are proxied unbuffered and uncompressed. Security headers and
+# the Content-Security-Policy are repeated in every location that sets its own add_header (nginx 1.26 does not
+# merge add_header levels). TLS: {{ 'on (port ' ~ nginx_tls_port ~ ', port ' ~ nginx_listen_port ~ ' redirects)' if nginx_tls_enabled | bool else 'off' }}.
+{% set hermclaw_headers = [
+     ['Content-Security-Policy', nginx_csp ~ ('; upgrade-insecure-requests' if nginx_tls_enabled | bool else '')],
+     ['X-Content-Type-Options', 'nosniff'],
+     ['X-Frame-Options', 'DENY'],
+     ['Referrer-Policy', 'same-origin'],
+     ['Cross-Origin-Opener-Policy', 'same-origin'],
+     ['Cross-Origin-Resource-Policy', 'same-origin'],
+     ['Permissions-Policy', nginx_permissions_policy],
+   ] + ([['Strict-Transport-Security', 'max-age=' ~ nginx_hsts_max_age]]
+        if nginx_tls_enabled | bool and nginx_hsts_max_age | int > 0 else []) %}
+{% macro security_headers() %}
+{% for name, value in hermclaw_headers %}
+        add_header {{ name }} "{{ value }}" always;
+{% endfor %}
+{% endmacro %}
+{% macro listen(port, extra) %}
+    listen {{ port }}{{ extra }}{{ ' default_server' if nginx_default_server | bool else '' }};
+{% if nginx_listen_ipv6 | bool %}
+    listen [::]:{{ port }}{{ extra }}{{ ' default_server' if nginx_default_server | bool else '' }};
+{% endif %}
+{% endmacro %}
+
+# access log without the query string: SSE URLs carry ?access_token= (EventSource cannot send headers)
+log_format hermclaw_noquery '$remote_addr - $remote_user [$time_local] "$request_method $uri $server_protocol" '
+                            '$status $body_bytes_sent "$http_referer" "$http_user_agent" $request_time';
 
 upstream hermclaw_api {
     server {{ nginx_api_upstream | regex_replace('^http://', '') }};
     keepalive 16;
 }
 
+{% if nginx_tls_enabled | bool %}
+# port {{ nginx_listen_port }}: readiness probe (hosts.yaml) and redirect to HTTPS only
 server {
-    listen {{ nginx_listen_port }}{{ ' default_server' if nginx_default_server | bool else '' }};
-{% if nginx_listen_ipv6 | bool %}
-    listen [::]:{{ nginx_listen_port }}{{ ' default_server' if nginx_default_server | bool else '' }};
+{{ listen(nginx_listen_port, '') }}    server_name {{ nginx_server_name }};
+    server_tokens off;
+    access_log /var/log/nginx/{{ nginx_site_name }}.access.log hermclaw_noquery;
+    error_log /var/log/nginx/{{ nginx_site_name }}.error.log warn;
+
+    location = /healthz {
+        access_log off;
+        default_type text/plain;
+        return 200 "ok\n";
+    }
+
+    location / {
+        return 301 https://$host{{ '' if nginx_tls_port | int == 443 else ':' ~ nginx_tls_port }}$request_uri;
+    }
+}
+
 {% endif %}
+server {
+{% if nginx_tls_enabled | bool %}
+{{ listen(nginx_tls_port, ' ssl') }}    http2 on;
+{% else %}
+{{ listen(nginx_listen_port, '') }}{% endif %}
     server_name {{ nginx_server_name }};
 
+{% if nginx_tls_enabled | bool %}
+    ssl_certificate {{ nginx_tls_cert }};
+    ssl_certificate_key {{ nginx_tls_key }};
+    ssl_protocols TLSv1.2 TLSv1.3;
+    ssl_session_cache shared:hermclaw_tls:10m;
+    ssl_session_timeout 1d;
+    ssl_session_tickets off;
+
+{% endif %}
     root {{ hermclaw_webroot }};
     index index.html;
 
     server_tokens off;
     client_max_body_size {{ nginx_client_max_body_size }};
 
-    add_header X-Content-Type-Options "nosniff" always;
-    add_header X-Frame-Options "DENY" always;
-    add_header Referrer-Policy "same-origin" always;
-
-    access_log /var/log/nginx/{{ nginx_site_name }}.access.log;
+{{ security_headers() | replace('        add_header', '    add_header') }}
+    access_log /var/log/nginx/{{ nginx_site_name }}.access.log hermclaw_noquery;
     error_log /var/log/nginx/{{ nginx_site_name }}.error.log warn;
+
+    location = /healthz {
+        access_log off;
+        default_type text/plain;
+        return 200 "ok\n";
+    }
 
     # Server-Sent Events: job event stream and global event stream
     location ~ ^/api/(jobs/[^/]+/)?events/stream$ {
@@ -62,15 +120,11 @@ server {
     }
 
     location = /index.html {
-        add_header Cache-Control "no-cache" always;
-        add_header X-Content-Type-Options "nosniff" always;
-        add_header X-Frame-Options "DENY" always;
-        add_header Referrer-Policy "same-origin" always;
+{{ security_headers() }}        add_header Cache-Control "no-cache" always;
     }
 
+    # content-hashed file names: cache forever, never fall back to index.html
     location /assets/ {
-        expires 30d;
-        add_header Cache-Control "public, immutable" always;
-        add_header X-Content-Type-Options "nosniff" always;
+{{ security_headers() }}        add_header Cache-Control "public, max-age=31536000, immutable" always;
     }
 }
