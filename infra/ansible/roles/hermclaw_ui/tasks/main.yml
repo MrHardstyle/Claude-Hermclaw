@@ -53,6 +53,7 @@
         # the archives are reproducible (mtime 0): give the files the deployment time instead, so nginx
         # Last-Modified/ETag change with every release (otherwise a same-size index.html could be answered 304)
         extra_opts: [--touch]
+      when: not ansible_check_mode   # the directory above does not exist in a dry run
 
     - name: Check the unpacked build
       ansible.builtin.stat:

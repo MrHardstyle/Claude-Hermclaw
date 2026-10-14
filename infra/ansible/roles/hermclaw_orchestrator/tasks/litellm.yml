@@ -47,6 +47,7 @@
         group: root
         # reproducible archives carry mtime 0: files get the unpack time
         extra_opts: [--touch]
+      when: not ansible_check_mode   # the directory above does not exist in a dry run
 
     - name: Verify the LiteLLM payload (SHA256SUMS)
       ansible.builtin.command:

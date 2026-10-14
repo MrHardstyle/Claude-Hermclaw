@@ -38,6 +38,7 @@
         group: root
         mode: "0755"
 
+    # check mode (dry run of an upgrade): the directory above was not created, unarchive would fail on it
     - name: Copy and unpack the runtime payload
       ansible.builtin.unarchive:
         src: "{{ hermclaw_release_dir }}/{{ hermclaw_release_payload }}"
@@ -46,6 +47,7 @@
         group: root
         # reproducible archives carry mtime 0: files get the unpack time
         extra_opts: [--touch]
+      when: not ansible_check_mode
 
     - name: Verify the unpacked payload (SHA256SUMS)
       ansible.builtin.command:
