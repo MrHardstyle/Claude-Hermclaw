@@ -1,10 +1,19 @@
-# 32.1 / 32.10 – database schema of the release, decided before any service is stopped. The new release's own
-# `hermclaw doctor --offline --json` (as hermclaw, production environment, via the operator CLI) reports the
-# revision of the database against the release head. Sets hermclaw_orchestrator_migrate (upgrade needed) and
-# hermclaw_orchestrator_downgrade (rollback below the database's revision, see docs/runbooks/upgrade.md).
+# 32.1 / 32.10 – database schema of the release, decided before any service is stopped or any live file changes.
+# The new release's own `hermclaw doctor --offline --json` (as hermclaw, production environment, via the operator
+# CLI, with the new release's staged and validated configuration) reports the revision of the database against the
+# release head. Sets hermclaw_orchestrator_migrate (upgrade needed) and hermclaw_orchestrator_downgrade (rollback
+# below the database's revision, see docs/runbooks/upgrade.md).
 - name: Read the database revision with the new release (hermclaw doctor --offline --json)
   ansible.builtin.command:
-    argv: ["{{ hermclaw_cli_wrapper }}", --venv, "{{ hermclaw_orchestrator_venv }}", doctor, --offline, --json]
+    argv:
+      - "{{ hermclaw_cli_wrapper }}"
+      - --venv
+      - "{{ hermclaw_orchestrator_venv }}"
+      - --config-dir
+      - "{{ hermclaw_orchestrator_config_staging }}"
+      - doctor
+      - --offline
+      - --json
   register: hermclaw_orchestrator_doctor_offline
   changed_when: false
   check_mode: false
@@ -71,10 +80,11 @@
         msg: >-
           The database is at schema revision {{ hermclaw_orchestrator_db_revision }}, which release {{ hermclaw_version }}
           (head {{ hermclaw_release_meta.alembic_head }}) does not know: it was migrated by a newer release. Nothing has been
-          stopped or switched. Either re-run with -e hermclaw_orchestrator_allow_schema_downgrade=true (after a backup:
-          sudo -u hermclaw /opt/hermclaw/venv/bin/python -m hermclaw.backup create) to downgrade the schema with the
-          migrations of the active release {{ hermclaw_orchestrator_active_venv.stat.lnk_target | default('?') }}, or restore
-          the pre-upgrade backup (docs/runbooks/upgrade.md, "Rollback").
+          stopped or switched (services, venvs, /etc/hermclaw and LiteLLM are unchanged). Either re-run with
+          -e hermclaw_orchestrator_allow_schema_downgrade=true (after a backup: sudo {{ hermclaw_cli_wrapper }} backup create)
+          to downgrade the schema with the migrations of the active release
+          {{ hermclaw_orchestrator_active_venv.stat.lnk_target | default('?') }}, or restore the pre-upgrade backup
+          (docs/runbooks/upgrade.md, "Rollback").
       when: not hermclaw_orchestrator_allow_schema_downgrade | bool
 
     - name: Downgrade with the active release's migrations

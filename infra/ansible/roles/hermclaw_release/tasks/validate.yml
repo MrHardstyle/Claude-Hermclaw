@@ -4,7 +4,7 @@
     that:
       - hermclaw_version is defined
       - hermclaw_version is string
-      - hermclaw_version is match('^[0-9]+(\.[0-9]+)*((a|b|rc)[0-9]+)?(\.post[0-9]+)?(\.dev[0-9]+)?$')
+      - hermclaw_version is match('^' ~ hermclaw_version_pattern ~ '$')
     fail_msg: >-
       hermclaw_version '{{ hermclaw_version | default('(undefined)') }}' is not a canonical PEP 440 version string
       (quoted, e.g. "0.1.0rc1" - the name of dist/release-<version>/ printed by scripts/deploy/build-release.sh).
@@ -13,7 +13,7 @@
 - name: Validate the release layout settings
   ansible.builtin.assert:
     that:
-      - (hermclaw_keep_releases | string) is match('^[0-9]{1,2}$')
+      - (hermclaw_keep_releases | string) is match('^[1-9][0-9]?$')
       - hermclaw_install_dir is match('^/[A-Za-z0-9._/-]+$')
       - hermclaw_releases_dir is match('^/[A-Za-z0-9._/-]+$')
       - hermclaw_webroot is match('^/[A-Za-z0-9._/-]+$')
@@ -28,7 +28,8 @@
       - hermclaw_sandbox_default_toolchain in hermclaw_sandbox_toolchains
       - (hermclaw_sandbox_image_version | string) is match('^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$')
     fail_msg: >-
-      invalid deployment setting: hermclaw_keep_releases must be 0-99, the paths absolute without '..',
+      invalid deployment setting: hermclaw_keep_releases must be 1-99 (the previous release is always kept for the
+      rollback), the paths absolute without '..',
       hermclaw_venv must live directly in hermclaw_install_dir, sandbox toolchains lowercase names
       (the default one among them) and hermclaw_sandbox_image_version a tag.
     quiet: true

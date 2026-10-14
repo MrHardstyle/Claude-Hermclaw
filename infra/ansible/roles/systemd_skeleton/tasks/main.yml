@@ -42,8 +42,13 @@
       - systemd_skeleton_litellm_venv is match('^/[A-Za-z0-9._/-]+$')
       - systemd_skeleton_searxng_image is match('^[a-z0-9.-]+(/[a-z0-9._-]+)+:[A-Za-z0-9._-]+$')
       - systemd_skeleton_searxng_image is not match('.*:latest$')
-      - systemd_skeleton_credentials.values() | flatten | reject('match', '^[a-z0-9][a-z0-9-]*$') | list | length == 0
-    fail_msg: invalid worker id, instance id, db name, path, image (must be pinned) or credential name
+      - systemd_skeleton_api_forwarded_allow_ips is match('^[0-9A-Fa-f.:]+(/[0-9]{1,3})?(,[0-9A-Fa-f.:]+(/[0-9]{1,3})?)*$')
+      - (systemd_skeleton_credentials.values() | flatten + systemd_skeleton_backup_optional_credentials)
+        | reject('match', '^[a-z0-9][a-z0-9-]*$') | list | length == 0
+    fail_msg: >-
+      invalid worker id, instance id, db name, path, image (must be pinned), credential name or
+      systemd_skeleton_api_forwarded_allow_ips (comma-separated IP addresses/networks of the web UI hosts, no names,
+      never "*"; set it in the inventory when ansible_host of a webui host is a DNS name)
     quiet: true
   tags: [systemd]
 
@@ -104,6 +109,21 @@
   when: group_names | intersect(['execution_workers', 'model_workers']) | length > 0
   tags: [systemd]
 
+- name: Check for the optional credentials of the backup
+  ansible.builtin.stat:
+    path: "{{ hermclaw_credstore_dir }}/hermclaw-{{ item }}"
+    get_checksum: false
+  loop: "{{ systemd_skeleton_backup_optional_credentials if 'orchestrator' in group_names else [] }}"
+  register: systemd_skeleton_backup_cred_stat
+  tags: [systemd]
+
+- name: Remember the backup credentials that exist
+  ansible.builtin.set_fact:
+    systemd_skeleton_backup_credentials: >-
+      {{ systemd_skeleton_backup_cred_stat.results | selectattr('stat', 'defined') | selectattr('stat.exists')
+         | map(attribute='item') | list }}
+  tags: [systemd]
+
 - name: Install the unit files
   ansible.builtin.template:
     src: "{{ systemd_skeleton_template_dir }}/{{ item }}.j2"
@@ -114,6 +134,17 @@
   loop: "{{ systemd_skeleton_host_units }}"
   register: systemd_skeleton_unit_files
   notify: Reload systemd
+  tags: [systemd]
+
+# The deployment's restart decisions read these flags. They accumulate over the plays of one run, so unit or
+# environment files changed by the bootstrap part of playbooks/site.yml still restart the services in its deploy
+# part (where this role runs again and reports no change).
+- name: Remember unit and environment file changes for the deployment's restarts
+  ansible.builtin.set_fact:
+    systemd_skeleton_units_changed: "{{ systemd_skeleton_units_changed | default(false) | bool or systemd_skeleton_unit_files is changed }}"
+    systemd_skeleton_env_changed: >-
+      {{ systemd_skeleton_env_changed | default(false) | bool or systemd_skeleton_env_file is changed
+         or systemd_skeleton_worker_env_file is changed }}
   tags: [systemd]
 
 - name: SearXNG Quadlet

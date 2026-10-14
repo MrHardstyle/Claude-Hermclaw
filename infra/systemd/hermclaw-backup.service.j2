@@ -1,5 +1,6 @@
 # Managed by Hermclaw – backup run (orchestrator .225, Bauplan §36, research 20261008-022).
-# Started by hermclaw-backup.timer. The backup implementation (P33) provides the command.
+# Started by hermclaw-backup.timer. The backup implementation (P33) provides the command; this unit is the deployed
+# form of infra/backup/hermclaw-backup.service (same environment, credentials and exit codes).
 [Unit]
 Description=Hermclaw Next backup
 After=network-online.target postgresql.service
@@ -14,7 +15,15 @@ Type=oneshot
 User={{ hermclaw_user }}
 Group={{ hermclaw_group }}
 EnvironmentFile={{ hermclaw_config_dir }}/hermclaw.env
+Environment=HERMCLAW_BACKUP_CONFIG={{ hermclaw_config_dir }}/backup.yaml
+# secrets as systemd credentials, referenced as cred:<name> in backup.yaml; loaded when they exist on this host
+# (systemd_skeleton_backup_optional_credentials), so a missing one never fails the run before backup.yaml needs it
+{% for cred in systemd_skeleton_backup_credentials | default([]) %}
+LoadCredentialEncrypted={{ cred }}:{{ hermclaw_credstore_dir }}/hermclaw-{{ cred }}
+{% endfor %}
 ExecStart={{ systemd_skeleton_backup_command }}
+# 75 = another backup operation holds the lock (the next timer run retries)
+SuccessExitStatus=75
 Nice=10
 IOSchedulingClass=idle
 TimeoutStartSec=6h

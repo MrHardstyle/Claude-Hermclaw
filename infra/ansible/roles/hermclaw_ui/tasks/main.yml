@@ -82,6 +82,13 @@
     get_checksum: false
   register: hermclaw_ui_webroot
 
+- name: Inspect the marker of the previously active UI build
+  ansible.builtin.stat:
+    path: "{{ hermclaw_ui_releases_dir }}/{{ hermclaw_ui_webroot.stat.lnk_target | basename }}.release"
+    get_checksum: false
+  register: hermclaw_ui_previous
+  when: hermclaw_ui_webroot.stat.islnk | default(false)
+
 - name: Replace the bootstrap's webroot directory (no data loss)
   when:
     - hermclaw_ui_webroot.stat.exists
@@ -129,9 +136,29 @@
     src: "{{ hermclaw_ui_release_dir | relpath(hermclaw_webroot | dirname) }}"
     dest: "{{ hermclaw_webroot }}"
     state: link
+    # dry run of an upgrade: the build was not unpacked, report the switch instead of failing on it
+    force: "{{ ansible_check_mode }}"
   register: hermclaw_ui_switch
   when: >-
     not (ansible_check_mode and hermclaw_ui_webroot.stat.isdir | default(false) and not hermclaw_ui_webroot.stat.islnk)
+
+- name: Remember whether the UI build switched
+  ansible.builtin.set_fact:
+    hermclaw_ui_switched: "{{ hermclaw_ui_switch is changed }}"
+
+# the mtime of <version>.release is the build's last activation (initially its unpacking): the build switched away
+# from stays among the kept ones, also after a rollback followed by an upgrade
+- name: Record the activation order of the UI builds (previous and new)
+  ansible.builtin.file:
+    path: "{{ hermclaw_ui_releases_dir }}/{{ item }}.release"
+    state: touch
+    owner: root
+    group: root
+    mode: "0644"
+  loop: >-
+    {{ ([hermclaw_ui_webroot.stat.lnk_target | basename] if hermclaw_ui_previous.stat.isreg | default(false) else [])
+       + [hermclaw_version] }}
+  when: hermclaw_ui_switched | bool
 
 - name: Prune old UI builds
   ansible.builtin.import_tasks: prune.yml
@@ -142,7 +169,7 @@
     argv: [nginx, -t, -q]
   changed_when: false
   when:
-    - hermclaw_ui_switch is changed
+    - hermclaw_ui_switched | bool
     - hermclaw_manage_services | bool
 
 - name: Reload nginx
@@ -150,7 +177,7 @@
     name: nginx
     state: reloaded
   when:
-    - hermclaw_ui_switch is changed
+    - hermclaw_ui_switched | bool
     - hermclaw_manage_services | bool
 
 - name: Health checks through the web host

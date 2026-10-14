@@ -43,8 +43,11 @@ The UI is deployed by `infra/ansible/playbooks/deploy.yml` (role `hermclaw_ui`, 
    `hermclaw_webroot` (`/var/www/hermclaw-next`, `playbooks/group_vars/all.yml`) is a **symlink** to the active
    release. It is replaced with one `rename(2)`, so a request never sees a half-copied tree. The first deployment
    replaces the bootstrap's placeholder directory. A webroot that holds anything other than that placeholder is kept
-   as `hermclaw-next.pre-release-<time>`. The active release and `hermclaw_keep_releases` (default 3) previous ones
-   are kept. After a switch the playbook runs `nginx -t` and only then reloads nginx.
+   as `hermclaw-next.pre-release-<time>`. The active release and the `hermclaw_keep_releases` (default 3, at least 1)
+   most recently active other builds are kept: every switch touches the marker of the build it leaves, so the build
+   that was active before the last switch is always kept for a rollback. After a switch the playbook runs `nginx -t`
+   and only then reloads nginx. `deploy.yml --check --diff` of a new version unpacks nothing and leaves the webroot
+   as it is.
 3. Optional: to point the UI at another API origin without a rebuild, edit
    `<meta name="hermclaw-api-base" content="">` in `index.html` of the active release (it is overwritten by the next
    deployment; prefer a rebuild with `VITE_HERMCLAW_API_BASE`). An empty value means same origin `/api`, which is

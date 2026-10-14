@@ -8,6 +8,23 @@
     fail_msg: hermclaw_verify_doctor_tolerate must be a list of doctor check names, the timeout a number
     quiet: true
 
+# a dry run before the first deployment has no operator CLI and no active release yet: nothing to verify
+- name: Check for the operator CLI and the active release (dry run)
+  ansible.builtin.stat:
+    path: "{{ item }}"
+    get_checksum: false
+  loop: ["{{ hermclaw_cli_wrapper }}", "{{ hermclaw_venv }}/bin/hermclaw"]
+  register: hermclaw_verify_inputs
+  when:
+    - hermclaw_verify_doctor | bool
+    - ansible_check_mode
+
+- name: Decide whether the doctor runs
+  ansible.builtin.set_fact:
+    hermclaw_verify_run: >-
+      {{ hermclaw_verify_doctor | bool
+         and (not ansible_check_mode or hermclaw_verify_inputs.results | rejectattr('stat.exists') | list | length == 0) }}
+
 - name: Run hermclaw doctor in the services' context
   ansible.builtin.command:
     argv: ["{{ hermclaw_cli_wrapper }}", doctor, --json, --timeout, "{{ hermclaw_verify_doctor_timeout | string }}"]
@@ -17,10 +34,10 @@
     hermclaw_verify_doctor_run.rc not in [0, 1]
     or not (hermclaw_verify_doctor_run.stdout | trim).startswith('{')
   check_mode: false
-  when: hermclaw_verify_doctor | bool
+  when: hermclaw_verify_run | bool
 
 - name: Evaluate the doctor report
-  when: hermclaw_verify_doctor | bool
+  when: hermclaw_verify_run | bool
   block:
     - name: Collect the failed checks
       ansible.builtin.set_fact:

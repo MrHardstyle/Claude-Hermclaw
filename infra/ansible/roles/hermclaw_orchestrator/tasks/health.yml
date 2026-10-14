@@ -1,5 +1,6 @@
-# 32.9 – health of the orchestrator services right after the (re)start; any failure stops the play. The complete
-# installation check (`hermclaw doctor`, workers, models, sandbox, research) runs in the last play (hermclaw_verify).
+# 32.9 – health of the API right after the (re)start; any failure stops the play (LiteLLM is checked before the
+# API and the scheduler start: health_litellm.yml). The complete installation check (`hermclaw doctor`, workers,
+# models, sandbox, research) runs in the last play (hermclaw_verify).
 - name: Wait for the API (/api/health reports status ok and version {{ hermclaw_version }})
   ansible.builtin.uri:
     url: "{{ hermclaw_orchestrator_api_url }}/api/health"
@@ -13,34 +14,4 @@
   retries: "{{ hermclaw_orchestrator_health_retries }}"
   delay: "{{ hermclaw_orchestrator_health_delay }}"
   check_mode: false
-  when: not ansible_check_mode
-
-- name: Wait for LiteLLM (/health/liveliness)
-  ansible.builtin.uri:
-    url: "{{ hermclaw_orchestrator_litellm_url }}/health/liveliness"
-    return_content: true
-  register: hermclaw_orchestrator_litellm_live
-  until: hermclaw_orchestrator_litellm_live.status == 200
-  retries: "{{ hermclaw_orchestrator_health_retries }}"
-  delay: "{{ hermclaw_orchestrator_health_delay }}"
-  check_mode: false
-  when: not ansible_check_mode
-
-# without its master key LiteLLM silently runs without authentication (research 20261014-027 L9/L10): an
-# unauthenticated request must be refused (401; 500 = the prisma package is missing in the venv, still refused)
-- name: Check that LiteLLM refuses requests without the master key
-  ansible.builtin.uri:
-    url: "{{ hermclaw_orchestrator_litellm_url }}/v1/models"
-    status_code: [200, 400, 401, 403, 500]
-  register: hermclaw_orchestrator_litellm_noauth
-  check_mode: false
-  when: not ansible_check_mode
-
-- name: Require authentication at LiteLLM
-  ansible.builtin.assert:
-    that: hermclaw_orchestrator_litellm_noauth.status != 200
-    fail_msg: >-
-      LiteLLM serves /v1/models without a key: it runs without its master key (LITELLM_MASTER_KEY empty?).
-      Check the credential: sudo {{ hermclaw_bin_dir }}/hermclaw-credential check litellm-master-key
-    quiet: true
   when: not ansible_check_mode

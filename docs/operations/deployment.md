@@ -11,9 +11,9 @@ operator scripts. It is built once on the control node and verified by checksum:
 
 | Host | What the deployment does (`infra/ansible/playbooks/deploy.yml`) |
 |---|---|
-| `.225` orchestrator | release venv `/opt/hermclaw/venv-<v>` (offline, hash-checked) → `/etc/hermclaw/*.yaml` rendered + validated → LiteLLM venv + `litellm.yaml` → units enabled → drain → `hermclaw migrate` (once, before the restart) → atomic switch of `/opt/hermclaw/venv` → `hermclaw-litellm`, SearXNG, `hermclaw-api`, `hermclaw-scheduler`, `hermclaw-backup.timer` → health → admin API token (once) |
-| `.222` execution worker | release venv → `capabilities.yaml`, `policies.yaml` → sandbox images (rootless, missing tags only) → switch → `hermclaw-exec-worker` → `/health` |
-| `.224` model worker | release venv → `capabilities.yaml` → ffmpeg → switch → `hermclaw-model-worker` → `/health` → missing Ollama models pulled (`hermclaw-model-pull`) |
+| `.225` orchestrator | release venv `/opt/hermclaw/venv-<v>` (offline, hash-checked) → `/etc/hermclaw/*.yaml` rendered + validated in a staging copy → LiteLLM venv installed → schema decision (nothing live has changed yet) → units enabled → drain → `hermclaw migrate` (once, before the restart) → live configuration + `litellm.yaml` → atomic switch of `/opt/litellm/venv` and `/opt/hermclaw/venv` → `hermclaw-litellm` (healthy and authenticated before anything else starts) → SearXNG, `hermclaw-api`, `hermclaw-scheduler`, `hermclaw-backup.timer` → health → admin API token (once) |
+| `.222` execution worker | release venv → `capabilities.yaml`, `policies.yaml` validated → sandbox images (rootless, missing tags only) → configuration installed → switch → `hermclaw-exec-worker` → `/health` |
+| `.224` model worker | release venv → `capabilities.yaml` validated → ffmpeg → configuration installed → switch → `hermclaw-model-worker` → `/health` → missing Ollama tags of `models.yaml` pulled (`hermclaw-model-pull`, then any other tag on its own) |
 | `.223` web UI | nginx site (headers, CSP, optional TLS) → UI build into `/var/www/hermclaw-next-releases/<v>/` → atomic switch of `/var/www/hermclaw-next` → `nginx -t` → reload → checks through nginx |
 | all | at the end: `hermclaw doctor` on `.225` in the services' context; any failed check stops the play |
 
@@ -58,7 +58,7 @@ operator scripts. It is built once on the control node and verified by checksum:
 | `hermclaw_web_server_name` | `.223` | `hermclaw.lan 192.168.178.223` | nginx `server_name`, also the SAN of a self-signed certificate |
 | `nginx_tls_enabled` / `nginx_tls_source` | `.223` | `false` / `self-signed` | HTTPS; `provided` + `nginx_tls_cert_src` / `nginx_tls_key_src` (files on the control node) |
 | `nginx_hsts_max_age` | `.223` | `0` | send Strict-Transport-Security only once every client trusts the certificate |
-| `hermclaw_keep_releases` | `all.vars` | `3` | previous releases kept for a network-free rollback (venvs, payloads, UI builds) |
+| `hermclaw_keep_releases` | `all.vars` | `3` | previous releases kept for a fast rollback (venvs, payloads, UI builds), 1–99: the most recently **active** ones, so the release active before the last switch is always kept |
 | `hermclaw_release_root` | `all.vars` | `<repo>/dist` | where the release directories are on the control node |
 | `hermclaw_config_overrides` | `all.vars` | `{}` | `{<file>: mapping}` deep-merged into `config/<file>.example.yaml` (section 5) |
 | `hermclaw_config_host_overrides` | `all.vars` | `{}` | `{<hosts.yaml id>: mapping}` merged into that host entry; unknown ids are appended |
@@ -68,6 +68,8 @@ operator scripts. It is built once on the control node and verified by checksum:
 | `hermclaw_orchestrator_allow_schema_downgrade` | `-e` | `false` | permits a rollback below the database's schema (section 7) |
 | `hermclaw_verify_doctor_tolerate` | `all.vars` | `[]` | doctor checks whose failure is reported but tolerated, e.g. `["models:model-224"]` |
 | `hermclaw_ui_validate_certs` | `.223` | `false` | the UI checks from the control node do not verify a self-signed certificate |
+| `hermclaw_release_require_orchestrator_first` | `-e` | `true` | a run without the orchestrator requires it to run `hermclaw_version` already (section 3) |
+| `systemd_skeleton_api_forwarded_allow_ips` | `.225` | the `ansible_host` of the `webui` hosts | proxies whose `X-Forwarded-For/-Proto` the API trusts (`HERMCLAW_API_FORWARDED_ALLOW_IPS`); IP addresses only, never `*` |
 
 ## 2. Build a release
 
@@ -109,17 +111,26 @@ Exit codes: 0 ok, 1 build/self-test failure, 2 usage, 69 missing tool.
 ## 3. First deployment
 
 ```bash
-cd infra/ansible
-ansible-playbook playbooks/deploy.yml --check --diff                     # nothing on disk changes
+cd infra/ansible                                                         # ansible.cfg: inventory/hosts.yml
+ansible-playbook playbooks/deploy.yml --check --diff                     # dry run: nothing on disk changes
 ansible-playbook playbooks/deploy.yml                                    # or: playbooks/site.yml (bootstrap + deploy)
 ansible-playbook playbooks/deploy.yml --limit orchestrator               # one host group (its preflight runs too)
 ansible-playbook playbooks/deploy.yml --tags hermclaw_ui                 # one role (here: only the UI build + switch)
 ```
 
+Add `-K` if your admin login needs a sudo password. The dry run checks the release, the inventory and the
+credentials (the preflight runs for real) and lists what would change. It does not unpack or install the new
+release, so the parts that need it are left to the real run: `hermclaw config-check` of the new configuration, the
+schema decision and the final `hermclaw doctor` (before the first deployment there is nothing to check yet).
+
 Every role carries its name as a tag, and the preflight always runs. `--tags hermclaw_ui` (UI only) and
-`--tags hermclaw_verify` (doctor only) work on their own. The Python roles build on each other
-(`hermclaw_release` → `hermclaw_config` → `hermclaw_orchestrator`/`hermclaw_worker`), so run those together or run
-the whole playbook.
+`--tags hermclaw_verify` (doctor only) work on their own. Workers and the UI never get ahead of the orchestrator: a
+run that does not deploy the orchestrator (`--limit execution_workers`, `--tags hermclaw_ui`, ...) first asks the
+orchestrator's `/api/health` (from the control node) and refuses unless it already runs `hermclaw_version`. When the
+orchestrator is down on purpose (disaster recovery of a host with the release it ran before), add
+`-e hermclaw_release_require_orchestrator_first=false`. The Python roles build on each other
+(`hermclaw_release` → `hermclaw_config` → `hermclaw_orchestrator`/`hermclaw_worker`; `hermclaw_config` validates,
+the host role installs the files at its switch), so run those together or run the whole playbook.
 
 The first run on a host replaces the bootstrap's empty venv directory. It is kept as
 `/opt/hermclaw/venv.pre-release-<time>` (no data loss; delete it once the deployment works), and
@@ -153,10 +164,13 @@ transient unit (`systemd-run --pipe --wait --collect`). Secrets exist only in th
 sudo hermclaw doctor                         sudo hermclaw repo-add myapp git@192.168.178.226:group/myapp.git --project-id 12
 sudo hermclaw token-create alice --scopes read,control      sudo hermclaw job-submit "…" --repo myapp
 sudo hermclaw --alembic current              sudo hermclaw --venv /opt/hermclaw/venv-0.2.0 migrate
+sudo hermclaw backup create                  sudo hermclaw backup restore-test --latest
+sudo hermclaw --config-dir /etc/hermclaw/deploy-staging config-check     # the configuration the last run validated
 ```
 
 It must run as root (exit 77 otherwise). A credential that does not exist yet is reported and left out, and only
-commands that need it fail. The exit status is the command's own.
+commands that need it fail. The backup's credential `backup-manifest-key` is added when it exists. `--config-dir`
+must be an existing absolute directory (exit 64 otherwise). The exit status is the command's own.
 
 ## 5. Configuration (`/etc/hermclaw/*.yaml`)
 
@@ -171,10 +185,12 @@ generated from `config/<name>.example.yaml` **of the deployed release**, then me
    by id.
 
 The complete set is first written to `/etc/hermclaw/deploy-staging/` and validated with the **new release's**
-`hermclaw config-check`. Only then are the live files replaced (`root:hermclaw 0640`, the previous file kept as
-`<name>.yaml.<timestamp>~`), and a change restarts the services that read them. `.225` gets all six files and
-`litellm.yaml` (`hermclaw litellm-config` from the validated `models.yaml`). `.222` gets `capabilities.yaml` and
-`policies.yaml`, and `.224` gets `capabilities.yaml`.
+`hermclaw config-check`. The live files are replaced only at the host's switch (`root:hermclaw 0640`, the previous
+file kept as `<name>.yaml.<timestamp>~`): on `.225` after the schema decision, the drain and the migration, on the
+workers right before the switch. The running release therefore never reads the new release's configuration, and a
+change restarts the services that read it. `.225` gets all six files and `litellm.yaml` (`hermclaw litellm-config`
+from the validated `models.yaml`). `.222` gets `capabilities.yaml` and `policies.yaml`, and `.224` gets
+`capabilities.yaml`.
 
 Manual edits on a host are overwritten by the next run, and `--check --diff` shows them as drift. Put the change into
 the inventory:
@@ -203,8 +219,10 @@ ansible-playbook playbooks/deploy.yml -e hermclaw_version=<new>
 
 The new venv is installed next to the active one, so the old release keeps running until the switch. On `.225` the
 scheduler drains on SIGTERM (`TimeoutStopSec=90s`, checkpoints running steps) together with the API. `hermclaw
-migrate` of the new release runs once, then the symlink is switched and the services restart. A failed migration
-starts the old services again (PostgreSQL rolls the revision back). A failure on `.225` stops the whole run.
+migrate` of the new release runs once, then the configuration is installed, the symlinks are switched and the
+services restart: LiteLLM first, and the API and the scheduler only once it answers `/health/liveliness` and refuses
+requests without its master key. A failed migration starts the old services again with their own configuration
+(PostgreSQL rolls the revision back). A failure on `.225` stops the whole run.
 
 ## 7. Rollback
 
@@ -212,9 +230,10 @@ starts the old services again (PostgreSQL rolls the revision back). A failure on
 ansible-playbook playbooks/deploy.yml -e hermclaw_version=<old>
 ```
 
-The old venv, payload and UI build are still there (`hermclaw_keep_releases`). Nothing is reinstalled; the
-symlinks switch back. **Schema rule:** if `<new>` added Alembic revisions, the deployment stops before anything is
-stopped or switched and explains the options. After a backup, re-run with
+The old venv, payload and UI build are still there (`hermclaw_keep_releases`: the release active before the last
+switch is always kept). Nothing is reinstalled; the symlinks switch back. `dist/release-<old>/` must still exist on
+the control node. **Schema rule:** if `<new>` added Alembic revisions, the deployment stops before anything is
+stopped or switched and before any live file changes, and explains the options. After a backup, re-run with
 `-e hermclaw_orchestrator_allow_schema_downgrade=true`. The schema is then downgraded with the migrations of the
 active (newer) release, which contain the `downgrade()` of their revisions, to the head of `<old>`, and the old
 release is switched in. The alternative is the restore of the pre-upgrade backup
@@ -238,7 +257,12 @@ sudo hermclaw doctor
 LiteLLM lives in `/opt/litellm/venv-<litellm version>-<lock sha>`; `/opt/litellm/venv` is the unit's path (symlink).
 The venv is shared by every hermclaw release with the same LiteLLM lock. The backup timer is enabled. Until
 `/etc/hermclaw/backup.yaml` exists (P33, `docs/operations/backup-restore.md`), each run is skipped
-(`ConditionPathExists`).
+(`ConditionPathExists`). The deployed `hermclaw-backup.service` is the complete unit of `infra/backup/` (environment
+`HERMCLAW_BACKUP_CONFIG`, exit code 75 = locked counts as success); it loads `backup-manifest-key` when that credential
+exists. After creating it (`… | sudo systemd-creds encrypt --name=backup-manifest-key - /etc/credstore.encrypted/
+hermclaw-backup-manifest-key`, backup runbook) re-run `ansible-playbook playbooks/deploy.yml --limit orchestrator`, so
+the unit loads it. Do not copy `infra/backup/hermclaw-backup.{service,timer}` over the deployed units; the restore-test
+units of `infra/backup/` are installed by hand as the backup runbook describes.
 
 **.222**
 
@@ -247,7 +271,8 @@ systemctl status hermclaw-exec-worker; curl -s http://192.168.178.222:8787/healt
 sudo -u hermclaw XDG_RUNTIME_DIR=/run/user/$(id -u hermclaw) podman images 'localhost/hermclaw-sandbox-*'
 # rebuild: bump hermclaw_sandbox_image_version, or by hand:
 sudo -u hermclaw XDG_RUNTIME_DIR=/run/user/$(id -u hermclaw) \
-  HERMCLAW_SANDBOX_IMAGES_DIR=/opt/hermclaw/current/sandbox-images /opt/hermclaw/bin/hermclaw-build-sandbox-images --only python
+  HERMCLAW_SANDBOX_IMAGES_DIR=/opt/hermclaw/current/sandbox-images /opt/hermclaw/bin/hermclaw-build-sandbox-images \
+  --only python --version 1                       # --version = hermclaw_sandbox_image_version (policies.yaml tags)
 grep NoNewPrivs /proc/$(systemctl show -p MainPID --value hermclaw-exec-worker)/status   # must be 0 (rootless podman)
 ```
 
@@ -260,8 +285,10 @@ journalctl -u hermclaw-model-pull.service       # the transient unit of the last
 ```
 
 The pull runs in the transient unit `hermclaw-model-pull.service`, and Ansible polls it, so a dropped SSH session
-does not abort a multi-hour download (`hermclaw_worker_model_pull_timeout`, default 6 h). Only missing tags are
-pulled. The Ollama server settings come from the bootstrap role `ollama` (`ollama.service.d/hermclaw.conf`, research
+does not abort a multi-hour download (`hermclaw_worker_model_pull_timeout`, default 6 h). It only runs when a tag of
+`models.yaml` is missing. `hermclaw-model-pull` covers the fixed role set; a tag the inventory changed
+(`hermclaw_config_overrides.models`) is then pulled on its own in `hermclaw-model-pull-tag.service`
+(`journalctl -u hermclaw-model-pull-tag`). The dry run only reports missing tags. The Ollama server settings come from the bootstrap role `ollama` (`ollama.service.d/hermclaw.conf`, research
 026) and are not touched by the deployment.
 
 **.223**
@@ -276,8 +303,8 @@ curl -sI http://192.168.178.223/ | grep -i content-security-policy
 
 After its restarts each host role checks:
 
-* `.225`: `/api/health` shows `ok` and the new version, LiteLLM `/health/liveliness`, `/v1/models` refuses requests
-  without a key, SearXNG `/healthz`;
+* `.225`: LiteLLM `/health/liveliness` and `/v1/models` refusing requests without a key (before the API and the
+  scheduler start), SearXNG `/healthz`, `/api/health` shows `ok` and the new version;
 * the workers: `/health` shows `ok` and the new version;
 * `.223`, from the control node: `/healthz`, `/` (UI build with CSP) and `/api/health` through nginx.
 
@@ -300,7 +327,11 @@ images of `.222`, and SearXNG. Any failed check stops the play and prints the re
 | `console entry point … cannot be loaded` | The release is broken (the build's self-test should have caught it): fix `pyproject.toml` `[project.scripts]` and rebuild |
 | `The database is at schema revision …, which release … does not know` | Rollback below the schema: section 7 |
 | migration failed, old services started again | Fix the cause (`journalctl`, `sudo hermclaw --alembic current`), re-run |
-| `LiteLLM serves /v1/models without a key` | `sudo /opt/hermclaw/bin/hermclaw-credential check litellm-master-key`; the unit must load it |
+| `LiteLLM serves /v1/models without a key` | `sudo /opt/hermclaw/bin/hermclaw-credential check litellm-master-key`; the unit must load it. The API and the scheduler stay stopped until a re-run passes this check |
+| `/etc/systemd/system/hermclaw-backup.service exists and is not managed by Hermclaw` | the unit was copied from `infra/backup/` by hand. The deployed unit is the same (environment, `SuccessExitStatus=75`, `backup-manifest-key` when it exists): `sudo rm /etc/systemd/system/hermclaw-backup.{service,timer}`, re-run |
+| `models.yaml names invalid Ollama tags` | a tag in `hermclaw_config_overrides.models` is not a plain `name[:tag]` |
+| `Workers and the UI must never run a newer release than the orchestrator` | deploy the orchestrator first (no `--limit`/`--tags`, or `--limit orchestrator`); disaster recovery with the orchestrator down: `-e hermclaw_release_require_orchestrator_first=false` |
+| `invalid … systemd_skeleton_api_forwarded_allow_ips` | `ansible_host` of a webui host is a DNS name: set `systemd_skeleton_api_forwarded_allow_ips` to its IP address in the inventory |
 | worker `/health` never `ok` | `journalctl -u hermclaw-exec-worker` / `-model-worker`; worker token (`hermclaw-credential check worker-token`), podman (`.222`), Ollama (`.224`) |
 | `need about … GB … are free` | Free disk space on the models file system or move `OLLAMA_MODELS` (`ollama_models_dir`) |
 | UI checks fail with `Debian default page` | The address is not in `hermclaw_web_server_name` |
@@ -316,5 +347,7 @@ images of `.222`, and SearXNG. Any failed check stops the play and prints the re
 
 The converge runs the real playbooks with the real release in `python:3.13-slim-trixie` containers. Services are not
 started (no systemd PID 1). PostgreSQL is a private cluster on the test host, and `systemd-run`/`systemd-creds` are
-test doubles. It checks: the switch, the migration of the plain venv directory, `changed=0` on the second run and
-in `--check`, pruning, a schema rollback and `systemd-analyze verify` of the deployed units.
+test doubles. It checks: the dry run of the first deployment and of an upgrade (nothing on disk changes), the switch,
+the migration of the plain venv directory, `changed=0` on the second run and in `--check`, pruning, a schema
+rollback that is refused without touching a live file and then done, `systemd-analyze verify` of the deployed units,
+and that no secret reaches any output.

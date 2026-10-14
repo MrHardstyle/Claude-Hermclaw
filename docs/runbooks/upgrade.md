@@ -20,20 +20,23 @@ an incompatible worker is set to `error` and never receives work) and the API co
 git -C ~/hermclaw-next fetch --tags && git -C ~/hermclaw-next checkout v<new>
 ~/hermclaw-next/scripts/deploy/build-release.sh          # -> dist/release-<new>/ (wheelhouse, LiteLLM, UI, SHA256SUMS)
 
-# 1. backup first (.225) – the restore test proves the backup is usable
-sudo -u hermclaw /opt/hermclaw/venv/bin/python -m hermclaw.backup create
-sudo -u hermclaw /opt/hermclaw/venv/bin/python -m hermclaw.backup restore-test --latest
+# 1. backup first (.225) – the restore test proves the backup is usable. Through the operator CLI: as hermclaw with
+#    hermclaw.env and the services' credentials (incl. backup-manifest-key); a plain `sudo -u hermclaw` shell has neither
+sudo hermclaw backup create
+sudo hermclaw backup restore-test --latest
 
-# 2. dry run: what the deployment would change (venv switch, config, units)
+# 2. dry run: what the deployment would change (venv switch, config, units). Nothing is unpacked or installed; the
+#    schema decision and `hermclaw config-check` of the new release need its venv and therefore run in step 3
 cd ~/hermclaw-next/infra/ansible
 ansible-playbook -i inventory/hosts.yml playbooks/deploy.yml -e hermclaw_version=<new> --check --diff
 
 # 3. roll out with the deployment playbook (idempotent). Per host it installs the release offline into a fresh venv
 #    /opt/hermclaw/venv-<new> (hash-checked wheelhouse), renders and validates /etc/hermclaw/*.yaml with the new
-#    release (`hermclaw config-check`), renders the units. On .225 it then drains (stops hermclaw-scheduler and
-#    hermclaw-api), runs `hermclaw migrate` of the new release once, as hermclaw with the production environment,
-#    switches the /opt/hermclaw/venv symlink atomically and restarts the services, then the workers and the UI.
-#    It ends with `hermclaw doctor`.
+#    release (`hermclaw config-check`, staging copy), renders the units. On .225 it then decides the schema change,
+#    drains (stops hermclaw-scheduler and hermclaw-api), runs `hermclaw migrate` of the new release once, as hermclaw
+#    with the production environment, installs the new configuration and litellm.yaml, switches the LiteLLM and
+#    /opt/hermclaw/venv symlinks atomically and restarts the services (LiteLLM first, healthy and authenticated, then
+#    SearXNG, API and scheduler), then the workers and the UI. It ends with `hermclaw doctor`.
 ansible-playbook -i inventory/hosts.yml playbooks/deploy.yml -e hermclaw_version=<new>
 
 # 4. verify
@@ -44,24 +47,26 @@ sudo journalctl -u hermclaw-scheduler --since -5min | grep -E '"scheduler starte
 
 On start the scheduler recovers everything the stop left in flight (P34): checkpointed coder steps resume,
 other in-flight steps re-run, preparation of jobs is re-entrant, leases of the previous incarnation are released.
-If the new release fails before the switch (preflight, config validation, migration), the previous release keeps
-running. A failed migration starts the old services again. A failure on `.225` stops the whole run, so workers and
-UI never get ahead of the orchestrator.
+If the new release fails before the switch (preflight, config validation, schema decision, migration), the previous
+release keeps running with its own configuration: `/etc/hermclaw/*.yaml`, `litellm.yaml` and the venv symlinks change
+only after the migration. A failed migration starts the old services again. A failure on `.225` stops the whole run,
+so workers and UI never get ahead of the orchestrator.
 
 ## Rollback
 
 Re-run the deployment with the previous version. Its venv, payload and UI build are still on the hosts
-(`hermclaw_keep_releases`, default 3 previous releases), so nothing is downloaded or rebuilt. The switch back is the
-same atomic symlink rename:
+(`hermclaw_keep_releases`, default 3: the most recently active previous releases; the one active before the last
+switch is always kept), so nothing is reinstalled or rebuilt. `dist/release-<old>/` must still exist on the control
+node (the preflight verifies it). The switch back is the same atomic symlink rename:
 
 ```bash
 ansible-playbook -i inventory/hosts.yml playbooks/deploy.yml -e hermclaw_version=<old>
 ```
 
 **Schema rule.** If the newer release added Alembic revisions, the database is ahead of `<old>`. The deployment
-detects this before it stops anything: the new release's `hermclaw doctor --offline --json` reports a revision that
-`<old>` does not know. The play then stops and nothing is switched. The schema has to go down with the **newer**
-release's migrations, because only they contain the `downgrade()` of their own revisions:
+detects this before it stops anything: `hermclaw doctor --offline --json` of the release being deployed (`<old>`)
+reports the database's revision, and `<old>`'s migrations do not know it. The play then stops; nothing is stopped or switched and no live file changes. The schema has to
+go down with the **newer** release's migrations, because only they contain the `downgrade()` of their own revisions:
 
 ```bash
 # after a backup (step 1 above): let the deployment downgrade with the still-installed newer release, then switch
@@ -84,6 +89,6 @@ see `docs/operations/backup-restore.md`).
 |---|---|
 | LiteLLM (`/opt/litellm/venv` → `venv-<version>-<lock>`, `systemd_skeleton_litellm_venv`) | pinned in the `litellm-proxy` extra of `pyproject.toml` (single source: `build-release.sh` resolves and hash-locks it into the release); bump only with the empirical gateway tests (`tests/integration/test_models_litellm_proxy.py`) green against the new version. The deployment installs the new venv next to the old one, regenerates `/etc/hermclaw/litellm.yaml` with `hermclaw litellm-config` and restarts `hermclaw-litellm` |
 | Ollama (`.224`) | pinned version; upgrade only after the GPU smoke test (`hermclaw-model-worker selftest`); never above the last driver branch supporting Pascal (R580, research R-017) |
-| Models | tags are fixed per role in `config/models.yaml`; a new tag is a config change (`hermclaw_config_overrides.models` in the inventory); the deployment then pulls every missing tag on `.224` with `/opt/hermclaw/bin/hermclaw-model-pull` (`hermclaw_worker_pull_models`, disk precheck); embedding model changes trigger a re-index (embedding_model per chunk) |
+| Models | tags are fixed per role in `config/models.yaml`; a new tag is a config change (`hermclaw_config_overrides.models` in the inventory); the deployment then pulls every missing tag on `.224`: `/opt/hermclaw/bin/hermclaw-model-pull` for the fixed role set, then each remaining tag of `models.yaml` in its own transient unit `hermclaw-model-pull-tag` (`hermclaw_worker_pull_models`, disk precheck); embedding model changes trigger a re-index (embedding_model per chunk) |
 | UI (`.223`) | static build from the release (`hermclaw-ui-<version>.tar.gz`), unpacked to `/var/www/hermclaw-next-releases/<version>/`; the webroot `/var/www/hermclaw-next` is a symlink switched atomically (`docs/operations/ui.md`) |
 | PostgreSQL | minor updates via Debian packages; major upgrades with `pg_upgradecluster` after a backup |

@@ -37,4 +37,7 @@ hermclaw_config_allow_placeholder_macs: false
 hermclaw_config_sandbox_toolchain_images: true
 
 hermclaw_config_staging_dir: "{{ hermclaw_config_dir }}/deploy-staging"
+# false: main.yml installs the validated files right away. playbooks/deploy.yml sets true: the host role
+# (hermclaw_orchestrator / hermclaw_worker) installs them with tasks_from: install.yml at its switch.
+hermclaw_config_install_at_switch: false
 hermclaw_config_venv: "{{ hermclaw_install_dir }}/venv-{{ hermclaw_version }}"

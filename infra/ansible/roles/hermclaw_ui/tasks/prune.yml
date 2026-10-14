@@ -1,5 +1,6 @@
-# Keep the active UI build and the hermclaw_keep_releases most recently unpacked others, ordered by their
-# completion markers <version>.release (the build directories carry the archive's fixed mtime).
+# Keep the active UI build and the hermclaw_keep_releases most recently active others, ordered by their completion
+# markers <version>.release (unpacking and every switch to or away from a build touch it; the build directories carry
+# the archive's fixed mtime). Only entries named after a release version are considered.
 - name: Read the active UI build
   ansible.builtin.stat:
     path: "{{ hermclaw_webroot }}"
@@ -10,13 +11,16 @@
 - name: Find the unpacked UI builds
   ansible.builtin.find:
     paths: ["{{ hermclaw_ui_releases_dir }}"]
+    patterns: ["^{{ hermclaw_version_pattern }}$"]
+    use_regex: true
     file_type: directory
   register: hermclaw_ui_builds
 
 - name: Find the UI build markers
   ansible.builtin.find:
     paths: ["{{ hermclaw_ui_releases_dir }}"]
-    patterns: ["*.release"]
+    patterns: ["^{{ hermclaw_version_pattern }}\\.release$"]
+    use_regex: true
     file_type: file
   register: hermclaw_ui_markers
 

@@ -1,6 +1,11 @@
 # hermclaw_orchestrator – .225 after hermclaw_release (venv-<version> installed, not active) and hermclaw_config
-# (validated configuration installed). Order: LiteLLM -> credentials -> units enabled -> schema decision ->
-# drain (stop scheduler, API) -> migrate -> atomic switch -> restart -> health -> admin token.
+# (configuration rendered and validated in <config_dir>/deploy-staging, not yet live). Order:
+#   operator CLI -> LiteLLM venv installed (not active) -> credentials -> schema decision (read-only: a refusal
+#   changes nothing that runs) -> units enabled -> drain (stop scheduler, API) -> migrate -> live configuration ->
+#   LiteLLM switch -> release switch -> LiteLLM (re)start, healthy and authenticated -> SearXNG -> API + scheduler
+#   -> health -> admin token.
+# The live files (/etc/hermclaw/*.yaml, litellm.yaml, the venv symlinks) change only after the services are drained
+# and the schema is migrated: a failed migration restarts the old release with its own configuration.
 - name: Validate the orchestrator settings
   ansible.builtin.import_tasks: validate.yml
 
@@ -12,7 +17,7 @@
     group: root
     mode: "0755"
 
-- name: LiteLLM proxy
+- name: LiteLLM proxy venv of the release (installed next to the active one)
   ansible.builtin.import_tasks: litellm.yml
 
 - name: Check the credentials of the orchestrator units
@@ -21,13 +26,6 @@
     tasks_from: credentials.yml
   vars:
     hermclaw_release_credential_units: "{{ hermclaw_orchestrator_units | map('regex_replace', '\\.timer$', '.service') | list }}"
-
-- name: Enable the orchestrator units
-  ansible.builtin.include_role:
-    name: hermclaw_release
-    tasks_from: enable.yml
-  vars:
-    hermclaw_release_enable: "{{ hermclaw_orchestrator_units }}"
 
 - name: Inspect the active release
   ansible.builtin.stat:
@@ -44,12 +42,38 @@
     hermclaw_orchestrator_migrate: false
     hermclaw_orchestrator_downgrade: false
 
+# a dry run of an upgrade or of the first deployment has neither the new venv, nor the operator CLI, nor the staged
+# configuration: the schema decision is then made by the real run (it changes nothing before it)
+- name: Check for the new release, the operator CLI and the staged configuration (dry run)
+  ansible.builtin.stat:
+    path: "{{ item }}"
+    get_checksum: false
+  loop:
+    - "{{ hermclaw_orchestrator_venv }}/bin/hermclaw"
+    - "{{ hermclaw_cli_wrapper }}"
+    - "{{ hermclaw_orchestrator_config_staging }}/models.yaml"
+  register: hermclaw_orchestrator_schema_inputs
+  when:
+    - ansible_check_mode
+    - hermclaw_orchestrator_run_database_tasks | bool
+
 - name: Database schema of the release
   ansible.builtin.include_tasks:
     file: database.yml
     apply:
       tags: [hermclaw_orchestrator]
-  when: hermclaw_orchestrator_run_database_tasks | bool
+  when:
+    - hermclaw_orchestrator_run_database_tasks | bool
+    - >-
+      not ansible_check_mode
+      or hermclaw_orchestrator_schema_inputs.results | rejectattr('stat.exists') | list | length == 0
+
+- name: Enable the orchestrator units
+  ansible.builtin.include_role:
+    name: hermclaw_release
+    tasks_from: enable.yml
+  vars:
+    hermclaw_release_enable: "{{ hermclaw_orchestrator_units }}"
 
 # graceful: the scheduler checkpoints running steps and releases its leases on SIGTERM (TimeoutStopSec=90s)
 - name: Drain - stop the scheduler and the API before the schema change and the switch
@@ -79,15 +103,30 @@
       changed_when: true
       when: hermclaw_orchestrator_downgrade | bool
 
+    # the new release with its own (staged, validated) configuration; the live files still belong to the old one
     - name: Run hermclaw migrate of release {{ hermclaw_version }}
       ansible.builtin.command:
-        argv: ["{{ hermclaw_cli_wrapper }}", --venv, "{{ hermclaw_orchestrator_venv }}", migrate]
+        argv:
+          - "{{ hermclaw_cli_wrapper }}"
+          - --venv
+          - "{{ hermclaw_orchestrator_venv }}"
+          - --config-dir
+          - "{{ hermclaw_orchestrator_config_staging }}"
+          - migrate
       register: hermclaw_orchestrator_migrate_run
       changed_when: true
 
     - name: Read the database revision after the migration
       ansible.builtin.command:
-        argv: ["{{ hermclaw_cli_wrapper }}", --venv, "{{ hermclaw_orchestrator_venv }}", doctor, --offline, --json]
+        argv:
+          - "{{ hermclaw_cli_wrapper }}"
+          - --venv
+          - "{{ hermclaw_orchestrator_venv }}"
+          - --config-dir
+          - "{{ hermclaw_orchestrator_config_staging }}"
+          - doctor
+          - --offline
+          - --json
       register: hermclaw_orchestrator_doctor_after
       changed_when: false
       failed_when: >-
@@ -107,26 +146,42 @@
         msg: >-
           The schema change for release {{ hermclaw_version }} failed in '{{ ansible_failed_task.name | default('?') }}':
           {{ (ansible_failed_result.stderr | default('') ~ ' ' ~ ansible_failed_result.stdout | default('')) | trim | truncate(2000) }}
-          - the previous release keeps running (venv not switched). PostgreSQL rolls a failed Alembic revision
-          back; check with: sudo {{ hermclaw_cli_wrapper }} --alembic current
+          - the previous release keeps running with its configuration (venv, LiteLLM and /etc/hermclaw not switched).
+          PostgreSQL rolls a failed Alembic revision back; check with: sudo {{ hermclaw_cli_wrapper }} --alembic current
+
+- name: Install the validated configuration of release {{ hermclaw_version }}
+  ansible.builtin.include_role:
+    name: hermclaw_config
+    tasks_from: install.yml
+
+- name: Switch LiteLLM to the venv and the configuration of the release
+  ansible.builtin.import_tasks: litellm_activate.yml
 
 - name: Switch to release {{ hermclaw_version }}
   ansible.builtin.include_role:
     name: hermclaw_release
     tasks_from: switch.yml
 
+# systemd_skeleton_*_changed accumulate over every play of the run: unit or environment files that the bootstrap
+# part of playbooks/site.yml changed still restart the services here
 - name: Decide the restarts
   ansible.builtin.set_fact:
     hermclaw_orchestrator_restart: >-
       {{ hermclaw_release_switched | bool or hermclaw_config_changed | default(false) | bool
          or hermclaw_orchestrator_migrate | bool
-         or (systemd_skeleton_unit_files | default({})) is changed
-         or (systemd_skeleton_env_file | default({})) is changed }}
+         or systemd_skeleton_units_changed | default(false) | bool
+         or systemd_skeleton_env_changed | default(false) | bool }}
 
 - name: Start LiteLLM (restart after a new venv, config or unit)
   ansible.builtin.systemd_service:
     name: hermclaw-litellm.service
     state: "{{ 'restarted' if hermclaw_orchestrator_litellm_restart | bool else 'started' }}"
+  when: hermclaw_manage_services | bool
+
+# the scheduler needs the model gateway, and LiteLLM without its master key is an open proxy: both are checked
+# before the API and the scheduler start
+- name: LiteLLM is healthy and refuses unauthenticated requests
+  ansible.builtin.import_tasks: health_litellm.yml
   when: hermclaw_manage_services | bool
 
 - name: Start SearXNG and the services

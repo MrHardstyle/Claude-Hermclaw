@@ -1,5 +1,5 @@
-# Preflight of playbooks/deploy.yml (first play, any_errors_fatal): everything below is read-only except the
-# local "deployed" fact at the end, so a failure stops the run before any host has been changed.
+# Preflight of playbooks/deploy.yml (first play, any_errors_fatal): everything below is read-only, so a failure stops
+# the run before any host has been changed. The play writes the local "deployed" fact last (mark_deployed.yml).
 - name: Validate the deployment settings
   ansible.builtin.import_tasks: validate.yml
 
@@ -48,6 +48,12 @@
       (release.json says {{ hermclaw_release_meta.name | default('?') }} {{ hermclaw_release_meta.version | default('?') }}).
     quiet: true
 
+- name: Workers and the UI never get ahead of the orchestrator
+  ansible.builtin.include_tasks:
+    file: orchestrator_first.yml
+    apply:
+      tags: [always]
+
 - name: Check that the host has been bootstrapped
   ansible.builtin.stat:
     path: "{{ item }}"
@@ -94,24 +100,3 @@
       {{ group_names | select('in', hermclaw_release_units.keys() | list)
          | map('extract', hermclaw_release_units) | flatten | unique }}
   when: group_names | intersect(hermclaw_release_units.keys() | list) | length > 0
-
-- name: Create the local facts directory
-  ansible.builtin.file:
-    path: "{{ hermclaw_release_facts_dir }}"
-    state: directory
-    owner: root
-    group: root
-    mode: "0755"
-
-- name: Mark the host as deployed (ansible_local.hermclaw)
-  ansible.builtin.copy:
-    content: "{{ {'deployed': true, 'managed_by': 'Hermclaw playbooks/deploy.yml'} | to_nice_json }}\n"
-    dest: "{{ hermclaw_release_facts_dir }}/hermclaw.fact"
-    owner: root
-    group: root
-    mode: "0644"
-
-- name: Re-read the local facts
-  ansible.builtin.setup:
-    gather_subset: ["!all", "!min", local]
-    fact_path: "{{ hermclaw_release_facts_dir }}"

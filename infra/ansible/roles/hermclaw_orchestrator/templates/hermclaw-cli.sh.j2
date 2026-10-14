@@ -5,21 +5,30 @@
 #   sudo hermclaw token-create NAME --scopes read     sudo hermclaw job-submit PROMPT [--repo NAME ...]
 #   sudo hermclaw --venv {{ hermclaw_install_dir }}/venv-<version> migrate    another installed release (deployment)
 #   sudo hermclaw --alembic current                   alembic of the release (schema rollback, docs/runbooks/upgrade.md)
+#   sudo hermclaw backup create                       backup now (python -m hermclaw.backup, docs/operations/backup-restore.md)
+#   sudo hermclaw --config-dir DIR config-check       another configuration directory (the deployment's staging copy)
 #
 # Runs {{ hermclaw_venv }}/bin/hermclaw exactly like the services do: as {{ hermclaw_user }} in a transient systemd
 # service (systemd-run --pipe --wait --collect) with EnvironmentFile={{ hermclaw_config_dir }}/hermclaw.env and the
-# encrypted credentials of hermclaw-scheduler.service (LoadCredentialEncrypted=). The secrets exist only in that
+# encrypted credentials of hermclaw-scheduler.service (LoadCredentialEncrypted=), plus the optional ones of the backup
+# ({{ hermclaw_orchestrator_cli_optional_credentials | default([]) | join(', ') }}) when they exist. The secrets exist only in that
 # service's $CREDENTIALS_DIRECTORY - never in the caller's environment, on a command line or in a log.
 # Exit codes: the command's own; 64 usage, 69 release not installed, 77 not root, 78 configuration missing.
 set -euo pipefail
 
 venv={{ hermclaw_venv }}
 tool=hermclaw
+config_dir=""
 while [[ $# -gt 0 ]]; do
     case "$1" in
         --venv)
             [[ $# -ge 2 ]] || { echo "hermclaw: --venv needs a directory" >&2; exit 64; }
             venv=$2
+            shift 2
+            ;;
+        --config-dir)
+            [[ $# -ge 2 ]] || { echo "hermclaw: --config-dir needs a directory" >&2; exit 64; }
+            config_dir=$2
             shift 2
             ;;
         --alembic)
@@ -36,6 +45,10 @@ fi
 if [[ ! "$venv" =~ ^/[A-Za-z0-9._/-]+$ || "$venv" == *..* || ! -x "${venv}/bin/${tool}" ]]; then
     echo "hermclaw: ${venv}/bin/${tool} is not installed" >&2
     exit 69
+fi
+if [[ -n "$config_dir" && ( ! "$config_dir" =~ ^/[A-Za-z0-9._/-]+$ || "$config_dir" == *..* || ! -d "$config_dir" ) ]]; then
+    echo "hermclaw: --config-dir ${config_dir} is not a directory" >&2
+    exit 64
 fi
 env_file={{ hermclaw_config_dir }}/hermclaw.env
 if [[ ! -r "$env_file" ]]; then
@@ -54,10 +67,22 @@ for cred in {{ (systemd_skeleton_credentials.scheduler + (systemd_skeleton_worke
         missing+=("$cred")
     fi
 done
+optional=({{ hermclaw_orchestrator_cli_optional_credentials | default([]) | join(' ') }})
+for cred in "${optional[@]}"; do
+    file="{{ hermclaw_credstore_dir }}/hermclaw-${cred}"
+    if [[ -e "$file" ]]; then
+        props+=(-p "LoadCredentialEncrypted=${cred}:${file}")
+    fi
+done
 if [[ -n "${missing[*]:-}" ]]; then
     echo "hermclaw: credential(s) not available: ${missing[*]} - commands that need them will fail" >&2
 fi
-cmd=("${venv}/bin/${tool}")
+cmd=()
+if [[ -n "$config_dir" ]]; then
+    # EnvironmentFile= wins over systemd-run --setenv: the override is applied by env(1) inside the unit
+    cmd+=(/usr/bin/env "HERMCLAW_CONFIG_DIR=${config_dir}")
+fi
+cmd+=("${venv}/bin/${tool}")
 if [[ "$tool" == alembic ]]; then
     cmd+=(-c "${venv}/share/hermclaw/alembic.ini")
 fi

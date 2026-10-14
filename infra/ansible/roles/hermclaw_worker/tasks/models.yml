@@ -20,6 +20,15 @@
     hermclaw_worker_planner_fallback: >-
       {{ hermclaw_worker_profiles | selectattr('role', 'equalto', 'planner_fallback') | list | length > 0 }}
 
+- name: Require plain Ollama tags (they become arguments of ollama pull)
+  ansible.builtin.assert:
+    that: hermclaw_worker_bad_tags | length == 0
+    fail_msg: "models.yaml names invalid Ollama tags: {{ hermclaw_worker_bad_tags }}"
+    quiet: true
+  vars:
+    hermclaw_worker_bad_tags: >-
+      {{ hermclaw_worker_wanted_models | reject('match', '^[a-z0-9][a-z0-9._/-]*(:[A-Za-z0-9][A-Za-z0-9._-]*)?$') | list }}
+
 - name: List the installed models
   ansible.builtin.command:
     argv: ["{{ hermclaw_worker_ollama_bin }}", list]
@@ -117,21 +126,52 @@
       changed_when: false
       check_mode: false
 
-    - name: Find tags that are still missing
+    # hermclaw-model-pull pulls the fixed role set (and the embedding/fallback planner given above); a tag that
+    # models.yaml names differently (hermclaw_config_overrides.models) is pulled here, one transient unit per tag
+    - name: Find the tags of models.yaml that hermclaw-model-pull did not pull
       ansible.builtin.set_fact:
-        hermclaw_worker_still_missing: >-
+        hermclaw_worker_extra_models: >-
           {%- set installed = hermclaw_worker_ollama_after.stdout_lines[1:] | map('split') | map('first') | list -%}
           {{ hermclaw_worker_wanted_models | reject('in', installed)
              | reject('in', installed | map('regex_replace', ':latest$', '') | list) | list }}
 
-    - name: Read the log of the model pull
+    - name: Pull the remaining tags of models.yaml
+      ansible.builtin.include_tasks:
+        file: pull_tag.yml
+        apply:
+          tags: [hermclaw_worker]
+      loop: "{{ hermclaw_worker_extra_models }}"
+      loop_control:
+        loop_var: hermclaw_worker_tag
+      when: not ansible_check_mode
+
+    - name: List the installed models after all pulls
       ansible.builtin.command:
-        argv: [journalctl, --unit=hermclaw-model-pull.service, --lines=40, --no-pager, --output=cat]
+        argv: ["{{ hermclaw_worker_ollama_bin }}", list]
+      environment:
+        OLLAMA_HOST: "{{ hermclaw_worker_ollama_url }}"
+      register: hermclaw_worker_ollama_final
+      changed_when: false
+      check_mode: false
+
+    - name: Find tags that are still missing
+      ansible.builtin.set_fact:
+        hermclaw_worker_still_missing: >-
+          {%- set installed = hermclaw_worker_ollama_final.stdout_lines[1:] | map('split') | map('first') | list -%}
+          {{ hermclaw_worker_wanted_models | reject('in', installed)
+             | reject('in', installed | map('regex_replace', ':latest$', '') | list) | list }}
+
+    - name: Read the log of the model pulls
+      ansible.builtin.command:
+        argv: [journalctl, --unit=hermclaw-model-pull.service, --unit=hermclaw-model-pull-tag.service, --lines=40, --no-pager, --output=cat]
       register: hermclaw_worker_pull_log
       changed_when: false
       check_mode: false
-      when: hermclaw_worker_still_missing | length > 0
+      when:
+        - hermclaw_worker_still_missing | length > 0
+        - not ansible_check_mode
 
+    # a dry run pulls nothing, so the tags are still missing there: it only reports what the real run would pull
     - name: Require every model of models.yaml
       ansible.builtin.assert:
         that: hermclaw_worker_still_missing | length == 0
@@ -141,3 +181,4 @@
           {{ hermclaw_worker_pull_log.stdout_lines | default([]) | join(' | ') | truncate(1500) }}
           - pull by hand: sudo OLLAMA_HOST={{ hermclaw_worker_ollama_url }} {{ hermclaw_worker_ollama_bin }} pull <tag>
         quiet: true
+      when: not ansible_check_mode

@@ -1,6 +1,7 @@
-# Keep the active release and the hermclaw_keep_releases most recently installed others (by install time = mtime
-# of venv-<version>, which its completion marker sets); delete the rest together with their payloads. The venv
-# the symlink points to is never deleted.
+# Keep the active release and the hermclaw_keep_releases (>= 1) most recently active others: the mtime of
+# venv-<version> is set by its installation and by every switch to or away from it (switch.yml), so the release that
+# was active before the last switch is always kept for the rollback. Their payloads are kept with them. Only
+# directories named after a release version are considered; the venv the symlink points to is never deleted.
 - name: Read the active venv
   ansible.builtin.stat:
     path: "{{ hermclaw_venv }}"
@@ -11,13 +12,16 @@
 - name: Find the installed release venvs
   ansible.builtin.find:
     paths: ["{{ hermclaw_install_dir }}"]
-    patterns: ["venv-*"]
+    patterns: ["^venv-{{ hermclaw_version_pattern }}$"]
+    use_regex: true
     file_type: directory
   register: hermclaw_release_venvs
 
 - name: Find the unpacked payloads
   ansible.builtin.find:
     paths: ["{{ hermclaw_releases_dir }}"]
+    patterns: ["^{{ hermclaw_version_pattern }}$"]
+    use_regex: true
     file_type: directory
   register: hermclaw_release_payloads
 

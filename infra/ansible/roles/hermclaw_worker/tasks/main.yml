@@ -1,4 +1,5 @@
-# hermclaw_worker – .222 / .224 after hermclaw_release (venv-<version> installed) and hermclaw_config.
+# hermclaw_worker – .222 / .224 after hermclaw_release (venv-<version> installed) and hermclaw_config (validated,
+# installed here right before the switch).
 - name: Validate the worker settings
   ansible.builtin.assert:
     that:
@@ -40,18 +41,25 @@
     - hermclaw_worker_kind == 'execution'
     - hermclaw_worker_build_sandbox_images | bool
 
+# the running worker keeps its configuration until the switch (sandbox image builds can take long)
+- name: Install the validated configuration of release {{ hermclaw_version }}
+  ansible.builtin.include_role:
+    name: hermclaw_config
+    tasks_from: install.yml
+
 - name: Switch to release {{ hermclaw_version }}
   ansible.builtin.include_role:
     name: hermclaw_release
     tasks_from: switch.yml
 
-- name: Start the worker daemon (restart on a new release, configuration or unit)
+# systemd_skeleton_*_changed accumulate over every play of the run (bootstrap part of playbooks/site.yml included)
+- name: Start the worker daemon (restart on a new release, configuration, unit or environment file)
   ansible.builtin.systemd_service:
     name: "{{ hermclaw_worker_unit }}"
     state: >-
       {{ 'restarted' if (hermclaw_release_switched | bool or hermclaw_config_changed | default(false) | bool
-         or (systemd_skeleton_unit_files | default({})) is changed
-         or (systemd_skeleton_worker_env_file | default({})) is changed) else 'started' }}
+         or systemd_skeleton_units_changed | default(false) | bool
+         or systemd_skeleton_env_changed | default(false) | bool) else 'started' }}
   when: hermclaw_manage_services | bool
 
 - name: Wait for the worker /health (status ok, version {{ hermclaw_version }})

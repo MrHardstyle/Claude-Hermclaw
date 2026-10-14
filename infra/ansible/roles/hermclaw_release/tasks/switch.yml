@@ -9,6 +9,14 @@
     get_checksum: false
   register: hermclaw_release_venv_path
 
+- name: Inspect the previously active venv
+  ansible.builtin.stat:
+    path: "{{ hermclaw_install_dir }}/{{ hermclaw_release_venv_path.stat.lnk_target | basename }}"
+    follow: false
+    get_checksum: false
+  register: hermclaw_release_previous
+  when: hermclaw_release_venv_path.stat.islnk | default(false)
+
 # the bootstrap (roles/common) created a plain venv directory; it is kept under a new name (no data loss) and
 # replaced by the symlink. Afterwards the bootstrap accepts the symlink (common/tasks/python.yml).
 - name: Keep the bootstrap's plain venv directory under a .pre-release-<time> name
@@ -30,19 +38,36 @@
     src: "{{ hermclaw_release_venv_dir | relpath(hermclaw_venv | dirname) }}"
     dest: "{{ hermclaw_venv }}"
     state: link
+    # dry run of an upgrade: venv-<version> was not installed, report the switch instead of failing on it
+    force: "{{ ansible_check_mode }}"
   register: hermclaw_release_link
   # check mode cannot simulate replacing the directory (the mv above did not run)
   when: not (ansible_check_mode and hermclaw_release_venv_path.stat.isdir | default(false) and not hermclaw_release_venv_path.stat.islnk)
+
+- name: Remember whether the active release changed
+  ansible.builtin.set_fact:
+    hermclaw_release_switched: "{{ hermclaw_release_link is changed or hermclaw_release_link is skipped }}"
+
+# The mtime of venv-<version> is its last activation (initially its installation): the release switched away from
+# becomes the most recent of the others, so pruning keeps it - also after a rollback followed by an upgrade.
+- name: Record the activation order (previous and new release venv)
+  ansible.builtin.file:
+    path: "{{ item }}"
+    state: touch
+    owner: root
+    group: root
+    mode: "0755"
+  loop: >-
+    {{ ([hermclaw_release_previous.stat.path] if hermclaw_release_previous.stat.isdir | default(false) else [])
+       + [hermclaw_release_venv_dir] }}
+  when: hermclaw_release_switched | bool
 
 - name: Point current at the payload of {{ hermclaw_version }}
   ansible.builtin.file:
     src: "{{ hermclaw_release_unpack_dir | relpath(hermclaw_release_current_link | dirname) }}"
     dest: "{{ hermclaw_release_current_link }}"
     state: link
-
-- name: Remember whether the active release changed
-  ansible.builtin.set_fact:
-    hermclaw_release_switched: "{{ hermclaw_release_link is changed or hermclaw_release_link is skipped }}"
+    force: "{{ ansible_check_mode }}"
 
 - name: Prune old releases
   ansible.builtin.import_tasks: prune.yml

@@ -1,0 +1,105 @@
+# 32.5 – switch the LiteLLM proxy to the venv of the release (litellm.yml installed it) and write its config from
+# the validated models.yaml. Runs after the schema decision and the migration (hermclaw_orchestrator main.yml), so
+# a refused or failed run leaves the running proxy untouched. Sets hermclaw_orchestrator_litellm_restart.
+- name: Inspect {{ hermclaw_orchestrator_litellm_link }}
+  ansible.builtin.stat:
+    path: "{{ hermclaw_orchestrator_litellm_link }}"
+    follow: false
+    get_checksum: false
+  register: hermclaw_orchestrator_litellm_link_stat
+
+- name: Inspect the previously active LiteLLM venv
+  ansible.builtin.stat:
+    path: "{{ hermclaw_litellm_root }}/{{ hermclaw_orchestrator_litellm_link_stat.stat.lnk_target | basename }}"
+    get_checksum: false
+  register: hermclaw_orchestrator_litellm_previous
+  when: hermclaw_orchestrator_litellm_link_stat.stat.islnk | default(false)
+
+- name: Keep a manually created LiteLLM venv directory (no data loss)
+  ansible.builtin.command:
+    argv:
+      - mv
+      - --no-target-directory
+      - --
+      - "{{ hermclaw_orchestrator_litellm_link }}"
+      - "{{ hermclaw_orchestrator_litellm_link }}.pre-release-{{ now(utc=true, fmt='%Y%m%dT%H%M%SZ') }}"
+  changed_when: true
+  when:
+    - hermclaw_orchestrator_litellm_link_stat.stat.exists
+    - hermclaw_orchestrator_litellm_link_stat.stat.isdir
+    - not hermclaw_orchestrator_litellm_link_stat.stat.islnk
+
+- name: Activate the LiteLLM venv (atomic symlink switch)
+  ansible.builtin.file:
+    src: "{{ hermclaw_orchestrator_litellm_venv | relpath(hermclaw_orchestrator_litellm_link | dirname) }}"
+    dest: "{{ hermclaw_orchestrator_litellm_link }}"
+    state: link
+    # dry run: the new venv was not installed, report the switch instead of failing on it
+    force: "{{ ansible_check_mode }}"
+  register: hermclaw_orchestrator_litellm_switch
+  when: >-
+    not (ansible_check_mode and hermclaw_orchestrator_litellm_link_stat.stat.isdir | default(false)
+    and not hermclaw_orchestrator_litellm_link_stat.stat.islnk)
+
+- name: Generate the LiteLLM config from the validated models.yaml (hermclaw litellm-config)
+  ansible.builtin.command:
+    argv: ["{{ hermclaw_orchestrator_venv }}/bin/hermclaw", litellm-config, "-", --config-dir, "{{ hermclaw_orchestrator_config_staging }}"]
+  environment:
+    HERMCLAW_ENV: production
+    PYTHONDONTWRITEBYTECODE: "1"
+  register: hermclaw_orchestrator_litellm_generated
+  changed_when: false
+  check_mode: false
+  when: hermclaw_config_check is not skipped
+
+- name: Write {{ hermclaw_orchestrator_litellm_config }}
+  ansible.builtin.copy:
+    content: "{{ hermclaw_orchestrator_litellm_generated.stdout }}\n"
+    dest: "{{ hermclaw_orchestrator_litellm_config }}"
+    owner: root
+    group: "{{ hermclaw_group }}"
+    mode: "0640"
+    backup: true
+  register: hermclaw_orchestrator_litellm_config_file
+  when: hermclaw_orchestrator_litellm_generated is not skipped
+
+- name: Remember whether the LiteLLM venv switched
+  ansible.builtin.set_fact:
+    hermclaw_orchestrator_litellm_switched: "{{ hermclaw_orchestrator_litellm_switch is changed }}"
+
+# the mtime of a LiteLLM venv is its last activation: the venv switched away from stays among the kept ones
+- name: Record the activation order of the LiteLLM venvs
+  ansible.builtin.file:
+    path: "{{ item }}"
+    state: touch
+    owner: root
+    group: root
+    mode: "0755"
+  loop: >-
+    {{ ([hermclaw_litellm_root ~ '/' ~ (hermclaw_orchestrator_litellm_link_stat.stat.lnk_target | basename)]
+        if hermclaw_orchestrator_litellm_previous.stat.isdir | default(false) else [])
+       + [hermclaw_orchestrator_litellm_venv] }}
+  when: hermclaw_orchestrator_litellm_switched | bool
+
+- name: Find the LiteLLM venvs
+  ansible.builtin.find:
+    paths: ["{{ hermclaw_litellm_root }}"]
+    patterns: ['^venv-[0-9A-Za-z._-]+$']
+    use_regex: true
+    file_type: directory
+  register: hermclaw_orchestrator_litellm_venvs
+
+- name: Delete LiteLLM venvs beyond the kept ones
+  ansible.builtin.file:
+    path: "{{ item }}"
+    state: absent
+  loop: >-
+    {{ (hermclaw_orchestrator_litellm_venvs.files | sort(attribute='mtime', reverse=true) | map(attribute='path')
+        | reject('equalto', hermclaw_orchestrator_litellm_venv) | list)[hermclaw_orchestrator_litellm_keep | int:] }}
+
+- name: Remember whether LiteLLM must be restarted
+  ansible.builtin.set_fact:
+    hermclaw_orchestrator_litellm_restart: >-
+      {{ hermclaw_orchestrator_litellm_switched | bool
+         or hermclaw_orchestrator_litellm_config_file is changed
+         or systemd_skeleton_units_changed | default(false) | bool }}

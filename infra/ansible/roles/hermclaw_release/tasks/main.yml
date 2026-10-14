@@ -54,6 +54,7 @@
         argv: [sha256sum, --check, --quiet, --strict, SHA256SUMS]
         chdir: "{{ hermclaw_release_unpack_dir }}"
       changed_when: false
+      when: not ansible_check_mode
 
     - name: Mark the payload as complete
       ansible.builtin.copy:

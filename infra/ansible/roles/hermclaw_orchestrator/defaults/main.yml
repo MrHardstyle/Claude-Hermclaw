@@ -21,6 +21,10 @@ hermclaw_orchestrator_admin_token: true
 hermclaw_orchestrator_admin_token_credential: api-operator-token
 hermclaw_orchestrator_admin_token_name: "operator-admin-{{ now(utc=true, fmt='%Y%m%d%H%M%S') }}"
 
+# Operator CLI (/usr/local/sbin/hermclaw): credentials loaded in addition to those of hermclaw-scheduler.service when
+# they exist on the host (the backup's, docs/operations/backup-restore.md); missing ones are silently left out.
+hermclaw_orchestrator_cli_optional_credentials: [backup-manifest-key]
+
 # Units of the orchestrator (enabled by the deployment; systemd_skeleton installs them).
 hermclaw_orchestrator_units: [hermclaw-litellm.service, hermclaw-api.service, hermclaw-scheduler.service, hermclaw-backup.timer]
 hermclaw_orchestrator_searxng: "{{ systemd_skeleton_searxng_enabled | default(true) }}"

@@ -15,9 +15,11 @@ Put one **release** of Hermclaw Next onto the four bootstrapped Debian 13 hosts 
 * **Atomic and reversible.** Every host has versioned directories plus one symlink. A switch is a single
   `rename(2)`. A rollback is the same playbook run with the previous version, whose files are still on the host.
 * **Ordered.** Nothing changes before every host's preflight has passed. The orchestrator goes first, and a failure
-  there stops the run. The schema migrates exactly once, before the restart.
-* **Idempotent.** A second run and a `--check` run report `changed=0`. The converge test asserts this for the real
-  playbook.
+  there stops the run. The schema migrates exactly once, before the restart. The files the running release reads
+  (`/etc/hermclaw/*.yaml`, `litellm.yaml`, the venv symlinks) change only after the drain and the migration.
+* **Idempotent.** A second run and a `--check` run report `changed=0`. `--check` is also the dry run of a first
+  deployment or an upgrade: nothing is unpacked or installed, nothing on disk changes. The converge test asserts both
+  for the real playbook.
 
 Model roles, the scope, Git mutations and the worker protocol are runtime concerns. The deployment only renders the
 configuration that carries them (`models.yaml`, `policies.yaml`, `capabilities.yaml`) and never changes their
@@ -110,7 +112,7 @@ reasons:
 
 | Play | Hosts | Roles / tasks | Notes |
 |---|---|---|---|
-| 1 Preflight (read-only, `tags: always`, `any_errors_fatal`) | all four groups | `hermclaw_release/preflight.yml`, `hermclaw_config/data.yml` | release.json present and `sha256sum -c` clean (control node, `run_once`); bootstrap present; CPython minor = the release's; every `LoadCredentialEncrypted=` of this host's units exists and decrypts; inventory sane (MACs, overrides, host ids); writes the `hermclaw.fact` |
+| 1 Preflight (read-only, `tags: always`, `any_errors_fatal`) | all four groups | `hermclaw_release/preflight.yml`, `hermclaw_config/data.yml`, `hermclaw_release/mark_deployed.yml` | release.json present and `sha256sum -c` clean (control node, `run_once`); a run without the orchestrator (`--limit`, `--tags`) requires it to run this release already (`orchestrator_first.yml`, its `/api/health`); bootstrap present; CPython minor = the release's; every `LoadCredentialEncrypted=` of this host's units exists and decrypts; inventory sane (MACs, overrides, host ids); only then, as the last task, the `hermclaw.fact` |
 | 2 Orchestrator (`any_errors_fatal`) | `orchestrator` | `systemd_skeleton`, `hermclaw_release`, `hermclaw_config`, `hermclaw_orchestrator` | see the order below |
 | 3 Execution worker | `execution_workers` | `systemd_skeleton`, `hermclaw_release`, `hermclaw_config`, `hermclaw_worker` | sandbox images (missing tags only), `/health` |
 | 4 Model worker | `model_workers` | as 3 | ffmpeg, `/health`, Ollama pulls |
@@ -124,10 +126,10 @@ names, no benchmark special cases and no project data. Host-specific values come
 
 | Role | Responsibility |
 |---|---|
-| `hermclaw_release` | `validate.yml`, `preflight.yml`, `credentials.yml`; payload unpack and verify; venv install (`pip --no-index --find-links --only-binary=:all: --require-hashes -r requirements.lock`, `pip check`); entry-point verification; `switch.yml` (symlink, `current`, prune); `enable.yml` (systemd or offline `WantedBy` links); `scripts.yml` (operator scripts, SSH-gate allowlist) |
-| `hermclaw_config` | `data.yml` computes the configuration (pure, no changes). `main.yml` stages it, validates it with the new release's `hermclaw config-check`, then installs it with `backup: true` |
-| `hermclaw_orchestrator` | operator CLI wrapper, LiteLLM venv and config, drain, schema decision and migration, restart, SearXNG, backup timer, health checks, admin token |
-| `hermclaw_worker` | sandbox images (`.222`), media packages and Ollama models (`.224`), worker daemon, `/health` |
+| `hermclaw_release` | `validate.yml`, `preflight.yml`, `credentials.yml`; payload unpack and verify; venv install (`pip --no-index --find-links --only-binary=:all: --require-hashes -r requirements.lock`, `pip check`); entry-point verification; `switch.yml` (symlink, activation order, `current`, prune); `enable.yml` (systemd or offline `WantedBy` links); `scripts.yml` (operator scripts, SSH-gate allowlist) |
+| `hermclaw_config` | `data.yml` computes the configuration (pure, no changes). `main.yml` stages it and validates it with the new release's `hermclaw config-check`. `install.yml` installs it with `backup: true`; `deploy.yml` sets `hermclaw_config_install_at_switch: true`, so the host role calls it at its switch |
+| `hermclaw_orchestrator` | operator CLI wrapper, LiteLLM venv (`litellm.yml`, not active) and its switch + config (`litellm_activate.yml`), schema decision, drain, migration, live configuration, restart, LiteLLM gate (`health_litellm.yml`), SearXNG, backup timer, API health, admin token |
+| `hermclaw_worker` | sandbox images (`.222`), media packages and Ollama models of `models.yaml` (`.224`: `hermclaw-model-pull` for the fixed role set, `pull_tag.yml` for a tag the inventory changed), live configuration right before the switch, worker daemon, `/health` |
 | `hermclaw_ui` | UI build directories, webroot migration, symlink switch, prune, `nginx -t` then reload, health checks |
 | `hermclaw_verify` | final `hermclaw doctor` with `hermclaw_verify_doctor_tolerate` for checks expected to warn |
 | `nginx` (bootstrap role, extended) | one site template for bootstrap and deployment: SSE location, CSP and security headers, optional TLS (provided or self-signed ECDSA P-256 with SAN, renewed 30 days before expiry), HTTP→HTTPS |
@@ -136,17 +138,26 @@ names, no benchmark special cases and no project data. Host-specific values come
 
 ```
 hermclaw_release   unpack payload -> venv-<new> (offline, hashes) -> verify entry points      (old release still active)
-hermclaw_config    render -> stage -> config-check with venv-<new> -> install (backup)        (old release still active)
-hermclaw_orch.     CLI wrapper -> LiteLLM venv + litellm.yaml -> credentials -> enable units
-                   doctor --offline --json with venv-<new>: DB revision known? migrate? downgrade?   (read-only)
+hermclaw_config    render -> stage (deploy-staging/) -> config-check with venv-<new>           (live files untouched)
+hermclaw_orch.     CLI wrapper -> LiteLLM venv-<lock> installed (not active) -> credentials
+                   doctor --offline --json with venv-<new> and the staged config: DB revision known? migrate?
+                     downgrade?   (read-only; a refusal leaves every live file and service as it was)
+                   enable units
                    drain: stop hermclaw-scheduler, hermclaw-api        (only if the release switches or the schema changes)
-                   [downgrade with the newer release's migrations] -> hermclaw migrate (venv-<new>) -> DB check
-                     rescue: start the old services again, fail (nothing switched)
-                   switch /opt/hermclaw/venv -> venv-<new>; current -> releases/<new>; prune
-                   restart LiteLLM (new venv/config/unit) | SearXNG | api + scheduler | backup.timer
-                   health: /api/health (ok, version), LiteLLM /health/liveliness, /v1/models refuses without a key
+                   [downgrade with the newer release's migrations] -> hermclaw migrate (venv-<new>, staged config)
+                     -> DB check; rescue: start the old services again with their own config, fail (nothing switched)
+                   install /etc/hermclaw/*.yaml (backup) -> /opt/litellm/venv + litellm.yaml -> /opt/hermclaw/venv,
+                     current; activation order; prune
+                   restart LiteLLM (new venv/config/unit) -> LiteLLM /health/liveliness, /v1/models refuses without
+                     a key -> SearXNG -> api + scheduler -> backup.timer
+                   health: /api/health (ok, version)
                    admin token: once, token-create -> hermclaw-credential set api-operator-token (no_log)
 ```
+
+Restart decisions read `hermclaw_release_switched`, `hermclaw_config_changed`, the migration and the flags
+`systemd_skeleton_units_changed` / `systemd_skeleton_env_changed`. `systemd_skeleton` sets these flags cumulatively,
+so a unit or environment file that the bootstrap part of `site.yml` changed still restarts the services in its
+deployment part (where `systemd_skeleton` runs again and reports no change).
 
 The scheduler drains gracefully: on SIGTERM it checkpoints running steps and releases its leases
 (`TimeoutStopSec=90s`). The new incarnation recovers them (P34). Workers and the UI come after the orchestrator, so
@@ -159,7 +170,10 @@ Migration and doctor run through the operator CLI `/usr/local/sbin/hermclaw`. It
 * the scheduler's `EnvironmentFile=`, working directory and `UMask=0027`
 * `LoadCredentialEncrypted=` for every credential the scheduler loads (plus the worker tokens)
 * `--venv DIR`, which selects a not-yet-active release
+* `--config-dir DIR`, which points the command at another configuration directory. The deployment uses it for the
+  staging copy. `EnvironmentFile=` wins over `--setenv`, so the wrapper sets it with `env(1)` inside the unit
 * `--alembic`, which runs Alembic of that release
+* the backup's optional credentials (`backup-manifest-key`) when they exist, for `sudo hermclaw backup …`
 
 So the schema change runs as the same user, with the same environment and the same secrets as the services, and
 never as root with ad-hoc variables.
@@ -176,24 +190,28 @@ contain `downgrade()` for their own revisions. The downgrade target is the older
 |---|---|
 | Completion markers: `.hermclaw-unpacked` (payload), `.hermclaw-release` (venv JSON with the lock hash), `<v>.release` (UI), LiteLLM marker. Work is skipped when the marker exists, and an incomplete directory without a marker is removed and redone | `hermclaw_release/main.yml`, `hermclaw_ui/main.yml`, `hermclaw_orchestrator/litellm.yml` |
 | `ansible.builtin.file state=link` with a relative `src` (the `relpath` filter): unchanged when the link already points there | `switch.yml`, UI, LiteLLM |
+| Pruning keeps the active release and the `hermclaw_keep_releases` (1–99) **most recently active** others. Every switch touches the release it leaves and the one it activates (venv directory, UI marker, LiteLLM venv), so the previous release survives a rollback followed by an upgrade. Only entries named after a release version (`hermclaw_version_pattern`) are pruned | `switch.yml`/`prune.yml`, `hermclaw_ui`, `litellm_activate.yml` |
 | Configuration rendered deterministically (`to_nice_yaml(sort_keys=false)`, fixed header), staged with `copy`, validated, installed with `copy` (changed only on a content difference) | `hermclaw_config` |
 | Read-only commands report `changed_when: false`. Mutating commands are guarded by `creates`, a marker or an explicit decision (`hermclaw_orchestrator_migrate` from the DB revision, a token only without its credential, models only when missing from `ollama list`, images only when `podman image exists` fails) | all roles |
 | Restarts only on a switch, a configuration or unit change, or a migration. Otherwise `state: started` | orchestrator, worker |
 | Bootstrap and deployment render identical files: the `hermclaw.fact` local fact makes the bootstrap's Quadlet `[Install]` match the deployed one, both use the same nginx template, and `common/python.yml` accepts the venv symlink | `systemd_skeleton`, `nginx`, `common` |
 | `--check`: the config validation is skipped only when the staged files would change (the staging copy does not exist in check mode), and the switch is not simulated over the bootstrap's plain directory | `hermclaw_config/main.yml`, `switch.yml` |
+| `--check` as a dry run: `unarchive` and the payload checksum run only for real (their directories do not exist in check mode), the symlink switches use `force: "{{ ansible_check_mode }}"` (the target is not installed), the schema decision and the final doctor need the new venv / operator CLI and are skipped until they exist, and the model check only reports | release, LiteLLM, UI, orchestrator, verify, worker |
 
-The converge test runs `site.yml` twice, then `deploy.yml --check`, and asserts `changed=0` for runs two and three.
-It also asserts that `migrate` and `token-create` ran exactly once (fake `systemd-run` log).
+The converge test runs `bootstrap.yml`, a `deploy.yml --check` dry run (nothing on disk changes), `deploy.yml`, then
+`site.yml` and `deploy.yml --check` (`changed=0`), and the dry run of the upgrade before it. It also asserts that
+`migrate` and `token-create` ran exactly once (fake `systemd-run` log).
 
 ## Failure behaviour
 
 | Failure | Effect |
 |---|---|
-| Preflight (checksum, missing bootstrap, Python minor, missing or undecryptable credential, bad inventory) | nothing has changed on any host (`any_errors_fatal`). The message names the fix, e.g. `sudo /opt/hermclaw/bin/hermclaw-credential set gitlab-token` |
+| Preflight (checksum, orchestrator not on the release of a worker/UI-only run, missing bootstrap, Python minor, missing or undecryptable credential, bad inventory) | nothing has changed on any host (`any_errors_fatal`). The message names the fix, e.g. `sudo /opt/hermclaw/bin/hermclaw-credential set gitlab-token` |
 | Install of `venv-<new>` (hash mismatch, `pip check`, entry point) | old release active and running; the incomplete venv has no marker and is redone on the next run |
 | `hermclaw config-check` of the staged config | the live `/etc/hermclaw/*.yaml` are unchanged; the error output is shown |
-| Database newer than the release | stop before the drain, with the exact command for the allowed downgrade |
-| Migration fails | rescue: API and scheduler of the old release start again; the venv is not switched; PostgreSQL rolls the failed revision's transaction back |
+| Database newer than the release | stop before the drain and before any live file changes, with the exact command for the allowed downgrade |
+| Migration fails | rescue: API and scheduler of the old release start again with their own configuration (`/etc/hermclaw`, LiteLLM and the venv are not switched yet); PostgreSQL rolls the failed revision's transaction back |
+| LiteLLM not alive, or answering without its master key, after its restart | the run stops before the API and the scheduler start (drained services stay stopped): fix the credential or `litellm.yaml`, re-run |
 | Health check after the switch (orchestrator) | the run stops (`any_errors_fatal`): workers and UI stay on the previous release. Recovery: re-run with the previous version (rollback) |
 | Worker `/health`, model pull, sandbox build | that host fails; the orchestrator is already on the new release and stays compatible (protocol check) |
 | `nginx -t` fails | no reload; the running nginx keeps the previous configuration |
@@ -212,6 +230,9 @@ It also asserts that `migrate` and `token-create` ran exactly once (fake `system
   release and the payloads carry per-file `SHA256SUMS`. The tree-sitter grammars (native code) are part of the
   checksummed payload, so no host downloads code at run time. The LiteLLM lock is checked for `litellm_init.pth`, and the
   LiteLLM unit sets `LITELLM_LOCAL_MODEL_COST_MAP=True` (no fetch at start) and `DISABLE_ADMIN_UI=True`.
+* **Trusted proxy.** `hermclaw.env` sets `HERMCLAW_API_FORWARDED_ALLOW_IPS` to the web UI host's address
+  (`systemd_skeleton_api_forwarded_allow_ips`), so the API takes the client address and scheme from nginx's
+  `X-Forwarded-For`/`-Proto` and from nobody else (never `*`).
 * **nginx.** The CSP is `default-src 'none'` with only `'self'` (plus `blob:` for images and media) allowed per
   type, `frame-ancestors 'none'` and no inline script or style (enforced at build time). The site also sends
   `X-Content-Type-Options`, `X-Frame-Options`, `Referrer-Policy`, `Cross-Origin-Opener-Policy`,
@@ -243,8 +264,8 @@ Hermclaw" header. A manual edit is overwritten by the next run and kept as an An
 | Test | Proves |
 |---|---|
 | `test_deploy_release.py` | real release builds (online with npm UI, offline with `--ui-dist`, a third with a new migration): layout, checksums, hash locks, CSP check, offline install in `python:3.13-slim-trixie`, migrations up/down on PostgreSQL, input refusals, broken entry points refused. The canary `test_this_checkout_builds_a_deployable_release` builds the checkout as it is |
-| `test_deploy_infra.py` | syntax checks, play structure, idempotency lint of the roles, `ansible-lint --profile=production`, shellcheck, validation refusals, config rendering and refusals, credential check, offline enable, operator CLI with a fake `systemd-run` (argv, exit codes, refusals), unit tweaks, self-signed certificate and renewal, nginx with TLS in `nginx:1.28` (headers, SSE, redirect) |
-| `test_deploy_converge.py` | the real `site.yml` in throw-away `debian:trixie`-based containers (network none, local connection, `hermclaw_manage_services=false`, private PostgreSQL), with these results: `venv-<v>` and symlink; migration of the bootstrap's plain venv; config passes `hermclaw config-check`; units render and pass `systemd-analyze verify --root`; UI release dir and symlink; second run and `--check` report `changed=0`; upgrade with prune (keep N); rollback refused, then allowed with downgrade, then idempotent; model worker converge |
+| `test_deploy_infra.py` | syntax checks, play structure, idempotency lint of the roles, `ansible-lint --profile=production`, shellcheck, validation refusals, config rendering and refusals, credential check, offline enable, switch + prune on a real directory tree (rollback followed by an upgrade keeps the previous release, dry run), the UI role end to end on a directory tree (placeholder migration, rollback, prune, dry run), the dry run of a new release (nothing unpacked or installed), the order of the orchestrator role (nothing live before the schema decision), the model pull against test doubles of `ollama`/`systemd-run`/`systemctl` (fixed roles, a changed tag, dry run, refusals), operator CLI with a fake `systemd-run` (argv, `--config-dir`, optional credentials, exit codes, refusals), unit tweaks, self-signed certificate and renewal, nginx with TLS in `nginx:1.28` (headers, SSE, redirect) |
+| `test_deploy_converge.py` | the real `bootstrap.yml`, `deploy.yml` and `site.yml` in throw-away `python:3.13-slim-trixie` containers (network none, local connection, `hermclaw_manage_services=false`, private PostgreSQL), with these results: the first dry run changes nothing; `venv-<v>` and symlink; migration of the bootstrap's plain venv; config passes `hermclaw config-check`; units render and pass `systemd-analyze verify --root`; UI release dir and symlink; second run and `--check` report `changed=0`; the dry run of an upgrade changes nothing; upgrade with prune (keep N); rollback refused without touching a live file, then allowed with downgrade, then idempotent; model worker converge; no secret in any output |
 
 Services do not run in the containers. The worker `/health`, the API health, `nginx -t`/reload against the live
 service, the SearXNG start and the Ollama pulls are covered by the code paths and the individual tests. Their live
@@ -254,7 +275,11 @@ execution waits for BLOCKER-001.
 
 * Live run on `.222`–`.225` (BLOCKER-001).
 * Runtime changes are listed in the P32 result (`shared_changes_needed`). They include:
-  * the worker entry points in `pyproject.toml`
   * a configurable `forwarded_allow_ips` in the API
   * a fallback build-context path in `hermclaw-build-sandbox-images`
-  * reconciling `infra/backup/hermclaw-backup.service` with `infra/systemd/hermclaw-backup.service.j2`
+  * explicit tags for `scripts/ops/hermclaw-model-pull` (today the deployment pulls a tag outside its fixed role set
+    itself, `pull_tag.yml`)
+* `infra/systemd/hermclaw-backup.service.j2` is now the deployed form of `infra/backup/hermclaw-backup.service`
+  (`HERMCLAW_BACKUP_CONFIG`, `SuccessExitStatus=75`, `backup-manifest-key` when it exists). The backup runbook should
+  stop telling operators to copy `infra/backup/hermclaw-backup.{service,timer}` over the deployed units: those files
+  lack the "Managed by Hermclaw" marker, so the next bootstrap or deployment refuses to overwrite them.

@@ -1,0 +1,17 @@
+# Install the configuration validated by main.yml (hermclaw_config_rendered, hermclaw_config_host_files) into
+# hermclaw_config_dir. Sets hermclaw_config_changed (a live file of this host changed: restart its services).
+- name: Install the configuration
+  ansible.builtin.copy:
+    content: "{{ hermclaw_config_rendered[item] }}"
+    dest: "{{ hermclaw_config_dir }}/{{ item }}.yaml"
+    owner: root
+    group: "{{ hermclaw_group }}"
+    mode: "0640"
+    backup: true
+    force: "{{ item not in hermclaw_config_unmanaged }}"
+  loop: "{{ hermclaw_config_host_files }}"
+  register: hermclaw_config_installed
+
+- name: Remember whether the live configuration changed
+  ansible.builtin.set_fact:
+    hermclaw_config_changed: "{{ hermclaw_config_installed is changed }}"

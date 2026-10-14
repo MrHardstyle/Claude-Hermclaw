@@ -15,6 +15,7 @@ import shutil
 import socket
 import ssl
 import subprocess
+import tarfile
 import threading
 import time
 import uuid
@@ -58,7 +59,13 @@ def _env(tmp_path: Path) -> dict[str, str]:
 
 
 def _playbook(
-    tmp_path: Path, plays: list[dict[str, Any]], extra: dict[str, Any], *, inventory: Path | None = None, args: tuple[str, ...] = ()
+    tmp_path: Path,
+    plays: list[dict[str, Any]],
+    extra: dict[str, Any],
+    *,
+    inventory: Path | None = None,
+    args: tuple[str, ...] = (),
+    path_prefix: Path | None = None,
 ) -> subprocess.CompletedProcess[str]:
     name = uuid.uuid4().hex[:8]
     pb = tmp_path / f"play-{name}.yml"
@@ -66,7 +73,10 @@ def _playbook(
     ev = tmp_path / f"extra-{name}.json"
     ev.write_text(json.dumps(extra), encoding="utf-8")
     inv = str(inventory) if inventory else "localhost,"
-    return _run([str(ANSIBLE_PLAYBOOK), "-i", inv, str(pb), "-e", f"@{ev}", *args], env=_env(tmp_path), cwd=tmp_path, timeout=900)
+    env = _env(tmp_path)
+    if path_prefix is not None:  # test doubles of system tools (systemctl, systemd-run, ...)
+        env["PATH"] = f"{path_prefix}{os.pathsep}{env['PATH']}"
+    return _run([str(ANSIBLE_PLAYBOOK), "-i", inv, str(pb), "-e", f"@{ev}", *args], env=env, cwd=tmp_path, timeout=900)
 
 
 def _local_play(tasks: list[dict[str, Any]], hosts: str = "localhost") -> list[dict[str, Any]]:
@@ -107,7 +117,13 @@ def test_deploy_playbook_structure() -> None:
     plays = yaml.safe_load((PLAYBOOKS_DIR / "deploy.yml").read_text(encoding="utf-8"))
     pre = plays[0]
     assert pre["hosts"] == "orchestrator:webui:execution_workers:model_workers" and pre["any_errors_fatal"] is True
-    assert [t["ansible.builtin.include_role"]["tasks_from"] for t in pre["tasks"]] == ["preflight.yml", "data.yml"]
+    assert [t["ansible.builtin.include_role"]["tasks_from"] for t in pre["tasks"]] == ["preflight.yml", "data.yml", "mark_deployed.yml"], (
+        "read-only checks first; the only write of the preflight play (the deployed fact) after every check passed"
+    )
+    preflight = (ROLES_DIR / "hermclaw_release" / "tasks" / "preflight.yml").read_text(encoding="utf-8")
+    assert "ansible.builtin.copy" not in preflight and "ansible.builtin.file" not in preflight, "preflight.yml is read-only"
+    assert "orchestrator_first.yml" in preflight, "workers and UI never get ahead of the orchestrator"
+
     by_hosts = {p["hosts"]: [r["role"] for r in p.get("roles", [])] for p in plays[1:]}
     order = [p["hosts"] for p in plays[1:]]
     assert order == ["orchestrator", "execution_workers", "model_workers", "webui", "orchestrator"], "orchestrator first, doctor last"
@@ -181,7 +197,8 @@ def test_build_script_is_shellcheck_clean() -> None:
 
 VALIDATION_CASES: list[tuple[str, str, str, dict[str, Any], str]] = [
     ("release-defaults", "hermclaw_release", "validate.yml", {}, "PASS"),
-    ("release-keep-0", "hermclaw_release", "validate.yml", {"hermclaw_keep_releases": 0}, "PASS"),
+    ("release-keep-0", "hermclaw_release", "validate.yml", {"hermclaw_keep_releases": 0}, "FAIL"),
+    ("release-keep-1", "hermclaw_release", "validate.yml", {"hermclaw_keep_releases": 1}, "PASS"),
     ("release-dash-rc", "hermclaw_release", "validate.yml", {"hermclaw_version": "0.1.0-rc1"}, "FAIL"),
     ("release-float", "hermclaw_release", "validate.yml", {"hermclaw_version": 1.0}, "FAIL"),
     ("release-injection", "hermclaw_release", "validate.yml", {"hermclaw_version": "1.0;reboot"}, "FAIL"),
@@ -203,6 +220,7 @@ VALIDATION_CASES: list[tuple[str, str, str, dict[str, Any], str]] = [
     ("orch-litellm-link", "hermclaw_orchestrator", "validate.yml", {"hermclaw_orchestrator_litellm_link": "opt/litellm/venv"}, "FAIL"),
     ("orch-api-url", "hermclaw_orchestrator", "validate.yml", {"hermclaw_orchestrator_api_url": "https://x/ ; rm"}, "FAIL"),
     ("orch-units", "hermclaw_orchestrator", "validate.yml", {"hermclaw_orchestrator_units": ["sshd.service"]}, "FAIL"),
+    ("orch-litellm-keep-0", "hermclaw_orchestrator", "validate.yml", {"hermclaw_orchestrator_litellm_keep": 0}, "FAIL"),
     ("nginx-tls-self-signed", "nginx", "validate.yml", {"hermclaw_web_server_name": "hermclaw.lan", "nginx_tls_enabled": True}, "PASS"),
     ("nginx-tls-no-name", "nginx", "validate.yml", {"hermclaw_web_server_name": "_", "nginx_tls_enabled": True}, "FAIL"),
     (
@@ -513,6 +531,452 @@ def test_units_are_enabled_offline_with_the_links_systemctl_would_create(tmp_pat
     assert res.returncode != 0 and "units without WantedBy=" in res.stdout
 
 
+# --------------------------------------------------------------------------------------------- switch / prune / dry run
+
+
+def _fake_release_venv(install: Path, version: str, installed_at: float) -> None:
+    """What hermclaw_release main.yml leaves behind: venv-<version> (with its marker) and releases/<version>."""
+    venv = install / f"venv-{version}"
+    (venv / "bin").mkdir(parents=True)
+    (venv / ".hermclaw-release").write_text(version, encoding="utf-8")
+    payload = install / "releases" / version
+    payload.mkdir(parents=True)
+    for path in (venv, payload):
+        os.utime(path, (installed_at, installed_at))
+
+
+def test_switch_and_prune_keep_the_previously_active_release(tmp_path: Path) -> None:
+    """Rollback followed by an upgrade: the release active before the last switch survives pruning (keep=1)."""
+    if os.geteuid() != 0:
+        pytest.skip("the switch makes the venvs root-owned")
+    install = tmp_path / "opt" / "hermclaw"
+    (install / "venv").mkdir(parents=True)  # the bootstrap's plain venv directory
+    (install / "venv" / "pyvenv.cfg").write_text("home = /usr/bin\n", encoding="utf-8")
+    (install / "venv-manual").mkdir()  # not a release: never pruned
+    (install / "releases" / "notes").mkdir(parents=True)
+    base = {
+        "hermclaw_install_dir": str(install),
+        "hermclaw_venv": str(install / "venv"),
+        "hermclaw_releases_dir": str(install / "releases"),
+        "hermclaw_keep_releases": 1,
+    }
+    tasks = [_include("hermclaw_release", "switch.yml")]
+
+    def switch(version: str, *args: str) -> subprocess.CompletedProcess[str]:
+        res = _playbook(tmp_path, _local_play(tasks), {**base, "hermclaw_version": version}, args=args)
+        assert res.returncode == 0, res.stdout[-3000:]
+        return res
+
+    def state() -> tuple[str, list[str], list[str]]:
+        return (
+            os.readlink(install / "venv"),
+            sorted(p.name for p in install.glob("venv-*")),
+            sorted(p.name for p in (install / "releases").iterdir()),
+        )
+
+    now = time.time()
+    _fake_release_venv(install, "1.0.0", now - 5000)
+    switch("1.0.0")
+    assert state()[0] == "venv-1.0.0" and os.readlink(install / "current") == "releases/1.0.0"
+    (kept,) = install.glob("venv.pre-release-*")
+    assert (kept / "pyvenv.cfg").is_file(), "the bootstrap's directory is kept, not deleted"
+    assert _changed(switch("1.0.0")) == 0
+    _fake_release_venv(install, "1.1.0", now - 4000)
+    switch("1.1.0")
+    _fake_release_venv(install, "1.2.0", now - 3000)
+    switch("1.2.0")
+    assert state() == ("venv-1.2.0", ["venv-1.1.0", "venv-1.2.0", "venv-manual"], ["1.1.0", "1.2.0", "notes"])
+    switch("1.1.0")  # rollback: reuses the kept venv
+    assert state() == ("venv-1.1.0", ["venv-1.1.0", "venv-1.2.0", "venv-manual"], ["1.1.0", "1.2.0", "notes"])
+    _fake_release_venv(install, "1.3.0", now - 2000)
+    switch("1.3.0")
+    assert state() == ("venv-1.3.0", ["venv-1.1.0", "venv-1.3.0", "venv-manual"], ["1.1.0", "1.3.0", "notes"]), (
+        "the release active before the switch (1.1.0) is kept, not the most recently installed other one (1.2.0)"
+    )
+    assert _changed(switch("1.3.0")) == 0
+    # dry run of an upgrade to a release that is not installed: reports the switch, changes nothing on disk
+    res = switch("1.4.0", "--check", "--diff")
+    assert _changed(res) > 0
+    assert state() == ("venv-1.3.0", ["venv-1.1.0", "venv-1.3.0", "venv-manual"], ["1.1.0", "1.3.0", "notes"])
+    assert os.readlink(install / "current") == "releases/1.3.0"
+
+
+def _ui_release(dist: Path, version: str) -> None:
+    rel = dist / f"release-{version}"
+    rel.mkdir(parents=True)
+    src = dist / f"ui-src-{version}"
+    (src / "assets").mkdir(parents=True)
+    (src / "index.html").write_text(f'<!doctype html><div id="root"></div><!-- {version} -->\n', encoding="utf-8")
+    (src / "assets" / "app.js").write_text("console.log(1)\n", encoding="utf-8")
+    with tarfile.open(rel / f"hermclaw-ui-{version}.tar.gz", "w:gz") as tf:
+        tf.add(src, arcname=".")
+    meta = {"name": "hermclaw", "version": version, "ui": {"payload": f"hermclaw-ui-{version}.tar.gz"}}
+    (rel / "release.json").write_text(json.dumps(meta), encoding="utf-8")
+
+
+def test_ui_build_switch_rollback_pruning_and_dry_run(tmp_path: Path) -> None:
+    """roles/hermclaw_ui on a real directory tree: placeholder webroot -> versioned builds + atomic symlink."""
+    if os.geteuid() != 0:
+        pytest.skip("the UI files are made root-owned")
+    dist, www = tmp_path / "dist", tmp_path / "www"
+    for version in ("1.0.0", "1.1.0", "1.2.0", "1.3.0", "1.4.0"):
+        _ui_release(dist, version)
+    webroot = www / "hermclaw-next"
+    webroot.mkdir(parents=True)
+    placeholder = (ROLES_DIR / "nginx" / "templates" / "index.html.j2").read_text(encoding="utf-8")
+    (webroot / "index.html").write_text(placeholder, encoding="utf-8")
+    releases = www / "hermclaw-next-releases"
+    (releases / "keep-me").mkdir(parents=True)  # not a release: never pruned
+    base = {
+        "hermclaw_webroot": str(webroot),
+        "hermclaw_release_root": str(dist),
+        "hermclaw_manage_services": False,
+        "hermclaw_ui_owner": "root",
+        "hermclaw_ui_group": "root",
+        "hermclaw_keep_releases": 1,
+    }
+    tasks = [_include("hermclaw_ui", "main.yml")]
+
+    def deploy(version: str, *args: str) -> subprocess.CompletedProcess[str]:
+        res = _playbook(tmp_path, _local_play(tasks), {**base, "hermclaw_version": version}, args=args)
+        assert res.returncode == 0, res.stdout[-3000:]
+        return res
+
+    def state() -> tuple[str, list[str]]:
+        return os.readlink(webroot), sorted(p.name for p in releases.iterdir())
+
+    deploy("1.0.0")
+    assert state() == ("hermclaw-next-releases/1.0.0", ["1.0.0", "1.0.0.release", "keep-me"])
+    assert "<!-- 1.0.0 -->" in (webroot / "index.html").read_text(encoding="utf-8"), "the placeholder webroot is replaced"
+    assert not list(www.glob("hermclaw-next.pre-release-*")), "a webroot with only the placeholder is not kept"
+    assert _changed(deploy("1.0.0")) == 0
+    deploy("1.1.0")
+    deploy("1.2.0")
+    assert state()[1] == ["1.1.0", "1.1.0.release", "1.2.0", "1.2.0.release", "keep-me"]
+    deploy("1.1.0")  # rollback
+    assert state() == ("hermclaw-next-releases/1.1.0", ["1.1.0", "1.1.0.release", "1.2.0", "1.2.0.release", "keep-me"])
+    deploy("1.3.0")
+    assert state() == ("hermclaw-next-releases/1.3.0", ["1.1.0", "1.1.0.release", "1.3.0", "1.3.0.release", "keep-me"]), (
+        "the build active before the switch is kept"
+    )
+    # dry run of an upgrade: nothing is unpacked, the webroot stays
+    deploy("1.4.0", "--check", "--diff")
+    assert state() == ("hermclaw-next-releases/1.3.0", ["1.1.0", "1.1.0.release", "1.3.0", "1.3.0.release", "keep-me"])
+
+
+def _fake_payload_release(tmp_path: Path, version: str) -> Path:
+    """release.json + runtime/LiteLLM payload archives (content irrelevant: a dry run never unpacks them)."""
+    dist = tmp_path / "dist"
+    rel = dist / f"release-{version}"
+    rel.mkdir(parents=True)
+    for name in (f"hermclaw-runtime-{version}.tar", f"hermclaw-litellm-{version}.tar"):
+        with tarfile.open(rel / name, "w") as tf:
+            info = tarfile.TarInfo("SHA256SUMS")
+            tf.addfile(info)
+    meta = {
+        "name": "hermclaw",
+        "version": version,
+        "python": {"version": "3.13"},
+        "alembic_head": "0002",
+        "runtime": {"payload": f"hermclaw-runtime-{version}.tar", "lock_sha256": "0" * 64},
+        "litellm": {
+            "payload": f"hermclaw-litellm-{version}.tar",
+            "version": "1.104.2",
+            "requirements": ["litellm[proxy]==1.104.2"],
+            "lock_sha256": "1" * 64,
+            "venv_name": "venv-1.104.2-111111111111",
+        },
+    }
+    (rel / "release.json").write_text(json.dumps(meta), encoding="utf-8")
+    return dist
+
+
+def test_dry_run_of_a_new_release_unpacks_and_installs_nothing(tmp_path: Path) -> None:
+    """`deploy.yml -e hermclaw_version=<new> --check --diff` (docs/runbooks/upgrade.md step 2) must not fail on the
+    payload directories it does not create, and must leave no trace."""
+    dist = _fake_payload_release(tmp_path, "2.0.0")
+    root = tmp_path / "root"
+    tasks = [
+        _include("hermclaw_release", "main.yml"),
+        {
+            "name": "LiteLLM venv",
+            "ansible.builtin.include_role": {"name": "hermclaw_orchestrator", "tasks_from": "litellm.yml"},
+        },
+        _include("hermclaw_release", "switch.yml"),
+    ]
+    extra = {
+        "hermclaw_version": "2.0.0",
+        "hermclaw_release_root": str(dist),
+        "hermclaw_install_dir": str(root / "opt" / "hermclaw"),
+        "hermclaw_venv": str(root / "opt" / "hermclaw" / "venv"),
+        "hermclaw_releases_dir": str(root / "opt" / "hermclaw" / "releases"),
+        "hermclaw_litellm_root": str(root / "opt" / "litellm"),
+        "hermclaw_orchestrator_ip": "192.168.178.225",
+        "common_python_bin": shutil.which("python3") or "/usr/bin/python3",
+    }
+    res = _playbook(tmp_path, _local_play(tasks), extra, args=("--check", "--diff"))
+    assert res.returncode == 0, res.stdout[-4000:]
+    assert _changed(res) > 0, "the dry run reports what the real run would do"
+    assert not root.exists(), sorted(str(p) for p in root.rglob("*"))
+
+
+FAKE_OLLAMA = r"""#!/usr/bin/env python3
+# test double of the ollama CLI: installed tags in $FAKE_OLLAMA_STATE, tags in $FAKE_OLLAMA_UNKNOWN cannot be pulled
+import json, os, sys
+state = os.environ["FAKE_OLLAMA_STATE"]
+tags = json.load(open(state)) if os.path.exists(state) else []
+with open(os.environ["FAKE_LOG"], "a", encoding="utf-8") as fh:
+    fh.write(json.dumps(["ollama", *sys.argv[1:], os.environ.get("OLLAMA_HOST", "")]) + "\n")
+cmd = sys.argv[1]
+if cmd == "list":
+    print("NAME    ID    SIZE    MODIFIED")
+    for tag in tags:
+        print(f"{tag}    0123456789ab    1 GB    1 minute ago")
+elif cmd == "pull":
+    if sys.argv[2] in os.environ.get("FAKE_OLLAMA_UNKNOWN", "").split():
+        sys.exit(f"Error: pull model manifest: file does not exist ({sys.argv[2]})")
+    if sys.argv[2] not in tags:
+        json.dump(tags + [sys.argv[2]], open(state, "w"))
+elif cmd == "show":
+    sys.exit(0 if sys.argv[2] in tags else 1)
+"""
+
+FAKE_SYSTEMD_RUN_SYNC = r"""#!/usr/bin/env python3
+# test double of `systemd-run --unit=NAME ...`: runs the command synchronously, keeps the unit result for systemctl
+import json, os, subprocess, sys
+args = sys.argv[1:]
+with open(os.environ["FAKE_LOG"], "a", encoding="utf-8") as fh:
+    fh.write(json.dumps(["systemd-run", *args]) + "\n")
+unit, env, i = None, dict(os.environ), 0
+while args[i].startswith("--"):
+    if args[i].startswith("--unit="):
+        unit = args[i].split("=", 1)[1]
+    elif args[i].startswith("--setenv="):
+        k, v = args[i].split("=", 1)[1].split("=", 1)
+        env[k] = v
+    i += 1
+units = os.environ["FAKE_UNITS"]
+if os.path.exists(os.path.join(units, unit + ".service")):
+    sys.exit(f"Failed to start transient service unit: Unit {unit}.service was already loaded or has a fragment file.")
+rc = subprocess.run(args[i:], env=env, check=False).returncode
+if rc != 0:
+    open(os.path.join(units, unit + ".service"), "w").write("failed")
+"""
+
+FAKE_SYSTEMCTL = r"""#!/bin/sh
+# test double of systemctl is-active / reset-failed for the transient units of the fake systemd-run
+echo "systemctl $*" >> "$FAKE_LOG.systemctl"
+f="$FAKE_UNITS/$2"
+case "$1" in
+    is-active) if [ -f "$f" ]; then cat "$f"; echo; exit 3; else echo inactive; exit 3; fi ;;
+    reset-failed) rm -f "$f" ;;
+esac
+"""
+
+
+@pytest.fixture
+def model_host(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> dict[str, Any]:
+    """roles/hermclaw_worker models.yml against test doubles of ollama, systemd-run, systemctl and journalctl, with
+    the release's real scripts/ops/hermclaw-model-pull."""
+    fakes = tmp_path / "fakes"
+    fakes.mkdir()
+    for name, text in (("ollama", FAKE_OLLAMA), ("systemd-run", FAKE_SYSTEMD_RUN_SYNC), ("systemctl", FAKE_SYSTEMCTL)):
+        (fakes / name).write_text(text, encoding="utf-8")
+        (fakes / name).chmod(0o755)
+    (fakes / "journalctl").write_text("#!/bin/sh\necho 'pull log: manifest not found'\n", encoding="utf-8")
+    (fakes / "journalctl").chmod(0o755)
+    bindir = tmp_path / "bin"
+    bindir.mkdir()
+    shutil.copy(REPO / "scripts" / "ops" / "hermclaw-model-pull", bindir / "hermclaw-model-pull")
+    units = tmp_path / "units"
+    units.mkdir()
+    models_dir = tmp_path / "models"
+    models_dir.mkdir()
+    dropin = tmp_path / "hermclaw.conf"
+    dropin.write_text(f"[Service]\nEnvironment=OLLAMA_MODELS={models_dir}\n", encoding="utf-8")
+    log = tmp_path / "calls.jsonl"
+    monkeypatch.setenv("FAKE_OLLAMA_STATE", str(tmp_path / "ollama.json"))
+    monkeypatch.setenv("FAKE_LOG", str(log))
+    monkeypatch.setenv("FAKE_UNITS", str(units))
+    monkeypatch.delenv("FAKE_OLLAMA_UNKNOWN", raising=False)
+    models = yaml.safe_load((REPO / "config" / "models.example.yaml").read_text(encoding="utf-8"))
+    extra = {
+        "hermclaw_config_data": {"models": models},
+        "systemd_skeleton_worker_id": "model-224",
+        "hermclaw_worker_ollama_bin": str(fakes / "ollama"),
+        "hermclaw_worker_ollama_dropin": str(dropin),
+        "hermclaw_bin_dir": str(bindir),
+        "hermclaw_worker_model_sizes_gb": {},
+        "hermclaw_worker_model_default_size_gb": 0,
+        "hermclaw_worker_model_disk_headroom_gb": 0,
+        "hermclaw_worker_model_pull_poll": 1,
+        "hermclaw_worker_model_pull_timeout": 5,
+    }
+    return {"tmp": tmp_path, "fakes": fakes, "extra": extra, "log": log, "models": models}
+
+
+def _pull(host: dict[str, Any], *args: str, **extra: Any) -> subprocess.CompletedProcess[str]:
+    tasks = [_include("hermclaw_worker", "models.yml")]
+    return _playbook(host["tmp"], _local_play(tasks), {**host["extra"], **extra}, args=args, path_prefix=host["fakes"])
+
+
+def _log(host: dict[str, Any]) -> list[list[str]]:
+    if not host["log"].exists():
+        return []
+    return [json.loads(line) for line in host["log"].read_text(encoding="utf-8").splitlines()]
+
+
+def test_model_pull_follows_models_yaml_and_survives_a_dry_run(model_host: dict[str, Any], monkeypatch: pytest.MonkeyPatch) -> None:
+    """32.6: the fixed roles' tags of models.yaml are pulled once (hermclaw-model-pull in a transient unit), a tag the
+    inventory changed is pulled too, a dry run pulls nothing, and a tag that cannot be pulled fails the play."""
+    profiles = model_host["models"]["profiles"]
+    wanted = sorted({p["model"] for p in profiles if p.get("enabled", True)})
+    assert {"gemma4:26b", "qwen3-coder:30b", "qwen3.8:27b", "qwen3:8b", "embeddinggemma:300m"} <= set(wanted)
+    # dry run on a host without models: reports, pulls nothing
+    res = _pull(model_host, "--check")
+    assert res.returncode == 0, res.stdout[-3000:]
+    assert not [c for c in _log(model_host) if c[0] == "systemd-run" or c[1] == "pull"], _log(model_host)
+    # the real run
+    res = _pull(model_host)
+    assert res.returncode == 0, res.stdout[-3000:]
+    runs = [c for c in _log(model_host) if c[0] == "systemd-run"]
+    assert len(runs) == 1 and "--unit=hermclaw-model-pull" in runs[0] and f"{model_host['tmp']}/bin/hermclaw-model-pull" in runs[0]
+    assert "--setenv=OLLAMA_HOST=http://127.0.0.1:11434" in runs[0]
+    installed = json.loads(Path(os.environ["FAKE_OLLAMA_STATE"]).read_text(encoding="utf-8"))
+    assert set(wanted) <= set(installed)
+    # nothing missing: no pull at all
+    before = len(_log(model_host))
+    again = _pull(model_host)
+    assert again.returncode == 0 and _changed(again) == 0
+    assert [c for c in _log(model_host)[before:] if c[0] == "systemd-run" or c[1] == "pull"] == []
+    # a changed tag (hermclaw_config_overrides.models): pulled by its own transient unit
+    changed = json.loads(json.dumps(model_host["models"]))
+    for p in changed["profiles"]:
+        if p["role"] == "coder":
+            p["model"] = "qwen3-coder:30b-a3b-q4_K_M"
+    res = _pull(model_host, hermclaw_config_data={"models": changed})
+    assert res.returncode == 0, res.stdout[-3000:]
+    tag_runs = [c for c in _log(model_host) if c[0] == "systemd-run" and "--unit=hermclaw-model-pull-tag" in c]
+    assert len(tag_runs) == 1 and tag_runs[0][-2:] == ["pull", "qwen3-coder:30b-a3b-q4_K_M"]
+    # a tag that cannot be pulled stops the play with the log of the pull
+    for p in changed["profiles"]:
+        if p["role"] == "fast":
+            p["model"] = "qwen3:9b-does-not-exist"
+    monkeypatch.setenv("FAKE_OLLAMA_UNKNOWN", "qwen3:9b-does-not-exist")
+    res = _pull(model_host, hermclaw_config_data={"models": changed})
+    assert res.returncode != 0
+    assert "still missing on localhost: qwen3:9b-does-not-exist" in res.stdout and "manifest not found" in res.stdout
+    # tags become arguments of ollama pull: an option-like tag is refused before anything runs
+    for p in changed["profiles"]:
+        if p["role"] == "fast":
+            p["model"] = "--insecure"
+    res = _pull(model_host, hermclaw_config_data={"models": changed})
+    assert res.returncode != 0 and "models.yaml names invalid Ollama tags" in res.stdout
+
+
+def test_workers_and_ui_never_get_ahead_of_the_orchestrator(tmp_path: Path) -> None:
+    """A run that does not deploy the orchestrator (--limit, --tags) needs the orchestrator on that release already."""
+    upstream = _Upstream()  # /api/health -> {"status": "ok", "version": "0.1.0rc1"}
+    try:
+        inventory = {
+            "all": {
+                "vars": {"ansible_connection": "local", "hermclaw_orchestrator_ip": "127.0.0.1"},
+                "children": {
+                    "orchestrator": {"hosts": {"o": {}}},
+                    "execution_workers": {"hosts": {"e": {}}},
+                    "webui": {"hosts": {"w": {}}},
+                },
+            }
+        }
+        inv = tmp_path / "hosts.yml"
+        inv.write_text(yaml.safe_dump(inventory), encoding="utf-8")
+        api = f"http://127.0.0.1:{upstream.port}"
+
+        def run(hosts: str, version: str, *args: str, **extra: Any) -> subprocess.CompletedProcess[str]:
+            play = _local_play([_include("hermclaw_release", "orchestrator_first.yml")], hosts=hosts)
+            play[0]["tags"] = ["always"]  # like the preflight play of deploy.yml
+            vars_ = {
+                "hermclaw_version": version,
+                "hermclaw_release_require_orchestrator_first": True,
+                "hermclaw_release_orchestrator_api_url": api,
+                **extra,
+            }
+            return _playbook(tmp_path, play, vars_, inventory=inv, args=args)
+
+        res = run("orchestrator:execution_workers:webui", "0.2.0")
+        assert res.returncode == 0 and upstream.requests == [], "the orchestrator goes first in this run: nothing to ask"
+        res = run("execution_workers:webui", "0.1.0rc1")
+        assert res.returncode == 0, res.stdout[-3000:]
+        assert [r["path"] for r in upstream.requests] == ["/api/health"], "asked once (run_once, from the control node)"
+        res = run("execution_workers", "0.2.0")
+        assert res.returncode != 0
+        assert "must never run a newer release than the orchestrator" in res.stdout and "reports version 0.1.0rc1" in res.stdout
+        res = run("orchestrator:webui", "0.2.0", "--tags", "hermclaw_ui")
+        assert res.returncode != 0, "--tags hermclaw_ui deploys the UI without the orchestrator role"
+        res = run("orchestrator:webui", "0.2.0", "--skip-tags", "hermclaw_orchestrator")
+        assert res.returncode != 0
+        res = run("execution_workers", "0.2.0", hermclaw_release_orchestrator_api_url=f"http://127.0.0.1:{_free_port()}")
+        assert res.returncode != 0 and "/api/health reports" in res.stdout, "an unreachable orchestrator is refused too"
+        res = run("execution_workers", "0.2.0", hermclaw_release_require_orchestrator_first=False)
+        assert res.returncode == 0, "explicit opt-out (disaster recovery with the orchestrator down)"
+    finally:
+        upstream.close()
+
+
+def test_nothing_live_changes_before_the_schema_decision() -> None:
+    """Live configuration, LiteLLM and the venv symlink switch only after the drain and the migration; restarts also
+    see unit/env changes the bootstrap part of site.yml made; LiteLLM is healthy before the scheduler starts."""
+    plays = yaml.safe_load((PLAYBOOKS_DIR / "deploy.yml").read_text(encoding="utf-8"))
+    for play in plays[1:4]:
+        (config,) = [r for r in play["roles"] if r["role"] == "hermclaw_config"]
+        assert config["vars"]["hermclaw_config_install_at_switch"] is True, play["name"]
+
+    def names(role: str, file: str) -> list[str]:
+        return [t["name"] for t in yaml.safe_load((ROLES_DIR / role / "tasks" / file).read_text(encoding="utf-8"))]
+
+    order = names("hermclaw_orchestrator", "main.yml")
+
+    def at(prefix: str) -> int:
+        (index,) = [i for i, n in enumerate(order) if n.startswith(prefix)]
+        return index
+
+    assert (
+        at("LiteLLM proxy venv")
+        < at("Database schema of the release")
+        < at("Enable the orchestrator units")
+        < at("Drain")
+        < at("Migrate the database schema")
+        < at("Install the validated configuration")
+        < at("Switch LiteLLM")
+        < at("Switch to release")
+        < at("Start LiteLLM")
+        < at("LiteLLM is healthy")
+        < at("Start SearXNG and the services")
+        < at("Health checks of the orchestrator")
+    ), order
+    litellm = (ROLES_DIR / "hermclaw_orchestrator" / "tasks" / "litellm.yml").read_text(encoding="utf-8")
+    assert "state: link" not in litellm and "hermclaw_orchestrator_litellm_config" not in litellm, "installs only"
+    worker = names("hermclaw_worker", "main.yml")
+    assert worker.index("Install the validated configuration of release {{ hermclaw_version }}") + 1 == worker.index(
+        "Switch to release {{ hermclaw_version }}"
+    )
+    config_main = yaml.safe_load((ROLES_DIR / "hermclaw_config" / "tasks" / "main.yml").read_text(encoding="utf-8"))
+    (install,) = [t for t in config_main if t.get("ansible.builtin.import_tasks") == "install.yml"]
+    assert install["when"] == "not hermclaw_config_install_at_switch | bool"
+    # every operator-CLI call before the configuration is live uses the new release's staged configuration
+    tasks = yaml.safe_load((ROLES_DIR / "hermclaw_orchestrator" / "tasks" / "main.yml").read_text(encoding="utf-8"))
+    database = yaml.safe_load((ROLES_DIR / "hermclaw_orchestrator" / "tasks" / "database.yml").read_text(encoding="utf-8"))
+    calls = [t for t in database if "--venv" in json.dumps(t)]
+    calls += [t for t in tasks[at("Migrate the database schema")]["block"] if "--alembic" not in json.dumps(t)]
+    assert len(calls) == 3 and all("--config-dir" in json.dumps(t) for t in calls)
+    # restart decisions use the accumulated flags, never a registered result another play could overwrite
+    for f in sorted(ROLES_DIR.glob("hermclaw_*/tasks/*.yml")):
+        text = f.read_text(encoding="utf-8")
+        assert "systemd_skeleton_unit_files" not in text and "systemd_skeleton_env_file" not in text, f.name
+    skeleton = (ROLES_DIR / "systemd_skeleton" / "tasks" / "main.yml").read_text(encoding="utf-8")
+    assert "systemd_skeleton_units_changed | default(false) | bool or systemd_skeleton_unit_files is changed" in skeleton
+
+
 # --------------------------------------------------------------------------------------------- operator CLI
 
 FAKE_SYSTEMD_RUN = r"""#!/usr/bin/env python3
@@ -548,7 +1012,8 @@ def cli(tmp_path: Path) -> dict[str, Any]:
         for tool in ("hermclaw", "alembic"):
             exe = v / "bin" / tool
             exe.write_text(
-                f'#!/bin/sh\necho "{v.name}/{tool} $* env=$HERMCLAW_ENV home=$HOME"\nread -r line && echo "stdin=$line"\nexit 3\n',
+                f'#!/bin/sh\necho "{v.name}/{tool} $* env=$HERMCLAW_ENV home=$HOME${{HERMCLAW_CONFIG_DIR:+ cfg=$HERMCLAW_CONFIG_DIR}}"\n'
+                'read -r line && echo "stdin=$line"\nexit 3\n',
                 encoding="utf-8",
             )
             exe.chmod(0o755)
@@ -557,7 +1022,7 @@ def cli(tmp_path: Path) -> dict[str, Any]:
     (conf / "hermclaw.env").write_text("HERMCLAW_ENV=production\n", encoding="utf-8")
     store = root / "credstore"
     store.mkdir()
-    for name in ("litellm-master-key", "worker-token-exec-222"):
+    for name in ("litellm-master-key", "worker-token-exec-222", "backup-manifest-key"):
         (store / f"hermclaw-{name}").write_text("blob", encoding="utf-8")
     wrapper = tmp_path / "hermclaw"
     tasks = [
@@ -582,6 +1047,7 @@ def cli(tmp_path: Path) -> dict[str, Any]:
     }
     play = _local_play(tasks)
     play[0]["vars_files"].append(str(ROLES_DIR / "systemd_skeleton" / "defaults" / "main.yml"))
+    play[0]["vars_files"].append(str(ROLES_DIR / "hermclaw_orchestrator" / "defaults" / "main.yml"))
     res = _playbook(tmp_path, play, extra)
     assert res.returncode == 0, res.stdout[-3000:]
     fake = tmp_path / "fake-systemd-run"
@@ -619,9 +1085,10 @@ def test_operator_cli_runs_the_cli_in_the_services_context(cli: dict[str, Any], 
     props = [opts[i + 1] for i, a in enumerate(opts) if a == "-p"]
     assert f"EnvironmentFile={cli['conf']}/hermclaw.env" in props and "UMask=0027" in props
     assert sorted(p for p in props if p.startswith("LoadCredentialEncrypted=")) == [
+        f"LoadCredentialEncrypted=backup-manifest-key:{cli['store']}/hermclaw-backup-manifest-key",
         f"LoadCredentialEncrypted=litellm-master-key:{cli['store']}/hermclaw-litellm-master-key",
         f"LoadCredentialEncrypted=worker-token-exec-222:{cli['store']}/hermclaw-worker-token-exec-222",
-    ]
+    ], "the scheduler's credentials plus the backup's optional ones that exist (sudo hermclaw backup ...)"
     assert any(a.startswith("--unit=hermclaw-cli-") for a in opts)
     assert "blob" not in json.dumps(argv), "credential contents never travel on the command line"
     # another installed release (the deployment migrates with the new venv before the switch) and alembic
@@ -634,6 +1101,16 @@ def test_operator_cli_runs_the_cli_in_the_services_context(cli: dict[str, Any], 
         "downgrade",
         "0002",
     ]
+    # the deployment's staged configuration (EnvironmentFile= would win over --setenv: env(1) sets it in the unit)
+    staging = cli["conf"] / "deploy-staging"
+    staging.mkdir()
+    res = _run([str(cli["wrapper"]), "--venv", str(cli["other"]), "--config-dir", str(staging), "doctor"], env=cli["env"], cwd=tmp_path)
+    assert res.returncode == 3 and res.stdout.splitlines()[0].endswith(f" cfg={staging}"), res.stdout + res.stderr
+    assert _calls(cli["log"])[-1][-4:] == ["/usr/bin/env", f"HERMCLAW_CONFIG_DIR={staging}", f"{cli['other']}/bin/hermclaw", "doctor"]
+    # an optional credential that does not exist is left out silently
+    (cli["store"] / "hermclaw-backup-manifest-key").unlink()
+    res = _run([str(cli["wrapper"]), "backup", "list"], env=cli["env"], cwd=tmp_path)
+    assert "backup-manifest-key" not in res.stderr + json.dumps(_calls(cli["log"])[-1]), res.stderr
 
 
 @pytest.mark.parametrize(
@@ -642,6 +1119,9 @@ def test_operator_cli_runs_the_cli_in_the_services_context(cli: dict[str, Any], 
         (["--venv", "/nonexistent/venv", "doctor"], 69, "is not installed"),
         (["--venv", "/opt/../tmp", "doctor"], 69, "is not installed"),
         (["--venv"], 64, "--venv needs a directory"),
+        (["--config-dir"], 64, "--config-dir needs a directory"),
+        (["--config-dir", "/nonexistent/staging", "doctor"], 64, "is not a directory"),
+        (["--config-dir", "etc/hermclaw", "doctor"], 64, "is not a directory"),
     ],
 )
 def test_operator_cli_refuses_bad_input(cli: dict[str, Any], tmp_path: Path, args: list[str], code: int, message: str) -> None:
@@ -698,6 +1178,15 @@ def test_units_carry_the_deployment_tweaks(tmp_path: Path) -> None:
     assert "LITELLM_TELEMETRY" not in litellm
     backup = out["systemd/hermclaw-backup.service"].read_text(encoding="utf-8")
     assert "ConditionPathExists=/etc/hermclaw/backup.yaml" in backup
+    # the deployed form of infra/backup/hermclaw-backup.service (P33): config path, lock exit code, credentials only
+    # when they exist on the host (a missing LoadCredentialEncrypted= file fails the unit with 243/CREDENTIALS)
+    assert "Environment=HERMCLAW_BACKUP_CONFIG=/etc/hermclaw/backup.yaml" in backup and "SuccessExitStatus=75" in backup
+    assert "\nLoadCredentialEncrypted=" not in backup
+    with_key = _render(tmp_path, tmp_path / "with-key", _render_vars({"systemd_skeleton_backup_credentials": ["backup-manifest-key"]}))
+    backup = with_key["systemd/hermclaw-backup.service"].read_text(encoding="utf-8")
+    assert "\nLoadCredentialEncrypted=backup-manifest-key:/etc/credstore.encrypted/hermclaw-backup-manifest-key\n" in backup
+    reference = (REPO / "infra" / "backup" / "hermclaw-backup.service").read_text(encoding="utf-8")
+    assert "LoadCredentialEncrypted=backup-manifest-key:/etc/credstore.encrypted/hermclaw-backup-manifest-key" in reference
     quadlet = out["systemd/hermclaw-searxng.container"].read_text(encoding="utf-8")
     directives = [ln for ln in quadlet.splitlines() if ln and not ln.startswith("#")]
     assert "WantedBy=default.target" not in directives, "bootstrap of a host that was never deployed"

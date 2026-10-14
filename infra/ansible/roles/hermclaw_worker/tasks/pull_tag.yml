@@ -1,0 +1,39 @@
+# One tag of models.yaml outside hermclaw-model-pull's fixed role set (models.yml): `ollama pull` in a transient unit
+# that Ansible polls, so a dropped SSH session does not abort the download. Input: hermclaw_worker_tag.
+- name: Check for a pull of a single tag that is still running
+  ansible.builtin.command:
+    argv: [systemctl, is-active, hermclaw-model-pull-tag.service]
+  register: hermclaw_worker_tag_active
+  changed_when: false
+  failed_when: false
+
+- name: Forget the result of an earlier failed pull of a single tag
+  ansible.builtin.command:
+    argv: [systemctl, reset-failed, hermclaw-model-pull-tag.service]
+  changed_when: false
+  failed_when: false
+  when: hermclaw_worker_tag_active.stdout | trim not in ['active', 'activating']
+
+- name: Pull the tag in a transient unit - {{ hermclaw_worker_tag }}
+  ansible.builtin.command:
+    argv:
+      - systemd-run
+      - --unit=hermclaw-model-pull-tag
+      - "--description=Hermclaw model pull {{ hermclaw_worker_tag }} (playbooks/deploy.yml)"
+      - "--setenv=OLLAMA_HOST={{ hermclaw_worker_ollama_url }}"
+      - --property=TimeoutStartSec=infinity
+      - "{{ hermclaw_worker_ollama_bin }}"
+      - pull
+      - "{{ hermclaw_worker_tag }}"
+  changed_when: true
+  when: hermclaw_worker_tag_active.stdout | trim not in ['active', 'activating']
+
+- name: Wait for the pull of {{ hermclaw_worker_tag }}
+  ansible.builtin.command:
+    argv: [systemctl, is-active, hermclaw-model-pull-tag.service]
+  register: hermclaw_worker_tag_state
+  until: hermclaw_worker_tag_state.stdout | trim not in ['active', 'activating']
+  retries: "{{ (hermclaw_worker_model_pull_timeout | int / hermclaw_worker_model_pull_poll | int) | round(0, 'ceil') | int }}"
+  delay: "{{ hermclaw_worker_model_pull_poll | int }}"
+  changed_when: false
+  failed_when: false

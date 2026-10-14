@@ -38,8 +38,16 @@ systemd_skeleton_instance_id: orchestrator-225
 systemd_skeleton_db_name: hermclaw
 systemd_skeleton_log_level: INFO
 systemd_skeleton_litellm_venv: /opt/litellm/venv
+# Reverse proxies whose X-Forwarded-For/-Proto the API trusts (hermclaw.env HERMCLAW_API_FORWARDED_ALLOW_IPS): the
+# addresses (ansible_host) of the webui hosts, i.e. nginx on .223 - never "*" (any client could forge its address).
+systemd_skeleton_api_forwarded_allow_ips: >-
+  {{ (groups.get('webui', []) | map('extract', hostvars) | map(attribute='ansible_host', default='') | select | list)
+     | default(['127.0.0.1'], true) | join(',') }}
 systemd_skeleton_litellm_bind: 127.0.0.1
 systemd_skeleton_backup_command: "{{ hermclaw_bin_dir }}/hermclaw-backup"
+# Credentials hermclaw-backup.service loads when they exist on the host (backup.yaml refers to them as cred:<name>,
+# docs/operations/backup-restore.md); a missing one is left out instead of failing every run.
+systemd_skeleton_backup_optional_credentials: [backup-manifest-key]
 systemd_skeleton_backup_on_calendar: "*-*-* 02:30:00"
 
 # Worker env (per worker host): id from the inventory (hermclaw_worker_id), bind = LAN address.

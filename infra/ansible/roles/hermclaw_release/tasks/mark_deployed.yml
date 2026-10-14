@@ -1,0 +1,22 @@
+# Last task of the preflight play of playbooks/deploy.yml, after every check passed on every host: marks the host as
+# deployed (ansible_local.hermclaw), so that systemd_skeleton (bootstrap and deployment) renders the same files.
+- name: Create the local facts directory
+  ansible.builtin.file:
+    path: "{{ hermclaw_release_facts_dir }}"
+    state: directory
+    owner: root
+    group: root
+    mode: "0755"
+
+- name: Mark the host as deployed (ansible_local.hermclaw)
+  ansible.builtin.copy:
+    content: "{{ {'deployed': true, 'managed_by': 'Hermclaw playbooks/deploy.yml'} | to_nice_json }}\n"
+    dest: "{{ hermclaw_release_facts_dir }}/hermclaw.fact"
+    owner: root
+    group: root
+    mode: "0644"
+
+- name: Re-read the local facts
+  ansible.builtin.setup:
+    gather_subset: ["!all", "!min", local]
+    fact_path: "{{ hermclaw_release_facts_dir }}"

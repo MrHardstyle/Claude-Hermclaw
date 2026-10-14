@@ -8,12 +8,15 @@
 #   ansible-playbook playbooks/deploy.yml -e hermclaw_version=<previous>                # rollback
 #   ansible-playbook playbooks/site.yml                                                 # bootstrap + deploy
 #
-# Order: preflight on every host (nothing changes before all checks passed) -> orchestrator .225 (release venv,
-# config, LiteLLM, migration, switch, services) -> execution worker .222 -> model worker .224 -> web UI .223 ->
-# hermclaw doctor. Idempotent: a second run and a --check run report changed=0. Live runs: BLOCKER-001 here.
+# Order: preflight on every host (nothing changes before all checks passed) -> orchestrator .225 (release venv and
+# LiteLLM venv installed next to the active ones, config validated, schema decision, drain, migration, then the live
+# config, LiteLLM and release switch, services) -> execution worker .222 -> model worker .224 -> web UI .223 ->
+# hermclaw doctor. Idempotent: a second run and a --check run report changed=0; --check also works as the dry run
+# of an upgrade (nothing is unpacked or installed). Live runs: BLOCKER-001 here.
 # Tags: the preflight always runs; every role carries its name as a tag (--tags hermclaw_ui re-deploys only the UI,
 # --tags hermclaw_verify only runs the doctor). The Python roles build on each other (release -> config ->
-# orchestrator/worker): run them together or run the whole playbook.
+# orchestrator/worker; the host role installs the configuration hermclaw_config validated): run them together or
+# run the whole playbook.
 
 - name: Deployment preflight (release, inventory, credentials) - read-only
   hosts: orchestrator:webui:execution_workers:model_workers
@@ -31,6 +34,11 @@
         name: hermclaw_config
         tasks_from: data.yml
 
+    - name: Mark the hosts as deployed (only after every check passed)
+      ansible.builtin.include_role:
+        name: hermclaw_release
+        tasks_from: mark_deployed.yml
+
 # a failure here (e.g. the schema change) stops the whole run: workers and UI never get ahead of the orchestrator
 - name: Orchestrator .225 - runtime, configuration, LiteLLM, migration, services, SearXNG
   hosts: orchestrator
@@ -43,6 +51,8 @@
       tags: [hermclaw_release]
     - role: hermclaw_config
       tags: [hermclaw_config]
+      vars:
+        hermclaw_config_install_at_switch: true
     - role: hermclaw_orchestrator
       tags: [hermclaw_orchestrator]
 
@@ -56,6 +66,8 @@
       tags: [hermclaw_release]
     - role: hermclaw_config
       tags: [hermclaw_config]
+      vars:
+        hermclaw_config_install_at_switch: true
     - role: hermclaw_worker
       tags: [hermclaw_worker]
 
@@ -69,6 +81,8 @@
       tags: [hermclaw_release]
     - role: hermclaw_config
       tags: [hermclaw_config]
+      vars:
+        hermclaw_config_install_at_switch: true
     - role: hermclaw_worker
       tags: [hermclaw_worker]
 

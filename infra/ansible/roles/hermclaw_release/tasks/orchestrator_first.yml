@@ -1,0 +1,44 @@
+# Workers and the UI never get ahead of the orchestrator (worker protocol, API contract): a run that does not deploy
+# the orchestrator itself (--limit execution_workers, --tags hermclaw_ui, ...) requires that the orchestrator already
+# runs this release. Read-only, from the control node, part of the preflight (nothing has changed yet).
+- name: Decide whether this run deploys the orchestrator
+  ansible.builtin.set_fact:
+    hermclaw_release_orchestrator_in_run: >-
+      {{ groups['orchestrator'] | default([]) | intersect(ansible_play_hosts_all) | length > 0
+         and ('all' in ansible_run_tags or 'hermclaw_orchestrator' in ansible_run_tags)
+         and 'hermclaw_orchestrator' not in ansible_skip_tags }}
+
+- name: Check the release of the orchestrator
+  when:
+    - hermclaw_release_require_orchestrator_first | bool
+    - not hermclaw_release_orchestrator_in_run | bool
+  block:
+    - name: Read the release the orchestrator runs (it is not deployed by this run)
+      ansible.builtin.uri:
+        url: "{{ hermclaw_release_orchestrator_api_url }}/api/health"
+        return_content: true
+        timeout: 10
+        status_code: [200, 503]
+      register: hermclaw_release_orchestrator_health
+      failed_when: false
+      delegate_to: localhost
+      become: false
+      run_once: true
+      check_mode: false
+
+    - name: Require the orchestrator to run this release first - {{ hermclaw_version }}
+      ansible.builtin.assert:
+        that:
+          - hermclaw_release_orchestrator_health.status | default(-1) in [200, 503]
+          - hermclaw_release_orchestrator_health.json.version | default('') == hermclaw_version
+        fail_msg: >-
+          This run deploys {{ hermclaw_version }} to {{ ansible_play_hosts_all | join(', ') }} but not the orchestrator,
+          and {{ hermclaw_release_orchestrator_api_url }}/api/health reports
+          {{ ('version ' ~ hermclaw_release_orchestrator_health.json.version)
+             if hermclaw_release_orchestrator_health.json.version is defined
+             else (hermclaw_release_orchestrator_health.msg | default('no answer') | truncate(200)) }}.
+          Workers and the UI must never run a newer release than the orchestrator: deploy the orchestrator first (a
+          run without --limit/--tags, or --limit orchestrator). When the orchestrator is down on purpose (disaster
+          recovery of a host with the release it ran before), re-run with
+          -e hermclaw_release_require_orchestrator_first=false.
+        quiet: true

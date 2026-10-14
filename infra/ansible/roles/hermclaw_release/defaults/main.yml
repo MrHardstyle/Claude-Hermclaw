@@ -49,6 +49,12 @@ hermclaw_release_systemd_dir: /etc/systemd/system
 # were encrypted on another host or whose TPM2/PCR binding no longer matches (status 243/CREDENTIALS).
 hermclaw_release_check_credentials_decrypt: "{{ hermclaw_manage_services | bool }}"
 
+# A run that does not deploy the orchestrator (--limit execution_workers, --tags hermclaw_ui, ...) requires that the
+# orchestrator already runs hermclaw_version (its /api/health, read from the control node). false only when the
+# orchestrator is down on purpose (disaster recovery of a host with the release it ran before).
+hermclaw_release_require_orchestrator_first: "{{ hermclaw_manage_services | bool }}"
+hermclaw_release_orchestrator_api_url: "http://{{ hermclaw_orchestrator_ip }}:{{ hermclaw_api_port }}"
+
 # Host-local Ansible fact (ansible_local.hermclaw): marks a host as deployed, so that the bootstrap renders the
 # same files as the deployment afterwards (SearXNG Quadlet [Install], playbooks/site.yml stays idempotent).
 hermclaw_release_facts_dir: /etc/ansible/facts.d

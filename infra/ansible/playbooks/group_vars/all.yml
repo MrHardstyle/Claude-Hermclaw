@@ -65,6 +65,8 @@ hermclaw_timezone: Europe/Berlin
 # --- Deployment (P32, playbooks/deploy.yml, docs/operations/deployment.md) ----
 # hermclaw_version comes from the inventory or `-e hermclaw_version=<v>`: the canonical PEP 440 version of a
 # release built by scripts/deploy/build-release.sh (dist/release-<v>/, e.g. 0.1.0rc1).
+# The same pattern (without anchors) names venv-<v>, releases/<v> and the UI builds; pruning only touches those.
+hermclaw_version_pattern: '[0-9]+(\.[0-9]+)*((a|b|rc)[0-9]+)?(\.post[0-9]+)?(\.dev[0-9]+)?'
 # Release directory on the control node.
 hermclaw_release_root: "{{ playbook_dir }}/../../../dist"
 hermclaw_release_dir: "{{ hermclaw_release_root }}/release-{{ hermclaw_version }}"
@@ -72,7 +74,8 @@ hermclaw_release_dir: "{{ hermclaw_release_root }}/release-{{ hermclaw_version }
 # <install_dir>/releases/<v> and <install_dir>/venv-<v>; hermclaw_venv is the symlink to the active venv and
 # <install_dir>/current the symlink to the active payload.
 hermclaw_releases_dir: "{{ hermclaw_install_dir }}/releases"
-# Previous releases kept for a network-free rollback, in addition to the active one (venvs, payloads, UI builds).
+# Previous releases kept for a fast rollback, in addition to the active one (venvs, payloads, UI builds): the most
+# recently active ones, so the release active before the last switch is always among them. 1-99.
 hermclaw_keep_releases: 3
 # UI builds on .223: <webroot>-releases/<v>/, hermclaw_webroot becomes the symlink to the active build.
 hermclaw_ui_releases_dir: "{{ hermclaw_webroot }}-releases"

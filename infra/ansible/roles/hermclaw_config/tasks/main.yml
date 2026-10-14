@@ -1,5 +1,5 @@
-# hermclaw_config – render, validate (complete set, new release) and install /etc/hermclaw/*.yaml.
-# Sets hermclaw_config_changed (a live file of this host changed: the services must be restarted).
+# hermclaw_config – render and validate (complete set, new release) /etc/hermclaw/*.yaml in the staging directory,
+# then install them (install.yml: here, or by the host role at its switch with hermclaw_config_install_at_switch).
 - name: Compute the configuration
   ansible.builtin.import_tasks: data.yml
 
@@ -85,18 +85,8 @@
     hermclaw_config_summary: "{{ hermclaw_config_check.stdout | from_json }}"
   when: hermclaw_config_check is not skipped
 
-- name: Install the configuration
-  ansible.builtin.copy:
-    content: "{{ hermclaw_config_rendered[item] }}"
-    dest: "{{ hermclaw_config_dir }}/{{ item }}.yaml"
-    owner: root
-    group: "{{ hermclaw_group }}"
-    mode: "0640"
-    backup: true
-    force: "{{ item not in hermclaw_config_unmanaged }}"
-  loop: "{{ hermclaw_config_host_files }}"
-  register: hermclaw_config_installed
-
-- name: Remember whether the live configuration changed
-  ansible.builtin.set_fact:
-    hermclaw_config_changed: "{{ hermclaw_config_installed is changed }}"
+# playbooks/deploy.yml installs the files at the host's switch (hermclaw_orchestrator: after the drain and the
+# migration; hermclaw_worker: right before the switch), so the running release never reads the new configuration
+- name: Install the configuration now
+  ansible.builtin.import_tasks: install.yml
+  when: not hermclaw_config_install_at_switch | bool

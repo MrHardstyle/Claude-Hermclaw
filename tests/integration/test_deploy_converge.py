@@ -14,10 +14,13 @@ container) with the **real release set** built by ``scripts/deploy/build-release
   creates) and verified with ``systemd-analyze verify --root=<container rootfs>``; the nginx site is tested with
   ``nginx -t`` in the official nginx image.
 
-Sequence (container A): site.yml 0.1.0rc1 (the bootstrap's plain venv directory is migrated to the symlink layout) ->
-second site.yml run and ``deploy.yml --check --diff`` report ``changed=0`` -> 0.1.0rc2 (switch) -> 0.1.0rc3 (migration
-to 0003, pruning with ``hermclaw_keep_releases=1``) -> rollback to 0.1.0rc2 refused without the schema-downgrade opt-in,
-then done with it (downgrade with the newer release's migrations, no reinstall) -> ``changed=0`` again.
+Sequence (container A, container B likewise for the model worker): ``bootstrap.yml`` -> ``deploy.yml --check --diff``
+on the freshly bootstrapped hosts (the documented first dry run: succeeds, nothing on disk changes) -> ``deploy.yml``
+0.1.0rc1 (the bootstrap's plain venv directory is migrated to the symlink layout) -> ``site.yml`` and ``deploy.yml
+--check --diff`` report ``changed=0`` -> dry run of the upgrade to 0.1.0rc2 (nothing on disk changes) -> 0.1.0rc2
+(switch) -> 0.1.0rc3 (migration to 0003, pruning with ``hermclaw_keep_releases=1``) -> rollback to 0.1.0rc2 refused
+without the schema-downgrade opt-in (no live file changes, although the run also carries a configuration change), then
+done with it (downgrade with the newer release's migrations, no reinstall) -> ``changed=0`` again.
 """
 
 from __future__ import annotations
@@ -26,6 +29,7 @@ import base64
 import json
 import os
 import re
+import shlex
 import shutil
 import subprocess
 import tempfile
@@ -225,6 +229,7 @@ class Container:
     hosts: list[str]
     limit: str
     runs: dict[str, subprocess.CompletedProcess[str]] = field(default_factory=dict)
+    snapshots: dict[str, str] = field(default_factory=dict)
 
     def sh(self, script: str, timeout: int = 600) -> subprocess.CompletedProcess[str]:
         return _podman("exec", self.name, "bash", "-c", script, timeout=timeout)
@@ -475,8 +480,14 @@ def deployment(
 
     def model_worker() -> None:  # container B runs in parallel with A's sequence
         skip = "--skip-tags postgresql,nodejs,nvidia,ollama"
-        b.playbook("site-1", "site.yml", skip)
-        if b.runs["site-1"].returncode == 0:
+        b.playbook("bootstrap", "bootstrap.yml", skip)
+        if b.runs["bootstrap"].returncode != 0:
+            return
+        b.snapshots["before dry run"] = _snapshot(b)
+        b.playbook("dry-run", "deploy.yml", "--check", "--diff")
+        b.snapshots["after dry run"] = _snapshot(b)
+        b.playbook("deploy-1", "deploy.yml")
+        if b.runs["deploy-1"].returncode == 0:
             b.playbook("site-2", "site.yml", skip)
             b.playbook("check", "deploy.yml", "--check", "--diff")
 
@@ -503,12 +514,38 @@ def _fake_runs(c: Container) -> list[list[str]]:
 
 
 def _cli_commands(c: Container) -> list[str]:
-    """`<venv>/bin/<tool> <args>` of every operator-CLI call (after systemd-run's --)."""
+    """`<venv>/bin/<tool> <args>` of every operator-CLI call (after systemd-run's --; a leading `/usr/bin/env
+    HERMCLAW_CONFIG_DIR=<dir>` of --config-dir is shown as `[<dir>] `)."""
     out = []
     for argv in _fake_runs(c):
         cmd = argv[argv.index("--") + 1 :] if "--" in argv else argv
-        out.append(" ".join([cmd[0].rsplit("/", 3)[-3] + "/" + cmd[0].rsplit("/", 1)[-1], *cmd[1:]]))
+        prefix = ""
+        if cmd[0] == "/usr/bin/env":
+            prefix, cmd = f"[{cmd[1].split('=', 1)[1]}] ", cmd[2:]
+        out.append(prefix + " ".join([cmd[0].rsplit("/", 3)[-3] + "/" + cmd[0].rsplit("/", 1)[-1], *cmd[1:]]))
     return out
+
+
+SNAPSHOT_ROOTS = "/opt /etc/hermclaw /etc/credstore.encrypted /etc/systemd/system /etc/ansible /etc/containers /var/www /etc/nginx"
+
+
+def _snapshot(c: Container) -> str:
+    """Every path below the deployment's directories with type, size, mode, owner, mtime and link target."""
+    return c.out(
+        f"find {SNAPSHOT_ROOTS} -path /opt/ansible -prune -o -name __pycache__ -prune -o "
+        "-printf '%p %y %s %m %u %T@ %l\\n' 2>/dev/null | LC_ALL=C sort"
+    )
+
+
+def _no_secrets(c: Container) -> None:
+    """Neither the operator's GitLab token nor the generated admin token appears in any Ansible output."""
+    token = (
+        _decrypt(c, "api-operator-token") if c.sh("test -f /etc/credstore.encrypted/hermclaw-api-operator-token").returncode == 0 else None
+    )
+    for label, res in c.runs.items():
+        text = res.stdout + res.stderr
+        assert "glpat-TESTONLY" not in text, label
+        assert token is None or token not in text, label
 
 
 def _decrypt(c: Container, name: str) -> str:
@@ -524,7 +561,15 @@ def _decrypt(c: Container, name: str) -> str:
 def test_site_converges_bootstrap_and_deployment(deployment: dict[str, Any]) -> None:
     a: Container = deployment["a"]
     pg: Postgres | None = deployment["pg"]
-    res, recap = a.playbook("site-1", "site.yml", "--skip-tags postgresql,nodejs")
+    res, recap = a.playbook("bootstrap", "bootstrap.yml", "--skip-tags postgresql,nodejs")
+    _assert_ok(res, recap, HOSTS_A, idempotent=False)
+    # the first deployment's dry run (docs/operations/deployment.md section 3) on freshly bootstrapped hosts
+    before = _snapshot(a)
+    res, recap = a.playbook("dry-run", "deploy.yml", "--check", "--diff")
+    _assert_ok(res, recap, HOSTS_A, idempotent=False)
+    assert all(r[1] > 0 for r in recap.values()), "the dry run reports what the deployment would change"
+    assert _snapshot(a) == before, "the dry run changes nothing on disk"
+    res, recap = a.playbook("deploy-1", "deploy.yml")
     _assert_ok(res, recap, HOSTS_A, idempotent=False)
     assert all(r[1] > 0 for r in recap.values())
 
@@ -548,6 +593,9 @@ def test_site_converges_bootstrap_and_deployment(deployment: dict[str, Any]) -> 
         "    print(lang, root.type, root.has_error)'"
     ).splitlines()
     assert grammars[0] == "dir /opt/hermclaw/current/tree-sitter", grammars
+    # the API trusts X-Forwarded-For/-Proto of the nginx host only (research 029 E2/E3), never "*"
+    env = a.out("cat /etc/hermclaw/hermclaw.env").splitlines()
+    assert "HERMCLAW_API_FORWARDED_ALLOW_IPS=192.168.178.223" in env, env
     assert grammars[1:] == [f"{lang} program False" for lang in deployment["releases"].meta(V1)["tree_sitter"]["languages"]]
 
     # configuration: rendered, validated and owned by the deployment (real MAC addresses from the inventory)
@@ -619,10 +667,11 @@ def test_site_converges_bootstrap_and_deployment(deployment: dict[str, Any]) -> 
     # 32.1 migration before the switch, through the operator CLI (as hermclaw, production env, credentials)
     assert pg.sql("SELECT version_num FROM alembic_version") == meta["alembic_head"]
     cmds = _cli_commands(a)
+    staging = "[/etc/hermclaw/deploy-staging] "  # the new release's validated configuration, before it is live
     assert cmds[:3] == [
-        f"venv-{V1}/hermclaw doctor --offline --json",
-        f"venv-{V1}/hermclaw migrate",
-        f"venv-{V1}/hermclaw doctor --offline --json",
+        f"{staging}venv-{V1}/hermclaw doctor --offline --json",
+        f"{staging}venv-{V1}/hermclaw migrate",
+        f"{staging}venv-{V1}/hermclaw doctor --offline --json",
     ]
     first = _fake_runs(a)[1]
     assert "--uid=hermclaw" in first and "--pipe" in first and "--wait" in first and "--collect" in first
@@ -648,7 +697,7 @@ def test_site_converges_bootstrap_and_deployment(deployment: dict[str, Any]) -> 
 
 def test_second_site_run_and_check_mode_change_nothing(deployment: dict[str, Any]) -> None:
     a: Container = deployment["a"]
-    if a.runs.get("site-1") is None or a.runs["site-1"].returncode != 0:
+    if a.runs.get("deploy-1") is None or a.runs["deploy-1"].returncode != 0:
         pytest.skip("first converge failed")
     res, recap = a.playbook("site-2", "site.yml", "--skip-tags postgresql,nodejs")
     _assert_ok(res, recap, HOSTS_A, idempotent=True)
@@ -661,7 +710,7 @@ def test_second_site_run_and_check_mode_change_nothing(deployment: dict[str, Any
 
 def test_deployed_units_pass_systemd_analyze_verify_in_the_rootfs(deployment: dict[str, Any]) -> None:
     a: Container = deployment["a"]
-    if a.runs.get("site-1") is None or a.runs["site-1"].returncode != 0:
+    if a.runs.get("deploy-1") is None or a.runs["deploy-1"].returncode != 0:
         pytest.skip("first converge failed")
     analyze = shutil.which("systemd-analyze")
     if analyze is None:
@@ -701,7 +750,7 @@ def test_deployed_units_pass_systemd_analyze_verify_in_the_rootfs(deployment: di
 
 def test_operator_cli_and_doctor_in_the_services_context(deployment: dict[str, Any]) -> None:
     a: Container = deployment["a"]
-    if a.runs.get("site-1") is None or a.runs["site-1"].returncode != 0:
+    if a.runs.get("deploy-1") is None or a.runs["deploy-1"].returncode != 0:
         pytest.skip("first converge failed")
     if deployment["pg"] is None:
         pytest.skip("no PostgreSQL for the doctor's database checks")
@@ -719,7 +768,7 @@ def test_operator_cli_and_doctor_in_the_services_context(deployment: dict[str, A
 
 def test_deployed_nginx_site_passes_nginx_t(deployment: dict[str, Any]) -> None:
     a: Container = deployment["a"]
-    if a.runs.get("site-1") is None or a.runs["site-1"].returncode != 0:
+    if a.runs.get("deploy-1") is None or a.runs["deploy-1"].returncode != 0:
         pytest.skip("first converge failed")
     if _podman("image", "exists", NGINX_IMAGE).returncode != 0:
         pytest.skip(f"{NGINX_IMAGE} not available locally")
@@ -760,9 +809,15 @@ def test_deployed_nginx_site_passes_nginx_t(deployment: dict[str, Any]) -> None:
 def test_upgrade_switches_and_prunes_old_releases(deployment: dict[str, Any]) -> None:
     a: Container = deployment["a"]
     pg: Postgres | None = deployment["pg"]
-    if a.runs.get("site-1") is None or a.runs["site-1"].returncode != 0:
+    if a.runs.get("deploy-1") is None or a.runs["deploy-1"].returncode != 0:
         pytest.skip("first converge failed")
     llm_before = a.out("stat -c %Y /opt/litellm/venv/.hermclaw-litellm").strip()
+    # dry run of the upgrade (docs/runbooks/upgrade.md step 2): the new release is neither unpacked nor installed
+    before = _snapshot(a)
+    res, recap = a.playbook("v2-dry-run", "deploy.yml", f"-e hermclaw_version={V2}", "--check", "--diff")
+    _assert_ok(res, recap, HOSTS_A, idempotent=False)
+    assert all(r[1] > 0 for r in recap.values()), "the dry run reports the switch on every host"
+    assert _snapshot(a) == before, "the dry run of an upgrade changes nothing on disk"
     calls_before = len(_fake_runs(a))
     res, recap = a.playbook("v2", "deploy.yml", f"-e hermclaw_version={V2}")
     _assert_ok(res, recap, HOSTS_A, idempotent=False)
@@ -794,10 +849,16 @@ def test_rollback_needs_the_schema_downgrade_opt_in_and_reuses_the_installed_ven
         pytest.skip("upgrade to the third release failed")
     venv_mtime = a.out(f"stat -c %Y /opt/hermclaw/venv-{V2}/.hermclaw-release").strip()
     if pg is not None:
-        res, recap = a.playbook("rollback-refused", "deploy.yml", f"-e hermclaw_version={V2}")
+        live = "sha256sum /etc/hermclaw/*.yaml && readlink /opt/hermclaw/venv /opt/hermclaw/current /opt/litellm/venv"
+        before = a.out(live)
+        # the refused run also carries a configuration change (policies.yaml, litellm.yaml): it must not become live
+        change = {
+            "hermclaw_config_overrides": {"policies": {"coder": {"max_turns": 7}}, "models": {"litellm": {"request_timeout_seconds": 901}}}
+        }
+        res, recap = a.playbook("rollback-refused", "deploy.yml", f"-e hermclaw_version={V2}", f"-e {shlex.quote(json.dumps(change))}")
         assert res.returncode != 0
         assert f"The database is at schema revision 0003, which release {V2}" in res.stdout and "allow_schema_downgrade=true" in res.stdout
-        assert _link(a, "/opt/hermclaw/venv") == f"venv-{V3}", "nothing was switched"
+        assert a.out(live) == before, "nothing was switched: venvs, LiteLLM and /etc/hermclaw are unchanged"
         assert _link(a, "/var/www/hermclaw-next") == f"hermclaw-next-releases/{V3}"
     args = [f"-e hermclaw_version={V2}", "-e hermclaw_orchestrator_allow_schema_downgrade=true"]
     res, recap = a.playbook("rollback", "deploy.yml", *args)
@@ -813,16 +874,19 @@ def test_rollback_needs_the_schema_downgrade_opt_in_and_reuses_the_installed_ven
         ), _cli_commands(a)
     res, recap = a.playbook("rollback-2", "deploy.yml", *args)
     _assert_ok(res, recap, HOSTS_A, idempotent=True)
+    _no_secrets(a)
 
 
 def test_model_worker_converges_and_is_idempotent(deployment: dict[str, Any]) -> None:
     b: Container = deployment["b"]
     deployment["b_thread"].join(timeout=3600)
     hosts = ["hermclaw-model-224"]
-    first = b.runs.get("site-1")
-    assert first is not None, "the model worker run did not start"
-    recap = {m.group(1): tuple(int(x) for x in m.groups()[1:]) for m in RECAP.finditer(first.stdout)}
-    _assert_ok(first, recap, hosts, idempotent=False)
+    for label in ("bootstrap", "dry-run", "deploy-1"):
+        res = b.runs.get(label)
+        assert res is not None, f"the model worker run {label} did not start"
+        recap = {m.group(1): tuple(int(x) for x in m.groups()[1:]) for m in RECAP.finditer(res.stdout)}
+        _assert_ok(res, recap, hosts, idempotent=False)
+    assert b.snapshots["before dry run"] == b.snapshots["after dry run"], "the dry run changes nothing on disk"
     assert _link(b, "/opt/hermclaw/venv") == f"venv-{V1}"
     assert "WORKER_KIND=model" in b.out("cat /etc/hermclaw/worker.env")
     files = b.out("ls /etc/hermclaw").split()
@@ -834,3 +898,5 @@ def test_model_worker_converges_and_is_idempotent(deployment: dict[str, Any]) ->
         assert res is not None, label
         recap = {m.group(1): tuple(int(x) for x in m.groups()[1:]) for m in RECAP.finditer(res.stdout)}
         _assert_ok(res, recap, hosts, idempotent=True)
+    for label, res in b.runs.items():
+        assert "worker-token-from-orchestrator" not in res.stdout + res.stderr, label
