@@ -56,7 +56,17 @@ def test_redactor_masks_known_secret_shapes():
 def test_numeric_token_counters_are_not_redacted() -> None:
     from hermclaw.core.redaction import REDACTED, redact
 
-    out = redact({"prompt_tokens": 120, "completion_tokens": 30, "max_tokens": 512, "token_count": 3, "token": 123456, "api_key": "abcd1234", "ok": True})
+    out = redact(
+        {
+            "prompt_tokens": 120,
+            "completion_tokens": 30,
+            "max_tokens": 512,
+            "token_count": 3,
+            "token": 123456,
+            "api_key": "abcd1234",
+            "ok": True,
+        }
+    )
     assert out["prompt_tokens"] == 120 and out["completion_tokens"] == 30 and out["max_tokens"] == 512 and out["token_count"] == 3
     assert out["token"] == REDACTED and out["api_key"] == REDACTED and out["ok"] is True
 
@@ -64,8 +74,30 @@ def test_numeric_token_counters_are_not_redacted() -> None:
 def test_prefixed_secret_identifiers_are_redacted() -> None:
     from hermclaw.core.redaction import DEFAULT_REDACTOR, REDACTED
 
-    for text in ("DB_PASSWORD = 'hunter2hunter2'", 'smtp-password: s3cr3tvalue', '"apiToken": "abcd1234efgh"', "X_API_KEY=zzzzyyyyxxxx", "client_secret=abcdefgh"):
+    for text in (
+        "DB_PASSWORD = 'hunter2hunter2'",
+        "smtp-password: s3cr3tvalue",
+        '"apiToken": "abcd1234efgh"',
+        "X_API_KEY=zzzzyyyyxxxx",
+        "client_secret=abcdefgh",
+    ):
         out = DEFAULT_REDACTOR.text(text)
-        assert REDACTED in out and not any(v in out for v in ("hunter2hunter2", "s3cr3tvalue", "abcd1234efgh", "zzzzyyyyxxxx", "abcdefgh")), (text, out)
+        assert REDACTED in out and not any(
+            v in out for v in ("hunter2hunter2", "s3cr3tvalue", "abcd1234efgh", "zzzzyyyyxxxx", "abcdefgh")
+        ), (text, out)
     for text in ("max_tokens = 1000", "tokens: 1234", "passwords_count = 12345", "token_budget: 5000"):
         assert DEFAULT_REDACTOR.text(text) == text, text
+
+
+def test_default_config_dir_is_the_checkout_or_etc_hermclaw(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Installed release (no config/ next to the package): /etc/hermclaw, not <site-packages>/config."""
+    from hermclaw.core import settings as settings_mod
+
+    monkeypatch.delenv("HERMCLAW_CONFIG_DIR", raising=False)
+    assert settings_mod.default_config_dir() == settings_mod.REPO_ROOT / "config"
+    assert settings_mod.Settings().config_dir == settings_mod.REPO_ROOT / "config"
+    monkeypatch.setattr(settings_mod, "REPO_ROOT", tmp_path / "site-packages")
+    assert settings_mod.default_config_dir() == Path("/etc/hermclaw")
+    assert settings_mod.Settings().config_dir == Path("/etc/hermclaw")
+    monkeypatch.setenv("HERMCLAW_CONFIG_DIR", str(tmp_path))
+    assert settings_mod.Settings().config_dir == tmp_path

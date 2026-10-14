@@ -10,6 +10,15 @@ from pydantic import Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
+SYSTEM_CONFIG_DIR = Path("/etc/hermclaw")
+
+
+def default_config_dir() -> Path:
+    """Source checkout: ``<repo>/config`` (examples for development and tests); installed release (wheel in a venv,
+    no ``config/`` next to the package): ``/etc/hermclaw``, so an operator's manual CLI call finds the production
+    configuration even without ``HERMCLAW_CONFIG_DIR``."""
+    repo = REPO_ROOT / "config"
+    return repo if (repo / "models.example.yaml").is_file() else SYSTEM_CONFIG_DIR
 
 
 class Settings(BaseSettings):
@@ -18,7 +27,7 @@ class Settings(BaseSettings):
     env: Literal["production", "development", "test"] = "development"
     instance_id: str = "orchestrator-225"
     database_url: str = "postgresql+psycopg://hermclaw@127.0.0.1:5432/hermclaw"
-    config_dir: Path = Field(default=REPO_ROOT / "config")
+    config_dir: Path = Field(default_factory=default_config_dir)
     data_dir: Path = Path("/var/lib/hermclaw")
     log_level: str = "INFO"
     log_json: bool = True

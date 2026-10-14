@@ -541,6 +541,13 @@ Noch keine.
 - Tatsächlich: `load_config` silently falls back to `<name>.example.yaml` (meant for checkouts and tests) and doctor reported everything ok; Wake-on-LAN with `00:00:00:00:..` MACs never wakes a worker
 - Fix: check `config:files` (production: fail when any of hosts/models/policies/capabilities/logging is only available as example) and `config:wake_on_lan` (warn on placeholder MACs)
 
+### BUG-091 – Installed release looked for its configuration in `<site-packages>/config`
+- Phase: P39 · Komponente: core/settings · Severity: P3 · blockierend: nein · Status: **behoben** (`tests/unit/test_config_and_redaction.py::test_default_config_dir_is_the_checkout_or_etc_hermclaw`)
+- Reproduktion: `sudo -u hermclaw /opt/hermclaw/venv/bin/hermclaw config-check` without `HERMCLAW_CONFIG_DIR` (the units set it, a manual admin call does not)
+- Erwartet: the production configuration in `/etc/hermclaw`
+- Tatsächlich: `config_dir` defaulted to `REPO_ROOT/config`, which for a wheel install is `<venv>/lib/python3.13/site-packages/config` → "missing configuration file"
+- Fix: default is the checkout's `config/` only when it exists (examples), otherwise `/etc/hermclaw`
+
 ## Template
 
 ### BUG-XXX – Titel
