@@ -137,7 +137,7 @@ ansible-playbook -i inventory/hosts.yml playbooks/bootstrap.yml --limit webui -K
 Verify on `.223`:
 
 ```sh
-node --version; npm --version                              # v22.x (>= 22.12)
+node --version; npm --version                              # v22.x (>= 22.23.2, last 22.x security release)
 sudo nginx -t
 curl -sI http://127.0.0.1/ -H 'Host: hermclaw.lan' | head -5   # 200, placeholder page
 cat /etc/nginx/sites-available/hermclaw-next.conf | grep -n 'proxy_buffering off'

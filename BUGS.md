@@ -650,6 +650,11 @@ Noch keine.
 - Tatsächlich: `get_parser` attempts the ~23 MB GitHub download per file (failure is caught, structure skipped), so indexing stalls on timeouts
 - Fix: a failed load marks the language unavailable for the process (one warning); dependency pinned to `>=1.21,<2` (cache path is per version); the deployment pre-fetches the bundle
 
+### BUG-110 – Node.js minimum allowed 22.x releases without the latest security fixes (.223 UI build)
+- Phase: P39 · Komponente: bootstrap/nodejs · Severity: P3 · blockierend: nein · Status: **behoben** (`tests/integration/test_bootstrap_tooling.py::test_node_version_gate`; found by research R-028 B2/B9)
+- Tatsächlich: `nodejs_min_version` was Vite's minimum 22.12.0; NodeSource has lagged security releases, so an outdated Node could pass
+- Fix: minimum 22.23.2 (last 22.x security release); the failure message points to `--only-upgrade` and the checksum-verified tarball fallback (INSTALLATION.md 5.3)
+
 ## Template
 
 ### BUG-XXX – Titel

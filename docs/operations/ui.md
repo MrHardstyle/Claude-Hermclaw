@@ -6,7 +6,7 @@ Architecture: `docs/architecture/ui.md`. Topology (`config/hosts.example.yaml`):
 
 ## 1. Build
 
-Requirements: Node ≥ 22.12 (the build host uses `/opt/node22/bin`), npm, and the lockfile in `ui/package-lock.json`.
+Requirements: Node ≥ 22.23.2 (last 22.x security release; Vite itself needs ≥ 22.12; the build host uses `/opt/node22/bin`), npm, and the lockfile in `ui/package-lock.json`.
 
 ```bash
 cd ui

@@ -1,7 +1,9 @@
 # nodejs – Node.js 22 LTS from NodeSource for the Vite/React UI build on .223
 # (P01 1.11; research 20261008-001 / -018: Vite needs Node >= 20.19 or >= 22.12).
 nodejs_major: 22
-nodejs_min_version: "22.12.0"
+# 22.23.2 = last 22.x security release (2026-07-28; Vite itself needs >= 22.12, research 20261014-028 B2/B9).
+# NodeSource has lagged security releases before: if its candidate is older, the role fails with the tarball fallback.
+nodejs_min_version: "22.23.2"
 nodejs_repo_uri: "https://deb.nodesource.com/node_{{ nodejs_major }}.x"
 nodejs_repo_suite: nodistro
 nodejs_key_url: https://deb.nodesource.com/gpgkey/nodesource-repo.gpg.key

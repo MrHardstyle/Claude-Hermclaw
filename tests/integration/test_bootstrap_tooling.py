@@ -4,7 +4,7 @@ The real task files run (``common/tasks/python.yml``, ``common/tasks/git.yml``,
 ``nodejs/tasks/main.yml`` with package installation off) against fake binaries that print
 real-world version strings, and against the real binaries of this build host. The
 gates must accept every supported version and refuse everything older (or, for Node.js,
-another major line: Vite needs Node >= 20.19 / >= 22.12, research 20261008-018).
+another major line: >= 22.23.2, the last 22.x security release; Vite needs >= 22.12, research 20261014-028).
 """
 
 from __future__ import annotations
@@ -22,8 +22,9 @@ pytestmark = pytest.mark.integration
 
 def test_node_version_gate(tmp_path: Path) -> None:
     versions = {
-        "lts-22": ("v22.20.0", "PASS"),
-        "minimum": ("v22.12.0", "PASS"),
+        "lts-22": ("v22.23.3", "PASS"),
+        "minimum": ("v22.23.2", "PASS"),  # last 22.x security release
+        "below-security-release": ("v22.22.0", "FAIL"),
         "below-vite-minimum": ("v22.11.0", "FAIL"),
         "old-major": ("v20.19.5", "FAIL"),
         "other-major": ("v24.10.0", "FAIL"),  # nodejs_major pins the NodeSource line
@@ -49,7 +50,7 @@ def test_node_version_gate_with_the_real_node(tmp_path: Path) -> None:
     version = subprocess.run([node, "--version"], capture_output=True, text=True, check=False).stdout.strip()
     major = int(version.lstrip("v").split(".")[0])
     path = f"{Path(node).parent}:/usr/bin:/bin"
-    want = "PASS" if major == 22 and tuple(int(x) for x in version.lstrip("v").split(".")[:2]) >= (22, 12) else "FAIL"
+    want = "PASS" if major == 22 and tuple(int(x) for x in version.lstrip("v").split(".")[:3]) >= (22, 23, 2) else "FAIL"
     _run_cases(tmp_path, [("node-real", "nodejs", "main.yml", {"hermclaw_install_packages": False}, {"PATH": path}, want)])
 
 

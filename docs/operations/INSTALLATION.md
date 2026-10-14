@@ -286,10 +286,25 @@ Installiert Node.js 22 (für den UI-Build) und nginx mit einer Platzhalter-Seite
 Konfiguration. Prüfen:
 
 ```bash
-node --version                                   # v22.x (>= 22.12)
+node --version                                   # v22.x (>= 22.23.2, letztes Sicherheitsrelease)
 sudo nginx -t
 curl -sI http://127.0.0.1/ -H 'Host: hermclaw.lan' | head -1    # HTTP/1.1 200
 ```
+
+**Node.js-Mindestversion 22.23.2** (letztes Sicherheitsrelease der 22er-Linie). NodeSource hinkt Sicherheitsreleases
+manchmal hinterher (Research R-028 B9). Bricht die Rolle mit „does not satisfy 22.x >= 22.23.2“ ab, installieren Sie
+das offizielle Tarball (Prüfsumme gegen `SHASUMS256.txt`):
+
+```bash
+V=22.23.3
+cd /tmp && curl -fsSLO https://nodejs.org/dist/v$V/node-v$V-linux-x64.tar.xz && curl -fsSLO https://nodejs.org/dist/v$V/SHASUMS256.txt
+grep " node-v$V-linux-x64.tar.xz\$" SHASUMS256.txt | sha256sum -c -
+sudo tar -xJf node-v$V-linux-x64.tar.xz -C /opt && sudo ln -sfn /opt/node-v$V-linux-x64 /opt/node22
+sudo ln -sfn /opt/node22/bin/node /usr/local/bin/node && sudo ln -sfn /opt/node22/bin/npm /usr/local/bin/npm
+node --version                                   # v22.23.3
+```
+
+Danach den Bootstrap für `webui` erneut ausführen.
 
 ### 5.4 Execution Worker .222
 
