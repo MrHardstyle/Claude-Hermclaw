@@ -11,6 +11,9 @@
 # Order: preflight on every host (nothing changes before all checks passed) -> orchestrator .225 (release venv,
 # config, LiteLLM, migration, switch, services) -> execution worker .222 -> model worker .224 -> web UI .223 ->
 # hermclaw doctor. Idempotent: a second run and a --check run report changed=0. Live runs: BLOCKER-001 here.
+# Tags: the preflight always runs; every role carries its name as a tag (--tags hermclaw_ui re-deploys only the UI,
+# --tags hermclaw_verify only runs the doctor). The Python roles build on each other (release -> config ->
+# orchestrator/worker): run them together or run the whole playbook.
 
 - name: Deployment preflight (release, inventory, credentials) - read-only
   hosts: orchestrator:webui:execution_workers:model_workers
@@ -35,42 +38,58 @@
   any_errors_fatal: true
   roles:
     - role: systemd_skeleton
+      tags: [systemd_skeleton]
     - role: hermclaw_release
+      tags: [hermclaw_release]
     - role: hermclaw_config
+      tags: [hermclaw_config]
     - role: hermclaw_orchestrator
+      tags: [hermclaw_orchestrator]
 
 - name: Execution worker .222 - runtime, sandbox images, worker daemon
   hosts: execution_workers
   become: true
   roles:
     - role: systemd_skeleton
+      tags: [systemd_skeleton]
     - role: hermclaw_release
+      tags: [hermclaw_release]
     - role: hermclaw_config
+      tags: [hermclaw_config]
     - role: hermclaw_worker
+      tags: [hermclaw_worker]
 
 - name: Model worker .224 - runtime, worker daemon, Ollama models
   hosts: model_workers
   become: true
   roles:
     - role: systemd_skeleton
+      tags: [systemd_skeleton]
     - role: hermclaw_release
+      tags: [hermclaw_release]
     - role: hermclaw_config
+      tags: [hermclaw_config]
     - role: hermclaw_worker
+      tags: [hermclaw_worker]
 
 - name: Web UI .223 - nginx site, UI build, SSH gate
   hosts: webui
   become: true
   roles:
     - role: nginx
+      tags: [nginx]
     - role: hermclaw_ui
+      tags: [hermclaw_ui]
   tasks:
     - name: Install the operator scripts of the release
       ansible.builtin.include_role:
         name: hermclaw_release
         tasks_from: scripts.yml
+      tags: [hermclaw_release]
 
 - name: Verify the deployment (hermclaw doctor in the services' context)
   hosts: orchestrator
   become: true
   roles:
     - role: hermclaw_verify
+      tags: [hermclaw_verify]

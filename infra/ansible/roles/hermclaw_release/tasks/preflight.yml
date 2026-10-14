@@ -87,6 +87,8 @@
 - name: Check the credentials of this host's units
   ansible.builtin.include_tasks:
     file: credentials.yml
+    apply:
+      tags: [always]
   vars:
     hermclaw_release_credential_units: >-
       {{ group_names | select('in', hermclaw_release_units.keys() | list)

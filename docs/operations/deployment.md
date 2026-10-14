@@ -108,8 +108,14 @@ Exit codes: 0 ok, 1 build/self-test failure, 2 usage, 69 missing tool.
 cd infra/ansible
 ansible-playbook playbooks/deploy.yml --check --diff                     # nothing on disk changes
 ansible-playbook playbooks/deploy.yml                                    # or: playbooks/site.yml (bootstrap + deploy)
-ansible-playbook playbooks/deploy.yml --limit orchestrator               # one host group (needs the preflight hosts too)
+ansible-playbook playbooks/deploy.yml --limit orchestrator               # one host group (its preflight runs too)
+ansible-playbook playbooks/deploy.yml --tags hermclaw_ui                 # one role (here: only the UI build + switch)
 ```
+
+Every role carries its name as a tag, and the preflight always runs. `--tags hermclaw_ui` (UI only) and
+`--tags hermclaw_verify` (doctor only) work on their own. The Python roles build on each other
+(`hermclaw_release` → `hermclaw_config` → `hermclaw_orchestrator`/`hermclaw_worker`), so run those together or run
+the whole playbook.
 
 The first run on a host replaces the bootstrap's empty venv directory. It is kept as
 `/opt/hermclaw/venv.pre-release-<time>` (no data loss; delete it once the deployment works), and

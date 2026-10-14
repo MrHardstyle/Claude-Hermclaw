@@ -45,7 +45,10 @@
     hermclaw_orchestrator_downgrade: false
 
 - name: Database schema of the release
-  ansible.builtin.include_tasks: database.yml
+  ansible.builtin.include_tasks:
+    file: database.yml
+    apply:
+      tags: [hermclaw_orchestrator]
   when: hermclaw_orchestrator_run_database_tasks | bool
 
 # graceful: the scheduler checkpoints running steps and releases its leases on SIGTERM (TimeoutStopSec=90s)

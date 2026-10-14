@@ -419,6 +419,12 @@ def _start(name: str, workdir: Path, releases: Releases, wheels: Path, model_onl
         argv += ["-v", f"{path}:/opt/hosttools/{tool}:ro"]
     if pg is not None and not model_only:
         argv += ["-v", f"{pg.sock}:/run/postgresql"]
+    if model_only:  # check-host.sh wants the GTX 1080 on the PCI bus: one fake NVIDIA display controller
+        gpu = workdir / "pci" / "0000:01:00.0"
+        gpu.mkdir(parents=True)
+        (gpu / "vendor").write_text("0x10de\n", encoding="utf-8")
+        (gpu / "class").write_text("0x030000\n", encoding="utf-8")
+        argv += ["-v", f"{gpu.parent}:/sys/bus/pci/devices:ro"]
     started = _podman(*argv, IMAGE, "sleep", "14400")
     if started.returncode != 0:
         pytest.skip(f"cannot start a container here: {started.stderr.strip()[:300]}")
