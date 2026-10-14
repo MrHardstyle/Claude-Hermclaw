@@ -36,13 +36,26 @@ _local = threading.local()
 log = get_logger(__name__)
 
 
+_UNAVAILABLE: dict[str, str] = {}  # lang -> reason; process-wide: a failed grammar load is not retried per file
+
+
 def _parser(lang: str) -> Any:
+    """tree-sitter parser for ``lang``. tree-sitter-language-pack >= 1.0 downloads its grammar bundle on first use
+    (pre-fetched by the deployment); when that fails (offline, no cache) the language is marked unavailable for this
+    process instead of retrying – and timing out – once per file (research 20261014-027 Y6)."""
+    if lang in _UNAVAILABLE:
+        raise RuntimeError(f"tree-sitter grammar {lang} unavailable: {_UNAVAILABLE[lang]}")
     cache: dict[str, Any] = getattr(_local, "parsers", None) or {}
     _local.parsers = cache
     if lang not in cache:
         from tree_sitter_language_pack import get_parser
 
-        cache[lang] = get_parser(lang)  # type: ignore[arg-type]
+        try:
+            cache[lang] = get_parser(lang)  # type: ignore[arg-type]
+        except Exception as exc:
+            _UNAVAILABLE[lang] = f"{type(exc).__name__}: {str(exc)[:200]}"
+            log.warning("tree-sitter grammar unavailable, structure index skipped", extra={"language": lang, "reason": _UNAVAILABLE[lang]})
+            raise
     return cache[lang]
 
 

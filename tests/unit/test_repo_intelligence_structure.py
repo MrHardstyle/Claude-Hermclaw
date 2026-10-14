@@ -3,6 +3,8 @@ symbol-aligned chunking and query analysis."""
 
 from __future__ import annotations
 
+import pytest
+
 from hermclaw.repo_intelligence.chunking import CHARS_PER_TOKEN, Chunker, content_hash, document_text
 from hermclaw.repo_intelligence.config import RepoIntelConfig
 from hermclaw.repo_intelligence.dependencies import (
@@ -301,3 +303,24 @@ def test_query_phrases_are_single_line_and_ignore_apostrophes() -> None:
     q = analyze("title: orders.status'\nAdd revision 0002 (status NOT NULL DEFAULT 'new' with a check)")
     assert "new" in q.phrases and all("\n" not in p for p in q.lexical_patterns)
     assert analyze('`multi\nline` and "also\nthis"').phrases == []
+
+
+def test_unavailable_grammar_is_not_retried_per_file(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Offline without a pre-fetched grammar bundle: one failed load marks the language unavailable for the process
+    (no per-file download timeouts); files still index without structure."""
+    import tree_sitter_language_pack
+
+    from hermclaw.repo_intelligence import symbols as sym
+
+    calls: list[str] = []
+
+    def boom(lang: str) -> object:
+        calls.append(lang)
+        raise OSError("network unreachable")
+
+    monkeypatch.setattr(tree_sitter_language_pack, "get_parser", boom)
+    monkeypatch.setattr(sym, "_UNAVAILABLE", {})
+    monkeypatch.setattr(sym._local, "parsers", {}, raising=False)
+    for i in range(3):
+        extract_file_symbols(f"src/m{i}.php", "php", "<?php function f() {}\n")
+    assert calls == ["php"] and "network unreachable" in sym._UNAVAILABLE["php"]

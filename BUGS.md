@@ -644,6 +644,12 @@ Noch keine.
 - Tatsächlich: podman copies the engine process's variable values into the container (CVE-2026-57231); with the checkpoint annotation it silently ignores `--cap-drop=ALL` & co. (CVE-2026-94603; rootless not affected per advisory)
 - Fix: every image is inspected once per worker process before its first run (`SANDBOX_IMAGE_UNSAFE`); the worker selftest (`hermclaw doctor`) reports such images
 
+### BUG-109 – Offline grammar download of tree-sitter-language-pack retried (and timed out) for every file
+- Phase: P39 · Komponente: repo_intelligence · Severity: P3 · blockierend: nein · Status: **behoben** (`tests/unit/test_repo_intelligence_structure.py::test_unavailable_grammar_is_not_retried_per_file`; found via research R-027 Y6)
+- Reproduktion: tree-sitter-language-pack ≥ 1.0 without a cached grammar bundle and without network; index a repository with JS/TS/PHP files
+- Tatsächlich: `get_parser` attempts the ~23 MB GitHub download per file (failure is caught, structure skipped), so indexing stalls on timeouts
+- Fix: a failed load marks the language unavailable for the process (one warning); dependency pinned to `>=1.21,<2` (cache path is per version); the deployment pre-fetches the bundle
+
 ## Template
 
 ### BUG-XXX – Titel
