@@ -1,0 +1,15 @@
+# 1.9 – Git (installed with the base packages); Git mutations stay runtime-controlled.
+- name: Read the Git version
+  ansible.builtin.command:
+    argv: [git, --version]
+  register: common_git_version
+  changed_when: false
+  check_mode: false
+
+- name: Assert Git >= {{ common_git_min_version }}
+  ansible.builtin.assert:
+    that: >-
+      (common_git_version.stdout | regex_search('[0-9]+[.][0-9]+([.][0-9]+)?'))
+      is version(common_git_min_version, '>=')
+    fail_msg: "{{ common_git_version.stdout }} is older than {{ common_git_min_version }}"
+    quiet: true

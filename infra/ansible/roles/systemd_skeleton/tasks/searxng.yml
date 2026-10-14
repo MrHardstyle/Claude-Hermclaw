@@ -1,0 +1,73 @@
+- name: Create SearXNG directories
+  ansible.builtin.file:
+    path: "{{ item.path }}"
+    state: directory
+    owner: "{{ item.owner }}"
+    group: "{{ hermclaw_group }}"
+    mode: "0750"
+  loop:
+    - {path: "{{ hermclaw_config_dir }}/searxng", owner: root}
+    - {path: "{{ hermclaw_data_dir }}/searxng-cache", owner: "{{ hermclaw_user }}"}
+  loop_control:
+    label: "{{ item.path }}"
+
+- name: Write SearXNG settings
+  ansible.builtin.template:
+    src: searxng-settings.yml.j2
+    dest: "{{ hermclaw_config_dir }}/searxng/settings.yml"
+    owner: root
+    group: "{{ hermclaw_group }}"
+    mode: "0640"
+  notify: Restart SearXNG
+
+- name: Create the Quadlet directory of the hermclaw user
+  ansible.builtin.file:
+    path: "/etc/containers/systemd/users/{{ systemd_skeleton_hermclaw_uid }}"
+    state: directory
+    owner: root
+    group: root
+    mode: "0755"
+
+- name: Install the SearXNG Quadlet
+  ansible.builtin.template:
+    src: "{{ systemd_skeleton_template_dir }}/hermclaw-searxng.container.j2"
+    dest: "/etc/containers/systemd/users/{{ systemd_skeleton_hermclaw_uid }}/hermclaw-searxng.container"
+    owner: root
+    group: root
+    mode: "0644"
+  notify:
+    - Reload the hermclaw user manager
+    - Restart SearXNG
+
+- name: Create the SearXNG secret (stays on this host)
+  when:
+    - hermclaw_manage_services | bool
+    - not ansible_check_mode
+  block:
+    - name: Check for the SearXNG podman secret
+      ansible.builtin.command:
+        argv: [podman, secret, exists, "{{ systemd_skeleton_searxng_secret_name }}"]
+      become: true
+      become_user: "{{ hermclaw_user }}"
+      environment:
+        XDG_RUNTIME_DIR: "/run/user/{{ systemd_skeleton_hermclaw_uid }}"
+      args:
+        chdir: /
+      register: systemd_skeleton_searxng_secret
+      changed_when: false
+      failed_when: systemd_skeleton_searxng_secret.rc not in [0, 1]
+
+    - name: Generate the SearXNG secret
+      ansible.builtin.shell:
+        cmd: >-
+          set -o pipefail;
+          head -c 48 /dev/urandom | base64 -w0 |
+          podman secret create {{ systemd_skeleton_searxng_secret_name | quote }} - >/dev/null
+        executable: /bin/bash
+        chdir: /
+      become: true
+      become_user: "{{ hermclaw_user }}"
+      environment:
+        XDG_RUNTIME_DIR: "/run/user/{{ systemd_skeleton_hermclaw_uid }}"
+      changed_when: true
+      when: systemd_skeleton_searxng_secret.rc == 1

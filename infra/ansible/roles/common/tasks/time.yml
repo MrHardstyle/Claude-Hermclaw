@@ -1,0 +1,76 @@
+- name: Check time zone data
+  ansible.builtin.stat:
+    path: "/usr/share/zoneinfo/{{ hermclaw_timezone }}"
+  register: common_tzfile
+
+- name: Assert the time zone exists
+  ansible.builtin.assert:
+    that: common_tzfile.stat.exists
+    fail_msg: "unknown time zone {{ hermclaw_timezone }} (tzdata installed?)"
+    quiet: true
+
+- name: Set /etc/localtime
+  ansible.builtin.file:
+    src: "/usr/share/zoneinfo/{{ hermclaw_timezone }}"
+    dest: /etc/localtime
+    state: link
+    force: true
+
+- name: Set /etc/timezone
+  ansible.builtin.copy:
+    content: "{{ hermclaw_timezone }}\n"
+    dest: /etc/timezone
+    owner: root
+    group: root
+    mode: "0644"
+
+- name: Detect an already installed NTP daemon (never replace it)
+  ansible.builtin.stat:
+    path: "{{ item }}"
+  loop:
+    - /usr/sbin/chronyd
+    - /usr/sbin/ntpd
+  register: common_other_ntp
+
+- name: Decide NTP implementation
+  ansible.builtin.set_fact:
+    common_use_timesyncd: "{{ common_other_ntp.results | selectattr('stat.exists') | list | length == 0 }}"
+
+- name: Install systemd-timesyncd
+  ansible.builtin.apt:
+    name: systemd-timesyncd
+    state: present
+  when:
+    - common_use_timesyncd | bool
+    - hermclaw_install_packages | bool
+
+- name: Configure timesyncd servers
+  when:
+    - common_use_timesyncd | bool
+    - common_ntp_servers | length > 0
+  block:
+    - name: Create timesyncd drop-in directory
+      ansible.builtin.file:
+        path: /etc/systemd/timesyncd.conf.d
+        state: directory
+        owner: root
+        group: root
+        mode: "0755"
+
+    - name: Write timesyncd drop-in
+      ansible.builtin.template:
+        src: timesyncd-hermclaw.conf.j2
+        dest: /etc/systemd/timesyncd.conf.d/hermclaw.conf
+        owner: root
+        group: root
+        mode: "0644"
+      notify: Restart systemd-timesyncd
+
+- name: Enable systemd-timesyncd
+  ansible.builtin.systemd_service:
+    name: systemd-timesyncd
+    enabled: true
+    state: started
+  when:
+    - common_use_timesyncd | bool
+    - hermclaw_manage_services | bool

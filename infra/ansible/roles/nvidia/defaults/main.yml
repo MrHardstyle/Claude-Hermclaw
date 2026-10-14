@@ -1,0 +1,76 @@
+# nvidia – GTX 1080 (Pascal) driver on the model worker .224 (research 20261008-017,
+# recheck 2026-10-14 in docs/architecture/bootstrap.md).
+# 580 is the last driver branch supporting Pascal; 590+ dropped it, so the branch is pinned.
+nvidia_driver_branch: "580"
+
+# Installation source:
+#   runfile = NVIDIA's official .run installer for a pinned 580.x release (SHA-256 verified,
+#             DKMS, proprietary kernel modules). Default, because on Debian 13 no apt source
+#             ships the 580 branch: NVIDIA's CUDA debian13 repository only carries 590+ and
+#             Debian trixie (incl. backports) ships 550.
+#   cuda    = NVIDIA CUDA network repository (nvidia-driver-pinning-<branch> + cuda-drivers =
+#             proprietary modules; the open modules need Turing or newer). Usable only once
+#             NVIDIA publishes the branch for debian13 - the role checks the candidates first.
+#   debian  = Debian non-free nvidia-driver. trixie ships 550, which also supports Pascal:
+#             set nvidia_driver_branch: "550" together with nvidia_source: debian.
+nvidia_source: runfile
+
+# --- runfile ------------------------------------------------------------------------------
+# Latest 580 release on 2026-10-14 ("NVIDIA Certified", 2026-06-25). Upgrade only after the
+# GPU smoke test (`hermclaw-model-worker selftest`).
+nvidia_runfile_version: "580.173.02"
+nvidia_runfile_base: https://download.nvidia.com/XFree86/Linux-x86_64
+nvidia_runfile_name: "NVIDIA-Linux-x86_64-{{ nvidia_runfile_version }}.run"
+# Pinned SHA-256 of the .run file (64 hex digits). Empty = use NVIDIA's published
+# <file>.run.sha256sum next to the installer (same HTTPS origin).
+nvidia_runfile_sha256: ""
+nvidia_runfile_download_dir: /var/cache/hermclaw
+# --silent implies --ui=none --no-questions; Pascal needs the proprietary kernel modules.
+nvidia_runfile_options:
+  - --silent
+  - --dkms
+  - --kernel-module-type=proprietary
+  - --no-x-check
+nvidia_runfile_packages:
+  - build-essential
+  - pkg-config
+  - libglvnd-dev
+# Daemon account for nvidia-persistenced (the runfile ships the binary but no unit).
+nvidia_persistenced_user: nvidia-persistenced
+nvidia_persistenced_bin: /usr/bin/nvidia-persistenced
+
+# --- cuda ---------------------------------------------------------------------------------
+nvidia_cuda_repo_base: https://developer.download.nvidia.com/compute/cuda/repos/debian13/x86_64
+nvidia_cuda_keyring_deb: cuda-keyring_1.1-1_all.deb
+nvidia_cuda_pinning_package: "nvidia-driver-pinning-{{ nvidia_driver_branch }}"
+nvidia_cuda_driver_packages:
+  - cuda-drivers
+
+# --- debian -------------------------------------------------------------------------------
+nvidia_debian_packages:
+  - nvidia-driver
+  - firmware-misc-nonfree
+
+# Kernel headers for the running and the default kernel (DKMS builds for both).
+nvidia_build_packages:
+  - linux-headers-amd64
+  - "linux-headers-{{ ansible_facts['kernel'] | default('amd64') }}"
+  - dkms
+
+# Packages covered by the Hermclaw apt pin (regex on package names). With the runfile the
+# pin keeps any configured repository from installing a 590+ driver next to it.
+nvidia_pin_regex: "/^(nvidia|libnvidia|libcuda|libnvcuvid|libnvoptix|xserver-xorg-video-nvidia|cuda-drivers|firmware-nvidia)/"
+# Driver packages whose presence conflicts with a runfile installation (dpkg-query patterns).
+nvidia_package_conflicts:
+  - "nvidia-driver*"
+  - "nvidia-kernel-*"
+  - "nvidia-open*"
+  - "cuda-drivers*"
+
+# The model worker must use the GTX 1080 8 GB - never the 1080 Ti of the gaming PC (Bauplan §2.4).
+nvidia_expected_gpu_regex: "GTX 1080$"
+nvidia_expected_vram_mib_min: 8000
+# Reboot automatically when nouveau has to be unloaded or a new kernel module was installed
+# (otherwise: fail with a hint and continue after a manual reboot).
+nvidia_allow_reboot: false
+nvidia_reboot_timeout: 900

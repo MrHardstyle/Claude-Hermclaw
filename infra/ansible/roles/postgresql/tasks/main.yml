@@ -1,0 +1,22 @@
+# postgresql – PostgreSQL 17 + pgvector >= 0.8.2 from PGDG, localhost only (P01 1.7, 1.8)
+- name: Validate the PostgreSQL settings
+  ansible.builtin.import_tasks: validate.yml
+  tags: [postgresql]
+
+- name: PGDG repository and packages
+  ansible.builtin.import_tasks: install.yml
+  when: hermclaw_install_packages | bool
+  tags: [postgresql, packages]
+
+- name: Verify pgvector package version (CVE-2026-3172)
+  ansible.builtin.import_tasks: verify_pgvector.yml
+  tags: [postgresql]
+
+- name: Cluster configuration
+  ansible.builtin.import_tasks: configure.yml
+  tags: [postgresql]
+
+- name: Role, database and extensions
+  ansible.builtin.import_tasks: database.yml
+  when: hermclaw_manage_services | bool
+  tags: [postgresql]

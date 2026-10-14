@@ -1,0 +1,21 @@
+- name: Check /etc/systemd/system/{{ systemd_skeleton_guard_unit }}
+  ansible.builtin.stat:
+    path: "/etc/systemd/system/{{ systemd_skeleton_guard_unit }}"
+  register: systemd_skeleton_guard_stat
+
+- name: Read the existing unit file
+  ansible.builtin.slurp:
+    src: "/etc/systemd/system/{{ systemd_skeleton_guard_unit }}"
+  register: systemd_skeleton_guard_raw
+  when: systemd_skeleton_guard_stat.stat.exists and systemd_skeleton_guard_stat.stat.isreg
+
+- name: Stop if the unit belongs to something else
+  ansible.builtin.fail:
+    msg: >-
+      /etc/systemd/system/{{ systemd_skeleton_guard_unit }} exists and is not managed by Hermclaw -
+      refusing to overwrite an existing service.
+  when:
+    - systemd_skeleton_guard_stat.stat.exists
+    - >-
+      not systemd_skeleton_guard_stat.stat.isreg
+      or 'Managed by Hermclaw' not in (systemd_skeleton_guard_raw.content | b64decode)

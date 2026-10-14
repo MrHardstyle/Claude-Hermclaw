@@ -1,0 +1,33 @@
+# common – base system for every Hermclaw host (P01 1.1–1.6, 1.9).
+- name: Preflight
+  ansible.builtin.import_tasks: assert.yml
+  tags: [common, preflight]
+
+- name: Base packages
+  ansible.builtin.import_tasks: packages.yml
+  when: hermclaw_install_packages | bool
+  tags: [common, packages]
+
+- name: Time zone and NTP
+  ansible.builtin.import_tasks: time.yml
+  tags: [common, time]
+
+- name: Users and groups
+  ansible.builtin.import_tasks: users.yml
+  tags: [common, users]
+
+- name: Directories
+  ansible.builtin.import_tasks: directories.yml
+  tags: [common, directories]
+
+- name: Python and venv tooling
+  ansible.builtin.import_tasks: python.yml
+  tags: [common, python]
+
+- name: Git
+  ansible.builtin.import_tasks: git.yml
+  tags: [common, git]
+
+- name: SSH keys
+  ansible.builtin.import_tasks: ssh_keys.yml
+  tags: [common, ssh_keys]

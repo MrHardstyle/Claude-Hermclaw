@@ -1,0 +1,12 @@
+galaxy_info:
+  role_name: nginx
+  namespace: hermclaw
+  author: Hermclaw Next
+  description: "Nginx webroot and SSE-capable baseline site"
+  license: proprietary
+  min_ansible_version: "2.17"
+  platforms:
+    - name: Debian
+      versions:
+        - trixie
+dependencies: []

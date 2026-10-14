@@ -1,0 +1,17 @@
+# Debian's nginx.conf includes /etc/nginx/sites-enabled/*; nginx.org packages and custom
+# configurations may not (the site would silently never load). Tested against real
+# nginx.conf variants by tests/integration/test_bootstrap_infra.py::test_nginx_sites_include_check.
+- name: Read nginx.conf
+  ansible.builtin.slurp:
+    src: "{{ nginx_main_conf_path }}"
+  register: nginx_main_conf
+
+- name: Assert that nginx.conf loads sites-enabled (Debian layout)
+  ansible.builtin.assert:
+    that: >-
+      (nginx_main_conf.content | b64decode).splitlines() | map('trim')
+      | select('match', 'include[^A-Za-z0-9/#]+/etc/nginx/sites-enabled/') | list | length > 0
+    fail_msg: >-
+      {{ nginx_main_conf_path }} does not include /etc/nginx/sites-enabled/* (nginx.org package or a custom
+      nginx.conf?) - the Hermclaw site would never load. Add the include or use Debian's nginx.
+    quiet: true

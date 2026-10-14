@@ -1,0 +1,4 @@
+# Hermclaw Next – complete site. The deployment phase (P32) appends its plays below the
+# bootstrap; until then site.yml == bootstrap.yml.
+- name: Clean system bootstrap (P01)
+  ansible.builtin.import_playbook: bootstrap.yml

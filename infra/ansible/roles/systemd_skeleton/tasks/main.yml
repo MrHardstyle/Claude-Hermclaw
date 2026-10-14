@@ -1,0 +1,140 @@
+# systemd_skeleton – Hermclaw unit files, environment files, credentials (P01 1.13)
+- name: Determine this host's unit set
+  ansible.builtin.set_fact:
+    systemd_skeleton_host_units: >-
+      {{ group_names | select('in', systemd_skeleton_units.keys() | list)
+         | map('extract', systemd_skeleton_units) | flatten | unique }}
+    systemd_skeleton_host_enable: >-
+      {{ group_names | select('in', systemd_skeleton_enable_list.keys() | list)
+         | map('extract', systemd_skeleton_enable_list) | flatten | unique }}
+    systemd_skeleton_worker_hosts: >-
+      {{ ((groups['execution_workers'] | default([])) + (groups['model_workers'] | default([]))) | unique }}
+  tags: [systemd]
+
+- name: Require hermclaw_worker_id for every worker host
+  ansible.builtin.assert:
+    that:
+      - systemd_skeleton_worker_hosts | map('extract', hostvars) | selectattr('hermclaw_worker_id', 'undefined') | list | length == 0
+    fail_msg: every host in execution_workers/model_workers needs hermclaw_worker_id in the inventory
+    quiet: true
+  tags: [systemd]
+
+- name: Compute worker ids and token references
+  ansible.builtin.set_fact:
+    systemd_skeleton_worker_ids: "{{ systemd_skeleton_worker_hosts | map('extract', hostvars, 'hermclaw_worker_id') | list }}"
+  tags: [systemd]
+
+- name: Compute worker token references
+  ansible.builtin.set_fact:
+    systemd_skeleton_worker_token_refs: >-
+      {{ dict(systemd_skeleton_worker_ids | zip(systemd_skeleton_worker_ids | map('regex_replace', '^', 'cred:worker-token-'))) }}
+  tags: [systemd]
+
+- name: Validate identifiers used in unit files
+  ansible.builtin.assert:
+    that:
+      - systemd_skeleton_worker_ids | select('match', '^[a-z0-9][a-z0-9-]{0,62}$') | list | length == systemd_skeleton_worker_ids | length
+      - systemd_skeleton_worker_ids | unique | length == systemd_skeleton_worker_ids | length
+      - systemd_skeleton_instance_id is match('^[a-z0-9][a-z0-9-]{0,62}$')
+      - systemd_skeleton_db_name is match('^[a-z_][a-z0-9_]{0,62}$')
+      - systemd_skeleton_log_level in ['DEBUG', 'INFO', 'WARNING', 'ERROR']
+      - systemd_skeleton_backup_command is match('^/[A-Za-z0-9._/-]+$')
+      - systemd_skeleton_litellm_venv is match('^/[A-Za-z0-9._/-]+$')
+      - systemd_skeleton_searxng_image is match('^[a-z0-9.-]+(/[a-z0-9._-]+)+:[A-Za-z0-9._-]+$')
+      - systemd_skeleton_searxng_image is not match('.*:latest$')
+      - systemd_skeleton_credentials.values() | flatten | reject('match', '^[a-z0-9][a-z0-9-]*$') | list | length == 0
+    fail_msg: invalid worker id, instance id, db name, path, image (must be pinned) or credential name
+    quiet: true
+  tags: [systemd]
+
+- name: Look up the hermclaw account
+  ansible.builtin.command:
+    argv: [getent, passwd, "{{ hermclaw_user }}"]
+  register: systemd_skeleton_pw
+  changed_when: false
+  check_mode: false
+  failed_when: systemd_skeleton_pw.rc not in [0, 2]
+  tags: [systemd]
+
+- name: Remember the hermclaw UID
+  ansible.builtin.set_fact:
+    systemd_skeleton_hermclaw_uid: "{{ systemd_skeleton_pw.stdout.split(':')[2] if systemd_skeleton_pw.rc == 0 else '0' }}"
+  tags: [systemd]
+
+- name: Refuse to overwrite foreign unit files
+  ansible.builtin.include_tasks:
+    file: guard.yml
+    apply:
+      tags: [systemd]
+  loop: "{{ systemd_skeleton_host_units }}"
+  loop_control:
+    loop_var: systemd_skeleton_guard_unit
+  tags: [systemd]
+
+- name: Install the credential environment helper
+  ansible.builtin.copy:
+    src: "{{ systemd_skeleton_template_dir }}/hermclaw-cred-env"
+    dest: "{{ hermclaw_bin_dir }}/hermclaw-cred-env"
+    owner: root
+    group: root
+    mode: "0755"
+  tags: [systemd]
+
+- name: Write the orchestrator environment file
+  ansible.builtin.template:
+    src: "{{ systemd_skeleton_template_dir }}/hermclaw.env.j2"
+    dest: "{{ hermclaw_config_dir }}/hermclaw.env"
+    owner: root
+    group: "{{ hermclaw_group }}"
+    mode: "0640"
+  when: "'orchestrator' in group_names"
+  tags: [systemd]
+
+- name: Write the worker environment file
+  ansible.builtin.template:
+    src: "{{ systemd_skeleton_template_dir }}/worker.env.j2"
+    dest: "{{ hermclaw_config_dir }}/worker.env"
+    owner: root
+    group: "{{ hermclaw_group }}"
+    mode: "0640"
+  vars:
+    systemd_skeleton_worker_kind: "{{ 'execution' if 'execution_workers' in group_names else 'model' }}"
+  when: group_names | intersect(['execution_workers', 'model_workers']) | length > 0
+  tags: [systemd]
+
+- name: Install the unit files
+  ansible.builtin.template:
+    src: "{{ systemd_skeleton_template_dir }}/{{ item }}.j2"
+    dest: "/etc/systemd/system/{{ item }}"
+    owner: root
+    group: root
+    mode: "0644"
+  loop: "{{ systemd_skeleton_host_units }}"
+  notify: Reload systemd
+  tags: [systemd]
+
+- name: SearXNG Quadlet
+  ansible.builtin.import_tasks: searxng.yml
+  when:
+    - "'orchestrator' in group_names"
+    - systemd_skeleton_searxng_enabled | bool
+  tags: [systemd, searxng]
+
+- name: Credentials
+  ansible.builtin.import_tasks: credentials.yml
+  tags: [systemd, credentials]
+
+- name: Load the unit files
+  ansible.builtin.meta: flush_handlers
+  tags: [systemd]
+
+- name: Enable and start the services (deployment phase)
+  ansible.builtin.systemd_service:
+    name: "{{ item }}"
+    enabled: true
+    state: started
+  loop: "{{ systemd_skeleton_host_enable }}"
+  when:
+    - systemd_skeleton_enable_units | bool
+    - hermclaw_manage_services | bool
+  tags: [systemd]

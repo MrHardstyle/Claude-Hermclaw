@@ -1,0 +1,15 @@
+# Managed by Hermclaw – PostgreSQL client authentication (P01 1.7).
+# First matching line wins: postgres superuser, Hermclaw role, operator rules
+# (postgresql_hba_extra), then the generic local-only rules.
+# TYPE  DATABASE        USER            ADDRESS                 METHOD
+local   all             postgres                                peer
+local   {{ postgresql_db_name }}        {{ postgresql_db_owner }}                                peer
+host    {{ postgresql_db_name }}        {{ postgresql_db_owner }}        127.0.0.1/32            scram-sha-256
+host    {{ postgresql_db_name }}        {{ postgresql_db_owner }}        ::1/128                 scram-sha-256
+{% for rule in postgresql_hba_extra %}
+{{ rule.type }}    {{ rule.database }}    {{ rule.user }}    {{ rule.address | default('') }}    {{ rule.method }}
+{% endfor %}
+local   all             all                                     peer
+host    all             all             127.0.0.1/32            scram-sha-256
+host    all             all             ::1/128                 scram-sha-256
+local   replication     all                                     peer

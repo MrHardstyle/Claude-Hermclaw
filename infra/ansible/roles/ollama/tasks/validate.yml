@@ -1,0 +1,21 @@
+# Input validation of the ollama role (tested locally by
+# tests/integration/test_bootstrap_infra.py::test_role_input_validation).
+- name: Validate Ollama settings
+  ansible.builtin.assert:
+    that:
+      - ollama_version is match('^[0-9]+[.][0-9]+[.][0-9]+(-rc[0-9]+)?$')
+      - ollama_install_method in ['tarball', 'script']
+      - ollama_release_base is match('^https://[A-Za-z0-9./_-]+$')
+      - ollama_install_script_url is match('^https://[A-Za-z0-9./_-]+$')
+      - ollama_install_root is match('^/[A-Za-z0-9._/-]+$')
+      - ollama_listen is match('^[0-9.]+:[0-9]{1,5}$')
+      - ollama_keep_alive is match('^-?[0-9]+(s|m|h)?$')
+      - ollama_max_loaded_models | int >= 1
+      - ollama_num_parallel | int >= 1
+      - "'OLLAMA_CONTEXT_LENGTH' not in ollama_extra_env"
+      - ollama_extra_env.keys() | reject('match', '^OLLAMA_[A-Z_]+$') | list | length == 0
+      # allowlist (no whitespace, quotes, backslashes or line breaks reach the unit file)
+      - ollama_extra_env.values() | map('string') | reject('match', '^[A-Za-z0-9._:/,+=@%*-]*$') | list | length == 0
+      - ollama_extra_env.values() | map('string') | map('trim') | list == ollama_extra_env.values() | map('string') | list
+    fail_msg: invalid Ollama settings (OLLAMA_CONTEXT_LENGTH must stay unset - Hermclaw sends num_ctx)
+    quiet: true

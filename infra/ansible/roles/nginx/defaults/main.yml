@@ -1,0 +1,14 @@
+# nginx – presentation control plane on .223 (P01 1.12; research 20261008-014).
+# Baseline site; the deployment phase replaces it with infra/nginx/hermclaw-next.conf.
+nginx_site_name: hermclaw-next
+nginx_server_name: "{{ hermclaw_web_server_name | default('_') }}"
+nginx_listen_port: 80
+# Only claim default_server when no other site does (never take over existing sites).
+nginx_default_server: false
+nginx_api_upstream: "http://{{ hermclaw_orchestrator_ip }}:{{ hermclaw_api_port }}"
+nginx_client_max_body_size: 64m
+nginx_sse_read_timeout: 3600s
+nginx_webroot_owner: root
+nginx_webroot_group: www-data
+# Main configuration that must include sites-enabled/ (Debian layout).
+nginx_main_conf_path: /etc/nginx/nginx.conf

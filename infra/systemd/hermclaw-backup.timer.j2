@@ -1,0 +1,12 @@
+# Managed by Hermclaw – schedule for hermclaw-backup.service.
+[Unit]
+Description=Hermclaw Next backup schedule
+
+[Timer]
+OnCalendar={{ systemd_skeleton_backup_on_calendar }}
+RandomizedDelaySec=15min
+Persistent=true
+Unit=hermclaw-backup.service
+
+[Install]
+WantedBy=timers.target

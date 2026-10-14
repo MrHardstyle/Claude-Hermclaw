@@ -1,0 +1,19 @@
+- name: Check for an existing site file
+  ansible.builtin.stat:
+    path: "/etc/nginx/sites-available/{{ nginx_site_name }}.conf"
+  register: nginx_existing
+
+- name: Read the existing site file
+  ansible.builtin.slurp:
+    src: "/etc/nginx/sites-available/{{ nginx_site_name }}.conf"
+  register: nginx_existing_raw
+  when: nginx_existing.stat.exists
+
+- name: Stop if the existing site is not managed by Hermclaw
+  ansible.builtin.fail:
+    msg: >-
+      /etc/nginx/sites-available/{{ nginx_site_name }}.conf exists and is not managed by Hermclaw;
+      refusing to overwrite an existing service (set nginx_site_name or move the file).
+  when:
+    - nginx_existing.stat.exists
+    - "'Managed by Hermclaw' not in (nginx_existing_raw.content | b64decode)"

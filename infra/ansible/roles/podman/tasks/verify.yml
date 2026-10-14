@@ -1,0 +1,37 @@
+- name: Look up {{ podman_verify_user }}
+  ansible.builtin.command:
+    argv: [getent, passwd, "{{ podman_verify_user }}"]
+  register: podman_verify_pw
+  changed_when: false
+
+- name: Restart the user manager so a changed delegation applies
+  ansible.builtin.command:
+    argv: [systemctl, try-restart, "user@{{ podman_verify_pw.stdout.split(':')[2] }}.service"]
+  when: podman_delegate is changed  # noqa: no-handler - must happen before the verification below
+  changed_when: true
+
+- name: Run podman info as {{ podman_verify_user }}
+  ansible.builtin.command:
+    argv: [podman, info, --format, json]
+  become: true
+  become_user: "{{ podman_verify_user }}"
+  environment:
+    XDG_RUNTIME_DIR: "/run/user/{{ podman_verify_pw.stdout.split(':')[2] }}"
+  args:
+    chdir: /
+  register: podman_info
+  changed_when: false
+
+- name: Assert rootless mode, cgroup v2 and delegated controllers
+  vars:
+    podman_host: "{{ (podman_info.stdout | from_json).host }}"
+  ansible.builtin.assert:
+    that:
+      - podman_host.security.rootless | bool
+      - podman_host.cgroupVersion == 'v2'
+      - podman_delegate_controllers | difference(podman_host.cgroupControllers | default([])) | length == 0
+    fail_msg: >-
+      rootless Podman for {{ podman_verify_user }} is not usable: rootless={{ podman_host.security.rootless }},
+      cgroup={{ podman_host.cgroupVersion }}, controllers={{ podman_host.cgroupControllers | default([]) }}
+      (expected {{ podman_delegate_controllers }}; reboot or `systemctl daemon-reload` and re-login may be needed)
+    quiet: true

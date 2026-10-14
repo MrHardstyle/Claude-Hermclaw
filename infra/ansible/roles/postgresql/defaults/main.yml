@@ -1,0 +1,41 @@
+# postgresql – PostgreSQL 17 + pgvector from PGDG on the orchestrator (P01 1.7, 1.8;
+# research 20261008-003, DECISIONS D-002). Debian's own pgvector 0.8.0 is affected by
+# CVE-2026-3172, therefore pgvector comes from PGDG and must be >= 0.8.2.
+postgresql_version: "17"
+postgresql_cluster: main
+postgresql_port: "{{ hermclaw_postgres_port }}"
+postgresql_pgvector_min_version: "0.8.2"
+
+postgresql_pgdg_uri: https://apt.postgresql.org/pub/repos/apt
+postgresql_pgdg_suite: "{{ hermclaw_debian_codename }}-pgdg"
+postgresql_pgdg_key_url: https://www.postgresql.org/media/keys/ACCC4CF8.asc
+
+postgresql_packages:
+  - "postgresql-{{ postgresql_version }}"
+  - "postgresql-client-{{ postgresql_version }}"
+  - "postgresql-{{ postgresql_version }}-pgvector"
+
+# Database owned by the service account; services connect over the Unix socket with
+# peer authentication (no password exists for the role).
+postgresql_db_name: hermclaw
+postgresql_db_owner: "{{ hermclaw_user }}"
+postgresql_extensions:
+  - vector
+
+# Never published on the LAN (Bauplan §6: "lokal/privat").
+postgresql_listen_addresses: localhost
+postgresql_settings:
+  max_connections: 100
+  shared_buffers: 2GB
+  effective_cache_size: 8GB
+  maintenance_work_mem: 512MB
+  work_mem: 16MB
+  password_encryption: scram-sha-256
+  log_line_prefix: "%m [%p] %q%u@%d "
+  log_min_duration_statement: 2000
+  lock_timeout: 0
+  idle_in_transaction_session_timeout: 600000
+
+# Additional pg_hba lines (type, database, user, address, method). They are evaluated
+# after the postgres and Hermclaw rules and before the generic local rules (first match wins).
+postgresql_hba_extra: []

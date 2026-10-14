@@ -1,0 +1,32 @@
+# Managed by Hermclaw – backup run (orchestrator .225, Bauplan §36, research 20261008-022).
+# Started by hermclaw-backup.timer. The backup implementation (P33) provides the command.
+[Unit]
+Description=Hermclaw Next backup
+After=network-online.target postgresql.service
+Wants=network-online.target
+ConditionFileIsExecutable={{ systemd_skeleton_backup_command }}
+
+[Service]
+Type=oneshot
+User={{ hermclaw_user }}
+Group={{ hermclaw_group }}
+EnvironmentFile={{ hermclaw_config_dir }}/hermclaw.env
+ExecStart={{ systemd_skeleton_backup_command }}
+Nice=10
+IOSchedulingClass=idle
+TimeoutStartSec=6h
+UMask=0077
+ReadWritePaths={{ hermclaw_data_dir }} {{ hermclaw_log_dir }}
+NoNewPrivileges=yes
+PrivateTmp=yes
+PrivateDevices=yes
+ProtectSystem=strict
+ProtectHome=yes
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectControlGroups=yes
+RestrictSUIDSGID=yes
+LockPersonality=yes
+SystemCallArchitectures=native
+RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6
+CapabilityBoundingSet=

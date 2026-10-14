@@ -1,0 +1,106 @@
+#!/bin/sh
+# hermclaw-ssh-gate – forced command for the Hermclaw admin key on target hosts (Bauplan §29, P26 26.8).
+#
+# Install (target host, as root):
+#   install -o root -g root -m 0755 hermclaw-ssh-gate /usr/local/bin/hermclaw-ssh-gate
+#   install -o root -g root -m 0644 ssh-allowlist   /etc/hermclaw/ssh-allowlist
+#   ~hermclaw-admin/.ssh/authorized_keys:
+#     restrict,from="192.168.178.225",command="/usr/local/bin/hermclaw-ssh-gate" ssh-ed25519 AAAA… hermclaw-admin
+#   (an optional first argument names a different allow-list file: command="/usr/local/bin/hermclaw-ssh-gate /path")
+#
+# Behaviour:
+#   * the requested command comes from SSH_ORIGINAL_COMMAND (sshd sets it for forced commands); no command
+#     (interactive login), more than one line or control characters -> rejected;
+#   * the allow-list has one extended regular expression (grep -E) per line; '#' lines and empty lines are
+#     ignored; a rule must match the WHOLE command (grep -x);
+#   * commands containing shell metacharacters ( ; & | ` $ ( ) < > \ ) only match rules written as
+#     'shell:<regex>' – chaining/substitution needs an explicit opt-in, exactly like the runtime policy;
+#   * the allow-list must be a regular file owned by root (or the gate's user) and not group/world writable;
+#   * every decision is logged to syslog (facility auth, tag hermclaw-ssh-gate); allowed commands are run with
+#     'exec /bin/sh -c', so the exit status is the command's own; rejected commands exit 126.
+#
+# The runtime classifies and audits every command before it is sent; this gate is the host-side second line.
+
+set -u
+
+ALLOWLIST=${1:-/etc/hermclaw/ssh-allowlist}
+TAG=hermclaw-ssh-gate
+REJECT_STATUS=126
+MAX_LOG=400
+
+log() {
+    # $1 = priority, $2 = message; never fail because syslog is unavailable
+    if command -v logger >/dev/null 2>&1; then
+        logger -t "$TAG" -p "auth.$1" -- "$2" >/dev/null 2>&1 || :
+    fi
+}
+
+client=${SSH_CLIENT:-local}
+client=${client%% *}
+who=$(id -un 2>/dev/null || echo "uid=$(id -u)")
+
+reject() {
+    log warning "rejected user=$who from=$client reason=$1 cmd=$(printf '%.*s' "$MAX_LOG" "${SSH_ORIGINAL_COMMAND-}" | tr -c '[:print:]' '?')"
+    echo "$TAG: command not allowed ($1)" >&2
+    exit "$REJECT_STATUS"
+}
+
+if [ "${SSH_ORIGINAL_COMMAND+set}" != set ] || [ -z "${SSH_ORIGINAL_COMMAND}" ]; then
+    reject "no-command"
+fi
+cmd=$SSH_ORIGINAL_COMMAND
+
+# exactly one line, printable characters and tabs only
+case $cmd in
+    *"
+"*) reject "multi-line" ;;
+esac
+if printf '%s' "$cmd" | LC_ALL=C grep -q '[^[:print:]	]'; then
+    reject "control-characters"
+fi
+
+# the allow-list itself must be trustworthy
+if [ ! -f "$ALLOWLIST" ] || [ -L "$ALLOWLIST" ]; then
+    reject "allowlist-missing"
+fi
+uid=$(id -u)
+if [ -z "$(find "$ALLOWLIST" -prune \( -user 0 -o -user "$uid" \) -print 2>/dev/null)" ]; then
+    reject "allowlist-owner"
+fi
+if [ -n "$(find "$ALLOWLIST" -prune \( -perm -020 -o -perm -002 \) -print 2>/dev/null)" ]; then
+    reject "allowlist-writable"
+fi
+
+has_meta=no
+case $cmd in
+    *[\;\&\|\`\$\(\)\<\>\\]*) has_meta=yes ;;
+esac
+
+lineno=0
+# the allow-list is read on fd 4: stdin stays the SSH channel for the executed command (uploads stream via stdin)
+while IFS= read -r rule <&4 || [ -n "$rule" ]; do
+    lineno=$((lineno + 1))
+    case $rule in
+        '' | '#'*) continue ;;
+    esac
+    shell_rule=no
+    case $rule in
+        shell:*)
+            shell_rule=yes
+            rule=${rule#shell:}
+            ;;
+    esac
+    if [ "$has_meta" = yes ] && [ "$shell_rule" = no ]; then
+        continue
+    fi
+    printf '%s\n' "$cmd" | LC_ALL=C grep -Exq -e "$rule" 2>/dev/null
+    status=$?
+    if [ "$status" -eq 0 ]; then
+        log info "allowed user=$who from=$client rule=$lineno cmd=$(printf '%.*s' "$MAX_LOG" "$cmd")"
+        exec /bin/sh -c "$cmd" 4<&-
+    elif [ "$status" -gt 1 ]; then
+        log err "invalid regular expression in $ALLOWLIST line $lineno"
+    fi
+done 4<"$ALLOWLIST"
+
+reject "no-matching-rule"

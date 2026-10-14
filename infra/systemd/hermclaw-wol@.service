@@ -1,0 +1,18 @@
+# Managed by Hermclaw – persistent Wake-on-LAN (magic packet) for interface %I
+# (P01 wol_target role, research 20261008-016). Enable as
+#   systemctl enable --now "hermclaw-wol@$(systemd-escape <ifname>).service"
+# %i is the escaped instance (matches the device unit name), %I the real interface name.
+[Unit]
+Description=Hermclaw Wake-on-LAN (magic packet) on %I
+BindsTo=sys-subsystem-net-devices-%i.device
+After=sys-subsystem-net-devices-%i.device
+Before=network-pre.target
+Wants=network-pre.target
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+ExecStart=/usr/sbin/ethtool -s %I wol g
+
+[Install]
+WantedBy=multi-user.target

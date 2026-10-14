@@ -1,0 +1,229 @@
+# 1.4 – SSH keys (research 20261008-021).
+# The orchestrator generates the keys; private keys never leave it. Targets get the
+# runtime public key with `restrict,from="<orchestrator>"`; their host keys are read over
+# the already trusted Ansible connection into /etc/hermclaw/ssh/known_hosts (no TOFU).
+
+- name: Generate Hermclaw SSH keys on the orchestrator
+  ansible.builtin.command:
+    argv:
+      - ssh-keygen
+      - -q
+      - -t
+      - ed25519
+      - -N
+      - ""
+      - -C
+      - "{{ item.comment }}"
+      - -f
+      - "{{ hermclaw_ssh_dir }}/{{ item.name }}"
+    creates: "{{ hermclaw_ssh_dir }}/{{ item.name }}"
+  loop: "{{ common_ssh_keys }}"
+  loop_control:
+    label: "{{ item.name }}"
+  when: "'orchestrator' in group_names"
+
+- name: Restrict private keys to the hermclaw user
+  ansible.builtin.file:
+    path: "{{ hermclaw_ssh_dir }}/{{ item.name }}"
+    owner: "{{ hermclaw_user }}"
+    group: "{{ hermclaw_group }}"
+    mode: "0600"
+  loop: "{{ common_ssh_keys }}"
+  loop_control:
+    label: "{{ item.name }}"
+  when:
+    - "'orchestrator' in group_names"
+    - not ansible_check_mode
+
+- name: Publish public keys read-only
+  ansible.builtin.file:
+    path: "{{ hermclaw_ssh_dir }}/{{ item.name }}.pub"
+    owner: root
+    group: "{{ hermclaw_group }}"
+    mode: "0644"
+  loop: "{{ common_ssh_keys }}"
+  loop_control:
+    label: "{{ item.name }}.pub"
+  when:
+    - "'orchestrator' in group_names"
+    - not ansible_check_mode
+
+- name: Create the orchestrator known_hosts file
+  ansible.builtin.copy:
+    content: ""
+    dest: "{{ hermclaw_ssh_dir }}/known_hosts"
+    owner: root
+    group: "{{ hermclaw_group }}"
+    mode: "0644"
+    force: false
+  when: "'orchestrator' in group_names"
+
+# GitLab (.226) and Terra (.60) are not bootstrapped: their host keys come pre-verified from
+# the inventory. One line per host name and key type; a changed key replaces the old line.
+- name: Register pre-verified host keys of other hosts
+  ansible.builtin.lineinfile:
+    path: "{{ hermclaw_ssh_dir }}/known_hosts"
+    regexp: "^{{ item.split(' ')[0] | regex_escape }} {{ item.split(' ')[1] | regex_escape }} "
+    line: "{{ item }}"
+    create: true
+    owner: root
+    group: "{{ hermclaw_group }}"
+    mode: "0644"
+  loop: "{{ common_known_hosts_extra }}"
+  loop_control:
+    label: "{{ item.split(' ')[0] }} {{ item.split(' ')[1] }}"
+  when: "'orchestrator' in group_names"
+
+- name: Authorize the runtime key and register host keys on SSH targets
+  when:
+    - group_names | intersect(common_ssh_target_groups) | length > 0
+    - groups['orchestrator'] | default([]) | length > 0
+  block:
+    - name: Look up the runtime SSH user
+      ansible.builtin.command:
+        argv: [getent, passwd, "{{ hermclaw_ssh_runtime_user }}"]
+      register: common_runtime_user
+      changed_when: false
+      failed_when: common_runtime_user.rc not in [0, 2]
+      check_mode: false
+
+    - name: Create the runtime SSH user if missing
+      ansible.builtin.user:
+        name: "{{ hermclaw_ssh_runtime_user }}"
+        shell: /bin/bash
+        create_home: true
+        password: "!"
+        comment: Hermclaw runtime SSH administration
+        state: present
+      when: common_runtime_user.rc == 2
+
+    - name: Re-read the runtime SSH user after creation
+      ansible.builtin.command:
+        argv: [getent, passwd, "{{ hermclaw_ssh_runtime_user }}"]
+      register: common_runtime_passwd
+      changed_when: false
+      failed_when: common_runtime_passwd.rc not in [0, 2]
+      check_mode: false
+
+    - name: Determine the runtime user's home
+      ansible.builtin.set_fact:
+        # in check mode a user that does not exist yet has no passwd entry: fall back to
+        # the useradd default so the remaining tasks can still be simulated
+        common_runtime_home: >-
+          {{ (common_runtime_passwd.stdout.split(':')[5])
+             if common_runtime_passwd.rc == 0 else '/home/' ~ hermclaw_ssh_runtime_user }}
+
+    - name: Read the group memberships of the runtime SSH user
+      ansible.builtin.command:
+        argv: [id, -nG, "{{ hermclaw_ssh_runtime_user }}"]
+      register: common_runtime_groups
+      changed_when: false
+      check_mode: false
+      when: common_runtime_passwd.rc == 0
+
+    - name: Determine privileged group memberships of the runtime SSH user
+      ansible.builtin.set_fact:
+        common_runtime_admin_groups: >-
+          {{ ((common_runtime_groups.stdout | default('')).split())
+             | intersect(common_ssh_privileged_groups) }}
+
+    - name: Refuse a runtime SSH user with unrestricted sudo
+      ansible.builtin.assert:
+        that: common_allow_shared_admin_login | bool or common_runtime_admin_groups | length == 0
+        fail_msg: >-
+          {{ hermclaw_ssh_runtime_user }} is in {{ common_runtime_admin_groups | join(', ') }}
+          - the runtime key would get full root. Remove the group membership (the runtime only gets
+          /etc/sudoers.d/hermclaw-runtime) or set common_allow_shared_admin_login=true deliberately.
+        quiet: true
+
+    - name: Allow the runtime SSH user only the listed sudo commands
+      ansible.builtin.template:
+        src: sudoers-runtime.j2
+        dest: /etc/sudoers.d/hermclaw-runtime
+        owner: root
+        group: root
+        mode: "0440"
+        validate: /usr/sbin/visudo -cf %s
+      when: common_ssh_runtime_sudo_commands | length > 0
+
+    - name: Remove the sudo allowlist when no command is allowed
+      ansible.builtin.file:
+        path: /etc/sudoers.d/hermclaw-runtime
+        state: absent
+      when: common_ssh_runtime_sudo_commands | length == 0
+
+    - name: Check the runtime public key on the orchestrator
+      ansible.builtin.stat:
+        path: "{{ hermclaw_ssh_dir }}/id_ed25519.pub"
+      register: common_pubkey_stat
+      delegate_to: "{{ groups['orchestrator'][0] }}"
+
+    - name: Read the runtime public key from the orchestrator
+      ansible.builtin.slurp:
+        src: "{{ hermclaw_ssh_dir }}/id_ed25519.pub"
+      register: common_pubkey_raw
+      delegate_to: "{{ groups['orchestrator'][0] }}"
+      when: common_pubkey_stat.stat.exists
+
+    - name: Parse the runtime public key
+      ansible.builtin.set_fact:
+        common_pubkey_parts: "{{ (common_pubkey_raw.content | b64decode).split() }}"
+      when: common_pubkey_stat.stat.exists
+
+    - name: Validate the public key
+      ansible.builtin.assert:
+        that:
+          - common_pubkey_parts | length >= 2
+          - common_pubkey_parts[0] == 'ssh-ed25519'
+          - common_pubkey_parts[1] is match('^[A-Za-z0-9+/=]+$')
+          # quotes and line breaks in common_ssh_forced_command are refused by validate.yml
+        quiet: true
+      when: common_pubkey_stat.stat.exists
+
+    - name: Create ~/.ssh of the runtime user
+      ansible.builtin.file:
+        path: "{{ common_runtime_home }}/.ssh"
+        state: directory
+        owner: "{{ hermclaw_ssh_runtime_user }}"
+        mode: "0700"
+      when: not ansible_check_mode or common_runtime_user.rc == 0
+
+    - name: Authorize the runtime key (restrict, from orchestrator only)
+      ansible.builtin.lineinfile:
+        path: "{{ common_runtime_home }}/.ssh/authorized_keys"
+        regexp: "^.*\\s{{ common_pubkey_parts[1] | regex_escape }}(\\s.*)?$"
+        line: >-
+          {{ common_ssh_key_options }}{{ (',command="' ~ common_ssh_forced_command ~ '"')
+          if common_ssh_forced_command | length > 0 else '' }}
+          {{ common_pubkey_parts[0] }} {{ common_pubkey_parts[1] }} hermclaw-runtime@orchestrator
+        create: true
+        owner: "{{ hermclaw_ssh_runtime_user }}"
+        mode: "0600"
+      when: common_pubkey_stat.stat.exists
+
+    - name: Warn that the key is not distributed yet
+      ansible.builtin.debug:
+        msg: >-
+          {{ hermclaw_ssh_dir }}/id_ed25519.pub does not exist on {{ groups['orchestrator'][0] }} yet
+          (check mode before the first real run); rerun after bootstrapping the orchestrator.
+      when: not common_pubkey_stat.stat.exists
+
+    - name: Read this host's ED25519 host key
+      ansible.builtin.slurp:
+        src: /etc/ssh/ssh_host_ed25519_key.pub
+      register: common_hostkey_raw
+
+    - name: Register the host key in the orchestrator known_hosts
+      ansible.builtin.lineinfile:
+        path: "{{ hermclaw_ssh_dir }}/known_hosts"
+        regexp: "^{{ (ansible_host | default(inventory_hostname)) | regex_escape }},"
+        line: >-
+          {{ ansible_host | default(inventory_hostname) }},{{ inventory_hostname }}
+          {{ (common_hostkey_raw.content | b64decode).split()[0:2] | join(' ') }}
+        create: true
+        owner: root
+        group: "{{ hermclaw_group }}"
+        mode: "0644"
+      delegate_to: "{{ groups['orchestrator'][0] }}"
+      # several targets edit the same file on the orchestrator: serialise the read-modify-write
+      throttle: 1

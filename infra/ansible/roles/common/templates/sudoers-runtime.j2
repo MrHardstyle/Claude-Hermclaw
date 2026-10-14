@@ -1,0 +1,5 @@
+# Managed by Hermclaw – sudo allowlist of the runtime SSH user (research 20261008-021).
+# Must match ssh.allow_sudo_commands of this host in /etc/hermclaw/hosts.yaml. Every other
+# command is refused; the runtime additionally classifies and audits each SSH command.
+Defaults:{{ hermclaw_ssh_runtime_user }} !lecture
+{{ hermclaw_ssh_runtime_user }} ALL=(root) NOPASSWD: {{ common_ssh_runtime_sudo_commands | join(', ') }}

@@ -1,0 +1,7 @@
+# wol_target – persistent Wake-on-LAN (magic packet) on .222/.224 (research 20261008-016).
+# Interface: inventory wol_interface, else the interface of the default IPv4 route.
+wol_target_interface: "{{ wol_interface | default('') }}"
+# The inventory MAC (used by the orchestrator to wake the host) must match the interface.
+wol_target_mac: "{{ wol_mac | default('') }}"
+wol_target_require_mac_match: true
+wol_target_unit_template: "{{ role_path }}/../../../systemd/hermclaw-wol@.service"

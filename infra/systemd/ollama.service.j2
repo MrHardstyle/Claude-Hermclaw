@@ -1,0 +1,18 @@
+# Managed by Hermclaw – Ollama server (.224, research 20261008-007). Installed only when no
+# ollama.service exists; settings live in the drop-in ollama.service.d/hermclaw.conf.
+[Unit]
+Description=Ollama Service
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+ExecStart={{ ollama_bin }} serve
+User={{ ollama_user }}
+Group={{ ollama_group }}
+SupplementaryGroups=video render
+Restart=always
+RestartSec=3
+Environment=HOME={{ ollama_effective_home }}
+
+[Install]
+WantedBy=multi-user.target

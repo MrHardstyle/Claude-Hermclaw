@@ -1,0 +1,12 @@
+galaxy_info:
+  role_name: postgresql
+  namespace: hermclaw
+  author: Hermclaw Next
+  description: "PostgreSQL 17 and pgvector >= 0.8.2 from PGDG, localhost only"
+  license: proprietary
+  min_ansible_version: "2.17"
+  platforms:
+    - name: Debian
+      versions:
+        - trixie
+dependencies: []

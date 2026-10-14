@@ -1,0 +1,119 @@
+- name: List PostgreSQL clusters
+  ansible.builtin.command:
+    argv: [pg_lsclusters, --no-header]
+  register: postgresql_clusters
+  changed_when: false
+  failed_when: false
+  check_mode: false
+
+- name: Create the cluster if it is missing
+  ansible.builtin.command:
+    argv:
+      - pg_createcluster
+      - --port={{ postgresql_port }}
+      - --encoding=UTF8
+      - --locale=C.UTF-8
+      - "{{ postgresql_version }}"
+      - "{{ postgresql_cluster }}"
+    creates: "/etc/postgresql/{{ postgresql_version }}/{{ postgresql_cluster }}/postgresql.conf"
+  when: postgresql_clusters.rc == 0
+
+- name: Find the cluster line
+  ansible.builtin.set_fact:
+    postgresql_cluster_line: >-
+      {{ postgresql_clusters.stdout_lines | default([])
+         | select('match', '^' ~ postgresql_version ~ ' +' ~ postgresql_cluster ~ ' ') | first | default('') }}
+
+- name: Assert the cluster uses the planned port (never take over a foreign cluster)
+  ansible.builtin.assert:
+    that: (postgresql_cluster_line.split() + ['', '', ''])[2] == postgresql_port | string
+    fail_msg: >-
+      Cluster {{ postgresql_version }}/{{ postgresql_cluster }} is configured for port
+      {{ (postgresql_cluster_line.split() + ['', '', ''])[2] }} instead of {{ postgresql_port }}
+      (another PostgreSQL already owns the port?). Resolve manually (pg_lsclusters) - no automatic change.
+    quiet: true
+  when: postgresql_cluster_line | length > 0
+
+- name: Ensure the conf.d directory exists
+  ansible.builtin.file:
+    path: "/etc/postgresql/{{ postgresql_version }}/{{ postgresql_cluster }}/conf.d"
+    state: directory
+    owner: postgres
+    group: postgres
+    mode: "0755"
+  when: not ansible_check_mode or postgresql_cluster_line | length > 0
+
+- name: Write the Hermclaw settings drop-in
+  ansible.builtin.template:
+    src: hermclaw.conf.j2
+    dest: "/etc/postgresql/{{ postgresql_version }}/{{ postgresql_cluster }}/conf.d/hermclaw.conf"
+    owner: postgres
+    group: postgres
+    mode: "0644"
+  notify: Restart postgresql
+
+- name: Write pg_hba.conf
+  ansible.builtin.template:
+    src: pg_hba.conf.j2
+    dest: "/etc/postgresql/{{ postgresql_version }}/{{ postgresql_cluster }}/pg_hba.conf"
+    owner: postgres
+    group: postgres
+    mode: "0640"
+    backup: true
+  register: postgresql_hba
+  notify: Reload postgresql
+
+- name: Enable and start the cluster
+  ansible.builtin.systemd_service:
+    name: "postgresql@{{ postgresql_version }}-{{ postgresql_cluster }}"
+    enabled: true
+    state: started
+  when: hermclaw_manage_services | bool
+
+- name: Validate configuration files before they are applied
+  when:
+    - hermclaw_manage_services | bool
+    - not ansible_check_mode
+  block:
+    - name: Query pg_hba_file_rules and pg_file_settings for errors
+      ansible.builtin.command:
+        argv:
+          - psql
+          - -X
+          - -q
+          - -tA
+          - -v
+          - ON_ERROR_STOP=1
+          - -p
+          - "{{ postgresql_port }}"
+          - -d
+          - postgres
+          - -c
+          - >-
+            SELECT 'hba:' || line_number || ':' || error FROM pg_hba_file_rules WHERE error IS NOT NULL
+            UNION ALL
+            SELECT 'conf:' || sourcefile || ':' || sourceline || ':' || error FROM pg_file_settings WHERE error IS NOT NULL
+      become: true
+      become_user: postgres
+      register: postgresql_config_errors
+      changed_when: false
+
+    - name: Restore the previous pg_hba.conf on errors
+      ansible.builtin.copy:
+        src: "{{ postgresql_hba.backup_file }}"
+        dest: "/etc/postgresql/{{ postgresql_version }}/{{ postgresql_cluster }}/pg_hba.conf"
+        remote_src: true
+        owner: postgres
+        group: postgres
+        mode: "0640"
+      when:
+        - postgresql_config_errors.stdout | length > 0
+        - postgresql_hba.backup_file is defined
+
+    - name: Stop on configuration errors
+      ansible.builtin.fail:
+        msg: "PostgreSQL configuration errors: {{ postgresql_config_errors.stdout_lines }}"
+      when: postgresql_config_errors.stdout | length > 0
+
+- name: Apply configuration changes now
+  ansible.builtin.meta: flush_handlers

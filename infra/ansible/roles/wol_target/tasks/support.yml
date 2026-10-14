@@ -1,0 +1,19 @@
+# NIC capability check (ethtool "Supports Wake-on: pumbg" must contain g). Tested with a
+# fake ethtool by tests/integration/test_bootstrap_infra.py::test_wol_ethtool_checks.
+# Conditionals stay free of backslashes (Jinja decodes escapes there).
+- name: Read the NIC Wake-on-LAN capabilities
+  ansible.builtin.command:
+    argv: [ethtool, "{{ wol_target_if }}"]
+  register: wol_target_ethtool
+  changed_when: false
+  check_mode: false
+
+- name: Assert magic-packet support (Supports Wake-on contains g)
+  ansible.builtin.assert:
+    that: >-
+      'g' in (wol_target_ethtool.stdout | regex_findall('Supports Wake-on: *([a-z]+)') | first | default(''))
+    fail_msg: >-
+      {{ wol_target_if }} does not support Wake-on-LAN magic packets
+      ({{ wol_target_ethtool.stdout | regex_findall('Supports Wake-on:.*') | first | default('no Wake-on information') }}).
+      Enable WOL in BIOS/UEFI or use a different NIC.
+    quiet: true

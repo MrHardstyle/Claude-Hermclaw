@@ -1,0 +1,108 @@
+# common – base system for every Hermclaw host (P01 1.1–1.6, 1.9).
+common_base_packages:
+  - acl                 # Ansible become_user to unprivileged users
+  - apt-transport-https
+  - ca-certificates
+  - curl
+  - ethtool
+  - git
+  - gnupg
+  - iproute2
+  - jq
+  - logrotate
+  - openssh-client
+  - procps
+  - python3-apt         # ansible.builtin.apt
+  - python3-debian      # ansible.builtin.deb822_repository
+  - rsync
+  - sudo
+  - tzdata
+  - unzip
+  - zstd
+
+# 1.5 / 1.6 – Python 3.13 from Debian 13 + venv tooling (Bauplan §5 "Python 3.12+")
+common_python_packages:
+  - python3
+  - python3-venv
+  - python3-pip
+  - python3-dev
+  - build-essential
+  - libpq-dev
+  - pipx
+common_python_min_version: "3.12"
+# Empty application venv; the deployment phase installs Hermclaw into it.
+common_create_venv: true
+
+# 1.9 – Git
+common_git_min_version: "2.39"
+
+# Time: empty list keeps Debian's default NTP pool for systemd-timesyncd.
+common_ntp_servers: []
+
+# 1.4 – SSH keys, generated on the orchestrator only (private keys never leave it).
+common_ssh_keys:
+  - name: id_ed25519          # runtime SSH administration (research 20261008-021)
+    comment: hermclaw-runtime@orchestrator
+  - name: backup_ed25519      # rsync to Terra/Unraid .60 (installed there manually)
+    comment: hermclaw-backup@orchestrator
+# authorized_keys options for the runtime key on .222/.223/.224
+common_ssh_key_options: 'restrict,from="{{ hermclaw_orchestrator_ip }}"'
+# Optional forced command (e.g. the P29 SSH gate); empty = none.
+common_ssh_forced_command: ""
+# sudo allowlist of the runtime SSH user (/etc/sudoers.d/hermclaw-runtime); must match
+# ssh.allow_sudo_commands in config/hosts.yaml. Empty = the file is removed (no sudo at all).
+# Workers need `systemctl suspend` for the idle-sleep hook (P10, Wake-on-LAN).
+common_ssh_runtime_sudo_commands: >-
+  {{ ['/usr/bin/systemctl suspend']
+     if group_names | intersect(['execution_workers', 'model_workers']) | length > 0 else [] }}
+# Refuse to run with ansible_user == hermclaw_ssh_runtime_user (see tasks/validate.yml).
+common_allow_shared_admin_login: false
+# Membership in one of these groups means unrestricted root via sudo/polkit: the runtime
+# SSH user must not be in any of them (it only gets /etc/sudoers.d/hermclaw-runtime).
+common_ssh_privileged_groups:
+  - sudo
+  - wheel
+  - admin
+  - root
+# Pre-verified host keys of hosts that are not bootstrapped (GitLab .226, Terra .60), as
+# known_hosts lines "host[,address] key-type base64-key". Compare the fingerprint
+# (ssh-keygen -lf) out of band before adding a line - no trust on first use.
+common_known_hosts_extra: []
+# Groups whose hosts receive the runtime public key and land in known_hosts.
+common_ssh_target_groups:
+  - webui
+  - execution_workers
+  - model_workers
+
+# Run scripts/bootstrap/check-host.sh before changing anything.
+common_run_preflight: true
+common_preflight_allow_conflicts: false
+# Port plan handed to check-host.sh (HERMCLAW_PORT_PLAN), rendered from hermclaw_port_plan
+# so inventory overrides of the plan are honoured.
+common_preflight_port_plan: |-
+  {% for group, entries in hermclaw_port_plan | dictsort %}
+  {% for entry in entries %}
+  {{ group }} {{ entry.port }} {{ entry.service }} {{ entry.expect | join(',') }}
+  {% endfor %}
+  {% endfor %}
+# Override the per-role minima of check-host.sh (empty = script defaults).
+common_preflight_min_cpus: ""
+common_preflight_min_ram_mb: ""
+common_preflight_min_disk_gb: ""
+
+# System python used for the application venv (Debian: /usr/bin/python3).
+common_python_bin: /usr/bin/python3
+
+# 1.3 – directory layout; owners/modes are part of the security model (Bauplan §35).
+common_directories:
+  - {path: "{{ hermclaw_install_dir }}", owner: root, group: "{{ hermclaw_group }}", mode: "0755"}
+  - {path: "{{ hermclaw_bin_dir }}", owner: root, group: root, mode: "0755"}
+  - {path: "{{ hermclaw_config_dir }}", owner: root, group: "{{ hermclaw_group }}", mode: "0750"}
+  - {path: "{{ hermclaw_config_dir }}/secrets", owner: root, group: "{{ hermclaw_group }}", mode: "0750"}
+  - {path: "{{ hermclaw_ssh_dir }}", owner: root, group: "{{ hermclaw_group }}", mode: "0750"}
+  - {path: "{{ hermclaw_data_dir }}", owner: "{{ hermclaw_user }}", group: "{{ hermclaw_group }}", mode: "0750"}
+  - {path: "{{ hermclaw_data_dir }}/workspaces", owner: "{{ hermclaw_user }}", group: "{{ hermclaw_group }}", mode: "0750"}
+  - {path: "{{ hermclaw_data_dir }}/artifacts", owner: "{{ hermclaw_user }}", group: "{{ hermclaw_group }}", mode: "0750"}
+  - {path: "{{ hermclaw_data_dir }}/repos", owner: "{{ hermclaw_user }}", group: "{{ hermclaw_group }}", mode: "0750"}
+  - {path: "{{ hermclaw_log_dir }}", owner: "{{ hermclaw_user }}", group: "{{ hermclaw_group }}", mode: "0750"}
+  - {path: "{{ hermclaw_credstore_dir }}", owner: root, group: root, mode: "0700"}

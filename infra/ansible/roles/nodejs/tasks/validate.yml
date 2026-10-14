@@ -1,0 +1,12 @@
+# Input validation of the nodejs role (tested locally by
+# tests/integration/test_bootstrap_infra.py::test_role_input_validation).
+- name: Validate Node.js settings
+  ansible.builtin.assert:
+    that:
+      - nodejs_major | int >= 22
+      - nodejs_min_version is match('^[0-9]+[.][0-9]+[.][0-9]+$')
+      - nodejs_min_version.split('.')[0] | int == nodejs_major | int
+      - nodejs_repo_uri is match('^https://[A-Za-z0-9./_-]+$')
+      - nodejs_key_url is match('^https://[A-Za-z0-9./_-]+$')
+    fail_msg: Node.js must be the 22.x LTS line or newer from an https NodeSource repository
+    quiet: true

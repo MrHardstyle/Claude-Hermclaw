@@ -1,0 +1,45 @@
+# 1.5 / 1.6 – Debian 13 python3 (3.13) plus venv tooling
+- name: Install Python and build tooling
+  ansible.builtin.apt:
+    name: "{{ common_python_packages }}"
+    state: present
+    install_recommends: false
+  when: hermclaw_install_packages | bool
+
+- name: Read the Python version
+  ansible.builtin.command:
+    argv:
+      - "{{ common_python_bin }}"
+      - -c
+      - "import sys; print('%d.%d.%d' % sys.version_info[:3])"
+  register: common_python_version
+  changed_when: false
+  check_mode: false
+
+- name: Assert Python >= {{ common_python_min_version }}
+  ansible.builtin.assert:
+    that: common_python_version.stdout is version(common_python_min_version, '>=')
+    fail_msg: "python3 {{ common_python_version.stdout }} is older than {{ common_python_min_version }}"
+    quiet: true
+
+- name: Create the application virtualenv (owned by root, read-only for services)
+  ansible.builtin.command:
+    argv:
+      - "{{ common_python_bin }}"
+      - -m
+      - venv
+      - "{{ hermclaw_venv }}"
+    creates: "{{ hermclaw_venv }}/bin/python"
+  when: common_create_venv | bool
+
+- name: Check that the virtualenv works
+  ansible.builtin.command:
+    argv:
+      - "{{ hermclaw_venv }}/bin/python"
+      - -c
+      - "import sys, venv; assert sys.prefix != sys.base_prefix"
+  changed_when: false
+  check_mode: false
+  when:
+    - common_create_venv | bool
+    - not ansible_check_mode

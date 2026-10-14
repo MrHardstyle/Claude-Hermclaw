@@ -1,0 +1,5 @@
+# {{ ansible_managed | default('') }}
+# Managed by Hermclaw – pgvector must come from PGDG (CVE-2026-3172, D-002).
+Package: postgresql-{{ postgresql_version }}-pgvector
+Pin: origin apt.postgresql.org
+Pin-Priority: 900

@@ -1,0 +1,11 @@
+# Input validation of the podman role (tested locally by
+# tests/integration/test_bootstrap_infra.py::test_role_input_validation).
+- name: Validate podman settings
+  ansible.builtin.assert:
+    that:
+      - podman_users | select('match', '^[a-z_][a-z0-9_-]{0,30}$') | list | length == podman_users | length
+      - podman_subid_start | int >= 65536
+      - podman_subid_count | int >= 65536
+      - podman_delegate_controllers | difference(['cpu', 'cpuset', 'io', 'memory', 'pids']) | length == 0
+      - podman_rootless_network_cmd in ['pasta', 'slirp4netns']
+    quiet: true

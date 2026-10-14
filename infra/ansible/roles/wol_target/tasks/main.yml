@@ -1,0 +1,60 @@
+# wol_target – `ethtool -s <if> wol g` made persistent with a systemd oneshot (P01, research 016)
+- name: Select and validate the interface
+  ansible.builtin.import_tasks: validate.yml
+  tags: [wol]
+
+- name: Compare the inventory MAC with the interface
+  vars:
+    wol_target_if_mac: "{{ ansible_facts[wol_target_if | replace('-', '_')]['macaddress'] | default('') | lower }}"
+    wol_target_placeholder: "{{ wol_target_mac | length == 0 or wol_target_mac == '00:00:00:00:00:00' }}"
+  tags: [wol]
+  block:
+    - name: Warn about a placeholder MAC
+      ansible.builtin.debug:
+        msg: >-
+          wol_target_mac of {{ inventory_hostname }} is not set - put {{ wol_target_if_mac }} into the inventory (wol_mac)
+          and config/hosts.yaml, otherwise the orchestrator cannot wake this host.
+      when: wol_target_placeholder | bool
+
+    - name: Assert the inventory MAC belongs to {{ wol_target_if }}
+      ansible.builtin.assert:
+        that: wol_target_mac | lower == wol_target_if_mac
+        fail_msg: "wol_target_mac {{ wol_target_mac }} does not match {{ wol_target_if }} ({{ wol_target_if_mac }})"
+        quiet: true
+      when:
+        - not wol_target_placeholder | bool
+        - wol_target_require_mac_match | bool
+
+- name: Check magic-packet support of the NIC
+  ansible.builtin.import_tasks: support.yml
+  when: hermclaw_install_packages | bool
+  tags: [wol]
+
+- name: Install hermclaw-wol@.service
+  ansible.builtin.copy:
+    src: "{{ wol_target_unit_template }}"
+    dest: /etc/systemd/system/hermclaw-wol@.service
+    owner: root
+    group: root
+    mode: "0644"
+  notify: Reload systemd
+  tags: [wol]
+
+- name: Load the unit
+  ansible.builtin.meta: flush_handlers
+  tags: [wol]
+
+- name: Enable and start the Wake-on-LAN unit for {{ wol_target_if }}
+  ansible.builtin.systemd_service:
+    name: "hermclaw-wol@{{ wol_target_instance }}.service"
+    enabled: true
+    state: started
+  when: hermclaw_manage_services | bool
+  tags: [wol]
+
+- name: Verify that Wake-on is g
+  ansible.builtin.import_tasks: verify.yml
+  when:
+    - hermclaw_manage_services | bool
+    - not ansible_check_mode
+  tags: [wol]

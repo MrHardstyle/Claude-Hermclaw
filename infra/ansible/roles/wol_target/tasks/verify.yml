@@ -1,0 +1,19 @@
+# Active mode check after hermclaw-wol@<if>.service ran ("Wake-on: g"). Tested with a fake
+# ethtool by tests/integration/test_bootstrap_infra.py::test_wol_ethtool_checks.
+- name: Read the active Wake-on-LAN mode
+  ansible.builtin.command:
+    argv: [ethtool, "{{ wol_target_if }}"]
+  register: wol_target_active
+  changed_when: false
+  check_mode: false
+
+# "Supports Wake-on:" lines start with a letter after the indentation and never match
+- name: Assert Wake-on is g
+  ansible.builtin.assert:
+    that: >-
+      (wol_target_active.stdout | regex_findall('(?m)^[^A-Za-z]*Wake-on: *([a-z]+)') | first | default('')) == 'g'
+    fail_msg: >-
+      {{ wol_target_if }} reports
+      {{ wol_target_active.stdout | regex_findall('(?m)^[^A-Za-z]*Wake-on:.*$') | first | default('no Wake-on line') | trim }}
+      instead of Wake-on: g
+    quiet: true

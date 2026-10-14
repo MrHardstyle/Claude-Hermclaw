@@ -1,0 +1,33 @@
+# Managed by Hermclaw – SearXNG search provider for the research engine (DECISIONS D-004,
+# research 20261008-023) as a rootless Podman Quadlet user unit of {{ hermclaw_user }}.
+# Installed to /etc/containers/systemd/users/<uid>/ -> generates hermclaw-searxng.service
+# in the user manager (lingering). Reachable on 127.0.0.1:{{ hermclaw_searxng_port }} only.
+[Unit]
+Description=Hermclaw SearXNG (research search provider)
+After=network-online.target
+Wants=network-online.target
+
+[Container]
+ContainerName=hermclaw-searxng
+Image={{ systemd_skeleton_searxng_image }}
+PublishPort=127.0.0.1:{{ hermclaw_searxng_port }}:8080
+# container uid/gid 977 (searxng) = host {{ hermclaw_user }}: settings stay root-owned, group-readable
+UserNS=keep-id:uid=977,gid=977
+Volume={{ hermclaw_config_dir }}/searxng:/etc/searxng:ro
+Volume={{ hermclaw_data_dir }}/searxng-cache:/var/cache/searxng:rw
+Secret={{ systemd_skeleton_searxng_secret_name }},type=env,target=SEARXNG_SECRET
+Environment=SEARXNG_BASE_URL=http://127.0.0.1:{{ hermclaw_searxng_port }}/
+DropCapability=ALL
+NoNewPrivileges=true
+
+[Service]
+Restart=on-failure
+RestartSec=10s
+TimeoutStartSec=300
+
+# Bootstrap renders no install section, so the generated unit never starts on its own; the
+# deployment phase (systemd_skeleton_enable_units: true) adds WantedBy=default.target.
+{% if systemd_skeleton_enable_units | bool %}
+[Install]
+WantedBy=default.target
+{% endif %}

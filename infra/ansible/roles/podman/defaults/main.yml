@@ -1,0 +1,31 @@
+# podman – rootless Podman for the execution sandbox (.222) and SearXNG (.225)
+# (P01 1.10; research 20261008-005).
+podman_packages:
+  - podman
+  - uidmap
+  - slirp4netns
+  - passt
+  - fuse-overlayfs
+  - catatonit
+  - crun
+  - dbus-user-session
+  - systemd-container
+podman_min_version: "5.0"
+
+# Users that run rootless containers.
+podman_users:
+  - "{{ hermclaw_user }}"
+
+# Sub-ID allocation: new ranges start at the first free multiple of podman_subid_count
+# at or above podman_subid_start; existing ranges of a user are never moved.
+podman_subid_start: 100000
+podman_subid_count: 65536
+
+# cgroup v2 controllers delegated to user managers (resource limits for rootless containers).
+podman_delegate_controllers: [cpu, cpuset, io, memory, pids]
+
+# Network backend for rootless containers that get network (default: pasta).
+podman_rootless_network_cmd: pasta
+
+# Verify rootless operation and cgroup delegation with `podman info` as each user.
+podman_verify_rootless: true

@@ -1,0 +1,52 @@
+# systemd_skeleton – unit files for all Hermclaw services (P01 1.13; research 20261008-020).
+# Units are installed and loaded but NOT enabled; the deployment phase enables them once
+# the code, config and credentials are in place (systemd_skeleton_enable_units: true).
+systemd_skeleton_template_dir: "{{ role_path }}/../../../systemd"
+systemd_skeleton_enable_units: false
+
+# Unit files per inventory group (templates from infra/systemd/, ".j2" stripped).
+systemd_skeleton_units:
+  orchestrator:
+    - hermclaw-api.service
+    - hermclaw-scheduler.service
+    - hermclaw-litellm.service
+    - hermclaw-backup.service
+    - hermclaw-backup.timer
+  execution_workers:
+    - hermclaw-exec-worker.service
+  model_workers:
+    - hermclaw-model-worker.service
+# Units started by the deployment phase when systemd_skeleton_enable_units is true.
+systemd_skeleton_enable_list:
+  orchestrator: [hermclaw-litellm.service, hermclaw-api.service, hermclaw-scheduler.service, hermclaw-backup.timer]
+  execution_workers: [hermclaw-exec-worker.service]
+  model_workers: [hermclaw-model-worker.service]
+
+# Credentials (LoadCredentialEncrypted=<id>:<credstore>/hermclaw-<id>) per service;
+# worker-token-<worker id> entries are added automatically for api and scheduler.
+systemd_skeleton_credentials:
+  api: [api-admin-token]
+  scheduler: [litellm-master-key, gitlab-token]
+  litellm: [litellm-master-key]
+  worker: [worker-token]
+# Generate random host-local secrets that Hermclaw itself defines (never gitlab-token,
+# which is issued by GitLab) and share worker tokens between orchestrator and workers.
+systemd_skeleton_generate_credentials: true
+systemd_skeleton_generated_credentials: [api-admin-token, litellm-master-key]
+
+systemd_skeleton_instance_id: orchestrator-225
+systemd_skeleton_db_name: hermclaw
+systemd_skeleton_log_level: INFO
+systemd_skeleton_litellm_venv: /opt/litellm/venv
+systemd_skeleton_litellm_bind: 127.0.0.1
+systemd_skeleton_backup_command: "{{ hermclaw_bin_dir }}/hermclaw-backup"
+systemd_skeleton_backup_on_calendar: "*-*-* 02:30:00"
+
+# Worker env (per worker host): id from the inventory (hermclaw_worker_id), bind = LAN address.
+systemd_skeleton_worker_id: "{{ hermclaw_worker_id | default(inventory_hostname) }}"
+systemd_skeleton_worker_bind: "{{ ansible_host | default('127.0.0.1') }}"
+
+# SearXNG (orchestrator): rootless Quadlet user unit of hermclaw, pinned image tag.
+systemd_skeleton_searxng_enabled: true
+systemd_skeleton_searxng_image: docker.io/searxng/searxng:2026.10.9-f4822b3fc
+systemd_skeleton_searxng_secret_name: hermclaw-searxng-secret

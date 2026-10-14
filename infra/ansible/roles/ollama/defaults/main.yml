@@ -1,0 +1,45 @@
+# ollama – Ollama server on the model worker .224 (research 20261008-007).
+# Pinned release; upgrade only after the GPU smoke test (`hermclaw-model-worker selftest`).
+# 0.40.3 = latest stable on 2026-10-14 (released 2026-10-11; 0.40.4 was hours old).
+ollama_version: "0.40.3"
+# Gemma 4 needs >= 0.22, Qwen3.8 >= 0.32.12 (research R-007/R-012): never pin below.
+ollama_min_version: "0.32.12"
+# tarball = pinned release archive (checksum verified) under /opt/ollama/<version>
+# script  = official install script with OLLAMA_VERSION (installs /usr/local/bin/ollama)
+ollama_install_method: tarball
+ollama_release_base: https://github.com/ollama/ollama/releases/download
+ollama_archive: ollama-linux-amd64.tar.zst
+ollama_install_script_url: https://ollama.com/install.sh
+ollama_install_root: /opt/ollama
+ollama_bin: >-
+  {{ (ollama_install_root ~ '/current/bin/ollama') if ollama_install_method == 'tarball'
+     else '/usr/local/bin/ollama' }}
+ollama_download_dir: /var/cache/hermclaw
+
+ollama_user: ollama
+ollama_group: ollama
+ollama_home: /var/lib/ollama          # only used when the account does not exist yet
+# empty = Ollama's default below the account's home (<home>/.ollama/models; an existing
+# account keeps its home and therefore its downloaded models)
+ollama_models_dir: ""
+
+# Server settings (systemd drop-in ollama.service.d/hermclaw.conf)
+ollama_listen: "0.0.0.0:{{ hermclaw_ollama_port }}"
+ollama_keep_alive: 5m
+ollama_max_loaded_models: 2        # one large model + the embedding model
+ollama_num_parallel: 1
+ollama_flash_attention: false      # enable only after a successful test on Pascal
+ollama_extra_env: {}
+
+# Ollama has no authentication and listens on the LAN (OLLAMA_HOST=0.0.0.0): a dedicated
+# nftables table (hermclaw-ollama-firewall.service) drops connections to the Ollama port
+# from everything except loopback and these sources (the orchestrator runs LiteLLM and the
+# health checks). Other tables/rules are never touched. Add sources (IPv4/IPv6, CIDR
+# allowed) for existing LAN clients instead of disabling it.
+ollama_firewall_enabled: true
+ollama_firewall_allowed_sources:
+  - "{{ hermclaw_orchestrator_ip }}"
+ollama_firewall_nft_file: /etc/hermclaw/nftables/hermclaw-ollama.nft
+
+# Verify the API after (re)start
+ollama_verify: true

@@ -1,0 +1,46 @@
+# Managed by Hermclaw – model/media worker daemon (.224): Ollama residency control,
+# GPU telemetry (nvidia-smi), media jobs. Installed by the systemd_skeleton role (P01 1.13).
+[Unit]
+Description=Hermclaw Next model and media worker
+After=network-online.target ollama.service
+Wants=network-online.target ollama.service
+ConditionFileIsExecutable={{ hermclaw_venv }}/bin/hermclaw-model-worker
+
+[Service]
+Type=exec
+User={{ hermclaw_user }}
+Group={{ hermclaw_group }}
+SupplementaryGroups=video render
+EnvironmentFile={{ hermclaw_config_dir }}/worker.env
+LoadCredentialEncrypted=worker-token:{{ hermclaw_credstore_dir }}/hermclaw-worker-token
+ExecStart={{ hermclaw_venv }}/bin/hermclaw-model-worker
+Restart=on-failure
+RestartSec=5s
+TimeoutStopSec=60s
+KillMode=mixed
+UMask=0027
+WorkingDirectory={{ hermclaw_data_dir }}
+ReadWritePaths={{ hermclaw_data_dir }} {{ hermclaw_log_dir }}
+# GPU access: /dev/nvidia* must stay visible (no PrivateDevices)
+NoNewPrivileges=yes
+PrivateTmp=yes
+PrivateMounts=yes
+ProtectSystem=strict
+ProtectHome=yes
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectKernelLogs=yes
+ProtectControlGroups=yes
+ProtectClock=yes
+ProtectHostname=yes
+RestrictSUIDSGID=yes
+RestrictRealtime=yes
+RestrictNamespaces=yes
+LockPersonality=yes
+SystemCallArchitectures=native
+RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6 AF_NETLINK
+CapabilityBoundingSet=
+AmbientCapabilities=
+
+[Install]
+WantedBy=multi-user.target

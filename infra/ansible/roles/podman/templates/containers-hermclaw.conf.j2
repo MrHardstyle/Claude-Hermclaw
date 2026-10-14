@@ -1,0 +1,7 @@
+# Managed by Hermclaw – containers.conf drop-in (rootless Podman defaults).
+[engine]
+cgroup_manager = "systemd"
+events_logger = "journald"
+
+[network]
+default_rootless_network_cmd = "{{ podman_rootless_network_cmd }}"

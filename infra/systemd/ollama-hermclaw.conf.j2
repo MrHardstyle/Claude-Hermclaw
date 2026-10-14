@@ -1,0 +1,19 @@
+# Managed by Hermclaw – Ollama settings for the model worker (research 20261008-007).
+# OLLAMA_CONTEXT_LENGTH stays unset on purpose: Hermclaw sends num_ctx with every request.
+[Service]
+{% if ollama_install_method == 'tarball' %}
+ExecStart=
+ExecStart={{ ollama_bin }} serve
+{% endif %}
+Environment=OLLAMA_HOST={{ ollama_listen }}
+Environment=OLLAMA_KEEP_ALIVE={{ ollama_keep_alive }}
+Environment=OLLAMA_MAX_LOADED_MODELS={{ ollama_max_loaded_models }}
+Environment=OLLAMA_NUM_PARALLEL={{ ollama_num_parallel }}
+Environment=OLLAMA_MODELS={{ ollama_effective_models_dir }}
+{% if ollama_flash_attention | bool %}
+Environment=OLLAMA_FLASH_ATTENTION=1
+{% endif %}
+{% for key, value in ollama_extra_env | dictsort %}
+Environment={{ key }}={{ value }}
+{% endfor %}
+UnsetEnvironment=OLLAMA_CONTEXT_LENGTH

@@ -1,0 +1,12 @@
+# Input validation of the nginx role (tested locally by
+# tests/integration/test_bootstrap_infra.py::test_role_input_validation).
+- name: Validate nginx settings
+  ansible.builtin.assert:
+    that:
+      - nginx_site_name is match('^[a-z0-9][a-z0-9_.-]*$')
+      - nginx_server_name is match('^[A-Za-z0-9_.* -]+$')
+      - nginx_api_upstream is match('^http://[A-Za-z0-9.-]+(:[0-9]{1,5})?$')
+      - nginx_listen_port | int > 0
+      - nginx_client_max_body_size is match('^[0-9]+[kmg]?$')
+      - nginx_sse_read_timeout is match('^[0-9]+[smhd]?$')
+    quiet: true

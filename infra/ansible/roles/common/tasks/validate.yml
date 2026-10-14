@@ -1,0 +1,74 @@
+# Input validation of the common role (no host access; tested locally by
+# tests/integration/test_bootstrap_infra.py::test_role_input_validation).
+- name: Validate account names and orchestrator address
+  ansible.builtin.assert:
+    that:
+      - hermclaw_user is match('^[a-z_][a-z0-9_-]{0,30}$')
+      - hermclaw_group is match('^[a-z_][a-z0-9_-]{0,30}$')
+      - hermclaw_ssh_runtime_user is match('^[a-z_][a-z0-9_-]{0,30}$')
+      - hermclaw_orchestrator_ip is match('^((25[0-5]|2[0-4][0-9]|1?[0-9]?[0-9])[.]){3}(25[0-5]|2[0-4][0-9]|1?[0-9]?[0-9])$')
+      - hermclaw_timezone is match('^[A-Za-z0-9_+-]+(/[A-Za-z0-9_+-]+)*$')
+    fail_msg: invalid hermclaw_user/hermclaw_group/hermclaw_ssh_runtime_user/hermclaw_orchestrator_ip/hermclaw_timezone
+    quiet: true
+
+- name: Validate managed paths (absolute, no traversal)
+  ansible.builtin.assert:
+    that:
+      - item is match('^/[A-Za-z0-9._/-]+$')
+      - "'/../' not in item ~ '/'"
+      - "'/./' not in item ~ '/'"
+    fail_msg: "invalid path {{ item }}"
+    quiet: true
+  loop:
+    - "{{ hermclaw_install_dir }}"
+    - "{{ hermclaw_venv }}"
+    - "{{ hermclaw_bin_dir }}"
+    - "{{ hermclaw_config_dir }}"
+    - "{{ hermclaw_ssh_dir }}"
+    - "{{ hermclaw_data_dir }}"
+    - "{{ hermclaw_home }}"
+    - "{{ hermclaw_log_dir }}"
+    - "{{ hermclaw_credstore_dir }}"
+
+
+- name: Validate the runtime SSH policy (sudo allowlist, forced command, NTP servers)
+  ansible.builtin.assert:
+    that:
+      # absolute command plus plain arguments: no sudoers metacharacters (, : = \ ! * ? [ ] #)
+      - common_ssh_runtime_sudo_commands | reject('match', '^/[A-Za-z0-9._/+-]+( [A-Za-z0-9._/+@-]+)*$') | list | length == 0
+      - common_ssh_forced_command is match('^(/[A-Za-z0-9._/+-]+( [A-Za-z0-9._/+@=-]+)*)?$')
+      - common_ntp_servers | reject('match', '^[A-Za-z0-9.:-]+$') | list | length == 0
+      # '$' also matches before a trailing line break: refuse surrounding whitespace explicitly
+      - common_ssh_runtime_sudo_commands | map('trim') | list == common_ssh_runtime_sudo_commands | list
+      - common_ssh_forced_command | trim == common_ssh_forced_command
+      - common_ntp_servers | map('trim') | list == common_ntp_servers | list
+    fail_msg: >-
+      invalid common_ssh_runtime_sudo_commands {{ common_ssh_runtime_sudo_commands }},
+      common_ssh_forced_command '{{ common_ssh_forced_command }}' or common_ntp_servers {{ common_ntp_servers }}
+    quiet: true
+
+- name: Validate the pre-verified known_hosts entries
+  ansible.builtin.assert:
+    that:
+      - >-
+        common_known_hosts_extra | map('string')
+        | reject('match', '^[][A-Za-z0-9._:-]+(,[][A-Za-z0-9._:-]+)* (ssh-ed25519|ecdsa-sha2-nistp(256|384|521)|ssh-rsa) [A-Za-z0-9+/]+={0,3}$')
+        | list | length == 0
+      - common_known_hosts_extra | map('string') | map('trim') | list == common_known_hosts_extra | map('string') | list
+    fail_msg: >-
+      invalid common_known_hosts_extra entry (expected "host[,address] key-type base64-key" per line):
+      {{ common_known_hosts_extra }}
+    quiet: true
+
+# The runtime key lands in the runtime user's authorized_keys; if that account were also the
+# full-sudo Ansible login, the LLM-driven runtime would be root on every worker.
+- name: Keep the Ansible login separate from the restricted runtime SSH user
+  ansible.builtin.assert:
+    that: >-
+      common_allow_shared_admin_login | bool
+      or (ansible_user | default(lookup('ansible.builtin.env', 'USER'), true)) != hermclaw_ssh_runtime_user
+    fail_msg: >-
+      ansible_user is '{{ hermclaw_ssh_runtime_user }}', the restricted runtime SSH account. Use a separate
+      sudo-capable admin login for Ansible (see docs/operations/bootstrap.md) or set
+      common_allow_shared_admin_login=true deliberately.
+    quiet: true

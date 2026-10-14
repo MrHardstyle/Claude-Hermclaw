@@ -1,0 +1,12 @@
+galaxy_info:
+  role_name: nvidia
+  namespace: hermclaw
+  author: Hermclaw Next
+  description: "NVIDIA 580 driver branch for the GTX 1080, pinned against 590+"
+  license: proprietary
+  min_ansible_version: "2.17"
+  platforms:
+    - name: Debian
+      versions:
+        - trixie
+dependencies: []

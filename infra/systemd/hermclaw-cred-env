@@ -1,0 +1,65 @@
+#!/bin/bash
+# Managed by Hermclaw – export systemd credentials as environment variables, then exec.
+#
+# Usage: hermclaw-cred-env VAR=credential-name [VAR=credential-name ...] -- command [args...]
+#
+# For programs that only read secrets from the environment (e.g. LiteLLM's
+# LITELLM_MASTER_KEY). Reads the first line of $CREDENTIALS_DIRECTORY/<credential-name>
+# (LoadCredential[Encrypted]=). Values are never printed. Exit 78 (EX_CONFIG) when a
+# credential is missing, 64 (EX_USAGE) on bad arguments.
+set -euo pipefail
+
+usage() {
+    echo "usage: hermclaw-cred-env VAR=credential [VAR=credential ...] -- command [args...]" >&2
+    exit 64
+}
+
+if [[ -z "${CREDENTIALS_DIRECTORY:-}" || ! -d "${CREDENTIALS_DIRECTORY}" ]]; then
+    echo "hermclaw-cred-env: CREDENTIALS_DIRECTORY is not set (run from a unit with LoadCredential*=)" >&2
+    exit 78
+fi
+
+mapped=0
+while [[ $# -gt 0 ]]; do
+    case "$1" in
+        --)
+            shift
+            break
+            ;;
+        *=*)
+            var="${1%%=*}"
+            cred="${1#*=}"
+            if [[ ! "$var" =~ ^[A-Z_][A-Z0-9_]*$ ]]; then
+                echo "hermclaw-cred-env: invalid variable name '${var}'" >&2
+                exit 64
+            fi
+            if [[ ! "$cred" =~ ^[A-Za-z0-9_][A-Za-z0-9_.-]*$ || "$cred" == *..* ]]; then
+                echo "hermclaw-cred-env: invalid credential name" >&2
+                exit 64
+            fi
+            file="${CREDENTIALS_DIRECTORY}/${cred}"
+            if [[ ! -f "$file" || ! -r "$file" ]]; then
+                echo "hermclaw-cred-env: credential '${cred}' is not available" >&2
+                exit 78
+            fi
+            value=""
+            IFS= read -r value <"$file" || true
+            if [[ -z "$value" ]]; then
+                echo "hermclaw-cred-env: credential '${cred}' is empty" >&2
+                exit 78
+            fi
+            export "${var}=${value}"
+            unset value
+            mapped=$((mapped + 1))
+            shift
+            ;;
+        *)
+            usage
+            ;;
+    esac
+done
+
+if [[ $mapped -eq 0 || $# -eq 0 ]]; then
+    usage
+fi
+exec "$@"

@@ -1,0 +1,118 @@
+# nginx – webroot and baseline site on .223 (P01 1.12)
+- name: Validate the nginx settings
+  ansible.builtin.import_tasks: validate.yml
+  tags: [nginx]
+
+- name: Install nginx
+  ansible.builtin.apt:
+    name: nginx
+    state: present
+    install_recommends: false
+  when: hermclaw_install_packages | bool
+  tags: [nginx, packages]
+
+- name: Create the webroot
+  ansible.builtin.file:
+    path: "{{ hermclaw_webroot }}"
+    state: directory
+    owner: "{{ nginx_webroot_owner }}"
+    group: "{{ nginx_webroot_group }}"
+    mode: "0755"
+  tags: [nginx]
+
+- name: Place a placeholder page (never overwrites a deployed UI)
+  ansible.builtin.template:
+    src: index.html.j2
+    dest: "{{ hermclaw_webroot }}/index.html"
+    owner: "{{ nginx_webroot_owner }}"
+    group: "{{ nginx_webroot_group }}"
+    mode: "0644"
+    force: false
+  tags: [nginx]
+
+- name: Refuse to overwrite a foreign site with the same name
+  ansible.builtin.include_tasks:
+    file: guard.yml
+    apply:
+      tags: [nginx]
+  tags: [nginx]
+
+# Debian's nginx package ships both directories and includes sites-enabled/* from
+# nginx.conf; they are (re)created only for image builds without the package.
+- name: Ensure the Debian site directories exist
+  ansible.builtin.file:
+    path: "/etc/nginx/{{ item }}"
+    state: directory
+    owner: root
+    group: root
+    mode: "0755"
+  loop: [sites-available, sites-enabled]
+  tags: [nginx]
+
+- name: Check that nginx.conf loads sites-enabled
+  ansible.builtin.import_tasks: sites_include.yml
+  when: hermclaw_install_packages | bool
+  tags: [nginx]
+
+- name: Install and validate the site
+  tags: [nginx]
+  block:
+    - name: Write the Hermclaw site
+      ansible.builtin.template:
+        src: hermclaw-next.conf.j2
+        dest: "/etc/nginx/sites-available/{{ nginx_site_name }}.conf"
+        owner: root
+        group: root
+        mode: "0644"
+        backup: true
+      register: nginx_site
+      notify: Reload nginx
+
+    - name: Enable the Hermclaw site
+      ansible.builtin.file:
+        src: "/etc/nginx/sites-available/{{ nginx_site_name }}.conf"
+        dest: "/etc/nginx/sites-enabled/{{ nginx_site_name }}.conf"
+        state: link
+      register: nginx_link
+      notify: Reload nginx
+
+    - name: Test the complete nginx configuration
+      ansible.builtin.command:
+        argv: [nginx, -t, -q]
+      changed_when: false
+      when:
+        - hermclaw_install_packages | bool
+        - not ansible_check_mode
+  rescue:
+    - name: Restore the previous site file
+      ansible.builtin.copy:
+        src: "{{ nginx_site.backup_file }}"
+        dest: "/etc/nginx/sites-available/{{ nginx_site_name }}.conf"
+        remote_src: true
+        owner: root
+        group: root
+        mode: "0644"
+      when: nginx_site.backup_file is defined
+
+    - name: Disable a newly added site that breaks nginx
+      ansible.builtin.file:
+        path: "/etc/nginx/sites-enabled/{{ nginx_site_name }}.conf"
+        state: absent
+      when:
+        - nginx_link is defined
+        - nginx_link is changed
+
+    - name: Stop after the rollback
+      ansible.builtin.fail:
+        msg: >-
+          Installing the Hermclaw site failed in '{{ ansible_failed_task.name | default('?') }}':
+          {{ ansible_failed_result.msg | default('') | truncate(400) }}{{ (' ' ~ (ansible_failed_result.stderr | default('') | truncate(400))) }}
+          - previous site configuration restored, the running nginx was not reloaded.
+
+- name: Enable and start nginx
+  ansible.builtin.systemd_service:
+    name: nginx
+    enabled: true
+    state: started
+  when: hermclaw_manage_services | bool
+  tags: [nginx]

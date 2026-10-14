@@ -1,0 +1,27 @@
+- name: Read the installed pgvector package version
+  ansible.builtin.command:
+    argv:
+      - dpkg-query
+      - --showformat=${Version}
+      - --show
+      - "postgresql-{{ postgresql_version }}-pgvector"
+  register: postgresql_pgvector_pkg
+  changed_when: false
+  failed_when: false
+  check_mode: false
+
+- name: Assert pgvector is not affected by CVE-2026-3172, minimum {{ postgresql_pgvector_min_version }}
+  ansible.builtin.assert:
+    that:
+      - postgresql_pgvector_pkg.rc == 0
+      # Debian version [epoch:]upstream[-revision] -> numeric upstream part. Conditionals must
+      # stay free of backslashes: Jinja decodes escapes there (a '\2' backreference became chr(2)).
+      - >-
+        (postgresql_pgvector_pkg.stdout | trim).split(':')[-1] | regex_search('^[0-9]+([.][0-9]+)*') | default('0', true)
+        is version(postgresql_pgvector_min_version, '>=')
+    fail_msg: >-
+      postgresql-{{ postgresql_version }}-pgvector {{ postgresql_pgvector_pkg.stdout | default('not installed') }}
+      is missing or older than {{ postgresql_pgvector_min_version }} (CVE-2026-3172). Install it from PGDG
+      (apt.postgresql.org {{ postgresql_pgdg_suite }}), not from Debian.
+    quiet: true
+  when: not (ansible_check_mode and postgresql_pgvector_pkg.rc != 0)

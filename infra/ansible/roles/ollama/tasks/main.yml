@@ -1,0 +1,251 @@
+# ollama – pinned Ollama with Hermclaw settings (no OLLAMA_CONTEXT_LENGTH: Hermclaw sends num_ctx)
+- name: Validate the ollama settings
+  ansible.builtin.import_tasks: validate.yml
+  tags: [ollama]
+
+- name: Create the ollama group
+  ansible.builtin.group:
+    name: "{{ ollama_group }}"
+    system: true
+  tags: [ollama]
+
+- name: Find GPU device groups
+  ansible.builtin.command:
+    argv: [getent, group, "{{ item }}"]
+  loop: [video, render]
+  register: ollama_gpu_groups
+  changed_when: false
+  failed_when: false
+  check_mode: false
+  tags: [ollama]
+
+- name: Look up an existing ollama account
+  ansible.builtin.command:
+    argv: [getent, passwd, "{{ ollama_user }}"]
+  register: ollama_pw
+  changed_when: false
+  failed_when: ollama_pw.rc not in [0, 2]
+  check_mode: false
+  tags: [ollama]
+
+- name: Create the ollama system user
+  ansible.builtin.user:
+    name: "{{ ollama_user }}"
+    group: "{{ ollama_group }}"
+    system: true
+    home: "{{ ollama_home }}"
+    create_home: true
+    shell: /usr/sbin/nologin
+    password: "!"
+    comment: Ollama service account
+  when: ollama_pw.rc == 2
+  tags: [ollama]
+
+- name: Give ollama access to the GPU devices (existing accounts keep home and shell)
+  ansible.builtin.user:
+    name: "{{ ollama_user }}"
+    groups: "{{ ollama_gpu_groups.results | selectattr('rc', 'equalto', 0) | map(attribute='item') | list }}"
+    append: true
+  when: not (ansible_check_mode and ollama_pw.rc == 2)
+  tags: [ollama]
+
+- name: Re-read the ollama account after creation
+  ansible.builtin.command:
+    argv: [getent, passwd, "{{ ollama_user }}"]
+  register: ollama_account
+  changed_when: false
+  failed_when: ollama_account.rc not in [0, 2]
+  check_mode: false
+  tags: [ollama]
+
+# Ollama's own default is $HOME/.ollama/models; keeping it means an existing installation
+# (official script: home /usr/share/ollama) keeps its downloaded models.
+- name: Decide home and models directory
+  ansible.builtin.set_fact:
+    ollama_effective_home: "{{ ollama_account.stdout.split(':')[5] if ollama_account.rc == 0 else ollama_home }}"
+    ollama_effective_models_dir: >-
+      {{ ollama_models_dir if ollama_models_dir | length > 0
+         else ((ollama_account.stdout.split(':')[5] if ollama_account.rc == 0 else ollama_home) ~ '/.ollama/models') }}
+  tags: [ollama]
+
+- name: Validate the models directory
+  ansible.builtin.assert:
+    that:
+      - ollama_effective_models_dir is match('^/[A-Za-z0-9._/-]+$')
+      - "'/../' not in ollama_effective_models_dir ~ '/'"
+    fail_msg: "invalid models directory {{ ollama_effective_models_dir }}"
+    quiet: true
+  tags: [ollama]
+
+- name: Create the models directory
+  ansible.builtin.file:
+    path: "{{ ollama_effective_models_dir }}"
+    state: directory
+    owner: "{{ ollama_user }}"
+    group: "{{ ollama_group }}"
+    mode: "0750"
+  tags: [ollama]
+
+- name: Install the pinned release archive
+  when:
+    - ollama_install_method == 'tarball'
+    - hermclaw_install_packages | bool
+  tags: [ollama, packages]
+  block:
+    - name: Create download and install directories
+      ansible.builtin.file:
+        path: "{{ item }}"
+        state: directory
+        owner: root
+        group: root
+        mode: "0755"
+      loop:
+        - "{{ ollama_download_dir }}"
+        - "{{ ollama_install_root }}/{{ ollama_version }}"
+
+    - name: Download the release archive, checksum from the release, version {{ ollama_version }}
+      ansible.builtin.get_url:
+        url: "{{ ollama_release_base }}/v{{ ollama_version }}/{{ ollama_archive }}"
+        dest: "{{ ollama_download_dir }}/ollama-{{ ollama_version }}-{{ ollama_archive }}"
+        checksum: "sha256:{{ ollama_release_base }}/v{{ ollama_version }}/sha256sum.txt"
+        owner: root
+        group: root
+        mode: "0644"
+        timeout: 120
+
+    - name: Extract Ollama {{ ollama_version }}
+      ansible.builtin.command:
+        argv:
+          - tar
+          - --zstd
+          - --no-same-owner
+          - -xf
+          - "{{ ollama_download_dir }}/ollama-{{ ollama_version }}-{{ ollama_archive }}"
+          - -C
+          - "{{ ollama_install_root }}/{{ ollama_version }}"
+        creates: "{{ ollama_install_root }}/{{ ollama_version }}/bin/ollama"
+
+    - name: Point current at {{ ollama_version }}
+      ansible.builtin.file:
+        src: "{{ ollama_install_root }}/{{ ollama_version }}"
+        dest: "{{ ollama_install_root }}/current"
+        state: link
+      notify: Restart ollama
+
+- name: Install with the official script
+  when:
+    - ollama_install_method == 'script'
+    - hermclaw_install_packages | bool
+  tags: [ollama, packages]
+  block:
+    - name: Read the installed Ollama version
+      ansible.builtin.command:
+        argv: ["{{ ollama_bin }}", --version]
+      register: ollama_installed
+      changed_when: false
+      failed_when: false
+      check_mode: false
+
+    - name: Download the install script
+      ansible.builtin.get_url:
+        url: "{{ ollama_install_script_url }}"
+        dest: "{{ ollama_download_dir }}/ollama-install.sh"
+        owner: root
+        group: root
+        mode: "0700"
+      when: ollama_version not in ollama_installed.stdout | default('')
+
+    - name: Run the install script for {{ ollama_version }}
+      ansible.builtin.command:
+        argv: [sh, "{{ ollama_download_dir }}/ollama-install.sh"]
+      environment:
+        OLLAMA_VERSION: "{{ ollama_version }}"
+      changed_when: true
+      when: ollama_version not in ollama_installed.stdout | default('')
+      notify: Restart ollama
+
+- name: Check for an existing ollama.service
+  ansible.builtin.stat:
+    path: /etc/systemd/system/ollama.service
+  register: ollama_unit
+  tags: [ollama]
+
+- name: Read the existing ollama.service
+  ansible.builtin.slurp:
+    src: /etc/systemd/system/ollama.service
+  register: ollama_unit_raw
+  when: ollama_unit.stat.exists
+  tags: [ollama]
+
+- name: Install the Hermclaw ollama.service (only if none exists or it is ours)
+  ansible.builtin.template:
+    src: "{{ role_path }}/../../../systemd/ollama.service.j2"
+    dest: /etc/systemd/system/ollama.service
+    owner: root
+    group: root
+    mode: "0644"
+  when: >-
+    not ollama_unit.stat.exists
+    or 'Managed by Hermclaw' in (ollama_unit_raw.content | default('') | b64decode)
+  notify:
+    - Reload systemd
+    - Restart ollama
+  tags: [ollama]
+
+- name: Create the ollama.service drop-in directory
+  ansible.builtin.file:
+    path: /etc/systemd/system/ollama.service.d
+    state: directory
+    owner: root
+    group: root
+    mode: "0755"
+  tags: [ollama]
+
+- name: Write the Hermclaw drop-in (OLLAMA_HOST, keep-alive, max loaded models)
+  ansible.builtin.template:
+    src: "{{ role_path }}/../../../systemd/ollama-hermclaw.conf.j2"
+    dest: /etc/systemd/system/ollama.service.d/hermclaw.conf
+    owner: root
+    group: root
+    mode: "0644"
+  notify:
+    - Reload systemd
+    - Restart ollama
+  tags: [ollama]
+
+- name: Apply unit changes
+  ansible.builtin.meta: flush_handlers
+  tags: [ollama]
+
+- name: Enable and start ollama
+  ansible.builtin.systemd_service:
+    name: ollama
+    enabled: true
+    state: started
+  when: hermclaw_manage_services | bool
+  tags: [ollama]
+
+- name: Verify the Ollama API version
+  ansible.builtin.uri:
+    url: "http://127.0.0.1:{{ hermclaw_ollama_port }}/api/version"
+    return_content: true
+  register: ollama_api
+  until: ollama_api.status == 200
+  retries: 20
+  delay: 3
+  when:
+    - ollama_verify | bool
+    - hermclaw_manage_services | bool
+    - not ansible_check_mode
+  tags: [ollama]
+
+- name: Assert the running Ollama is {{ ollama_version }}
+  ansible.builtin.assert:
+    that: ollama_api.json.version == ollama_version
+    fail_msg: "Ollama reports {{ ollama_api.json.version | default('?') }}, expected {{ ollama_version }}"
+    quiet: true
+  when:
+    - ollama_verify | bool
+    - hermclaw_manage_services | bool
+    - not ansible_check_mode
+  tags: [ollama]

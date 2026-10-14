@@ -1,0 +1,146 @@
+# nvidia_source = runfile: NVIDIA's .run installer for a pinned 580.x release (SHA-256 verified,
+# DKMS so kernel updates rebuild the module, proprietary modules for Pascal).
+- name: Find packaged NVIDIA drivers that conflict with a runfile installation
+  ansible.builtin.command:
+    argv: "{{ ['dpkg-query', '-W', '-f=${Package} ${db:Status-Abbrev}\\n'] + nvidia_package_conflicts }}"
+  register: nvidia_dpkg
+  changed_when: false
+  # 1 = some pattern matched no package (dpkg-query still lists the matching ones)
+  failed_when: nvidia_dpkg.rc not in [0, 1]
+  check_mode: false
+
+- name: Collect installed conflicting packages
+  ansible.builtin.set_fact:
+    # second status letter: n = not installed, c = only config files left; anything else counts
+    nvidia_runfile_conflicts: >-
+      {{ nvidia_dpkg.stdout_lines | select('match', '^[^ ]+ [a-z][iUFHWt]') | map('split', ' ') | map('first') | list }}
+
+- name: Refuse to mix the runfile driver with packaged drivers
+  ansible.builtin.assert:
+    that: nvidia_runfile_conflicts | length == 0
+    fail_msg: >-
+      {{ inventory_hostname }} has packaged NVIDIA drivers installed ({{ nvidia_runfile_conflicts | join(', ') }}).
+      Mixing them with the {{ nvidia_runfile_version }} runfile breaks both: purge them first
+      (apt purge {{ nvidia_runfile_conflicts | join(' ') }}; reboot) or keep them with nvidia_source=cuda/debian.
+    quiet: true
+
+- name: Blacklist nouveau (the proprietary driver needs the GPU)
+  ansible.builtin.template:
+    src: blacklist-nouveau.conf.j2
+    dest: /etc/modprobe.d/hermclaw-blacklist-nouveau.conf
+    owner: root
+    group: root
+    mode: "0644"
+  register: nvidia_blacklist
+
+- name: Rebuild the initramfs without nouveau
+  ansible.builtin.command:
+    argv: [update-initramfs, -u]
+  changed_when: true
+  when: nvidia_blacklist is changed  # noqa: no-handler - must happen before the reboot below
+
+- name: Read the version of the installed nvidia kernel module
+  ansible.builtin.command:
+    argv: [modinfo, -F, version, nvidia]
+  register: nvidia_module_version
+  changed_when: false
+  failed_when: false
+  check_mode: false
+
+- name: Decide whether the installer has to run
+  ansible.builtin.set_fact:
+    nvidia_runfile_needed: >-
+      {{ nvidia_module_version.rc != 0 or (nvidia_module_version.stdout | trim) != nvidia_runfile_version }}
+
+- name: Install {{ nvidia_runfile_version }}
+  when: nvidia_runfile_needed | bool
+  block:
+    - name: Check whether nouveau is loaded
+      ansible.builtin.stat:
+        path: /sys/module/nouveau
+      register: nvidia_nouveau
+
+    - name: Reboot to unload nouveau
+      ansible.builtin.reboot:
+        reboot_timeout: "{{ nvidia_reboot_timeout }}"
+        msg: Hermclaw bootstrap - unloading nouveau before the NVIDIA {{ nvidia_runfile_version }} installation
+      when:
+        - nvidia_nouveau.stat.exists
+        - nvidia_allow_reboot | bool
+        - hermclaw_manage_services | bool
+
+    - name: Check nouveau again
+      ansible.builtin.stat:
+        path: /sys/module/nouveau
+      register: nvidia_nouveau_after
+
+    - name: Stop while nouveau still drives the GPU
+      ansible.builtin.fail:
+        msg: >-
+          nouveau is loaded on {{ inventory_hostname }}. It is blacklisted now
+          (/etc/modprobe.d/hermclaw-blacklist-nouveau.conf, initramfs rebuilt): reboot the host and rerun the
+          playbook (or set nvidia_allow_reboot=true) to install NVIDIA {{ nvidia_runfile_version }}.
+      when:
+        - nvidia_nouveau_after.stat.exists
+        - not ansible_check_mode
+
+    - name: Create the download directory
+      ansible.builtin.file:
+        path: "{{ nvidia_runfile_download_dir }}"
+        state: directory
+        owner: root
+        group: root
+        mode: "0755"
+
+    - name: Download the NVIDIA {{ nvidia_runfile_version }} installer (SHA-256 verified)
+      ansible.builtin.get_url:
+        url: "{{ nvidia_runfile_base }}/{{ nvidia_runfile_version }}/{{ nvidia_runfile_name }}"
+        dest: "{{ nvidia_runfile_download_dir }}/{{ nvidia_runfile_name }}"
+        checksum: >-
+          sha256:{{ nvidia_runfile_sha256 if nvidia_runfile_sha256 | length > 0 else
+          nvidia_runfile_base ~ '/' ~ nvidia_runfile_version ~ '/' ~ nvidia_runfile_name ~ '.sha256sum' }}
+        owner: root
+        group: root
+        mode: "0700"
+        timeout: 300
+
+    - name: Run the NVIDIA installer (log /var/log/nvidia-installer.log)
+      ansible.builtin.command:
+        argv: "{{ ['sh', nvidia_runfile_download_dir ~ '/' ~ nvidia_runfile_name] + nvidia_runfile_options }}"
+        chdir: /
+      register: nvidia_driver_runfile
+      changed_when: true
+
+- name: Create the nvidia-persistenced account
+  ansible.builtin.user:
+    name: "{{ nvidia_persistenced_user }}"
+    system: true
+    create_home: false
+    home: /nonexistent
+    shell: /usr/sbin/nologin
+    password: "!"
+    comment: NVIDIA Persistence Daemon
+    state: present
+
+- name: Check for an existing nvidia-persistenced unit in /etc
+  ansible.builtin.stat:
+    path: /etc/systemd/system/nvidia-persistenced.service
+  register: nvidia_persistenced_unit
+
+- name: Read the existing nvidia-persistenced unit
+  ansible.builtin.slurp:
+    src: /etc/systemd/system/nvidia-persistenced.service
+  register: nvidia_persistenced_unit_raw
+  when: nvidia_persistenced_unit.stat.exists
+
+# the runfile ships the daemon but no unit; a foreign unit file is left alone
+- name: Install the nvidia-persistenced unit
+  ansible.builtin.template:
+    src: nvidia-persistenced.service.j2
+    dest: /etc/systemd/system/nvidia-persistenced.service
+    owner: root
+    group: root
+    mode: "0644"
+  when: >-
+    not nvidia_persistenced_unit.stat.exists
+    or 'Managed by Hermclaw' in (nvidia_persistenced_unit_raw.content | default('') | b64decode)

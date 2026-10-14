@@ -1,0 +1,4 @@
+# Managed by Hermclaw – the proprietary NVIDIA {{ nvidia_runfile_version }} driver needs the GPU
+# (role nvidia, nvidia_source=runfile); nouveau must not bind it.
+blacklist nouveau
+options nouveau modeset=0

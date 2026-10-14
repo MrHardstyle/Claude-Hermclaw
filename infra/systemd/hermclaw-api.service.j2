@@ -1,0 +1,47 @@
+# Managed by Hermclaw – Hermclaw Next API (orchestrator .225). Template: infra/systemd/
+# Installed by the systemd_skeleton role (P01 1.13); enabled by the deployment phase.
+# Secrets: systemd credentials, read by the API from $CREDENTIALS_DIRECTORY (cred:<name>).
+[Unit]
+Description=Hermclaw Next API
+After=network-online.target postgresql.service
+Wants=network-online.target postgresql.service
+ConditionFileIsExecutable={{ hermclaw_venv }}/bin/hermclaw
+
+[Service]
+Type=exec
+User={{ hermclaw_user }}
+Group={{ hermclaw_group }}
+EnvironmentFile={{ hermclaw_config_dir }}/hermclaw.env
+ExecStart={{ hermclaw_venv }}/bin/hermclaw api
+{% for cred in systemd_skeleton_credentials.api + (systemd_skeleton_worker_ids | map('regex_replace', '^', 'worker-token-') | list) %}
+LoadCredentialEncrypted={{ cred }}:{{ hermclaw_credstore_dir }}/hermclaw-{{ cred }}
+{% endfor %}
+Restart=on-failure
+RestartSec=5s
+TimeoutStopSec=30s
+UMask=0027
+WorkingDirectory={{ hermclaw_data_dir }}
+ReadWritePaths={{ hermclaw_data_dir }} {{ hermclaw_log_dir }}
+NoNewPrivileges=yes
+PrivateTmp=yes
+PrivateDevices=yes
+PrivateMounts=yes
+ProtectSystem=strict
+ProtectHome=yes
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectKernelLogs=yes
+ProtectControlGroups=yes
+ProtectClock=yes
+ProtectHostname=yes
+RestrictSUIDSGID=yes
+RestrictRealtime=yes
+RestrictNamespaces=yes
+LockPersonality=yes
+SystemCallArchitectures=native
+RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6
+CapabilityBoundingSet=
+AmbientCapabilities=
+
+[Install]
+WantedBy=multi-user.target

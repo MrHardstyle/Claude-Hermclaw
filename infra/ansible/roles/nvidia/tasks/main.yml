@@ -1,0 +1,180 @@
+# nvidia – 580 branch driver (Pascal), pinned against 590+, nvidia-smi verification
+- name: Validate the nvidia settings
+  ansible.builtin.import_tasks: validate.yml
+  tags: [nvidia]
+
+- name: Pin the driver branch (before any driver package is installed)
+  ansible.builtin.template:
+    src: nvidia-pin.pref.j2
+    dest: /etc/apt/preferences.d/hermclaw-nvidia.pref
+    owner: root
+    group: root
+    mode: "0644"
+  register: nvidia_pin
+  tags: [nvidia]
+
+- name: Install the driver
+  when: hermclaw_install_packages | bool
+  tags: [nvidia, packages]
+  block:
+    - name: Install kernel headers, DKMS and build tooling
+      ansible.builtin.apt:
+        name: "{{ nvidia_build_packages + (nvidia_runfile_packages if nvidia_source == 'runfile' else []) }}"
+        state: present
+        update_cache: true
+        cache_valid_time: 3600
+
+    - name: Install the runfile driver
+      ansible.builtin.include_tasks:
+        file: runfile.yml
+        apply:
+          tags: [nvidia, packages]
+      when: nvidia_source == 'runfile'
+
+    - name: Install the NVIDIA repository keyring
+      ansible.builtin.apt:
+        deb: "{{ nvidia_cuda_repo_base }}/{{ nvidia_cuda_keyring_deb }}"
+        state: present
+      register: nvidia_keyring
+      when: nvidia_source == 'cuda'
+
+    - name: Enable contrib and non-free-firmware/non-free for Debian driver packages
+      ansible.builtin.deb822_repository:
+        name: hermclaw-debian-nonfree
+        types: [deb]
+        uris: [https://deb.debian.org/debian]
+        suites: ["{{ hermclaw_debian_codename }}", "{{ hermclaw_debian_codename }}-updates"]
+        components: [contrib, non-free, non-free-firmware]
+        signed_by: /usr/share/keyrings/debian-archive-keyring.gpg
+        state: present
+      register: nvidia_nonfree
+      when: nvidia_source == 'debian'
+
+    - name: Refresh apt cache after repository changes
+      ansible.builtin.apt:
+        update_cache: true
+      when: nvidia_keyring is changed or nvidia_nonfree is changed or nvidia_pin is changed
+
+    - name: Check the apt candidates before installing
+      ansible.builtin.include_tasks:
+        file: candidate.yml
+        apply:
+          tags: [nvidia, packages]
+      vars:
+        nvidia_candidate_present: "{{ [nvidia_cuda_pinning_package] if nvidia_source == 'cuda' else [] }}"
+        nvidia_candidate_branch: >-
+          {{ nvidia_cuda_driver_packages if nvidia_source == 'cuda' else nvidia_debian_packages[:1] }}
+      when: nvidia_source in ['cuda', 'debian']
+
+    # nvidia-driver-pinning-<branch> keeps cuda-drivers from pulling in 590+ dependencies
+    - name: Install the NVIDIA branch pinning package before the driver
+      ansible.builtin.apt:
+        name: "{{ nvidia_cuda_pinning_package }}"
+        state: present
+      when: nvidia_source == 'cuda'
+
+    - name: Install the driver packages
+      ansible.builtin.apt:
+        name: "{{ nvidia_cuda_driver_packages if nvidia_source == 'cuda' else nvidia_debian_packages }}"
+        state: present
+      register: nvidia_driver_apt
+      when: nvidia_source in ['cuda', 'debian']
+
+- name: Remember whether a driver was installed in this run
+  ansible.builtin.set_fact:
+    nvidia_driver_changed: >-
+      {{ (nvidia_driver_apt is defined and nvidia_driver_apt is changed)
+         or (nvidia_driver_runfile is defined and nvidia_driver_runfile is changed) }}
+  tags: [nvidia]
+
+- name: Query the GPU with nvidia-smi
+  ansible.builtin.command:
+    argv:
+      - nvidia-smi
+      - --query-gpu=driver_version,name,memory.total
+      - --format=csv,noheader,nounits
+  register: nvidia_smi
+  changed_when: false
+  failed_when: false
+  check_mode: false
+  tags: [nvidia]
+
+- name: Reboot to load the new kernel module
+  ansible.builtin.reboot:
+    reboot_timeout: "{{ nvidia_reboot_timeout }}"
+    msg: Hermclaw bootstrap - loading the NVIDIA {{ nvidia_driver_branch }} driver
+  when:
+    - nvidia_driver_changed | bool
+    - nvidia_smi.rc != 0
+    - nvidia_allow_reboot | bool
+    - hermclaw_manage_services | bool
+  register: nvidia_rebooted
+  tags: [nvidia]
+
+- name: Query the GPU again after the reboot
+  ansible.builtin.command:
+    argv:
+      - nvidia-smi
+      - --query-gpu=driver_version,name,memory.total
+      - --format=csv,noheader,nounits
+  register: nvidia_smi_after_reboot
+  changed_when: false
+  failed_when: false
+  check_mode: false
+  when: nvidia_rebooted is changed
+  tags: [nvidia]
+
+- name: Use the post-reboot GPU query
+  ansible.builtin.set_fact:
+    nvidia_smi: "{{ nvidia_smi_after_reboot }}"
+  when: nvidia_rebooted is changed
+  tags: [nvidia]
+
+- name: Explain a pending reboot
+  ansible.builtin.fail:
+    msg: >-
+      nvidia-smi is not working yet ({{ nvidia_smi.stderr | default(nvidia_smi.msg | default('')) | truncate(200) }}).
+      The driver was just installed - reboot {{ inventory_hostname }} (or set nvidia_allow_reboot=true) and rerun.
+  when:
+    - nvidia_smi.rc != 0
+    - nvidia_driver_changed | bool
+    - not ansible_check_mode
+  tags: [nvidia]
+
+- name: Assert the GPU model and driver branch {{ nvidia_driver_branch }}
+  vars:
+    nvidia_fields: "{{ (nvidia_smi.stdout_lines | default([]) | first | default('')).split(',') | map('trim') | list }}"
+  ansible.builtin.assert:
+    that:
+      - nvidia_smi.rc == 0
+      - nvidia_fields | length == 3
+      - nvidia_fields[0].split('.')[0] == nvidia_driver_branch
+      - nvidia_source != 'runfile' or nvidia_fields[0] == nvidia_runfile_version
+      - nvidia_fields[1] is search(nvidia_expected_gpu_regex)
+      - nvidia_fields[2] | int >= nvidia_expected_vram_mib_min | int
+    fail_msg: >-
+      unexpected GPU state: "{{ nvidia_smi.stdout | default('') }}" (rc={{ nvidia_smi.rc }}) -
+      expected driver {{ nvidia_runfile_version if nvidia_source == 'runfile' else nvidia_driver_branch ~ '.x' }}
+      on a GPU matching '{{ nvidia_expected_gpu_regex }}' with >= {{ nvidia_expected_vram_mib_min }} MiB
+      (a different loaded version needs a reboot after a driver update)
+    quiet: true
+  when: not ansible_check_mode
+  tags: [nvidia]
+
+- name: Check for nvidia-persistenced
+  ansible.builtin.stat:
+    path: "{{ nvidia_persistenced_bin }}"
+  register: nvidia_persistenced
+  tags: [nvidia]
+
+- name: Enable nvidia-persistenced (keeps the GPU initialised between model loads)
+  ansible.builtin.systemd_service:
+    name: nvidia-persistenced
+    enabled: true
+    state: started
+    daemon_reload: true
+  when:
+    - hermclaw_manage_services | bool
+    - nvidia_persistenced.stat.exists
+    - not ansible_check_mode
+  tags: [nvidia]

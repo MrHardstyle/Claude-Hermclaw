@@ -1,0 +1,50 @@
+# One user (podman_subid_item[0]) and one file (/etc/subuid or /etc/subgid).
+- name: Look up {{ podman_subid_item[0] }}
+  ansible.builtin.command:
+    argv: [getent, passwd, "{{ podman_subid_item[0] }}"]
+  register: podman_subid_pw
+  changed_when: false
+  check_mode: false
+
+- name: Check /etc/{{ podman_subid_item[1] }}
+  ansible.builtin.stat:
+    path: "/etc/{{ podman_subid_item[1] }}"
+  register: podman_subid_stat
+
+- name: Read /etc/{{ podman_subid_item[1] }}
+  ansible.builtin.slurp:
+    src: "/etc/{{ podman_subid_item[1] }}"
+  register: podman_subid_raw
+  when: podman_subid_stat.stat.exists
+
+- name: Compute the sub-ID range of {{ podman_subid_item[0] }}
+  ansible.builtin.set_fact:
+    podman_subid_lines: >-
+      {{ ((podman_subid_raw.content | b64decode) if podman_subid_stat.stat.exists else '').splitlines()
+         | select('match', '^[^:#]+:[0-9]+:[0-9]+$') | list }}
+    podman_subid_uid: "{{ podman_subid_pw.stdout.split(':')[2] }}"
+
+- name: Decide whether a new range is needed
+  ansible.builtin.set_fact:
+    podman_subid_has_range: >-
+      {{ podman_subid_lines | map('split', ':') | map('first')
+         | select('in', [podman_subid_item[0], podman_subid_uid]) | list | length > 0 }}
+    podman_subid_next: >-
+      {%- set ns = namespace(end=podman_subid_start | int) -%}
+      {%- for line in podman_subid_lines -%}
+      {%- set parts = line.split(':') -%}
+      {%- if (parts[1] | int) + (parts[2] | int) > ns.end -%}
+      {%- set ns.end = (parts[1] | int) + (parts[2] | int) -%}
+      {%- endif -%}
+      {%- endfor -%}
+      {{ ((ns.end + (podman_subid_count | int) - 1) // (podman_subid_count | int)) * (podman_subid_count | int) }}
+
+- name: Add a non-overlapping range to /etc/{{ podman_subid_item[1] }}
+  ansible.builtin.lineinfile:
+    path: "/etc/{{ podman_subid_item[1] }}"
+    line: "{{ podman_subid_item[0] }}:{{ podman_subid_next }}:{{ podman_subid_count }}"
+    create: true
+    owner: root
+    group: root
+    mode: "0644"
+  when: not podman_subid_has_range | bool

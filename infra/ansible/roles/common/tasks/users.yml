@@ -1,0 +1,26 @@
+# 1.2 – dedicated, locked system account for all Hermclaw services
+- name: Create the hermclaw group
+  ansible.builtin.group:
+    name: "{{ hermclaw_group }}"
+    system: true
+    state: present
+
+- name: Create the hermclaw system user
+  ansible.builtin.user:
+    name: "{{ hermclaw_user }}"
+    group: "{{ hermclaw_group }}"
+    system: true
+    home: "{{ hermclaw_home }}"
+    create_home: true
+    shell: /usr/sbin/nologin
+    password: "!"
+    comment: Hermclaw Next service account
+    state: present
+
+- name: Restrict the hermclaw home directory
+  ansible.builtin.file:
+    path: "{{ hermclaw_home }}"
+    state: directory
+    owner: "{{ hermclaw_user }}"
+    group: "{{ hermclaw_group }}"
+    mode: "0750"

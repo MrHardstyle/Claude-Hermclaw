@@ -1,0 +1,15 @@
+# Managed by Hermclaw – NVIDIA persistence daemon for the runfile driver on the model worker
+# (role nvidia). Keeps the GPU initialised between model loads; based on NVIDIA's sample unit.
+[Unit]
+Description=NVIDIA Persistence Daemon
+After=systemd-modules-load.service
+
+[Service]
+Type=forking
+PIDFile=/run/nvidia-persistenced/nvidia-persistenced.pid
+ExecStart={{ nvidia_persistenced_bin }} --user {{ nvidia_persistenced_user }}
+ExecStopPost=/bin/rm -rf /run/nvidia-persistenced
+Restart=always
+
+[Install]
+WantedBy=multi-user.target

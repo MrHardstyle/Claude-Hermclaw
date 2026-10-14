@@ -1,0 +1,15 @@
+# Managed by Hermclaw – PostgreSQL {{ postgresql_version }} settings (conf.d drop-in).
+{% macro pgvalue(value) -%}
+{%- if value is number or (value | string) is match('^-?[0-9]+(\.[0-9]+)?(B|kB|MB|GB|TB|us|ms|s|min|h|d)?$') -%}
+{{ value }}
+{%- else -%}
+'{{ value | string | replace('\\', '\\\\') | replace("'", "''") | replace('\n', ' ') }}'
+{%- endif -%}
+{%- endmacro %}
+listen_addresses = {{ pgvalue(postgresql_listen_addresses) }}
+port = {{ postgresql_port | int }}
+{% for key, value in postgresql_settings | dictsort %}
+{% if key is match('^[a-z_][a-z0-9_.]*$') %}
+{{ key }} = {{ pgvalue(value) }}
+{% endif %}
+{% endfor %}

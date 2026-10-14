@@ -1,0 +1,44 @@
+# Managed by Hermclaw – execution worker daemon (.222). Runs sandbox commands with rootless
+# Podman as {{ hermclaw_user }} (lingering user manager, delegated cgroup v2 controllers).
+# Installed by the systemd_skeleton role (P01 1.13); enabled by the deployment phase.
+[Unit]
+Description=Hermclaw Next execution worker
+After=network-online.target user@{{ systemd_skeleton_hermclaw_uid }}.service
+Wants=network-online.target user@{{ systemd_skeleton_hermclaw_uid }}.service
+ConditionFileIsExecutable={{ hermclaw_venv }}/bin/hermclaw-exec-worker
+
+[Service]
+Type=exec
+User={{ hermclaw_user }}
+Group={{ hermclaw_group }}
+EnvironmentFile={{ hermclaw_config_dir }}/worker.env
+# rootless Podman talks to the user's systemd instance for container cgroups
+# (%U would be root's UID in a system unit, so the UID is rendered by Ansible)
+Environment=XDG_RUNTIME_DIR=/run/user/{{ systemd_skeleton_hermclaw_uid }}
+Environment=DBUS_SESSION_BUS_ADDRESS=unix:path=/run/user/{{ systemd_skeleton_hermclaw_uid }}/bus
+Environment=HOME={{ hermclaw_home }}
+LoadCredentialEncrypted=worker-token:{{ hermclaw_credstore_dir }}/hermclaw-worker-token
+ExecStart={{ hermclaw_venv }}/bin/hermclaw-exec-worker
+Restart=on-failure
+RestartSec=5s
+# the worker stops its own containers; mixed lets it do so before SIGKILL
+KillMode=mixed
+TimeoutStopSec=60s
+UMask=0027
+WorkingDirectory={{ hermclaw_data_dir }}
+# Rootless Podman needs user namespaces and the setuid newuidmap/newgidmap helpers,
+# so NoNewPrivileges/RestrictNamespaces/PrivateDevices stay off here; isolation of the
+# executed code comes from the sandbox (--network=none, --cap-drop=ALL, read-only rootfs).
+ProtectSystem=full
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectKernelLogs=yes
+ProtectClock=yes
+ProtectHostname=yes
+RestrictRealtime=yes
+LockPersonality=yes
+SystemCallArchitectures=native
+RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6 AF_NETLINK
+
+[Install]
+WantedBy=multi-user.target

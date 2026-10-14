@@ -1,0 +1,127 @@
+# podman – rootless Podman, sub-IDs, lingering, cgroup v2 delegation (P01 1.10)
+- name: Validate the podman settings
+  ansible.builtin.import_tasks: validate.yml
+  tags: [podman]
+
+- name: Install Podman and rootless helpers
+  ansible.builtin.apt:
+    name: "{{ podman_packages }}"
+    state: present
+    install_recommends: false
+  when: hermclaw_install_packages | bool
+  tags: [podman, packages]
+
+- name: Read the Podman version
+  ansible.builtin.command:
+    argv: [podman, --version]
+  register: podman_version
+  changed_when: false
+  check_mode: false
+  when: hermclaw_install_packages | bool
+  tags: [podman]
+
+- name: Assert Podman >= {{ podman_min_version }}
+  ansible.builtin.assert:
+    that: (podman_version.stdout | regex_search('[0-9]+[.][0-9]+([.][0-9]+)?')) is version(podman_min_version, '>=')
+    fail_msg: "{{ podman_version.stdout }} is older than {{ podman_min_version }}"
+    quiet: true
+  when: hermclaw_install_packages | bool
+  tags: [podman]
+
+- name: Allocate sub-UIDs and sub-GIDs
+  ansible.builtin.include_tasks:
+    file: subids.yml
+    apply:
+      tags: [podman]
+  loop: "{{ podman_users | product(['subuid', 'subgid']) | list }}"
+  loop_control:
+    loop_var: podman_subid_item
+    label: "{{ podman_subid_item[0] }} /etc/{{ podman_subid_item[1] }}"
+  tags: [podman]
+
+- name: Create the containers.conf drop-in directory
+  ansible.builtin.file:
+    path: /etc/containers/containers.conf.d
+    state: directory
+    owner: root
+    group: root
+    mode: "0755"
+  tags: [podman]
+
+- name: Write the containers.conf drop-in
+  ansible.builtin.template:
+    src: containers-hermclaw.conf.j2
+    dest: /etc/containers/containers.conf.d/50-hermclaw.conf
+    owner: root
+    group: root
+    mode: "0644"
+  tags: [podman]
+
+- name: Create the user@.service drop-in directory
+  ansible.builtin.file:
+    path: /etc/systemd/system/user@.service.d
+    state: directory
+    owner: root
+    group: root
+    mode: "0755"
+  tags: [podman]
+
+- name: Delegate cgroup v2 controllers to user managers
+  ansible.builtin.template:
+    src: delegate.conf.j2
+    dest: /etc/systemd/system/user@.service.d/delegate.conf
+    owner: root
+    group: root
+    mode: "0644"
+  register: podman_delegate
+  notify: Reload systemd
+  tags: [podman]
+
+- name: Load the delegation drop-in before user managers start
+  ansible.builtin.meta: flush_handlers
+  tags: [podman]
+
+- name: Enable lingering (starts the user manager now)
+  ansible.builtin.command:
+    argv: [loginctl, enable-linger, "{{ item }}"]
+    creates: "/var/lib/systemd/linger/{{ item }}"
+  loop: "{{ podman_users }}"
+  when: hermclaw_manage_services | bool
+  tags: [podman]
+
+- name: Mark lingering for the next boot (no running systemd)
+  when: not hermclaw_manage_services | bool
+  tags: [podman]
+  block:
+    - name: Create the linger directory
+      ansible.builtin.file:
+        path: /var/lib/systemd/linger
+        state: directory
+        owner: root
+        group: root
+        mode: "0755"
+
+    - name: Create linger flag files
+      ansible.builtin.copy:
+        content: ""
+        dest: "/var/lib/systemd/linger/{{ item }}"
+        owner: root
+        group: root
+        mode: "0644"
+        force: false
+      loop: "{{ podman_users }}"
+
+- name: Verify rootless Podman and delegated controllers
+  ansible.builtin.include_tasks:
+    file: verify.yml
+    apply:
+      tags: [podman]
+  loop: "{{ podman_users }}"
+  loop_control:
+    loop_var: podman_verify_user
+  when:
+    - podman_verify_rootless | bool
+    - hermclaw_manage_services | bool
+    - hermclaw_install_packages | bool
+    - not ansible_check_mode
+  tags: [podman]

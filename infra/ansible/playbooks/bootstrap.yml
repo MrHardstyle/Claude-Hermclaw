@@ -1,0 +1,65 @@
+# Hermclaw Next – P01 clean system bootstrap of the Debian 13 hosts (Bauplan §2, §5, §6).
+#
+#   cd infra/ansible
+#   ansible-playbook playbooks/bootstrap.yml --check --diff     # dry run (meaningful on reruns)
+#   ansible-playbook playbooks/bootstrap.yml                    # all hosts, orchestrator first
+#   ansible-playbook playbooks/bootstrap.yml --limit webui      # one group
+#   ansible-playbook playbooks/bootstrap.yml --tags preflight   # read-only preflight only
+#
+# Idempotent: a second run reports changed=0. GitLab (.226) and Terra (.60) are not
+# bootstrapped (no Hermclaw software runs there). Live runs: BLOCKER-001 in this build env.
+
+- name: Ensure Python for Ansible on the Hermclaw hosts
+  hosts: orchestrator:webui:execution_workers:model_workers
+  gather_facts: false
+  become: true
+  tags: [always]
+  tasks:
+    - name: Install python3 when it is missing (raw, Debian)
+      ansible.builtin.raw: >-
+        if [ -x /usr/bin/python3 ]; then echo present; else
+        DEBIAN_FRONTEND=noninteractive apt-get update -qq &&
+        DEBIAN_FRONTEND=noninteractive apt-get install -y -qq --no-install-recommends python3 >/dev/null &&
+        echo installed; fi
+      register: bootstrap_python
+      changed_when: "'installed' in bootstrap_python.stdout"
+      when: hermclaw_install_packages | default(true) | bool
+
+    - name: Gather facts
+      ansible.builtin.setup:
+
+- name: Orchestrator .225 - runtime, PostgreSQL, Podman (SearXNG), units
+  hosts: orchestrator
+  become: true
+  roles:
+    - role: common
+    - role: postgresql
+    - role: podman
+    - role: systemd_skeleton
+
+- name: WebUI .223 - Node.js build tooling, Nginx
+  hosts: webui
+  become: true
+  roles:
+    - role: common
+    - role: nodejs
+    - role: nginx
+
+- name: Execution worker .222 - rootless Podman sandbox, Wake-on-LAN, units
+  hosts: execution_workers
+  become: true
+  roles:
+    - role: common
+    - role: podman
+    - role: wol_target
+    - role: systemd_skeleton
+
+- name: Model worker .224 - NVIDIA 580, Ollama, Wake-on-LAN, units
+  hosts: model_workers
+  become: true
+  roles:
+    - role: common
+    - role: nvidia
+    - role: ollama
+    - role: wol_target
+    - role: systemd_skeleton

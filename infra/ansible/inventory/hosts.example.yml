@@ -1,8 +1,11 @@
 # Hermclaw Next – Ansible inventory (copy to hosts.yml and adjust).
-# Host roles are fixed by the architecture and must not be redistributed.
+# Host roles are fixed by the architecture (Bauplan §2) and must not be redistributed.
+# scripts/bootstrap/bootstrap-control-node.sh creates hosts.yml from this file.
 all:
   vars:
-    ansible_user: hermclaw-admin
+    # Your personal sudo-capable admin login on the Debian hosts. NOT hermclaw-admin: that
+    # account is created by the bootstrap as the runtime's restricted SSH user (sudo allowlist only).
+    ansible_user: admin
     ansible_become: true
     hermclaw_version: "0.1.0-rc1"
     hermclaw_orchestrator_ip: 192.168.178.225
@@ -16,16 +19,24 @@ all:
       hosts:
         hermclaw-webui:
           ansible_host: 192.168.178.223
+          # nginx server_name of the Hermclaw site; "_" = catch-all (only if no other default site exists)
+          hermclaw_web_server_name: hermclaw.lan
     execution_workers:
       hosts:
         hermclaw-exec-222:
           ansible_host: 192.168.178.222
-          wol_mac: "00:00:00:00:00:00"   # TODO: real MAC from inventory
+          hermclaw_worker_id: exec-222
+          wol_mac: "00:00:00:00:00:00"   # TODO: real MAC from inventory (P00)
+          wol_interface: ""              # empty = interface of the default route
     model_workers:
       hosts:
         hermclaw-model-224:
           ansible_host: 192.168.178.224
-          wol_mac: "00:00:00:00:00:00"   # TODO: real MAC from inventory
+          hermclaw_worker_id: model-224
+          wol_mac: "00:00:00:00:00:00"   # TODO: real MAC from inventory (P00)
+          wol_interface: ""
+    # Not bootstrapped by playbooks/bootstrap.yml (not Debian 13 Hermclaw hosts);
+    # listed for playbooks/inventory.yml and documentation only.
     gitlab:
       hosts:
         gitlab-226:

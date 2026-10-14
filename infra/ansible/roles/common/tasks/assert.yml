@@ -1,0 +1,64 @@
+# 1.1 – target platform is Debian 13 "trixie" (research 20261008-001)
+- name: Assert Debian 13 trixie on x86_64
+  ansible.builtin.assert:
+    that:
+      - ansible_facts['distribution'] == 'Debian'
+      - ansible_facts['distribution_major_version'] == hermclaw_debian_major | string
+      - ansible_facts['distribution_release'] == hermclaw_debian_codename
+      - ansible_facts['architecture'] == 'x86_64'
+    fail_msg: >-
+      Hermclaw Next requires Debian {{ hermclaw_debian_major }} ({{ hermclaw_debian_codename }}) on x86_64,
+      found {{ ansible_facts['distribution'] }} {{ ansible_facts['distribution_version'] }}
+      ({{ ansible_facts['distribution_release'] }}) on {{ ansible_facts['architecture'] }}.
+    quiet: true
+
+- name: Validate the common settings
+  ansible.builtin.import_tasks: validate.yml
+
+- name: Run host preflight (scripts/bootstrap/check-host.sh, read-only)
+  ansible.builtin.script:
+    cmd: >-
+      {{ role_path }}/../../../../scripts/bootstrap/check-host.sh --json
+      --role {{ group_names | join(',') | quote }}
+      {{ '--allow-conflicts' if common_preflight_allow_conflicts | bool else '' }}
+      {{ ('--min-cpus ' ~ (common_preflight_min_cpus | int)) if common_preflight_min_cpus | string | length > 0 else '' }}
+      {{ ('--min-ram-mb ' ~ (common_preflight_min_ram_mb | int)) if common_preflight_min_ram_mb | string | length > 0 else '' }}
+      {{ ('--min-disk-gb ' ~ (common_preflight_min_disk_gb | int)) if common_preflight_min_disk_gb | string | length > 0 else '' }}
+    executable: /bin/bash
+  environment:
+    HERMCLAW_PORT_PLAN: "{{ common_preflight_port_plan }}"
+  register: common_preflight
+  changed_when: false
+  failed_when: false
+  check_mode: false
+  when: common_run_preflight | bool
+
+- name: Evaluate preflight result
+  when: common_run_preflight | bool
+  block:
+    - name: Stop when the preflight produced no report (usage error, invalid port plan)
+      ansible.builtin.fail:
+        msg: >-
+          check-host.sh exited with {{ common_preflight.rc | default('?') }} without a JSON report on {{ inventory_hostname }}:
+          {{ (common_preflight.stderr | default('') ~ ' ' ~ common_preflight.msg | default('')) | trim | truncate(600) }}
+      when: >-
+        common_preflight.rc | default(-1) not in [0, 1]
+        or not (common_preflight.stdout | default('') | trim is match('^[{].*[}]$'))
+
+    - name: Parse preflight report
+      ansible.builtin.set_fact:
+        common_preflight_report: "{{ common_preflight.stdout | from_json }}"
+
+    - name: Show preflight warnings
+      ansible.builtin.debug:
+        msg: "{{ common_preflight_report.checks | selectattr('status', 'equalto', 'WARN') | map(attribute='message') | list }}"
+      when: common_preflight_report.warnings | int > 0
+
+    - name: Stop on preflight failures (never overwrite existing services)
+      ansible.builtin.fail:
+        msg: >-
+          Preflight failed on {{ inventory_hostname }}:
+          {{ common_preflight_report.checks | selectattr('status', 'equalto', 'FAIL')
+             | map(attribute='check') | zip(common_preflight_report.checks
+             | selectattr('status', 'equalto', 'FAIL') | map(attribute='message')) | map('join', ': ') | list }}
+      when: common_preflight.rc | default(-1) != 0

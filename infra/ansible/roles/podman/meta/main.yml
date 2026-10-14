@@ -1,0 +1,12 @@
+galaxy_info:
+  role_name: podman
+  namespace: hermclaw
+  author: Hermclaw Next
+  description: "Rootless Podman with sub-IDs, lingering and cgroup v2 delegation"
+  license: proprietary
+  min_ansible_version: "2.17"
+  platforms:
+    - name: Debian
+      versions:
+        - trixie
+dependencies: []

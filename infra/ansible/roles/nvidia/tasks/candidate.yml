@@ -1,0 +1,36 @@
+# apt candidate check before a driver install from apt (sources cuda/debian). Inputs:
+#   nvidia_candidate_present - packages that only need an installation candidate
+#   nvidia_candidate_branch  - packages whose candidate must belong to nvidia_driver_branch
+# The Hermclaw pin (hermclaw-nvidia.pref) already removes 590+ candidates, so a repository
+# that only carries 590+ (NVIDIA's debian13 repo on 2026-10-14) shows "(none)" here and the
+# role stops with a clear message instead of a half-installed driver. Tested with a fake
+# apt-cache by tests/integration/test_bootstrap_infra.py::test_nvidia_candidate_check.
+- name: Read the apt candidates of the driver packages
+  ansible.builtin.command:
+    argv: [apt-cache, policy, "{{ item }}"]
+  loop: "{{ (nvidia_candidate_present + nvidia_candidate_branch) | unique }}"
+  register: nvidia_candidate_policy
+  changed_when: false
+  check_mode: false
+
+- name: Collect the candidate versions
+  ansible.builtin.set_fact:
+    nvidia_candidates: >-
+      {{ dict(nvidia_candidate_policy.results | map(attribute='item')
+         | zip(nvidia_candidate_policy.results | map(attribute='stdout')
+               | map('regex_replace', '$', ' Candidate: (none)')
+               | map('regex_findall', 'Candidate: *([^ \n]+)') | map('first'))) }}
+
+- name: Assert installable driver packages of branch {{ nvidia_driver_branch }}
+  ansible.builtin.assert:
+    that:
+      - nvidia_candidate_present | reject('in', nvidia_candidates | dict2items | rejectattr('value', 'equalto', '(none)')
+        | map(attribute='key') | list) | list | length == 0
+      - nvidia_candidate_branch | map('extract', nvidia_candidates)
+        | reject('match', '^([0-9]+:)?' ~ nvidia_driver_branch ~ '[.]') | list | length == 0
+    fail_msg: >-
+      No installable {{ nvidia_driver_branch }}.x driver from source '{{ nvidia_source }}' on {{ inventory_hostname }}
+      (apt candidates: {{ nvidia_candidates }}). NVIDIA's debian13 CUDA repository only carries 590+ and Debian
+      trixie ships 550 - use nvidia_source=runfile (default) for {{ nvidia_driver_branch }}, or
+      nvidia_source=debian with nvidia_driver_branch=550.
+    quiet: true

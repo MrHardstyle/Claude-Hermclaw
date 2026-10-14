@@ -1,0 +1,22 @@
+# Interface selection and input validation of the wol_target role (tested locally by
+# tests/integration/test_bootstrap_infra.py::test_role_input_validation).
+- name: Select the Wake-on-LAN interface
+  ansible.builtin.set_fact:
+    wol_target_if: >-
+      {{ wol_target_interface if wol_target_interface | length > 0
+         else ansible_facts['default_ipv4']['interface'] | default('') }}
+
+- name: Validate the interface name and MAC address
+  ansible.builtin.assert:
+    that:
+      - wol_target_if is match('^[A-Za-z0-9_][A-Za-z0-9_.-]{0,14}$')
+      - wol_target_mac | length == 0 or wol_target_mac is match('^([0-9A-Fa-f]{2}:){5}[0-9A-Fa-f]{2}$')
+    fail_msg: "invalid wol interface '{{ wol_target_if }}' or wol_target_mac '{{ wol_target_mac }}'"
+    quiet: true
+
+# systemd unit names escape '-' as \x2d (systemd-escape); the unit uses %i for the device
+# unit and the unescaped %I for ethtool.
+- name: Compute the systemd instance name
+  ansible.builtin.set_fact:
+    wol_target_instance: >-
+      {{ wol_target_if | replace('-', '\x2d') }}

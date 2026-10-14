@@ -1,0 +1,3 @@
+# Managed by Hermclaw – cgroup v2 controller delegation for rootless Podman.
+[Service]
+Delegate={{ podman_delegate_controllers | join(' ') }}

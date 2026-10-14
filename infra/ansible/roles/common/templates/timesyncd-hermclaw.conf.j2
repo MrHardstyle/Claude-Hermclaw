@@ -1,0 +1,4 @@
+# {{ ansible_managed | default('Managed by Hermclaw (Ansible role common)') }}
+# Managed by Hermclaw – P01 common role.
+[Time]
+NTP={{ common_ntp_servers | join(' ') }}

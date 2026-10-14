@@ -1,0 +1,68 @@
+# nodejs – NodeSource Node.js {{ nodejs_major }}.x (P01 1.11)
+- name: Validate the nodejs settings
+  ansible.builtin.import_tasks: validate.yml
+  tags: [nodejs]
+
+- name: Install Node.js from NodeSource
+  when: hermclaw_install_packages | bool
+  tags: [nodejs, packages]
+  block:
+    - name: Add the NodeSource repository
+      ansible.builtin.deb822_repository:
+        name: nodesource
+        types: [deb]
+        uris: ["{{ nodejs_repo_uri }}"]
+        suites: ["{{ nodejs_repo_suite }}"]
+        components: [main]
+        architectures: [amd64]
+        signed_by: "{{ nodejs_key_url }}"
+        state: present
+      register: nodejs_repo
+
+    - name: Pin nodejs to NodeSource
+      ansible.builtin.template:
+        src: nodesource.pref.j2
+        dest: /etc/apt/preferences.d/hermclaw-nodesource.pref
+        owner: root
+        group: root
+        mode: "0644"
+      register: nodejs_pin
+
+    - name: Refresh apt cache after repository changes
+      ansible.builtin.apt:
+        update_cache: true
+      when: nodejs_repo is changed or nodejs_pin is changed
+
+    - name: Install nodejs (ships npm and corepack)
+      ansible.builtin.apt:
+        name: nodejs
+        state: present
+
+- name: Read the Node.js version
+  ansible.builtin.command:
+    argv: [node, --version]
+  register: nodejs_version
+  changed_when: false
+  check_mode: false
+  failed_when: false
+  tags: [nodejs]
+
+- name: Assert the Node.js major version and minimum {{ nodejs_min_version }}
+  ansible.builtin.assert:
+    that:
+      - nodejs_version.rc == 0
+      - nodejs_version.stdout | regex_replace('^v', '') is version(nodejs_min_version, '>=')
+      - (nodejs_version.stdout | regex_replace('^v', '')).split('.')[0] | int == nodejs_major | int
+    fail_msg: "node {{ nodejs_version.stdout | default('missing') }} does not satisfy {{ nodejs_major }}.x >= {{ nodejs_min_version }}"
+    quiet: true
+  when: not (ansible_check_mode and nodejs_version.rc != 0)
+  tags: [nodejs]
+
+- name: Read the npm version
+  ansible.builtin.command:
+    argv: [npm, --version]
+  register: nodejs_npm_version
+  changed_when: false
+  check_mode: false
+  when: nodejs_version.rc == 0
+  tags: [nodejs]

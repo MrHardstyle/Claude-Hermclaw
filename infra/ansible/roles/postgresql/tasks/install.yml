@@ -1,0 +1,31 @@
+- name: Add the PGDG apt repository ({{ postgresql_pgdg_suite }})
+  ansible.builtin.deb822_repository:
+    name: pgdg
+    types: [deb]
+    uris: ["{{ postgresql_pgdg_uri }}"]
+    suites: ["{{ postgresql_pgdg_suite }}"]
+    components: [main]
+    architectures: [amd64]
+    signed_by: "{{ postgresql_pgdg_key_url }}"
+    state: present
+  register: postgresql_repo
+
+- name: Pin pgvector to PGDG
+  ansible.builtin.template:
+    src: pgdg.pref.j2
+    dest: /etc/apt/preferences.d/hermclaw-pgdg.pref
+    owner: root
+    group: root
+    mode: "0644"
+  register: postgresql_pin
+
+- name: Refresh apt cache after repository changes
+  ansible.builtin.apt:
+    update_cache: true
+  when: postgresql_repo is changed or postgresql_pin is changed
+
+- name: Install PostgreSQL and pgvector {{ postgresql_version }}
+  ansible.builtin.apt:
+    name: "{{ postgresql_packages }}"
+    state: present
+    install_recommends: false
