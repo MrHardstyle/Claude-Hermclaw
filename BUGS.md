@@ -637,6 +637,13 @@ Noch keine.
 - Tatsächlich: target blocked for later deployments
 - Fix: claim released, deployment marked failed
 
+### BUG-108 – Sandbox ran images whose metadata defeats its isolation (Podman CVE-2026-57231 / CVE-2026-94603, unfixed in trixie's podman 5.4.2)
+- Phase: P39 · Komponente: worker/execution (P18) · Severity: P1 · blockierend: nein · Status: **behoben** (`tests/integration/test_sandbox_podman.py::test_images_that_defeat_the_sandbox_are_refused` with a real podman-built image, `tests/unit/test_sandbox_runtime_env.py::test_image_safety_issues`; found by research R-028 C3/C3b)
+- Reproduktion: an allowed image with `Env: ["SECRET"]` (no value) or the label/annotation `io.podman.annotations.checkpoint.runtime.name`
+- Erwartet: refused before anything runs
+- Tatsächlich: podman copies the engine process's variable values into the container (CVE-2026-57231); with the checkpoint annotation it silently ignores `--cap-drop=ALL` & co. (CVE-2026-94603; rootless not affected per advisory)
+- Fix: every image is inspected once per worker process before its first run (`SANDBOX_IMAGE_UNSAFE`); the worker selftest (`hermclaw doctor`) reports such images
+
 ## Template
 
 ### BUG-XXX – Titel

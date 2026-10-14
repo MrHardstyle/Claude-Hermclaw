@@ -591,6 +591,13 @@ class ExecutionService:
             present = len(self.runner.allowed_images()) - len(missing)
             if missing:
                 return False, f"missing: {', '.join(missing)} (scripts/ops/hermclaw-build-sandbox-images)"
+            unsafe = []
+            for image in sorted(self.runner.allowed_images()):
+                reason = await self.runner.image_refusal(image)
+                if reason is not None:
+                    unsafe.append(f"{image}: {reason}")
+            if unsafe:
+                return False, "unsafe: " + "; ".join(unsafe)[:500]
             return True, f"{present} image(s) present"
 
         await timed("workspaces_writable", writable())

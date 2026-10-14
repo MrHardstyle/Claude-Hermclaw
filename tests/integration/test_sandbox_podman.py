@@ -373,3 +373,27 @@ async def test_live_222_rootless_with_delegated_cgroups_v2(ws: Path) -> None:
     assert net.exit_code == 0 and net.stdout.strip() == "1"
     owner = await strict.run(req("touch owned && stat -c %u owned"), ws)
     assert owner.stdout.strip() == str(os.getuid())  # --userns=keep-id: files belong to the worker user
+
+
+async def test_images_that_defeat_the_sandbox_are_refused(ws: Path, tmp_path: Path) -> None:
+    """CVE-2026-94603 (checkpoint annotation drops --cap-drop & co.) and CVE-2026-57231 (Env entries without a value
+    copy the engine's variables into the container): such images never run (research 20261014-028 C3/C3b)."""
+    from worker.execution.sandbox import CHECKPOINT_ANNOTATION
+
+    bad = f"localhost/hermclaw-p18-checkpoint:{uuid.uuid4().hex[:8]}"
+    ctx = tmp_path / "ctx"
+    ctx.mkdir()
+    (ctx / "Containerfile").write_text(f"FROM {IMAGE}\nLABEL {CHECKPOINT_ANNOTATION}=runc\n", encoding="utf-8")
+    built = subprocess.run(
+        ["podman", "build", "-q", "--network=none", "-t", bad, str(ctx)], capture_output=True, text=True, timeout=300, check=False
+    )
+    assert built.returncode == 0, built.stderr[-2000:]
+    try:
+        sbx = sandbox(extra_images=[bad])
+        res = await sbx.run(req("echo should-not-run", image=bad), ws)
+        assert res.exit_code is None and res.error is not None and res.error.startswith("SANDBOX_IMAGE_UNSAFE"), res
+        assert "should-not-run" not in (res.stdout or "")
+        ok = await sbx.run(req("echo fine"), ws)
+        assert ok.exit_code == 0 and ok.stdout.strip() == "fine", "the regular image still runs"
+    finally:
+        subprocess.run(["podman", "rmi", "-f", bad], capture_output=True, check=False)

@@ -647,6 +647,36 @@ class SandboxInvocation:
     passthrough_env: Mapping[str, str] = field(default_factory=dict)
 
 
+#: image annotation/label that makes podman treat an image as a checkpoint and silently drop the run's isolation
+#: options (CVE-2026-94603, GHSA-2cvf-wqm6-wr9g; rootless is not affected – refused anyway, defence in depth)
+CHECKPOINT_ANNOTATION = "io.podman.annotations.checkpoint.runtime.name"
+
+
+def image_safety_issues(inspect_json: str) -> list[str]:
+    """Problems of an image (``<engine> image inspect`` JSON) that defeat the sandbox (research 20261014-028 C3/C3b):
+
+    * an ``Env`` entry without ``=`` makes ``podman run`` copy the engine process's value of that variable into the
+      container (CVE-2026-57231, ``*`` copies everything);
+    * the checkpoint annotation makes podman ignore ``--cap-drop`` & co. (CVE-2026-94603)."""
+    try:
+        data = json.loads(inspect_json)
+    except ValueError:
+        return ["unreadable image metadata"]
+    issues: list[str] = []
+    for item in data if isinstance(data, list) else [data]:
+        if not isinstance(item, dict):
+            continue
+        raw_config = item.get("Config")
+        config: dict[str, Any] = raw_config if isinstance(raw_config, dict) else {}
+        bare = [e for e in (config.get("Env") or []) if isinstance(e, str) and "=" not in e]
+        if bare:
+            issues.append(f"Env entries without a value copy host variables into the container: {', '.join(bare)[:200]}")
+        marks = {**(item.get("Annotations") or {}), **(config.get("Labels") or {})}
+        if CHECKPOINT_ANNOTATION in marks:
+            issues.append(f"checkpoint annotation {CHECKPOINT_ANNOTATION} disables the sandbox options")
+    return issues
+
+
 class ContainerSandbox:
     """Shared implementation of the podman and docker adapters (one container per command)."""
 
@@ -697,6 +727,7 @@ class ContainerSandbox:
         self.shell = tuple(shell)
         self.shm_size = _normalize_size(shm_size)
         self._active: dict[str, str] = {}  # container name -> request id
+        self._image_verdicts: dict[str, str | None] = {}  # image -> None (safe) or the refusal reason
 
     # ------------------------------------------------------------------ introspection
     def active_containers(self) -> dict[str, str]:
@@ -705,6 +736,20 @@ class ContainerSandbox:
 
     def allowed_images(self) -> frozenset[str]:
         return allowed_images(self.policy, self.extra_images)
+
+    async def image_refusal(self, image: str) -> str | None:
+        """``None`` when ``image`` is safe to run (checked once per process), else the reason it is refused.
+
+        A missing image is not judged here (the run pulls or fails as before) and not cached."""
+        if image in self._image_verdicts:
+            return self._image_verdicts[image]
+        rc, out, _err = await engine_exec([self.executable, "image", "inspect", image], timeout_seconds=60)
+        if rc != 0:
+            return None
+        issues = image_safety_issues(out)
+        verdict = "; ".join(issues) if issues else None
+        self._image_verdicts[image] = verdict
+        return verdict
 
     async def health(self) -> EngineInfo:
         return await engine_info(self.engine, self.executable)
@@ -921,6 +966,10 @@ class ContainerSandbox:
             return _violation_result(
                 req, self.engine, PolicyViolation("a command with this request_id is already running", code="SANDBOX_REQUEST_ACTIVE"), name
             )
+        refusal = await self.image_refusal(inv.image)
+        if refusal is not None:
+            unsafe = PolicyViolation(f"image {inv.image} refused: {refusal}", code="SANDBOX_IMAGE_UNSAFE")
+            return _violation_result(req, self.engine, unsafe)
         self._active[name] = req.request_id
         log.info(
             "sandbox command starting",

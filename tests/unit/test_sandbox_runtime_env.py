@@ -45,3 +45,19 @@ def test_other_names_stay_refused_and_dbtools_sets_only_runtime_names() -> None:
     policy = SandboxPolicy(env_allowlist=["PATH"])
     validate_request_env(dict.fromkeys(sorted(names), "x"), policy.request_env_allowlist)
     assert names >= {"DATABASE_URL", "HERMCLAW_SANDBOX_URL"} and "PGPASSWORD" in RUNTIME_SANDBOX_ENV
+
+
+def test_image_safety_issues() -> None:
+    import json
+
+    from worker.execution.sandbox import CHECKPOINT_ANNOTATION, image_safety_issues
+
+    safe = [{"Config": {"Env": ["PATH=/usr/bin", "LANG=C.UTF-8"], "Labels": {"maintainer": "x"}}, "Annotations": {}}]
+    assert image_safety_issues(json.dumps(safe)) == []
+    bare = [{"Config": {"Env": ["PATH=/usr/bin", "AWS_SECRET_ACCESS_KEY", "*"]}}]
+    [issue] = image_safety_issues(json.dumps(bare))
+    assert "AWS_SECRET_ACCESS_KEY" in issue and "*" in issue
+    assert image_safety_issues(json.dumps([{"Config": {}, "Annotations": {CHECKPOINT_ANNOTATION: "runc"}}]))
+    assert image_safety_issues(json.dumps([{"Config": {"Labels": {CHECKPOINT_ANNOTATION: "runc"}}}]))
+    assert image_safety_issues("not json") == ["unreadable image metadata"]
+    assert image_safety_issues(json.dumps([{"Config": None, "Annotations": None}])) == []
