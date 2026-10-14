@@ -496,6 +496,13 @@ Noch keine.
 - Phase: P39 · Komponente: tests · Severity: P4 · blockierend: nein · Status: **behoben** (precondition explicit: execution workers set offline; `test_workers_execution_daemon.py` + `test_runtime_services.py` together green; found by the P27 agent)
 - Tatsächlich: with a ready worker left by another test the pool selected it and raised WorkerAuthFailed (correct runtime behaviour) instead of the expected WorkerUnreachable
 
+### BUG-084 – Sandbox refused the environment of DB migration commands (`SANDBOX_ENV_NOT_ALLOWED`)
+- Phase: P39 · Komponente: worker/execution + dbtools · Severity: P1 · blockierend: ja (für `database`-Schritte) · Status: **behoben** (`tests/unit/test_sandbox_runtime_env.py`)
+- Reproduktion: a `database` step calls `db_migration_apply_sandbox`; the DB tools run `alembic upgrade head` in the step's sandbox with `DATABASE_URL`/`SQLALCHEMY_DATABASE_URI`/`HERMCLAW_SANDBOX_URL`/`HERMCLAW_ALEMBIC_*` and libpq `PG*` variables
+- Erwartet: the migration runs against the throw-away sandbox database
+- Tatsächlich: `validate_request_env` only allowed `policies.sandbox.env_allowlist` (PATH, HOME, LANG, LC_ALL, CI, PYTHONDONTWRITEBYTECODE) → every sandbox migration failed; the unit tests used fake executors and missed it
+- Fix: `hermclaw.core.config.RUNTIME_SANDBOX_ENV` (names only the runtime sets – tool calls of the model carry no environment) + `SandboxPolicy.request_env_allowlist`; the podman/docker sandbox validates against it, so an operator override of `env_allowlist` cannot break migrations or the verifier's `CI=1`. A test scans `hermclaw/dbtools` for every env name it sets.
+
 ## Template
 
 ### BUG-XXX – Titel

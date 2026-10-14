@@ -27,7 +27,8 @@ Every command of a step runs in its own throw-away container::
 * **18.8 cleanup** – ``--rm``; on timeout, cancellation and engine errors the container is killed and
   removed explicitly. Leftovers of crashed runs are found by label (:mod:`worker.execution.recovery`).
 
-Environment: ``policy.env_allowlist`` lists the names (exact or ``fnmatch`` glob) a request may set; nothing
+Environment: ``policy.request_env_allowlist`` (``env_allowlist`` plus the names the runtime itself sets,
+``hermclaw.core.config.RUNTIME_SANDBOX_ENV``) lists the names (exact or ``fnmatch`` glob) a request may set; nothing
 from the worker's own environment is forwarded into a container (podman additionally gets
 ``--http-proxy=false`` so host proxy variables, which may embed credentials, never leak in). Request values
 never appear on the engine's command line (``/proc/<pid>/cmdline`` is world-readable): they are handed to the
@@ -772,7 +773,7 @@ class ContainerSandbox:
             raise PolicyViolation("command contains a NUL byte", code="SANDBOX_COMMAND_INVALID")
         workspace = validate_workspace_dir(workspace_dir)
         image = resolve_image(self.policy, req.image, self.extra_images)
-        requested = validate_request_env(req.env, self.policy.env_allowlist)
+        requested = validate_request_env(req.env, self.policy.request_env_allowlist)
         env = {**BASE_CONTAINER_ENV, **requested}
         passthrough = {k: v for k, v in requested.items() if not is_engine_env_name(k)}
         for k in requested.keys() - passthrough.keys():
@@ -1090,7 +1091,7 @@ class LocalSandbox:
         env.update(BASE_CONTAINER_ENV)
         env["TMPDIR"] = os.environ.get("TMPDIR", "/tmp")  # noqa: S108 - host temp dir
         env["HOME"] = env["TMPDIR"]
-        env.update(validate_request_env(req.env, self.policy.env_allowlist))
+        env.update(validate_request_env(req.env, self.policy.request_env_allowlist))
         return env
 
     async def run(self, req: CommandRequest, workspace_dir: Path) -> CommandResult:

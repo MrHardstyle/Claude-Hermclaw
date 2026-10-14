@@ -158,6 +158,37 @@ class CommandPolicy(_Strict):
     max_output_bytes: int = 200_000
 
 
+#: environment variables the *runtime* sets on sandbox commands (never the model – tool calls carry no environment):
+#: the database tools point a project's migration tool at the throw-away sandbox database (P27), the verifier marks
+#: its commands as CI runs. Always allowed in addition to ``policies.sandbox.env_allowlist``, so an operator override
+#: of the allow-list cannot break them (BUG-084).
+RUNTIME_SANDBOX_ENV: tuple[str, ...] = (
+    "CI",
+    "DATABASE_URL",
+    "SQLALCHEMY_DATABASE_URI",
+    "HERMCLAW_SANDBOX_URL",
+    "HERMCLAW_ALEMBIC_*",
+    "PGHOST",
+    "PGPORT",
+    "PGUSER",
+    "PGPASSWORD",
+    "PGDATABASE",
+    # libpq parameters a sandbox-server DSN of databases.yaml may carry (hermclaw.dbtools.targets._LIBPQ_ENV)
+    "PGSSLMODE",
+    "PGSSLROOTCERT",
+    "PGSSLCERT",
+    "PGSSLKEY",
+    "PGSSLCRL",
+    "PGCONNECT_TIMEOUT",
+    "PGAPPNAME",
+    "PGTARGETSESSIONATTRS",
+    "PGOPTIONS",
+    "PGGSSENCMODE",
+    "PGCHANNELBINDING",
+    "PYTHONDONTWRITEBYTECODE",
+)
+
+
 class SandboxPolicy(_Strict):
     engine: Literal["podman", "docker", "local"] = "podman"
     image: str = "docker.io/library/python:3.12-slim"
@@ -169,6 +200,11 @@ class SandboxPolicy(_Strict):
     default_timeout_seconds: int = 600
     network_default: Literal["none", "allowed"] = "none"
     env_allowlist: list[str] = Field(default_factory=lambda: ["PATH", "HOME", "LANG", "LC_ALL", "CI", "PYTHONDONTWRITEBYTECODE"])
+
+    @property
+    def request_env_allowlist(self) -> list[str]:
+        """Names a sandbox request may set: the configured allow-list plus the runtime's own (``RUNTIME_SANDBOX_ENV``)."""
+        return [*self.env_allowlist, *(n for n in RUNTIME_SANDBOX_ENV if n not in self.env_allowlist)]
 
 
 class ScopePolicy(_Strict):
