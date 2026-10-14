@@ -173,6 +173,98 @@ async def test_37_2_sqlite_schema_migration(sessionmaker: Any, tmp_path: Path) -
     assert out.remote_file("migrations/001_init.sql") == SQLITE_SEED["migrations/001_init.sql"].strip()
 
 
+# ------------------------------------------------------------------------------------- 37.3 PostgreSQL migration
+ALEMBIC_ENV = (
+    "from alembic import context\nfrom sqlalchemy import engine_from_config, pool\n\nconfig = context.config\n\n\n"
+    "def run_migrations_online() -> None:\n"
+    '    connectable = engine_from_config(config.get_section(config.config_ini_section, {}), prefix="sqlalchemy.", '
+    "poolclass=pool.NullPool)\n"
+    "    with connectable.connect() as connection:\n"
+    "        context.configure(connection=connection, target_metadata=None)\n"
+    "        with context.begin_transaction():\n            context.run_migrations()\n\n\nrun_migrations_online()\n"
+)
+PG_SEED = {
+    "service/alembic.ini": (
+        "[alembic]\nscript_location = %(here)s/migrations\nsqlalchemy.url = postgresql+psycopg://app@db.internal/app\n"
+    ),
+    "service/migrations/env.py": ALEMBIC_ENV,
+    "service/migrations/versions/0001_create_orders.py": (
+        '"""create orders"""\nimport sqlalchemy as sa\nfrom alembic import op\n\nrevision = "0001"\ndown_revision = None\n\n\n'
+        "def upgrade():\n"
+        '    op.create_table("orders", sa.Column("id", sa.Integer, primary_key=True), sa.Column("total", sa.Integer, nullable=False))\n'
+        '\n\ndef downgrade():\n    op.drop_table("orders")\n'
+    ),
+}
+STATUS_REV = (
+    '"""orders.status with a check constraint"""\nimport sqlalchemy as sa\nfrom alembic import op\n\n'
+    'revision = "0002"\ndown_revision = "0001"\n\n\n'
+    "def upgrade():\n"
+    '    op.add_column("orders", sa.Column("status", sa.String(16), nullable=False, server_default="new"))\n'
+    "    op.create_check_constraint(\"orders_status_valid\", \"orders\", \"status IN ('new', 'paid', 'shipped')\")\n"
+    '\n\ndef downgrade():\n    op.drop_constraint("orders_status_valid", "orders", type_="check")\n'
+    '    op.drop_column("orders", "status")\n'
+)
+
+
+async def test_37_3_postgresql_migration(sessionmaker: Any, tmp_path: Path) -> None:
+    """A ``database`` step writes an Alembic revision and proves it with ``db_migration_apply_sandbox``: the runtime
+    creates a throw-away PostgreSQL database, runs upgrade → downgrade → upgrade through the step's executor, records
+    the tool output as ``ops_output`` evidence and drops the database again."""
+    from tests.integration.test_dbtools_support import ADMIN_URL, sandbox_names
+
+    config_dir = tmp_path / "etc"
+    config_dir.mkdir()
+    (config_dir / "databases.yaml").write_text(
+        f"targets: []\nsandbox:\n  admin_dsn_ref: literal:{ADMIN_URL}\nmigration_python: {PY}\n", encoding="utf-8"
+    )
+    before = set(sandbox_names())
+    new_rev = "service/migrations/versions/0002_orders_status.py"
+    sc = Scenario(
+        name="postgres",
+        title="orders.status",
+        prompt="Add a status column (new/paid/shipped) to the orders table of the PostgreSQL service (Alembic).",
+        seed=PG_SEED,
+        plans=[
+            plan(
+                "orders.status",
+                [
+                    step(
+                        "S001",
+                        "database",
+                        "database",
+                        "Add Alembic revision 0002 (orders.status NOT NULL DEFAULT 'new' with a check constraint) and apply it "
+                        "to a sandbox database (upgrade, downgrade, upgrade).",
+                        repo_hints=["service/migrations/versions/0001_create_orders.py", "service/alembic.ini"],
+                        allowed_new_paths=[new_rev],
+                        acceptance=[
+                            {"type": "presence", "path_glob": new_rev, "pattern": "create_check_constraint"},
+                            {"type": "diff", "must_not_change": ["service/migrations/versions/0001_create_orders.py"]},
+                            {"type": "artifact", "kind": "ops_output", "name_glob": "db_migration_apply_sandbox*"},
+                        ],
+                    ),
+                    _review("S001"),
+                ],
+            )
+        ],
+        coder={
+            "S001": [
+                write_file(new_rev, STATUS_REV),
+                act("db_migration_apply_sandbox", path="service"),
+                done("revision 0002 applied, rolled back and re-applied in a sandbox database", [new_rev]),
+            ]
+        },
+        settings={"config_dir": config_dir},
+    )
+    out = await run_scenario(sessionmaker, sc, tmp_path)
+    assert "create_check_constraint" in out.remote_file(new_rev)
+    evidence = [a for a in out.artifacts if a.kind == "ops_output" and a.name.startswith("db_migration_apply_sandbox")]
+    assert evidence and "alembic" in Path(evidence[0].path).read_text(encoding="utf-8")
+    applied = [e.payload for e in out.events if e.event_type == "db.tool" and e.payload.get("tool") == "db_migration_apply_sandbox"]
+    assert [p.get("outcome") for p in applied] == ["ok"] and applied[0].get("framework") == "alembic", applied
+    assert len(applied[0].get("steps", [])) >= 3, "upgrade, downgrade and upgrade again"
+    assert set(sandbox_names()) - before == set(), "the sandbox database and role are dropped after the run"
+
+
 # ------------------------------------------------------------------------------------------- TS / TSX toolchain
 TSC = shutil.which("tsc")
 NODE = shutil.which("node")

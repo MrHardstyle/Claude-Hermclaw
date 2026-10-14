@@ -292,3 +292,12 @@ def test_query_analysis() -> None:
     only_stop = analyze("the and or")
     assert not only_stop.is_empty()
     assert analyze("").is_empty()
+
+
+def test_query_phrases_are_single_line_and_ignore_apostrophes() -> None:
+    """Regression (BUG-089): a phrase spanning lines between two apostrophes made ripgrep reject the whole lexical query."""
+    q = analyze("Fix the user's profile page\nand the 'save' button; it's broken")
+    assert q.phrases == ["save"]
+    q = analyze("title: orders.status'\nAdd revision 0002 (status NOT NULL DEFAULT 'new' with a check)")
+    assert "new" in q.phrases and all("\n" not in p for p in q.lexical_patterns)
+    assert analyze('`multi\nline` and "also\nthis"').phrases == []

@@ -527,6 +527,13 @@ Noch keine.
 - Erwartet: 0 violations
 - Tatsächlich: Fixed in roles/ollama/tasks/gpu_check.yml:40 and main.yml:135 (Jinja moved to the end of the task name).
 
+### BUG-089 – Repository intelligence: a quoted "phrase" across lines disabled the lexical signal
+- Phase: P39 · Komponente: repo_intelligence · Severity: P2 · blockierend: nein · Status: **behoben** (`tests/unit/test_repo_intelligence_structure.py::test_query_phrases_are_single_line_and_ignore_apostrophes`; found by the 37.3 E2E run)
+- Reproduktion: a step query like `title: orders.status'` + newline + `… DEFAULT 'new' …` (or any apostrophe as in "user's" followed later by a quoted word)
+- Erwartet: lexical search with the step's words and literals
+- Tatsächlich: the single-quote phrase pattern matched from the apostrophe across the line break; ripgrep refuses multi-line fixed patterns, so the whole lexical signal failed (`REPO_PATTERN_INVALID`, ranking degraded)
+- Fix: phrases are single-line, a single quote must not touch a word (apostrophes), and `lexical_patterns` never emits a pattern with a newline/NUL
+
 ## Template
 
 ### BUG-XXX – Titel

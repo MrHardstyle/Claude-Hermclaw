@@ -21,7 +21,8 @@ _STOP_WORDS = """
 _STOP = frozenset(_STOP_WORDS.split())
 _IDENT_RE = re.compile(r"[A-Za-z_$][\w$]*(?:(?:\.|::|->|\\)[A-Za-z_$][\w$]*)*")
 _ROUTE_RE = re.compile(r"(?<![\w.])/[\w\-{}:.<>\[\]]+(?:/[\w\-{}:.<>\[\]]*)*")
-_PHRASE_RE = re.compile(r"`([^`]{2,200})`|\"([^\"]{2,200})\"|'([^']{3,200})'")
+# single-line literals only; a single quote must not touch a word (apostrophes: "the user's 'save' button")
+_PHRASE_RE = re.compile(r"`([^`\n]{2,200})`|\"([^\"\n]{2,200})\"|(?<![\w'])'([^'\n]{3,200})'(?![\w'])")
 _CAMEL_RE = re.compile(r"[A-Z]+(?=[A-Z][a-z]|\d|\b)|[A-Z]?[a-z]+|[A-Z]+|\d+")
 
 
@@ -65,7 +66,7 @@ class QueryTerms:
         seen: dict[str, None] = {}
         for p in [*self.phrases, *self.identifiers, *self.routes, *self.terms]:
             key = p.lower()
-            if key not in seen and len(p) >= 2:
+            if key not in seen and len(p) >= 2 and "\n" not in p and "\0" not in p:
                 seen[key] = None
         return list(seen)
 

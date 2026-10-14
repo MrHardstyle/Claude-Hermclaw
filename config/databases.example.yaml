@@ -24,6 +24,10 @@ targets: []
 #   client_host: 192.168.178.225          # how the execution worker (.222) reaches that server
 #   orphan_max_age_hours: 6               # sandboxes of crashed runs are dropped at scheduler start
 
+# Interpreter that runs a project's Alembic migrations inside the execution sandbox image (needs alembic + the
+# project's DB driver there):
+# migration_python: python3
+
 # limits:
 #   default_row_limit: 100
 #   max_row_limit: 5000
