@@ -421,6 +421,8 @@ Konfigurationsdatei, einer Umgebungsvariable, einem Log oder auf einer Kommandoz
 | `worker-token-exec-222`, `worker-token-model-224` | .225 | Bootstrap (zufällig) | Scheduler/API (Signatur der Worker-Aufrufe) |
 | `worker-token` | .222, .224 | Bootstrap (Kopie vom Orchestrator) | Worker-Daemons |
 | `gitlab-token` | .225 | **Sie** (Schritt 6.1) | Scheduler: Merge Requests, geschützte Branches |
+| `api-operator-token` | .225 | Deployment (einmalig) | Ihr erstes Admin-Token für die Oberfläche (Kapitel 8.6) |
+| `backup-manifest-key` | .225 | Sie oder das Deployment (Kapitel 11) | Signatur der Backup-Manifeste |
 
 ### 6.1 GitLab vorbereiten (.226)
 
@@ -428,7 +430,8 @@ Konfigurationsdatei, einer Umgebungsvariable, einem Log oder auf einer Kommandoz
    **Project/Group Access Token** mit Rolle *Developer* und den Scopes `api`, `read_repository`,
    `write_repository`.
 2. Schützen Sie `main`, `master` und `release/*` (*Settings → Repository → Protected branches*). Hermclaw pusht
-   nie dorthin, sondern nur auf `hermclaw/*`-Job-Branches und öffnet Merge Requests.
+   nie dorthin, sondern nur auf `hermclaw/*`-Job-Branches und öffnet auf Wunsch Merge Requests
+   (`git.create_merge_request`, Kapitel 9.3).
 3. Hinterlegen Sie den **Deploy-Key** des Orchestrators mit Schreibrecht (*Settings → Repository → Deploy keys*,
    „Grant write permissions“):
 
@@ -517,7 +520,223 @@ nötige Änderung in `models.yaml` (Kapitel 9.2).
 
 ---
 
-<!-- INSTALL-CH8-9: Deployment und Konfiguration – nach P32 -->
+## 8. Release bauen und ausrollen (Deployment)
+
+Ein **Release** enthält das Hermclaw-Wheel samt aller Abhängigkeiten für CPython 3.13 (Python von Debian 13), den
+LiteLLM-Proxy, den UI-Build, die Beispielkonfiguration, die Betriebsskripte und die tree-sitter-Grammatiken. Es wird
+einmal auf dem Admin-Rechner gebaut, per SHA-256 geprüft und offline auf allen Hosts installiert. Details:
+`docs/operations/deployment.md`, Architektur: `docs/architecture/deployment.md`.
+
+### 8.1 Voraussetzungen auf dem Admin-Rechner
+
+* ansible-core 2.21 aus Kapitel 4.
+* **CPython 3.13** mit `venv` (auf Debian 13: `sudo apt install python3 python3-venv`; sonst `--python /pfad/python3.13`).
+  Das Release muss zur Python-Version der Hosts passen; der Preflight vergleicht das.
+* **Node.js ≥ 22.23.2** mit npm (für den UI-Build), `tar`, `gzip`, `sha256sum`, Zugang zu PyPI, npm und GitHub.
+* Hat Ihr Admin-Rechner kein Python 3.13, bauen Sie das Release auf dem Orchestrator .225 (Debian 13) oder in einem
+  `debian:trixie`-Container aus demselben Checkout.
+
+### 8.2 Inventar ergänzen
+
+Zusätzlich zu Kapitel 4.2 in `infra/ansible/inventory/hosts.yml`:
+
+| Variable | Wert | Bedeutung |
+|---|---|---|
+| `hermclaw_version` | `"0.1.0rc1"` (in Anführungszeichen) | Version, die ausgerollt wird = Name von `dist/release-<version>/` |
+| `wol_mac` (Worker) | echte MAC | **Pflicht**: das Deployment verweigert Platzhalter-MACs |
+| `nginx_tls_enabled` (.223) | `true` / `false` | HTTPS für die Oberfläche (siehe 8.5) |
+| `hermclaw_config_overrides` | siehe Kapitel 9 | Ihre Anpassungen der Konfiguration |
+| `hermclaw_keep_releases` | `3` | ältere Releases für ein Rollback ohne Netz |
+| `hermclaw_worker_pull_models` (.224) | `true` | Modelle automatisch laden (Kapitel 7) |
+
+### 8.3 Release bauen
+
+```bash
+# im Checkout der zu installierenden Version (Kapitel 4.1)
+scripts/deploy/build-release.sh --wheel-cache ~/hermclaw-wheels
+#   -> dist/release-0.1.0rc1/  (release.json, Wheelhouses mit Hash-Lock, UI-Build, SHA256SUMS)
+#   Selbsttest: Offline-Installation in eine frische venv, pip check, alle Konsolen-Einstiegspunkte laden,
+#   hermclaw config-check der Beispiele, LiteLLM-Lock ohne den litellm_init.pth-Schadcode, UI ohne Inline-Skripte
+```
+
+Später ohne Internet neu bauen: `scripts/deploy/build-release.sh --offline-from ~/hermclaw-wheels --ui-dist ui/dist`.
+
+### 8.4 Ausrollen
+
+Vorher muss das GitLab-Token gespeichert sein (Kapitel 6.1). Der Preflight prüft jedes Credential, das die Units
+laden, und bricht vor jeder Änderung ab, wenn eines fehlt.
+
+```bash
+cd infra/ansible
+ansible-playbook -i inventory/hosts.yml playbooks/deploy.yml --check --diff -K     # Trockenlauf
+ansible-playbook -i inventory/hosts.yml playbooks/deploy.yml -K                    # Ausrollen (alle Hosts)
+ansible-playbook -i inventory/hosts.yml playbooks/deploy.yml -K                    # zweiter Lauf: changed=0
+```
+
+Was dabei passiert:
+
+| Host | Schritte |
+|---|---|
+| .225 | Release-venv `/opt/hermclaw/venv-<v>` (offline, Hash-geprüft) → `/etc/hermclaw/*.yaml` rendern + mit `hermclaw config-check` prüfen → LiteLLM-venv + `litellm.yaml` → Units aktivieren → laufende Schritte sauber anhalten → `hermclaw migrate` (vor dem Neustart) → Symlink `/opt/hermclaw/venv` umschalten → LiteLLM, SearXNG, API, Scheduler, Backup-Timer starten → Health-Checks → Admin-API-Token anlegen (einmalig) |
+| .222 | Release-venv → `capabilities.yaml`, `policies.yaml` → Sandbox-Images bauen (rootless, nur fehlende) → `hermclaw-exec-worker` → `/health` |
+| .224 | Release-venv → `capabilities.yaml` → ffmpeg → `hermclaw-model-worker` → `/health` → fehlende Modelle laden (in einer eigenen Unit, übersteht SSH-Abbrüche, bis 6 h) |
+| .223 | nginx-Site (SSE, CSP, Sicherheits-Header, optional TLS) → UI nach `/var/www/hermclaw-next-releases/<v>/` → Symlink umschalten → `nginx -t` → Reload → Prüfung über nginx |
+| alle | zum Schluss `hermclaw doctor` auf .225 im Dienstkontext; jeder `fail` stoppt den Lauf |
+
+Der erste Lauf ersetzt die leere venv des Bootstraps (sie bleibt als `/opt/hermclaw/venv.pre-release-<zeit>` erhalten;
+löschen Sie sie, wenn alles läuft).
+
+### 8.5 HTTPS für die Oberfläche (optional, empfohlen)
+
+```yaml
+    webui:
+      hosts:
+        hermclaw-webui:
+          nginx_tls_enabled: true
+          nginx_tls_source: self-signed        # oder: provided + nginx_tls_cert_src / nginx_tls_key_src (Dateien auf dem Admin-Rechner)
+          hermclaw_web_server_name: "hermclaw.lan 192.168.178.223"   # auch die SANs des Zertifikats
+```
+
+HTTP leitet dann auf HTTPS um. `nginx_hsts_max_age` erst setzen, wenn alle Browser dem Zertifikat vertrauen.
+
+### 8.6 Prüfen
+
+```bash
+# .225
+systemctl status hermclaw-litellm hermclaw-api hermclaw-scheduler hermclaw-backup.timer
+readlink /opt/hermclaw/venv /opt/litellm/venv
+curl -s http://127.0.0.1:4000/health/liveliness                              # "I'm alive!"
+curl -s -o /dev/null -w '%{http_code}\n' http://127.0.0.1:4000/v1/models    # 401 (200 hieße: kein Master-Key!)
+curl -s http://127.0.0.1:8888/healthz                                         # OK (SearXNG)
+sudo hermclaw doctor
+# .222 / .224
+curl -s http://192.168.178.222:8787/health; curl -s http://192.168.178.224:8787/health
+# .223
+curl -s http://192.168.178.223/healthz; curl -sI http://192.168.178.223/ | grep -i content-security-policy
+```
+
+Das Admin-API-Token für die erste Anmeldung in der Oberfläche (es wird nie ausgegeben):
+
+```bash
+sudo systemd-creds decrypt --name=api-operator-token /etc/credstore.encrypted/hermclaw-api-operator-token -
+```
+
+### 8.7 Upgrade und Rollback
+
+* **Upgrade:** neues Release bauen, Backup (Kapitel 11), dann
+  `ansible-playbook -i inventory/hosts.yml playbooks/deploy.yml -e hermclaw_version=<neu> -K`. Die neue venv wird neben der
+  alten installiert; erst nach erfolgreicher Migration wird umgeschaltet. Scheitert die Migration, starten die alten
+  Dienste wieder. Ablauf: `docs/runbooks/upgrade.md`.
+* **Rollback:** `ansible-playbook … playbooks/deploy.yml -e hermclaw_version=<alt> -K`. Nichts wird neu installiert, die
+  Symlinks schalten zurück. Hat die neue Version Datenbank-Migrationen hinzugefügt, stoppt der Lauf und erklärt die
+  Optionen: nach einem Backup mit `-e hermclaw_orchestrator_allow_schema_downgrade=true` erneut ausführen, oder das
+  Backup von vor dem Upgrade zurückspielen.
+
+---
+
+## 9. Konfiguration
+
+### 9.1 Wo die Konfiguration liegt
+
+| Datei | Host | Inhalt |
+|---|---|---|
+| `/etc/hermclaw/hosts.yaml` | .225 | Hosts, Adressen, Worker-APIs, Wake-on-LAN-MACs, SSH-Ziele, Idle-Sleep |
+| `/etc/hermclaw/models.yaml` | .225 | Modellprofile (Rollen, Ollama-Tags, Kontext, Timeouts), LiteLLM-Adresse |
+| `/etc/hermclaw/policies.yaml` | .225, .222 | Befehls-/Sandbox-/Scope-/Coder-/Review-/Research-/Git-/SSH-/WoL-Richtlinien |
+| `/etc/hermclaw/capabilities.yaml` | alle Worker | Schrittarten → Capability → Worker-Art, Modellrolle, Ressourcen |
+| `/etc/hermclaw/logging.yaml` | .225 | Log-Level je Logger |
+| `/etc/hermclaw/databases.yaml` | .225 | Datenbanken Ihrer Projekte für die DB-Tools (optional) |
+| `/etc/hermclaw/backup.yaml` | .225 | Backup-Ziel, Aufbewahrung (Kapitel 11) |
+| `/etc/hermclaw/litellm.yaml` | .225 | aus `models.yaml` erzeugt (`hermclaw litellm-config`), nicht von Hand ändern |
+| `/etc/hermclaw/hermclaw.env`, `worker.env` | .225 / Worker | Prozess-Einstellungen (`HERMCLAW_*`, `WORKER_*`), vom Bootstrap/Deployment gerendert |
+
+### 9.2 So ändern Sie die Konfiguration
+
+**Das Deployment besitzt diese Dateien.** Es erzeugt sie aus `config/<name>.example.yaml` des Releases, setzt die
+Werte aus dem Inventar ein (Adressen, Worker-URLs, MACs, Sandbox-Images) und mischt Ihre Overrides hinein. Danach
+prüft es das Ergebnis mit `hermclaw config-check`, bevor es eine Datei ersetzt (die alte bleibt als
+`<name>.yaml.<zeit>~`). Änderungen direkt auf dem Host überschreibt der nächste Lauf; `--check --diff` zeigt sie als
+Abweichung an. Tragen Sie Änderungen deshalb ins Inventar ein:
+
+```yaml
+all:
+  vars:
+    hermclaw_config_overrides:
+      policies:
+        git: {create_merge_request: true}          # Merge Requests in GitLab öffnen (Standard: nur Branch pushen)
+        coder: {max_turns: 24}
+      models:
+        litellm: {request_timeout_seconds: 1800}
+    hermclaw_config_host_overrides:
+      model-224: {wake_on_lan: {service_timeout_seconds: 300}}
+    hermclaw_config_unmanaged: [databases]         # einmal anlegen, danach pflegen Sie die Datei selbst
+```
+
+Mappings werden Schlüssel für Schlüssel gemischt, Listen ersetzen die Liste des Beispiels vollständig. Danach das
+Deployment erneut ausführen (Kapitel 8.4).
+
+### 9.3 Einstellungen, die Sie prüfen sollten
+
+| Datei → Schlüssel | Standard | Wann ändern |
+|---|---|---|
+| `policies` → `git.create_merge_request` | `false` | `true`, wenn Hermclaw für jeden Job einen Merge Request öffnen soll |
+| `policies` → `git.protected_branches` | `[main, master, "release/*"]` | weitere geschützte Branches |
+| `policies` → `git.author_name` / `author_email` | `Hermclaw Runtime` / `hermclaw@localhost` | Commit-Autor in GitLab |
+| `policies` → `ssh.require_approval_for_mutations` | `true` | nur ausschalten, wenn Host-Änderungen ohne Freigabe laufen dürfen (nicht empfohlen) |
+| `policies` → `ssh.allowed_hosts` | `[webui-223, exec-222, model-224]` | Hosts, die SSH-Schritte überhaupt erreichen dürfen |
+| `policies` → `sandbox.network_default` | `none` | Netz in der Sandbox nur über die Schritt-Capability |
+| `policies` → `sandbox.cpus` / `memory` / `pids_limit` | 2 / `2g` / … | an die Hardware von .222 anpassen |
+| `policies` → `sandbox.env_allowlist` | PATH, HOME, LANG, LC_ALL, CI, PYTHONDONTWRITEBYTECODE | Variablen, die Projekt-Befehle setzen dürfen |
+| `policies` → `coder.max_turns` | 20 | Werkzeugrunden je Schritt |
+| `policies` → `correction` | 2 Korrekturen, 3 Versuche, 2 Neuplanungen | Ausdauer bei Fehlschlägen |
+| `policies` → `research.primary_domains` | offizielle Doku-Domains | eigene bevorzugte Quellen |
+| `policies` → `wake_on_lan.idle_after_minutes` | 30 | Leerlaufzeit bis zum Suspend der Worker |
+| `policies` → `events.retention_days` | 90 | Aufbewahrung der Events |
+| `policies` → `git.workspace_retention_hours` | 72 | Aufbewahrung der Job-Workspaces |
+| `models` → `model_host_capacity_gb` | 34 | RAM + VRAM von .224 abzüglich Reserve (32 GB RAM + 8 GB VRAM → 34) |
+| `models` → `profiles[*].model` | feste Tags (Kapitel 1.2) | nur ein anderer Build desselben Modells, nie eine andere Rolle |
+| `models` → Profil `planner-gemma-fallback` | aktiv | `enabled: false`, wenn `gemma4:12b` nicht geladen ist |
+| `models` → Profil `embedding` | `embeddinggemma:300m` | `embeddinggemma-2:740m`, sobald Ollama es unter Linux/CUDA ausführt |
+| `hosts` → je Worker `idle_sleep_command` | `sudo /usr/bin/systemctl suspend` | entfernen, wenn ein Worker nie schlafen soll |
+| `databases` → `targets`, `sandbox` | keine | Projekt-Datenbanken für die DB-Tools (siehe 9.4) |
+
+Die Modellrollen sind fest (Gemma = Planner, Qwen3-Coder 30B = Implementation Worker, Qwen3.8 27B = Heavy Reviewer,
+Qwen3 8B = Fast Router, EmbeddingGemma). `hermclaw doctor` meldet einen Fehler, wenn einer Rolle ein aktives Profil fehlt.
+
+### 9.4 Projekt-Datenbanken (optional)
+
+Sollen Jobs mit den Datenbanken Ihrer Projekte arbeiten (Schema lesen, Read-only-Abfragen, Migrationen in einer
+Wegwerf-Datenbank prüfen), tragen Sie sie in `databases.yaml` ein und machen die Datei per
+`hermclaw_config_unmanaged: [databases]` zu Ihrer eigenen. Geheimnisse nur als `cred:`-Referenz:
+
+```yaml
+targets:
+  - name: shop
+    dsn_ref: cred:shop-db-dsn            # postgresql://reader@db.lan:5432/shop?sslmode=require
+    kind: postgresql
+    environment: production              # production = immer read-only
+sandbox:                                 # Wegwerf-Datenbanken für Migrationstests: NICHT der Produktionsserver
+  admin_dsn_ref: cred:sandbox-pg-admin   # Rolle mit CREATEDB + CREATEROLE
+  client_host: 192.168.178.225           # wie der Execution Worker den Server erreicht
+```
+
+Credentials anlegen: `sudo /opt/hermclaw/bin/hermclaw-credential set shop-db-dsn` (Wert über stdin). Damit der
+Scheduler sie laden darf, ergänzen Sie ihre Namen in `systemd_skeleton_credentials` im Inventar. Das Mapping wird als
+Ganzes ersetzt, deshalb alle Einträge angeben:
+
+```yaml
+    systemd_skeleton_credentials:
+      api: [api-admin-token]
+      scheduler: [litellm-master-key, gitlab-token, shop-db-dsn, sandbox-pg-admin]
+      litellm: [litellm-master-key]
+      worker: [worker-token]
+```
+
+Danach Bootstrap und Deployment für `orchestrator` erneut ausführen.
+
+---
+
+
 
 ## 10. Erste Inbetriebnahme
 
@@ -573,8 +792,8 @@ sudo hermclaw job-submit "Füge einen /health-Endpunkt hinzu, der {\"status\": \
 ```
 
 Beobachten Sie den Job in der UI: Triage (Fast Router) → Plan (Gemma) → Schritte (Qwen3-Coder, Werkzeuge, Tests in
-der Sandbox auf .222) → Verifier → Heavy Review (Qwen3.8) → Commit, Push auf `hermclaw/<id>-…` → Merge Request in
-GitLab. Die UI zeigt Status und Ergebnisse, **keine** Chain-of-Thought. Schritte, die einen Host ändern (SSH),
+der Sandbox auf .222) → Verifier → Heavy Review (Qwen3.8) → Commit, Push auf `hermclaw/<id>-…` (und ein Merge Request,
+wenn `git.create_merge_request: true`, Kapitel 9.3). Die UI zeigt Status und Ergebnisse, **keine** Chain-of-Thought. Schritte, die einen Host ändern (SSH),
 warten auf Ihre Freigabe im Tab „Approvals“.
 
 Mit der GTX 1080 dauert ein solcher Job je nach Größe 10–60 Minuten: Die großen Modelle laufen größtenteils aus dem RAM
