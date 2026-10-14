@@ -509,5 +509,150 @@ nötige Änderung in `models.yaml` (Kapitel 9.2).
 
 ---
 
-<!-- INSTALL-PART-2: Kapitel 6–14 (Zugangsdaten, Modelle, Deployment, Konfiguration, Inbetriebnahme, Backup,
-Live-Abnahme, Betrieb, Fehlersuche) – wird nach P32/P33 vervollständigt. -->
+<!-- INSTALL-CH8-9: Deployment und Konfiguration – nach P32 -->
+
+## 10. Erste Inbetriebnahme
+
+Alle Hermclaw-Befehle auf dem Orchestrator laufen über den **Operator-Wrapper** `sudo hermclaw …`. Er startet die
+CLI als Benutzer `hermclaw` mit der Umgebung und den Credentials der Dienste (`/etc/hermclaw/hermclaw.env`,
+`LoadCredentialEncrypted=`). Ein einfaches `sudo -u hermclaw /opt/hermclaw/venv/bin/hermclaw` hätte weder die
+Datenbank-URL noch die Geheimnisse.
+
+### 10.1 Gesamtzustand prüfen
+
+```bash
+sudo hermclaw doctor                  # jede Zeile ok/warn; Exit 1 bei einem fail
+curl -s http://192.168.178.225:8000/api/health
+curl -s http://192.168.178.223/api/health          # über nginx
+```
+
+`hermclaw doctor` prüft: Modellrollen, `hosts.yaml` (echte Dateien, keine Platzhalter-MACs), SSH-Hosts,
+Sandbox-Trennung, Datenbank (Migrationsstand, pgvector ≥ 0.8.7), Datenpfade und freien Platz, API-Tokens,
+LiteLLM (alle Aliase), beide Worker (Heartbeat, `/health`, Protokollversion), installierte Modelle auf .224,
+Sandbox-Images und den Selbsttest auf .222 sowie SearXNG.
+
+### 10.2 Zugangstoken für Menschen
+
+```bash
+sudo hermclaw token-create admin-<ihr-name> --scopes read,control,admin   # einmalig angezeigt – im Passwortmanager ablegen
+sudo hermclaw token-create viewer-<name> --scopes read                    # nur lesen
+```
+
+| Scope | Darf |
+|---|---|
+| `read` | Jobs, Pläne, Events, Diffs, Artefakte ansehen |
+| `control` | Jobs anlegen, abbrechen, wiederholen, Repositories (remote) registrieren |
+| `admin` | SSH-Mutationen freigeben, Worker-Details/Drain, lokale Repositories, Token-Verwaltung |
+
+Öffnen Sie `http://hermclaw.lan/` bzw. `http://192.168.178.223/` und melden Sie sich mit dem Token an. Das Token
+liegt nur im `sessionStorage` des Tabs.
+
+### 10.3 Repository registrieren
+
+```bash
+sudo hermclaw repo-add mein-projekt git@192.168.178.226:gruppe/mein-projekt.git \
+     --provider gitlab --project-id gruppe/mein-projekt --default-branch main --protected 'release/*'
+sudo hermclaw repo-list
+```
+
+Optional `--sandbox-image node` (bzw. `python`, `php`, `generic`), wenn das Projekt eine bestimmte Toolchain braucht.
+
+### 10.4 Erster Job (Rauchtest)
+
+```bash
+sudo hermclaw job-submit "Füge einen /health-Endpunkt hinzu, der {\"status\": \"ok\"} liefert, mit Test." \
+     --title "health endpoint" --repo mein-projekt
+```
+
+Beobachten Sie den Job in der UI: Triage (Fast Router) → Plan (Gemma) → Schritte (Qwen3-Coder, Werkzeuge, Tests in
+der Sandbox auf .222) → Verifier → Heavy Review (Qwen3.8) → Commit, Push auf `hermclaw/<id>-…` → Merge Request in
+GitLab. Die UI zeigt Status und Ergebnisse, **keine** Chain-of-Thought. Schritte, die einen Host ändern (SSH),
+warten auf Ihre Freigabe im Tab „Approvals“.
+
+Mit der GTX 1080 dauert ein solcher Job je nach Größe 10–60 Minuten: Die großen Modelle laufen größtenteils aus dem RAM
+(Kapitel 2.1).
+
+---
+
+<!-- INSTALL-CH11: Backup – nach P32 -->
+
+## 12. Live-Abnahme
+
+Die Build-Umgebung konnte die Hosts nicht erreichen (BLOCKER-001). Diese Abnahme holt alle Prüfungen gegen die echte
+Hardware nach. Sie braucht einen Quellcode-Checkout der installierten Version mit Test-Abhängigkeiten auf .225
+(und für die Sandbox-Suite auf .222):
+
+```bash
+# auf .225 (und .222) als root
+git clone https://github.com/MrHardstyle/Claude-Hermclaw.git /opt/hermclaw/src
+cd /opt/hermclaw/src && git checkout v0.1.0rc1
+python3 -m venv .venv && .venv/bin/pip install -e '.[dev]'
+chmod -R a+rX /opt/hermclaw/src                    # der Dienstbenutzer hermclaw muss lesen können
+
+# einmalig auf .225: Testrolle + pgvector-Template für die Wegwerf-Testdatenbanken
+sudo scripts/ops/live-acceptance.sh --prepare-db
+
+# alle Suiten dieses Hosts (Orchestrator: workers models repo_intelligence research sshtools infratools wol gitops backup)
+sudo scripts/ops/live-acceptance.sh
+#   GitLab-Suite nur mit einem Wegwerf-Projekt:
+sudo HERMCLAW_LIVE_GITLAB_PROJECT=hermclaw/sandbox HERMCLAW_LIVE_GITLAB_API=http://192.168.178.226 \
+     HERMCLAW_LIVE_GITLAB_REPO_URL=git@192.168.178.226:hermclaw/sandbox.git scripts/ops/live-acceptance.sh --suite gitops
+#   Wake-on-LAN vollständig (legt .224 schlafen und weckt ihn; kein Job darf laufen):
+sudo scripts/ops/live-acceptance.sh --suite wol --full-wol
+
+# auf .222: die Sandbox-Suite (rootless Podman, cgroup-v2-Limits, Netzwerk)
+sudo scripts/ops/live-acceptance.sh
+
+# danach aufräumen (.225)
+sudo scripts/ops/live-acceptance.sh --cleanup-db
+```
+
+Ergebnis: `/var/lib/hermclaw/acceptance/<zeit>-summary.txt` plus JUnit-XML je Suite. Alles `PASS` (oder `SKIP` mit
+Grund, z. B. GitLab ohne Wegwerf-Projekt) = abgenommen. Tragen Sie das Ergebnis in `STATUS.md` ein. Bei `FAIL`: das
+Log der Suite lesen und Kapitel 14 prüfen.
+
+---
+
+## 13. Betrieb
+
+| Aufgabe | Befehl / Ort |
+|---|---|
+| Status aller Dienste (.225) | `systemctl status hermclaw-api hermclaw-scheduler hermclaw-litellm postgresql@17-main` |
+| SearXNG (rootless, Benutzer hermclaw) | `systemctl --user --machine=hermclaw@.host status hermclaw-searxng` |
+| Worker | `.222`: `systemctl status hermclaw-exec-worker` · `.224`: `systemctl status hermclaw-model-worker ollama` |
+| Logs (JSON) | `journalctl -u hermclaw-scheduler -f` (ebenso `-u hermclaw-api`, `-u hermclaw-litellm`) |
+| Gesundheit | `sudo hermclaw doctor` · `curl -s http://192.168.178.225:8000/api/health?deep=true` |
+| Geladene Modelle | auf .224: `ollama ps` |
+| Speicherplatz | `df -h /var/lib/hermclaw /var/lib/ollama` (Hermclaw warnt unter 10 GB frei, stoppt neue Arbeit unter 2 GB) |
+| Upgrade | `docs/runbooks/upgrade.md` (Backup → Scheduler stoppen → `playbooks/deploy.yml -e hermclaw_version=<neu>` → prüfen) |
+| Rollback | `docs/runbooks/upgrade.md` → *Rollback* (vorheriger venv bleibt erhalten) |
+| Ausfall eines Hosts | `docs/runbooks/disaster-recovery.md` |
+| Umstieg vom alten System | `docs/runbooks/cutover.md` |
+| Bekannte Einschränkungen | `docs/operations/known-limitations.md` |
+
+Die Worker legen sich bei Leerlauf schlafen (`systemctl suspend`, Hosts mit `idle_sleep_command` in `hosts.yaml`).
+Der Scheduler weckt sie vor jedem Schritt per Wake-on-LAN. Ein schlafender Worker ist also normal.
+
+---
+
+## 14. Fehlersuche
+
+| Symptom | Ursache | Abhilfe |
+|---|---|---|
+| `doctor`: `database:pgvector` fail/warn | pgvector aus Debian (0.8.0) oder < 0.8.7 | `apt-cache policy postgresql-17-pgvector` (Quelle PGDG?), aktualisieren, `ALTER EXTENSION vector UPDATE;` in `hermclaw`, `systemctl restart postgresql@17-main` |
+| `doctor`: `config:files` fail | `/etc/hermclaw/*.yaml` fehlen, nur `.example.yaml` vorhanden | Deployment erneut ausführen (Kapitel 8) |
+| `doctor`: `config:wake_on_lan` warn | Platzhalter-MAC im Inventar | `wol_mac` setzen (Kapitel 4.2), Deployment erneut |
+| `doctor`: `litellm` fail, Gateway meldet `MODEL_AUTH_FAILED` | Master-Key fehlt/falsch | `hermclaw-credential check litellm-master-key`; `systemctl restart hermclaw-litellm hermclaw-scheduler` |
+| `doctor`: `models:model-224` fail | Modell nicht geladen | `hermclaw-model-pull` auf .224 (Kapitel 7) |
+| Modelle laufen auf der CPU (`ollama ps`: `100% CPU`) | Treiber zu alt / nicht geladen, nach Suspend GPU verloren | `nvidia-smi`; `journalctl -u ollama -b \| grep 'inference compute'`; nach Suspend: `rmmod nvidia_uvm && modprobe nvidia_uvm`, `systemctl restart ollama` |
+| `nvidia-smi`: „couldn't communicate with the NVIDIA driver“ nach Kernel-Update | DKMS-Modul fehlt | `dkms status`; `dkms autoinstall`; Neustart |
+| Schritte scheitern mit `WORKER_UNREACHABLE` | Worker schläft und wacht nicht auf | WoL im BIOS/`ethtool … \| grep Wake-on: g`, MAC in `hosts.yaml`, `sudo hermclaw doctor` |
+| Schritte scheitern mit `SANDBOX_IMAGE_UNSAFE` | Image mit gefährlichen Metadaten (Podman-CVEs) | nur die von `hermclaw-build-sandbox-images` gebauten Images verwenden |
+| `SANDBOX_ENV_NOT_ALLOWED` | Projekt-Befehl setzt eine nicht erlaubte Umgebungsvariable | `policies.sandbox.env_allowlist` in `policies.yaml` ergänzen |
+| SSH-Schritt wartet | Mutation braucht Freigabe | UI → Job → „Approvals“ (Admin-Token) |
+| UI lädt, Live-Status bleibt stehen | nginx puffert SSE | `nginx -T \| grep -A3 events/stream` muss `proxy_buffering off` zeigen; Deployment erneut |
+| Backup-Timer meldet Exit 75 | ein anderer Backup-Vorgang hält die Sperre | nichts tun, der nächste Lauf wiederholt |
+| `hermclaw-searxng` startet nicht | Podman-Secret fehlt (gewollt: kein Start mit bekanntem Schlüssel) | Deployment erneut ausführen (legt das Secret an) |
+
+Weitere Hinweise: `docs/operations/bootstrap.md` (Bootstrap-Fehler), `docs/operations/backup-restore.md`
+(*Troubleshooting*), `docs/architecture/*.md` (Fehlercodes je Komponente).
