@@ -24,6 +24,7 @@ from datetime import UTC, datetime, timedelta
 from typing import Any
 
 from sqlalchemy import and_, func, not_, select, update
+from sqlalchemy.exc import DBAPIError, InterfaceError, OperationalError
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from hermclaw.contracts.common import MUTATING_STEP_KINDS, JobStatus, Severity, StepStatus
@@ -98,6 +99,17 @@ class SchedulerSettings:
     retry_backoff_seconds: tuple[int, ...] = (30, 120, 600)
     job_lock_seconds: int = 3600
     cancel_grace_seconds: int = 60
+    # transient database errors (connection killed/reset, failover) during the re-entrant job phases (prepare,
+    # finalize): run the phase again instead of failing the job; bounded per job, exponential backoff
+    prepare_transient_retries: int = 5
+    prepare_retry_backoff_seconds: float = 1.0
+
+
+def transient_db_error(exc: BaseException) -> bool:
+    """Connection-level database failures that a retry on a fresh pool connection can overcome."""
+    if isinstance(exc, OperationalError | InterfaceError):
+        return True
+    return isinstance(exc, DBAPIError) and bool(exc.connection_invalidated)
 
 
 @dataclass
@@ -153,6 +165,7 @@ class Scheduler:
                 self._handlers[k] = h
         self._running: dict[uuid.UUID, _Running] = {}
         self._job_tasks: dict[uuid.UUID, _JobTask] = {}
+        self._prepare_retries: dict[uuid.UUID, int] = {}
         self._stop = asyncio.Event()
         self._admission_reason: str | None = None
 
@@ -396,6 +409,20 @@ class Scheduler:
             started += 1
         return started
 
+    async def _transient_retry(self, job_id: uuid.UUID, phase: str, exc: BaseException) -> bool:
+        """True (after a backoff) when a re-entrant job phase failed on a transient database error and may run again."""
+        attempt = self._prepare_retries.get(job_id, 0)
+        if not transient_db_error(exc) or attempt >= self.settings.prepare_transient_retries:
+            return False
+        self._prepare_retries[job_id] = attempt + 1
+        delay = self.settings.prepare_retry_backoff_seconds * (2**attempt)
+        log.warning(
+            "job phase hit a transient database error; it runs again",
+            extra={"job_id": str(job_id), "phase": phase, "attempt": attempt + 1, "delay_s": delay, "error": type(exc).__name__},
+        )
+        await asyncio.sleep(delay)
+        return True
+
     async def _run_prepare(self, job_id: uuid.UUID, token: CancelToken) -> None:
         res_ok: bool
         code: str | None
@@ -404,10 +431,13 @@ class Scheduler:
         try:
             res = await self.driver.prepare(job_id, token)
         except Exception as exc:
+            if await self._transient_retry(job_id, "prepare", exc):
+                return  # BUG-072: the job keeps its preparation state and this instance's lock; the next tick re-prepares it
             log.exception("job preparation crashed", extra={"job_id": str(job_id)})
             res_ok, code, msg, nxt = False, "PREPARE_CRASHED", f"{type(exc).__name__}: {exc}", None
         else:
             res_ok, code, msg, nxt = res.ok, res.error_code, res.error_message, res.next_status
+        self._prepare_retries.pop(job_id, None)
         async with self.sm() as s:
             job = (await s.execute(select(Job).where(Job.id == job_id).with_for_update())).scalar_one()
             job.lock_owner = None
@@ -938,8 +968,11 @@ class Scheduler:
             res = await self.driver.finalize(job_id, token)
             ok, code, msg = res.ok, res.error_code, res.error_message
         except Exception as exc:
+            if await self._transient_retry(job_id, "finalize", exc):
+                return  # finalize is re-entrant (push/report idempotent): the job stays committing, the next tick resumes it
             log.exception("finalize crashed", extra={"job_id": str(job_id)})
             ok, code, msg = False, "FINALIZE_CRASHED", f"{type(exc).__name__}: {exc}"
+        self._prepare_retries.pop(job_id, None)
         async with self.sm() as s:
             job = (await s.execute(select(Job).where(Job.id == job_id).with_for_update())).scalar_one()
             job.lock_owner = None

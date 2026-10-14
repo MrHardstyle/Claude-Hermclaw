@@ -145,7 +145,8 @@ def _kill_connections(db_name: str) -> int:
 
 
 async def test_db_connections_killed_mid_job_are_reestablished_and_the_job_finishes(world: World) -> None:
-    models = StackModels([checked_plan()])
+    # a kill while the plan is persisted rolls it back; the re-entrant preparation asks Gemma again (BUG-072)
+    models = StackModels([checked_plan() for _ in range(4)])
     proc = SchedulerProcess(
         get_config(),
         stack_settings(world),

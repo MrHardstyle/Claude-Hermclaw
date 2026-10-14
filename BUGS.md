@@ -437,7 +437,8 @@ Noch keine.
 - Reproduktion: `grep -rn 'IdleSleepPolicy(' hermclaw worker` → only the class itself
 
 ### BUG-072 – Scheduler fails a job permanently (PREPARE_CRASHED) on a transient DB OperationalError during preparation
-- Phase: P39 · Komponente: scheduler · Severity: P2 · blockierend: nein · Status: **offen** (Fix folgt)
+- Phase: P39 · Komponente: scheduler · Severity: P2 · blockierend: nein · Status: **behoben** (`tests/integration/test_scheduler.py::test_transient_db_errors_in_prepare_and_finalize_rerun_the_phase`; `tests/failure/test_runtime_failures.py -k db_connections_killed` 6/6 grün, vorher 1/3)
+- Fix: connection-level DB errors (`OperationalError`, `InterfaceError`, invalidated `DBAPIError`) in the re-entrant phases prepare/finalize re-run the phase (bounded `prepare_transient_retries`=5, exponential backoff) instead of PREPARE_CRASHED/FINALIZE_CRASHED; a database that stays down still fails the job
 - Reproduktion: `tests/failure/test_runtime_failures.py -k db_connections_killed` fails ~2 of 3 runs: AdminShutdown inside `driver.prepare` is caught in `Scheduler._run_prepare` as PREPARE_CRASHED
 - Erwartet: killed DB connections are re-established and the job finishes (35.7)
 

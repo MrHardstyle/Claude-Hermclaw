@@ -11,13 +11,14 @@ from typing import Any
 
 import pytest
 from sqlalchemy import select, update
+from sqlalchemy.exc import OperationalError
 
 from hermclaw.contracts.common import JobStatus, StepStatus
 from hermclaw.core.config import get_config
 from hermclaw.persistence.models import Event, Job, Step, StepAttempt, StepDependency
 from hermclaw.runtime.transitions import transition_job
 from hermclaw.scheduler.handlers import CancelToken, JobPhaseResult, StepOutcome, StepRunContext
-from hermclaw.scheduler.scheduler import Scheduler, SchedulerSettings
+from hermclaw.scheduler.scheduler import Scheduler, SchedulerSettings, transient_db_error
 
 pytestmark = pytest.mark.asyncio(loop_scope="session")
 
@@ -476,6 +477,47 @@ async def test_prepare_crash_and_invalid_state_fail_job(sessionmaker: Any, clean
     j2 = await _new_job(sm)
     jobs = await _run_until(Scheduler(sm, get_config(), [], NoopDriver(sm), settings=_settings()), sm, [j2])
     assert jobs[j2].status == "failed" and jobs[j2].error_code == "PREPARE_INVALID_STATE"
+
+
+async def test_transient_db_errors_in_prepare_and_finalize_rerun_the_phase(sessionmaker: Any, clean_jobs: None) -> None:
+    """BUG-072: a connection-level DB error re-runs the re-entrant phase (bounded); other errors still fail the job."""
+    sm = sessionmaker
+
+    def dropped() -> OperationalError:
+        return OperationalError("INSERT ...", {}, Exception("terminating connection due to administrator command"))
+
+    class FlakyDriver(FakeDriver):
+        prepare_failures = 2
+        finalize_failures = 1
+
+        async def prepare(self, job_id: uuid.UUID, token: CancelToken) -> JobPhaseResult:
+            if self.prepare_failures:
+                self.prepare_failures -= 1
+                raise dropped()
+            return await super().prepare(job_id, token)
+
+        async def finalize(self, job_id: uuid.UUID, token: CancelToken) -> JobPhaseResult:
+            if self.finalize_failures:
+                self.finalize_failures -= 1
+                raise dropped()
+            return await super().finalize(job_id, token)
+
+    class DownDriver(FakeDriver):
+        async def prepare(self, job_id: uuid.UUID, token: CancelToken) -> JobPhaseResult:
+            raise dropped()
+
+    flaky = FlakyDriver(sm)
+    j1 = await _new_job(sm)
+    flaky.plans[j1] = [StepSpec("S1")]
+    settings = _settings(prepare_retry_backoff_seconds=0.0)
+    jobs = await _run_until(Scheduler(sm, get_config(), [FakeHandler({"test"})], flaky, settings=settings), sm, [j1])
+    assert jobs[j1].status == "succeeded", (jobs[j1].error_code, jobs[j1].error_message)
+    assert flaky.prepare_failures == 0 and flaky.finalize_failures == 0
+    j2 = await _new_job(sm)
+    settings = _settings(prepare_retry_backoff_seconds=0.0, prepare_transient_retries=2)
+    jobs = await _run_until(Scheduler(sm, get_config(), [], DownDriver(sm), settings=settings), sm, [j2])
+    assert jobs[j2].status == "failed" and jobs[j2].error_code == "PREPARE_CRASHED", "bounded: a database that stays down fails the job"
+    assert transient_db_error(dropped()) and not transient_db_error(ValueError("x"))
 
 
 async def test_priority_and_concurrency_limit(sessionmaker: Any, clean_jobs: None) -> None:
