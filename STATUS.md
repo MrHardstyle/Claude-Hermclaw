@@ -2,9 +2,9 @@
 
 ## Aktueller Zustand (2026-10-14)
 - Projekt: Hermclaw Next · Modus: Greenfield Build · Branch: `claude/hermclaw-next-build`
-- Abgeschlossen: P01 Bootstrap (live offen), Komponenten P02–P27, P29–P31 (Kern) · Runtime-Integration (Composition Root `hermclaw/runtime/services.py`, Prozess `hermclaw scheduler`) · P34 Recovery · P35 Failure · P36 Security (ohne 36.4) · P37 E2E (ohne 37.3/37.4) · P38 Last
-- In Arbeit: Build-Queue (P28 Container/Proxy, P33 Backup) · P39 Bug-Bash
-- Danach: 37.3/37.4, 36.4, P32 Deployment, P39 Bug-Bash + komplette Testmatrix, P40–P42, Installationsanleitung, Final Build Report
+- Abgeschlossen: P01 Bootstrap, P02–P31, P33, P34–P38, P40, P42 (Live-Schritte `[~]`, BLOCKER-001) · Runtime-Integration aller Ops-Provider (SSH, DB, Container/Proxy)
+- In Arbeit: P32 Deployment (Workflow: Build + adversariales Review) · P39 Bug-Bash (früher Matrix-Lauf) · INSTALLATION.md
+- Danach: P39 komplette Testmatrix, P41 Release Candidate (Changelog, Runbooks, Known Limitations, Tag), Final Build Report
 - Blocker: BLOCKER-001 (Zielhosts aus der Build-Umgebung nicht erreichbar) – Live-Schritte `[~]`
 - Release-Status: NOT READY (RC erst nach P39–P41)
 
@@ -39,22 +39,22 @@
 | P25 – Scheduler | 9 | 0 | 0 |
 | P26 – SSH/Admin Tools | 7 | 1 | 0 |
 | P27 – DB Tools | 7 | 0 | 0 |
-| P28 – Container/Proxy Tools | 0 | 0 | 6 |
+| P28 – Container/Proxy Tools | 4 | 2 | 0 |
 | P29 – Media | 7 | 0 | 0 |
 | P30 – API | 9 | 0 | 0 |
 | P31 – UI | 15 | 0 | 0 |
 | P32 – Deployment | 0 | 0 | 10 |
-| P33 – Backup/Restore | 0 | 0 | 6 |
+| P33 – Backup/Restore | 5 | 1 | 0 |
 | P34 – Recovery | 7 | 0 | 0 |
 | P35 – Failure Injection | 19 | 0 | 0 |
 | P36 – Security Hardening | 8 | 0 | 0 |
-| P37 – Generalization E2E | 13 | 0 | 2 |
+| P37 – Generalization E2E | 15 | 0 | 0 |
 | P38 – Performance / Load | 8 | 0 | 0 |
 | P39 – FULL BUG BASH / HARDENING | 0 | 0 | 13 |
 | P40 – SOAK TEST | 6 | 3 | 0 |
 | P41 – RELEASE CANDIDATE | 0 | 0 | 9 |
 | P42 – CUTOVER PLAN | 2 | 4 | 0 |
-| **Summe** | **315** | **63** | **46** |
+| **Summe** | **326** | **66** | **32** |
 
 ## Deploymentstatus pro Host
 | Host | Rolle | Status |
