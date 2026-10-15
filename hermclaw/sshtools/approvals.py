@@ -7,7 +7,8 @@ calls cannot both run one approval, and a retry of the same mutation needs a fre
 approve the same token again – tokens identify host + command + step, approvals authorise one execution).
 
 Only the runtime/API (operator action) writes ``ssh_approvals``; the model only ever sees the token in a
-refusal. Writes merge just these two keys at SQL level (``metadata || patch``) while holding ``FOR UPDATE``,
+refusal, and a client cannot plant either key at job creation (reserved in ``hermclaw.core.job_metadata``,
+BUG-140). Writes merge just these two keys at SQL level (``metadata || patch``) while holding ``FOR UPDATE``,
 so concurrent writers of other metadata keys are not overwritten.
 """
 
@@ -21,13 +22,14 @@ from typing import Any
 from sqlalchemy import select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from hermclaw.core import job_metadata
 from hermclaw.core.errors import NotFoundError, ValidationFailed
 from hermclaw.persistence.models import Job
 from hermclaw.sshtools.errors import SSH_APPROVAL_INVALID
 from hermclaw.sshtools.policy import APPROVAL_TOKEN_RE
 
-APPROVALS_KEY = "ssh_approvals"
-CONSUMED_KEY = "ssh_approvals_consumed"
+APPROVALS_KEY = job_metadata.SSH_APPROVALS  # reserved: POST /api/jobs refuses it in client metadata (BUG-140)
+CONSUMED_KEY = job_metadata.SSH_APPROVALS_CONSUMED
 _MAX_ENTRIES = 500
 
 

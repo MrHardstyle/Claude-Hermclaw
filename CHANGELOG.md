@@ -83,11 +83,13 @@ getestet; die Live-Abnahme auf den Ziel-Hosts steht aus (BLOCKER-001, `scripts/o
   Image-Sicherheitsgate gegen Podman CVE-2026-57231/CVE-2026-94603 (BUG-108).
 - pgvector ≥ 0.8.7 (CVE-2026-3172, CVE-2026-103484; Untergrenze 0.8.2, D-012), LiteLLM ohne bekannte Advisories in der
   gepinnten Version (Research R-027).
+- `POST /api/jobs` lehnt laufzeitreservierte Metadaten-Schlüssel (u. a. `ssh_approvals`, `triage`, `replan_requested`)
+  mit 422 ab – ein `control`-Token kann keine SSH-Freigaben mehr vorab setzen (BUG-140, `hermclaw/core/job_metadata.py`).
 
 ### Behoben
 
-- 139 Fehler wurden während des Aufbaus gefunden und behoben, jeweils mit Regressionstest bzw. (bei reinen
-  Dokumentationsfehlern) einer Prüfung gegen den Code (`BUGS.md`, BUG-001 bis BUG-139; P0: 2, P1: 25, P2: 61,
+- 140 Fehler wurden während des Aufbaus gefunden und behoben, jeweils mit Regressionstest bzw. (bei reinen
+  Dokumentationsfehlern) einer Prüfung gegen den Code (`BUGS.md`, BUG-001 bis BUG-140; P0: 2, P1: 26, P2: 61,
   P3: 48, P4: 3). Es gibt keine offenen Bugs.
 - Installationsanleitung und Runbooks wurden Befehl für Befehl gegen Code und Rollen geprüft (71 bestätigte Befunde,
   alle behoben; BUG-133 bis BUG-139).

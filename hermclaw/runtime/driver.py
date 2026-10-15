@@ -21,6 +21,7 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from hermclaw.contracts.common import JobStatus, Severity
 from hermclaw.contracts.events import EventType
+from hermclaw.core import job_metadata
 from hermclaw.core.config import HermclawConfig
 from hermclaw.core.errors import GitError, HermclawError, MergeConflictError, ModelError
 from hermclaw.core.interfaces import RepoContextProvider
@@ -173,7 +174,8 @@ class RuntimeJobDriver:
         async with self.sm() as s:
             return (await s.execute(select(Job).where(Job.id == job_id))).scalar_one()
 
-    async def _set_meta(self, job_id: uuid.UUID, **values: Any) -> None:
+    async def _set_meta(self, job_id: uuid.UUID, values: dict[str, Any]) -> None:
+        """Merge runtime keys (declared in ``hermclaw.core.job_metadata``, BUG-140) into the locked job row."""
         async with self.sm() as s:
             job = (await s.execute(select(Job).where(Job.id == job_id).with_for_update())).scalar_one()
             job.metadata_ = {**(job.metadata_ or {}), **values}
@@ -198,8 +200,8 @@ class RuntimeJobDriver:
     async def _triage(self, job: Job) -> dict[str, Any] | None:
         if not self.settings.triage_enabled or self.chat is None:
             return None
-        if (job.metadata_ or {}).get("triage"):
-            return dict(job.metadata_["triage"])
+        if (job.metadata_ or {}).get(job_metadata.TRIAGE):
+            return dict(job.metadata_[job_metadata.TRIAGE])
         prompt = (
             "Classify this software/infrastructure job. Answer only with the JSON object.\n"
             "intent: code_change|research|administration|database|container|media|documentation|mixed; "
@@ -229,7 +231,7 @@ class RuntimeJobDriver:
                 await s.commit()
             return None
         triage = res.value.model_dump()
-        await self._set_meta(job.id, triage=triage)
+        await self._set_meta(job.id, {job_metadata.TRIAGE: triage})
         return triage
 
     async def _planner_input(self, job: Job, ws: WorkspaceInfo | None, triage: dict[str, Any] | None) -> PlannerInput:
@@ -296,7 +298,7 @@ class RuntimeJobDriver:
     async def finalize(self, job_id: uuid.UUID, token: CancelToken) -> JobPhaseResult:
         job = await self._job(job_id)
         notes: list[str] = []
-        extra: dict[str, Any] = {"triage": (job.metadata_ or {}).get("triage"), "notes": notes}
+        extra: dict[str, Any] = {"triage": (job.metadata_ or {}).get(job_metadata.TRIAGE), "notes": notes}
         ws = await self._workspace(job)
         scratch = ws is None and self.scratch is not None and job.repository_id is None
         if scratch and self.scratch is not None:
@@ -377,7 +379,7 @@ class RuntimeJobDriver:
         )
         job = await self._job(job_id)
         try:
-            inputs = await self._planner_input(job, await self._workspace(job), (job.metadata_ or {}).get("triage"))
+            inputs = await self._planner_input(job, await self._workspace(job), (job.metadata_ or {}).get(job_metadata.TRIAGE))
             res = await self.replanner.replan(job_id, trigger, inputs)
         except ReplanLimitReached as exc:
             return JobPhaseResult(ok=False, error_code="REPLAN_LIMIT", error_message=exc.message, detail=exc.details)

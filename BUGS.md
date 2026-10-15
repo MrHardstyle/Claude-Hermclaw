@@ -833,6 +833,24 @@ Noch keine.
 - Erwartet: the download finishes.
 - Tatsächlich: the role started `hermclaw-model-worker` before the pulls; its heartbeats made `.224` `ready`, and after `idle_after_minutes` without steps the idle policy suspended the host over SSH – a download does not count as activity. Fixed: `models.yml` runs before the daemon start and stops a running daemon while tags are missing (an offline worker is never suspended); the daemon starts right after the pulls. Dry runs and runs without missing tags leave the daemon alone (asserted).
 
+### BUG-140 – Control-scope tokens could plant runtime-reserved job metadata keys, including SSH approvals (privilege escalation)
+- Phase: P41 (Sicherheitsprüfung nach RC) · Komponente: api/runtime · Severity: P1 · blockierend: ja · Status: **behoben** (`tests/integration/test_api_job_metadata.py::test_control_token_cannot_pre_approve_an_ssh_mutation`, `::test_each_reserved_key_is_refused_before_anything_is_written`, `::test_spelling_variants_and_reserved_prefixes_are_refused`, `::test_admin_cannot_plant_reserved_keys_either`, `::test_reserved_key_is_checked_before_repository_resolution`, `::test_free_form_metadata_is_stored_and_the_typed_fields_win`; `tests/unit/test_job_metadata.py::test_every_job_metadata_write_is_a_reserved_key`, `::test_every_job_metadata_read_is_a_reserved_key`, `::test_runtime_uses_the_registry_constants`, `::test_scan_finds_the_known_writers`, `::test_scan_sees_reads_through_local_names_and_wrappers`)
+- Reproduktion: with a token that has only the `control` scope, send `POST /api/jobs` with `{"prompt": "…", "metadata": {"ssh_approvals": ["ssh-<token>"]}}`. Other plants: `{"triage": "x"}`, `{"replan_requested": false}`, or `{" ssh_approvals ": […]}` (the contract strips the whitespace from the key).
+- Erwartet: Runtime state in `jobs.metadata` is not client-settable. SSH mutation approvals need the `admin` scope (`POST /api/jobs/{id}/ssh-approvals`).
+- Tatsächlich: `create_job` stored `{**body.metadata, …}` without any filter:
+  - `ssh_approvals` was accepted by `consume_approval` as an operator approval. The token is predictable for a call without a step id. Planted approvals also hid real pending requests in the listing.
+  - `ssh_approvals_consumed` forged the `approved_by` attribution.
+  - `triage` skipped the fast router and steered the planner. A non-dict value crashed prepare, replan or finalize.
+  - A falsy `replan_requested` stopped dispatch for good (`has_key`) without ever starting a replan, so the job hung in `running`. A truthy value forced a replan outside the replan budget.
+  - The planner provenance markers (`planner_model_fallback` and others) could be forged.
+- Fix:
+  - New registry `hermclaw/core/job_metadata.py`. It holds every key the runtime or API writes or trusts: the SSH approval keys, triage, replan/retry, recovery, planner provenance and the three typed per-job flags. It also reserves the prefixes `_` and `hermclaw.`.
+  - `POST /api/jobs` checks the metadata first, before repository auto-registration, the job row or any event (pinned by `test_reserved_key_is_checked_before_repository_resolution`; the row counts alone cannot show the order, because the API session rolls back every refusal). A reserved key gets 422 `JOB_METADATA_RESERVED_KEY` in the API error format, naming the offending keys. Keys are compared after NFKC normalisation and case folding, with whitespace and format characters removed.
+  - Every writer and reader uses the registry constants.
+  - A guard test scans `hermclaw/` for job metadata writes and reads with keys that are not reserved or are string literals. Reads also count through a local name the function loads via `select(Job.metadata_)` or `_locked_metadata` (`meta.get(K)`, `meta[0]`, `_list(meta, K)`): that is how the SSH approval readers in `sshtools/approvals.py`, `sshtools/tools.py` and `api/approvals.py` read, and the scan's sanity test asserts that it finds them. The scanned forms are listed in `docs/architecture/api.md` §2.
+  - The `JobCreate.metadata` schema description lists the keys (`docs/contracts/openapi.json` regenerated). The API doc is `docs/architecture/api.md`.
+- Hinweis: free-form keys such as `ticket` and a job-level `sandbox_image` remain client-settable. The runtime reads `sandbox_image` only from repository metadata, checked against `policies.sandbox`. No in-repo client (UI, CLI, soak, E2E seed) sends metadata, so none is affected. No release has been deployed (BLOCKER-001), so there are no existing rows with planted keys.
+
 ## Template
 
 ### BUG-XXX – Titel

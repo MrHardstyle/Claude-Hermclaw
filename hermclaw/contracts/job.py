@@ -9,6 +9,7 @@ from uuid import UUID
 from pydantic import Field
 
 from hermclaw.contracts.common import Contract, JobStatus
+from hermclaw.core.job_metadata import describe_reserved
 
 
 class RepositoryRef(Contract):
@@ -28,7 +29,7 @@ class JobCreate(Contract):
     allow_network_research: bool = True
     auto_commit: bool = True
     create_merge_request: bool | None = None
-    metadata: dict[str, Any] = Field(default_factory=dict)
+    metadata: dict[str, Any] = Field(default_factory=dict, description=describe_reserved())
 
 
 class JobContract(Contract):

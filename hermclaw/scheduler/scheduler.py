@@ -29,6 +29,7 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from hermclaw.contracts.common import MUTATING_STEP_KINDS, JobStatus, Severity, StepStatus
 from hermclaw.contracts.events import EventType
+from hermclaw.core import job_metadata
 from hermclaw.core.config import HermclawConfig
 from hermclaw.core.errors import InvalidTransition
 from hermclaw.core.logging import get_logger
@@ -234,7 +235,7 @@ class Scheduler:
                     continue
                 job.lock_owner = None
                 job.lock_expires_at = None
-                job.metadata_ = {**(job.metadata_ or {}), "recovered_prepare_from": job.status}
+                job.metadata_ = {**(job.metadata_ or {}), job_metadata.RECOVERED_PREPARE_FROM: job.status}
                 await append_event(
                     s,
                     EventType.JOB_RECOVERED,
@@ -590,7 +591,7 @@ class Scheduler:
                         Job.status.in_([j.value for j in ACTIVE_JOB_STATES]),
                         Job.pause_requested.is_(False),
                         Job.cancel_requested.is_(False),
-                        not_(Job.metadata_.has_key("replan_requested")),  # manual replan pending: drain, do not start more
+                        not_(Job.metadata_.has_key(job_metadata.REPLAN_REQUESTED)),  # manual replan pending: drain, do not start more
                     )
                     .order_by(Job.priority.desc(), Step.priority.desc(), Step.created_at, Step.step_key)
                     .limit(free * 4)
@@ -867,7 +868,7 @@ class Scheduler:
                     sum(counts.get(st.value, 0) for st in (*STEP_IN_FLIGHT, StepStatus.ready, StepStatus.pending, StepStatus.checkpointed))
                     + retry_pending
                 )
-                manual_replan = (job.metadata_ or {}).get("replan_requested")
+                manual_replan = (job.metadata_ or {}).get(job_metadata.REPLAN_REQUESTED)
                 running_now = sum(counts.get(st.value, 0) for st in STEP_IN_FLIGHT)
                 if manual_replan and running_now:
                     continue  # manual replan waits for running steps; dispatch is already paused for this job
@@ -915,7 +916,10 @@ class Scheduler:
                         continue
                     if not await self._lock_job(s, job):
                         continue
-                    job.metadata_ = {**{k: v for k, v in (job.metadata_ or {}).items() if k != "replan_requested"}, "replan_reason": reason}
+                    job.metadata_ = {
+                        **{k: v for k, v in (job.metadata_ or {}).items() if k != job_metadata.REPLAN_REQUESTED},
+                        job_metadata.REPLAN_REASON: reason,
+                    }
                     await job_to(s, job, JobStatus.replanning, reason=reason, actor=self.instance_id, status_line="Gemma plant neu")
                     spawn.append((job.id, "replan", reason))
                     replanning += 1
@@ -948,7 +952,7 @@ class Scheduler:
                 if job.id in self._job_tasks or not await self._lock_job(s, job):
                     continue
                 phase = "replan" if job.status == JobStatus.replanning.value else "finalize"
-                reason = str((job.metadata_ or {}).get("replan_reason") or "resumed after restart")
+                reason = str((job.metadata_ or {}).get(job_metadata.REPLAN_REASON) or "resumed after restart")
                 await append_event(
                     s,
                     EventType.JOB_RECOVERED,

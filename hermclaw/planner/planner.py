@@ -24,6 +24,7 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 from hermclaw.contracts.common import Severity
 from hermclaw.contracts.events import EventType
 from hermclaw.contracts.plan import PlanContract
+from hermclaw.core import job_metadata
 from hermclaw.core.config import HermclawConfig, ModelProfileConfig, get_config
 from hermclaw.core.errors import HermclawError
 from hermclaw.core.logging import get_logger
@@ -175,7 +176,7 @@ class PlannerBase:
 
     async def record_fallback(self, session: AsyncSession, job: Job, outcome: LoopOutcome[Any], *, mode: str) -> None:
         aliases = sorted({a.alias for a in outcome.attempts if a.fallback_used})
-        merge_job_metadata(job, {FALLBACK_METADATA_KEY: True, "planner_fallback_alias": aliases[-1] if aliases else None})
+        merge_job_metadata(job, {FALLBACK_METADATA_KEY: True, job_metadata.PLANNER_FALLBACK_ALIAS: aliases[-1] if aliases else None})
         log.warning(
             "planner served by the technical fallback model",
             extra={"job_id": str(job.id), "mode": mode, "requested_alias": self.profile.alias, "served_aliases": aliases},
@@ -293,7 +294,7 @@ class Planner(PlannerBase):
             )
             job.current_plan_version = 1
             job.row_version += 1
-            merge_job_metadata(job, {"planner_model_alias": outcome.result.alias})
+            merge_job_metadata(job, {job_metadata.PLANNER_MODEL_ALIAS: outcome.result.alias})
             if outcome.fallback_used:
                 await self.record_fallback(session, job, outcome, mode="plan")
             await append_event(

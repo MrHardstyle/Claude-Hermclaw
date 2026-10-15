@@ -38,6 +38,7 @@ from hermclaw.contracts.common import StepStatus
 from hermclaw.contracts.events import EventType
 from hermclaw.contracts.plan import PlanContract, PlanStep
 from hermclaw.contracts.scope import normalise_path
+from hermclaw.core import job_metadata
 from hermclaw.events.store import append_event
 from hermclaw.models.protocols import CallContext
 from hermclaw.persistence.models import Job, ScopeContractRow, Step
@@ -480,8 +481,8 @@ class Replanner(PlannerBase):
             merge_job_metadata(
                 job,
                 {
-                    "planner_model_alias": outcome.result.alias,
-                    "last_replan": {"version": new_version_no, "reason_code": trigger.reason_code},
+                    job_metadata.PLANNER_MODEL_ALIAS: outcome.result.alias,
+                    job_metadata.LAST_REPLAN: {"version": new_version_no, "reason_code": trigger.reason_code},
                 },
             )
             if outcome.fallback_used:

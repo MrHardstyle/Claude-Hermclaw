@@ -72,6 +72,9 @@ AI leases (the coder checkpoints at its next turn).
   the capability allows it), `.git` never leaves `.225`.
 * **Secrets**: references only (`cred:`/`file:`), systemd credentials in production, redaction of every event,
   prompt, tool output and log (`hermclaw/core/redaction.py`); verifier secret scan on every change.
+* **Runtime state in `jobs.metadata` is not client-settable**: `POST /api/jobs` refuses metadata keys that the runtime
+  writes and trusts (SSH approvals, triage, replan/retry requests, planner provenance, the typed per-job flags;
+  registry `hermclaw/core/job_metadata.py`, [api.md](api.md) §2).
 * **No chain-of-thought** is stored or shown: models run with `think:false`; only results and short status lines
   are persisted.
 
@@ -79,6 +82,7 @@ AI leases (the coder checkpoints at its next turn).
 
 | Area | Document |
 |---|---|
+| job API, reserved job metadata keys | [api.md](api.md) |
 | runtime composition, driver, reports | [runtime.md](runtime.md) |
 | scheduler, recovery | [scheduler.md](scheduler.md) |
 | planner/replanner | [planner.md](planner.md) |

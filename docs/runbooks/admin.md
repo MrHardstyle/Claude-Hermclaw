@@ -33,7 +33,7 @@ free disk, model calls) feed a dashboard.
 
 | Task | UI | API (scope) |
 |---|---|---|
-| create | "Neuer Job" | `api /jobs -X POST -H 'Content-Type: application/json' -d '{"title":…,"prompt":…,"repository":{"name":"mein-projekt"}}'` (control) – or `sudo hermclaw job-submit "…" --repo mein-projekt` |
+| create | "Neuer Job" | `api /jobs -X POST -H 'Content-Type: application/json' -d '{"title":…,"prompt":…,"repository":{"name":"mein-projekt"}}'` (control) – or `sudo hermclaw job-submit "…" --repo mein-projekt`; optional free-form `"metadata":{…}` – runtime keys such as `ssh_approvals` or `triage` are refused with 422 (`docs/architecture/api.md` §2) |
 | follow | job page (plan DAG, live status, diffs, artifacts) | `api /jobs/<id>`, `api /jobs/<id>/steps`, `api /jobs/<id>/events`, SSE `api /jobs/<id>/events/stream -N` (read) |
 | cancel | "Abbrechen" | `api /jobs/<id>/cancel -X POST` (control) |
 | pause / resume | "Pausieren" / "Fortsetzen" | `api /jobs/<id>/pause -X POST`, `api /jobs/<id>/resume -X POST` (control) |

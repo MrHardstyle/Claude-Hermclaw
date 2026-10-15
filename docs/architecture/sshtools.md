@@ -90,6 +90,8 @@ store redacts keys that contain `token`.
      `ssh-<48 hex>`, the SHA-256 of host + exact command (or upload path/mode/sha256) + step. A token identifies a
      command; it does not authorise one.
    - Only an operator entry in `jobs.metadata['ssh_approvals']` (`grant_approval`) authorises it.
+     A client cannot plant the key (or `ssh_approvals_consumed`) when it creates the job: `POST /api/jobs` refuses
+     reserved metadata keys with 422 `JOB_METADATA_RESERVED_KEY` ([api.md](api.md) §2, BUG-140).
    - A repeated call that passes the token consumes the approval under `SELECT … FOR UPDATE`, in the same
      transaction that writes the `command_runs` row with `exit_code NULL` ("started"). The approval moves to
      `ssh_approvals_consumed` (history with `approved_by`). Approvals are single use, and concurrent calls with one

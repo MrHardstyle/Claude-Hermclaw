@@ -22,6 +22,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from hermclaw.contracts.events import EventType
 from hermclaw.contracts.plan import PlanContract, PlanStep
+from hermclaw.core import job_metadata
 from hermclaw.core.config import HermclawConfig
 from hermclaw.core.errors import NotFoundError
 from hermclaw.events.store import append_event
@@ -30,7 +31,7 @@ from hermclaw.planner.errors import PlannerError
 
 SOURCE_TYPE = "planner"
 CODER_MODEL_ROLE = "coder"
-FALLBACK_METADATA_KEY = "planner_model_fallback"
+FALLBACK_METADATA_KEY = job_metadata.PLANNER_MODEL_FALLBACK
 
 
 @dataclass
@@ -147,6 +148,7 @@ async def step_dependency_keys(session: AsyncSession, steps: Sequence[Step]) -> 
 
 
 def merge_job_metadata(job: Job, updates: dict[str, Any]) -> None:
+    """Shallow merge of runtime keys; every key must be declared in ``hermclaw.core.job_metadata`` (BUG-140)."""
     job.metadata_ = {**(job.metadata_ or {}), **updates}
 
 

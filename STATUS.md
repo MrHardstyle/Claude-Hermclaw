@@ -74,7 +74,7 @@
 - Embeddings: `embeddinggemma:300m` (768 dim; EmbeddingGemma 2 erst, wenn Ollama es unter Linux/CUDA ausführt, D-010)
 
 ## Bugs
-- 139 gefunden, **139 behoben**, 0 offen (P0 2, P1 25, P2 61, P3 48, P4 3) – `BUGS.md`
+- 140 gefunden, **140 behoben**, 0 offen (P0 2, P1 26, P2 61, P3 48, P4 3) – `BUGS.md` (zuletzt BUG-140: reservierte Job-Metadaten-Schlüssel)
 - Externer Blocker: BLOCKER-001
 
 ## Letzte Testresultate (2026-10-15, Build-Host)

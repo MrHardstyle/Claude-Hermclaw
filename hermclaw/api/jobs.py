@@ -19,6 +19,7 @@ from hermclaw.api.schemas import ArtifactOut, ControlOut, JobDetailOut, JobListO
 from hermclaw.contracts.common import JobStatus
 from hermclaw.contracts.events import EventType
 from hermclaw.contracts.job import JobCreate
+from hermclaw.core import job_metadata as jm
 from hermclaw.core.errors import ConflictError, NotFoundError, PolicyViolation, ValidationFailed
 from hermclaw.core.settings import get_settings
 from hermclaw.events.store import append_event
@@ -146,6 +147,9 @@ async def _resolve_repository(session: AsyncSession, body: JobCreate, principal:
 async def create_job(
     body: JobCreate, principal: Principal = Depends(require("control")), session: AsyncSession = Depends(get_session)
 ) -> JobOut:
+    # before anything is written (repository auto-registration, job row, events): a client must not plant state the
+    # runtime trusts – e.g. ssh_approvals would pre-approve SSH mutations without the admin scope (BUG-140)
+    jm.check_client_metadata(body.metadata)
     repo = await _resolve_repository(session, body, principal)
     title = body.title or (body.prompt.strip().splitlines()[0][:120] if body.prompt.strip() else "Job")
     job = Job(
@@ -160,9 +164,9 @@ async def create_job(
         created_by=principal.name,
         metadata_={
             **body.metadata,
-            "allow_network_research": body.allow_network_research,
-            "auto_commit": body.auto_commit,
-            "create_merge_request": body.create_merge_request,
+            jm.ALLOW_NETWORK_RESEARCH: body.allow_network_research,
+            jm.AUTO_COMMIT: body.auto_commit,
+            jm.CREATE_MERGE_REQUEST: body.create_merge_request,
         },
     )
     session.add(job)
@@ -261,13 +265,13 @@ async def _control(session: AsyncSession, job_id: uuid.UUID, action: str, princi
             raise ConflictError(f"retry not possible from status {status.value}")
         job.cancel_requested = False
         job.pause_requested = False
-        job.metadata_ = {**(job.metadata_ or {}), "retry_requested": True}
+        job.metadata_ = {**(job.metadata_ or {}), jm.RETRY_REQUESTED: True}
         await transition_job(session, job, JobStatus.queued, reason="retry via API", actor=principal.name)
         detail = "job re-queued; failed steps will be retried"
     elif action == "replan":
         if status in JOB_TERMINAL:
             raise ConflictError(f"job already {status.value}")
-        job.metadata_ = {**(job.metadata_ or {}), "replan_requested": reason or "manual replan via API"}
+        job.metadata_ = {**(job.metadata_ or {}), jm.REPLAN_REQUESTED: reason or "manual replan via API"}
         detail = "replan requested"
     else:  # pragma: no cover
         raise ValidationFailed(f"unknown action {action}")
