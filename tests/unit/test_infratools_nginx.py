@@ -42,23 +42,36 @@ def codes(findings: list[Finding]) -> dict[str, str]:
     return {f.code: f.severity for f in findings}
 
 
-def render_repo_template() -> str:
-    """infra/ansible/roles/nginx/templates/hermclaw-next.conf.j2 with the role defaults filled in."""
-    tpl = (ROOT / "infra/ansible/roles/nginx/templates/hermclaw-next.conf.j2").read_text()
-    tpl = tpl.replace("{{ nginx_api_upstream | regex_replace('^http://', '') }}", "192.168.178.225:8000")
-    tpl = re.sub(r"\{\{ ' default_server' if nginx_default_server \| bool else '' \}\}", " default_server", tpl)
-    tpl = re.sub(r"\{% if nginx_listen_ipv6 \| bool %\}\n(.*?)\{% endif %\}\n", r"\1", tpl, flags=re.S)
-    values = {
-        "nginx_listen_port": "80",
-        "nginx_server_name": "hermclaw.lan",
+def _ansible_bool(value: object) -> bool:
+    return value is True or str(value).strip().lower() in {"true", "yes", "on", "1"}
+
+
+def render_repo_template(**overrides: object) -> str:
+    """infra/ansible/roles/nginx/templates/hermclaw-next.conf.j2 rendered with Jinja (Ansible's trim_blocks and the
+    filters the template uses) from the role defaults; ``overrides`` replace inventory/fact-dependent values."""
+    import jinja2
+    import yaml
+
+    role = ROOT / "infra/ansible/roles/nginx"
+    env = jinja2.Environment(trim_blocks=True, undefined=jinja2.StrictUndefined, keep_trailing_newline=True)
+    env.filters["bool"] = _ansible_bool
+    env.filters["regex_replace"] = lambda value, pattern, repl="": re.sub(pattern, repl, str(value))
+    env.tests["search"] = lambda value, pattern: re.search(pattern, str(value)) is not None
+    env.tests["match"] = lambda value, pattern: re.match(pattern, str(value)) is not None
+    context: dict[str, object] = {
+        "hermclaw_web_server_name": "hermclaw.lan",
+        "hermclaw_orchestrator_ip": "192.168.178.225",
+        "hermclaw_api_port": 8000,
         "hermclaw_webroot": "/var/www/hermclaw-next",
-        "nginx_client_max_body_size": "10m",
-        "nginx_site_name": "hermclaw-next",
-        "nginx_sse_read_timeout": "3600s",
+        "ansible_facts": {"all_ipv6_addresses": ["fd00::223"]},
+        "ansible_host": "192.168.178.223",
     }
-    for key, value in values.items():
-        tpl = tpl.replace("{{ " + key + " }}", value)
-    return "\n".join(line for line in tpl.splitlines() if not line.lstrip().startswith("#"))
+    context.update(yaml.safe_load((role / "defaults/main.yml").read_text(encoding="utf-8")))
+    context.update(overrides)
+    for _ in range(3):  # defaults refer to each other ("{{ nginx_tls_dir }}/...")
+        context = {k: env.from_string(v).render(context) if isinstance(v, str) and "{{" in v else v for k, v in context.items()}
+    text = env.from_string((role / "templates/hermclaw-next.conf.j2").read_text(encoding="utf-8")).render(context)
+    return "\n".join(line for line in text.splitlines() if not line.lstrip().startswith("#"))
 
 
 # ---------------------------------------------------------------------------------------------- tokenizer
@@ -206,6 +219,17 @@ async def test_sse_probe_paths_find_the_matching_location() -> None:
     assert "SSE_PROBE_UNMATCHED" in codes(report2.findings)
 
 
+async def test_sse_probe_skips_redirect_servers_but_not_static_locations() -> None:
+    """The HTTP server of a TLS site only redirects; the client follows to the proxying server (BUG-132)."""
+    redirect = "server { listen 80; location / { return 301 https://$host$request_uri; } }"
+    assert "SSE_PROBE_NOT_PROXIED" not in codes((await validator().validate(redirect, sse_paths=("/api/events/stream",))).findings)
+    server_level = "server { listen 80; return 308 https://$host$request_uri; }"
+    report = await validator().validate(server_level, sse_paths=("/api/events/stream",))
+    assert not [f for f in report.findings if f.code.startswith("SSE_PROBE")], report.render()
+    static = "server { listen 80; location / { root /srv; return 200; } }"
+    assert "SSE_PROBE_NOT_PROXIED" in codes((await validator().validate(static, sse_paths=("/api/events/stream",))).findings)
+
+
 def test_match_location_semantics() -> None:
     server = parse(
         """server {
@@ -291,8 +315,19 @@ async def test_tls_warnings_and_allowed_upstreams() -> None:
     assert (await named.validate("server { location / { proxy_pass http://backend.lan:80; } }")).ok
 
 
-async def test_repo_nginx_template_passes_the_proxy_rules() -> None:
-    report = await validator().validate(render_repo_template(), sse_paths=("/api/jobs/abc/events/stream", "/api/events/stream"))
+@pytest.mark.parametrize(
+    "overrides",
+    [
+        {"nginx_default_server": True},
+        {"nginx_tls_enabled": True, "nginx_hsts_max_age": 31536000},
+        {"ansible_facts": {"all_ipv6_addresses": []}},
+    ],
+    ids=["http-default-server-ipv6", "tls-hsts", "ipv4-only"],
+)
+async def test_repo_nginx_template_passes_the_proxy_rules(overrides: dict[str, object]) -> None:
+    text = render_repo_template(**overrides)
+    assert ("listen [::]:" in text) == bool(overrides.get("ansible_facts", {"all_ipv6_addresses": [1]})["all_ipv6_addresses"])  # type: ignore[index]
+    report = await validator().validate(text, sse_paths=("/api/jobs/abc/events/stream", "/api/events/stream"))
     assert report.ok, report.render()
     assert report.sse_locations and not [f for f in report.findings if f.severity == "warning"], report.render()
 

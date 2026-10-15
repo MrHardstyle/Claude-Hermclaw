@@ -783,8 +783,12 @@ class ProxyConfigValidator:
 
     def _check_probe(self, servers: list[Directive], path: str, findings: list[Finding]) -> None:
         for server in servers:
+            if _redirects(server):
+                continue  # e.g. the HTTP server of a TLS site: the client follows to the server that proxies
             loc = match_location(server, path)
             where = f"server {server_names(server)[0] or '_'}"
+            if loc is not None and _redirects(loc):
+                continue
             if loc is None:
                 findings.append(Finding("warning", "SSE_PROBE_UNMATCHED", f"no location handles {path}", location=where, line=server.line))
                 continue
@@ -974,6 +978,15 @@ def _location_parts(loc: Directive) -> tuple[str, str]:
     if args and args[0].startswith("@"):
         return "@", args[0]
     return "", args[0] if args else ""
+
+
+_REDIRECT_CODES = {"301", "302", "303", "307", "308"}
+
+
+def _redirects(block: Directive) -> bool:
+    """True when ``block`` (a server or location) answers every request with a redirect (``return 301 …``)."""
+    ret = block.first("return")
+    return ret is not None and bool(ret.args) and ret.args[0] in _REDIRECT_CODES
 
 
 def match_location(server: Directive, path: str) -> Directive | None:

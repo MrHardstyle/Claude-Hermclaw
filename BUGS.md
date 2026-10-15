@@ -777,6 +777,12 @@ Noch keine.
 - Erwartet: no findings in tracked files.
 - Tatsächlich: `secret_assignment` for three comment lines of the form "admin token: …" (`docs/architecture/deployment.md`, `roles/hermclaw_orchestrator/defaults/main.yml`, `tasks/token.yml`) and `high_entropy` for the 40-hex PGDG fingerprint in `roles/postgresql/defaults/main.yml`. Fixed: comments reworded; the fingerprint is written in gpg's grouped form and normalised (`replace(' ', '') | upper`) before the comparison (fingerprint test still passes and refuses other/extra/missing keys).
 
+### BUG-132 – Proxy validator flagged the HTTP→HTTPS redirect server as "SSE not proxied"; template test could not render the P32 template
+- Phase: P39 (finale Matrix) · Komponente: infratools · Severity: P3 · blockierend: nein · Status: **behoben** (`tests/unit/test_infratools_nginx.py::test_sse_probe_skips_redirect_servers_but_not_static_locations`, `::test_repo_nginx_template_passes_the_proxy_rules[tls-hsts]`)
+- Reproduktion: `proxy_config_validate` with SSE probe paths on the rendered site with `nginx_tls_enabled: true`; and `pytest tests/unit/test_infratools_nginx.py` after the P32 template rewrite (Jinja macros).
+- Erwartet: the redirect-only HTTP server (`location / { return 301 https://… }`) is not an SSE path; the template test renders the real template.
+- Tatsächlich: two `SSE_PROBE_NOT_PROXIED` warnings for the port-80 server of every TLS site; the unit test rendered the template with string replacements and failed with `NGINX_SYNTAX` on the macro-based template. Fixed: servers/locations that answer with `return 3xx` are skipped by the probe; the test renders the template with Jinja (trim_blocks, Ansible filters/tests) from the role defaults in three variants (HTTP + default_server + IPv6, TLS + HSTS, IPv4 only).
+
 ## Template
 
 ### BUG-XXX – Titel
