@@ -49,9 +49,15 @@ getestet; die Live-Abnahme auf den Ziel-Hosts steht aus (BLOCKER-001, `scripts/o
   Plan-DAG, Live-Status ohne Chain-of-Thought, Diffs, Freigaben, Artefakten; Playwright-Tests.
 - **Deployment (P32):** Ansible-Bootstrap (P01) für Debian 13 auf allen Hosts (PostgreSQL 17 aus PGDG, rootless
   Podman mit cgroup-Delegation, Node.js 22, nginx, NVIDIA R580 per Runfile/DKMS, Ollama 0.40.4) und Deployment-
-  Playbook mit versionierten venv-Releases; `hermclaw doctor` als Installations-Preflight.
+  Playbook `deploy.yml`: Offline-Release (`scripts/deploy/build-release.sh`: CPython-3.13-Wheelhouse mit Hash-Lock,
+  UI-Build, tree-sitter-Grammatiken, `SHA256SUMS`, Selbsttest), versionierte venvs mit atomarem Symlink-Wechsel,
+  Konfiguration aus den Beispielen + Inventar mit `config-check` vor dem Einspielen, Schema-Entscheidung vor jeder
+  Live-Änderung, Migration einmal vor dem Neustart, LiteLLM-Gate (lebendig und authentifiziert), Health-Gates,
+  Upgrade/Rollback mit Schema-Downgrade-Opt-in, Prune nach Aktivierungsreihenfolge, Trockenlauf ohne Änderungen,
+  Operator-CLI `sudo hermclaw …`; `hermclaw doctor` als Installations-Preflight.
 - **Backup/Restore (P33):** konsistenter `pg_dump`, Konfiguration, Artefakte, signiertes Manifest, rsync nach
-  Terra (.60), Retention, wöchentlicher Restore-Test in eine Wegwerf-Datenbank, Disaster-Recovery `restore-full`.
+  Terra (.60), Retention, wöchentlicher Restore-Test in eine Wegwerf-Datenbank (Units und Restore-Template vom
+  Deployment eingerichtet), Disaster-Recovery `restore-full`.
 
 ### Hinzugefügt – Qualität (P34–P42)
 
@@ -65,6 +71,9 @@ getestet; die Live-Abnahme auf den Ziel-Hosts steht aus (BLOCKER-001, `scripts/o
   unter Linux/Pascal).
 - D-011: NVIDIA-Treiber R580 über den Runfile-Installer auf `.224` (kein paketierter Treiber ≥ 570 für Pascal in
   Debian 13).
+- D-012: pgvector ≥ 0.8.7 als Standard, dokumentierte Betreiber-Ausnahme ab 0.8.2, solange PGDG für trixie noch
+  kein 0.8.7 liefert.
+- SearXNG-Image per Tag und Digest gepinnt, `GRANIAN_HOST=0.0.0.0` (Research R-027).
 
 ### Sicherheit
 
@@ -77,8 +86,8 @@ getestet; die Live-Abnahme auf den Ziel-Hosts steht aus (BLOCKER-001, `scripts/o
 
 ### Behoben
 
-- 109 Fehler wurden während des Aufbaus gefunden und behoben, jeweils mit Regressionstest (`BUGS.md`, BUG-001 bis
-  BUG-109). Es gibt keine offenen Bugs.
+- 131 Fehler wurden während des Aufbaus gefunden und behoben, jeweils mit Regressionstest (`BUGS.md`, BUG-001 bis
+  BUG-131; P0: 2, P1: 24, P2: 57, P3: 45, P4: 3). Es gibt keine offenen Bugs.
 
 ### Bekannte Einschränkungen
 
