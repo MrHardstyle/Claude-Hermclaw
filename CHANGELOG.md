@@ -2,6 +2,23 @@
 
 Format: [Keep a Changelog](https://keepachangelog.com/de/1.1.0/), Versionen nach PEP 440.
 
+## [0.1.0rc2] – Release Candidate (2026-10-16)
+
+Fixes aus der Live-Abnahme auf den Ziel-Hosts (INSTALLATION.md Kapitel 12, BUG-143–152).
+
+### Behoben
+- **Planner (BUG-143):** Pläne mit schreibenden Steps ohne `repo_hints`, `allowed_new_paths` oder Presence-Evidence
+  werden beim Planen abgelehnt (vorher `SCOPE_UNAVAILABLE` zur Laufzeit, erster Testauftrag gescheitert); die Meldung
+  für Prüf-Steps ohne Abhängigkeit nennt Kandidaten-IDs.
+- **Planner-Prompt (BUG-144):** Web-Research nur für externe Fakten, nicht für das eigene Repository.
+- **Modelle (BUG-150):** optionales Profilfeld `gpu_layers` (Ollama `num_gpu`); `planner-gemma-fallback` lädt mit
+  32K auf der GTX 1080 nur mit 30 GPU-Layern.
+- **Git (BUG-152):** abgelehnte Pushes nennen die Begründung des Servers.
+- **Sandbox (BUG-147):** Docker-Adapter unter rootless Engines.
+- **Deployment (BUG-149):** `podman-compose` auf dem Execution Worker.
+- **Abnahme/Tests (BUG-145, -146, -148, -151):** Dev-Extra mit `aiohttp`, Sandbox-Suite prüft alle Podman-Tests,
+  SKIP statt PASS bei vollständig übersprungenen Suiten, SearXNG-URL aus der Konfiguration, WoL-Test ohne WoL.
+
 ## [0.1.0rc1] – Release Candidate (2026-10-15)
 
 Erster vollständiger Aufbau von Hermclaw Next (Greenfield, Bauplan v2, Phasen P00–P42). Lokal vollständig

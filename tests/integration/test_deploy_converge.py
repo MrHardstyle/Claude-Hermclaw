@@ -17,8 +17,8 @@ container) with the **real release set** built by ``scripts/deploy/build-release
 Sequence (container A, container B likewise for the model worker): ``bootstrap.yml`` -> ``deploy.yml --check --diff``
 on the freshly bootstrapped hosts (the documented first dry run: succeeds, nothing on disk changes) -> ``deploy.yml``
 0.1.0rc1 (the bootstrap's plain venv directory is migrated to the symlink layout) -> ``site.yml`` and ``deploy.yml
---check --diff`` report ``changed=0`` -> dry run of the upgrade to 0.1.0rc2 (nothing on disk changes) -> 0.1.0rc2
-(switch) -> 0.1.0rc3 (migration to 0003, pruning with ``hermclaw_keep_releases=1``) -> rollback to 0.1.0rc2 refused
+--check --diff`` report ``changed=0`` -> dry run of the upgrade to V2 (nothing on disk changes) -> V2
+(switch) -> V3 (migration to 0003, pruning with ``hermclaw_keep_releases=1``) -> rollback to V2 refused
 without the schema-downgrade opt-in (no live file changes, although the run also carries a configuration change), then
 done with it (downgrade with the newer release's migrations, no reinstall) -> ``changed=0`` again.
 """

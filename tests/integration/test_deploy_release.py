@@ -3,11 +3,11 @@
 The release set every deployment test uses is built **once per pytest session** (cached below the session's base temp
 directory, shared by ``test_deploy_converge.py``):
 
-* ``0.1.0rc1`` – the checkout's version, built online through the host's proxy with the real UI build (``npm ci && npm
+* ``V1`` – the checkout's version, built online through the host's proxy with the real UI build (``npm ci && npm
   run build``); every wheel it used is collected into a local wheel cache,
-* ``0.1.0rc2`` – the same sources as another version (``--version``), offline from that cache (``--offline-from``) with
+* ``V2`` (``<V1>.post1``) – the same sources as another version (``--version``), offline from that cache (``--offline-from``) with
   the first build's UI bundle (``--ui-dist``),
-* ``0.1.0rc3`` – a source copy with one more Alembic revision (``0003``), offline: the schema-upgrade / rollback case.
+* ``V3`` (``<V1>.post2``) – a source copy with one more Alembic revision (``0003``), offline: the schema-upgrade / rollback case.
 
 If the checkout itself cannot produce a deployable release because of the known defect of its worker console entry
 points (``pyproject.toml`` names ``worker.execution.app:main`` / ``worker.model.app:main``, which do not exist – the units
@@ -38,13 +38,17 @@ from pathlib import Path
 
 import pytest
 
+import hermclaw
+
 pytestmark = pytest.mark.integration
 
 REPO = Path(__file__).resolve().parents[2]
 BUILD = REPO / "scripts" / "deploy" / "build-release.sh"
 TRIXIE_PY = "docker.io/library/python:3.13-slim-trixie"
 NODE_BIN = Path("/opt/node22/bin")
-V1, V2, V3 = "0.1.0rc1", "0.1.0rc2", "0.1.0rc3"
+# V1 is the checkout's own version (built without --version); V2/V3 are later versions of the same sources
+V1 = hermclaw.__version__
+V2, V3 = f"{V1}.post1", f"{V1}.post2"
 CACHE_NAME = "hermclaw-deploy-releases"
 SOURCE_PARTS = ["pyproject.toml", "README.md", "alembic.ini", "migrations", "hermclaw", "worker", "config", "ui", "scripts/ops",
                 "infra/sandbox-images", "infra/backup"]  # fmt: skip
