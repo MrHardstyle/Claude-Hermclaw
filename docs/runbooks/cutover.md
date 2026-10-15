@@ -5,16 +5,20 @@ side by side on its own paths/ports until it has been stable, and every step has
 
 ## 0. Preconditions (go/no-go)
 
+Ansible commands run on the admin machine in `infra/ansible`. `$TOKEN` is a token with the `read` scope
+([admin.md](admin.md)).
+
 | Check | Command / evidence | Go when |
 |---|---|---|
-| RC tests green on the build host | `docs/operations/FINAL_BUILD_REPORT.md`, `docs/testing/test-matrix-results.md` (`scripts/dev/test_matrix.py`) | all suites green |
-| Hosts bootstrapped | `ansible-playbook -i inventory/hosts.yml playbooks/bootstrap.yml --check` shows no changes | idempotent |
-| Deployment healthy | `curl -s http://192.168.178.225:8000/api/health?deep=true` | `"status": "ok"` |
-| Models present on `.224` | `sudo -u ollama /opt/hermclaw/bin/hermclaw-model-pull --dry-run` (INSTALLATION.md §7) | exit 0, nothing missing |
-| Workers ready | `curl -s -H "Authorization: Bearer $TOKEN" http://192.168.178.225:8000/api/workers` | `exec-222`, `model-224` ready |
-| Backup + restore test | `sudo systemctl start hermclaw-backup.service hermclaw-restore-test.service`, then `journalctl -u hermclaw-backup -u hermclaw-restore-test -n 40 -o cat` (INSTALLATION.md §11) | both JSON results `"ok": true` |
-| Live smoke job | one real job against a test repository on `.226` (see INSTALLATION.md §12) | job succeeded, MR created |
-| Port plan | `scripts/bootstrap/check-host.sh` on every host | no foreign owner of a Hermclaw port |
+| RC tests green on the build host | `docs/testing/test-matrix-results.md` (written by `.venv/bin/python scripts/dev/test_matrix.py`) | all suites green |
+| Hosts bootstrapped | `ansible-playbook -i inventory/hosts.yml playbooks/bootstrap.yml --check --diff -K` | `changed=0` on every host |
+| Port plan | `ansible-playbook -i inventory/hosts.yml playbooks/bootstrap.yml --tags preflight -K` (runs `scripts/bootstrap/check-host.sh --role <group>` on every host) | exit 0; no `port:<n>` FAIL (`CONFLICT`: a foreign owner of a Hermclaw port) |
+| Deployment healthy | `curl -s 'http://192.168.178.225:8000/api/health?deep=true'` | `"status":"ok"` |
+| Models present on `.224` | `sudo -u ollama /opt/hermclaw/bin/hermclaw-model-pull` on `.224` (INSTALLATION.md §7: pulls a missing model, then checks each with `ollama show`; `--dry-run` only prints the pull commands and checks nothing), or `sudo hermclaw doctor` on `.225` while `.224` is awake | exit 0, no `MISSING role models`; doctor: `models:model-224` ok |
+| Workers ready | `curl -s -H "Authorization: Bearer $TOKEN" http://192.168.178.225:8000/api/workers` | `exec-222` and `model-224` `ready` (or `sleeping`: the smoke job then shows that Wake-on-LAN wakes them) |
+| Live acceptance | `sudo scripts/ops/live-acceptance.sh` in `/opt/hermclaw/src` on `.225` and `.222` (INSTALLATION.md §12) | `/var/lib/hermclaw/acceptance/<time>-summary.txt`: every suite `PASS`, or `SKIP` with a reason |
+| Backup + restore test | `sudo systemctl start hermclaw-backup.service hermclaw-restore-test.service` (`After=` starts the restore test once the backup has finished), then `sudo journalctl -u hermclaw-backup -u hermclaw-restore-test --since -3h -o cat \| grep -E '^  "(set_id\|ok)"'` (INSTALLATION.md §11) | `systemctl` exits 0; backup: `"set_id": "<id>"` (a successful backup has no `ok` field); restore test: `"ok": true` with the same `set_id`; no `"ok": false` |
+| Live smoke job | one real job against a test repository on `.226` (INSTALLATION.md §10.4) | job `succeeded`, branch `hermclaw/<id8>-<slug>` pushed; a merge request only with `git.create_merge_request: true` |
 
 ## 1. Freeze the old system read-only (42.1, 42.2)
 
@@ -23,8 +27,13 @@ The old components keep running in read-only mode; their data stays where it is.
 ```bash
 # .223 – old WebUI (noobclaw) stays reachable, but read-only: keep the site, block mutating requests
 sudo cp -a /etc/nginx/sites-available/noobclaw /etc/nginx/sites-available/noobclaw.pre-cutover
-#   in the noobclaw server block add:   limit_except GET HEAD { deny all; }
-sudo nginx -t && sudo systemctl reload nginx
+sudoedit /etc/nginx/sites-available/noobclaw
+#   as the first line inside EVERY server { } block of the file (one per listen port, e.g. 80 and 443) add:
+#       if ($request_method !~ ^(GET|HEAD)$) { return 405; }
+#   valid in server context and independent of the site's location blocks (limit_except is only allowed inside a
+#   location and would have to go into each of them)
+sudo nginx -t && sudo systemctl reload nginx        # no reload when the test fails
+curl -s -o /dev/null -w '%{http_code}\n' -X POST http://<old UI name or address>/   # 405
 
 # bridge host – stop the patch watcher (it is the only writer of the old system), do NOT remove it
 sudo systemctl stop hermclaw-patch-watcher.service
@@ -33,9 +42,10 @@ sudo systemctl disable hermclaw-patch-watcher.service       # re-enable = rollba
 # .226 GitLab – archive the old project local-ai/hermclaw (Settings → General → Advanced → Archive project).
 #   Archived projects are read-only; un-archive is the rollback. Never delete branches or the project.
 
-# snapshot of the old state for the record (read-only copies, kept on .60)
-ssh root@192.168.178.60 'mkdir -p /mnt/user/backups/hermclaw-legacy/$(date +%F)'
-rsync -a --info=stats1 /var/www/noobclaw/ root@192.168.178.60:/mnt/user/backups/hermclaw-legacy/$(date +%F)/webui/
+# .223 – snapshot of the old state for the record (read-only copies, kept on .60)
+D=$(date +%F)
+ssh root@192.168.178.60 "mkdir -p /mnt/user/backups/hermclaw-legacy/$D"
+rsync -a --info=stats1 /var/www/noobclaw/ "root@192.168.178.60:/mnt/user/backups/hermclaw-legacy/$D/webui/"
 ```
 
 Nothing of the old system is deleted in this phase: no `rm`, no `DROP`, no branch deletion.
@@ -53,16 +63,18 @@ the old site from the request path:
 test -L /etc/nginx/sites-enabled/hermclaw-next.conf   # enabled by playbooks/deploy.yml
 sudo rm -f /etc/nginx/sites-enabled/noobclaw          # only the symlink; the site file stays (rollback)
 sudo nginx -t && sudo systemctl reload nginx
-curl -s http://192.168.178.223/api/health             # proxied to .225
+curl -s http://192.168.178.223/api/health             # proxied to .225; with TLS on: curl -sk https://192.168.178.223/api/health
 ```
 
-Announce the new URL; the old UI stays reachable read-only on its previous server name/port if configured.
+Announce the new URL. Removing the symlink takes the old UI offline; its site file and `/var/www/noobclaw` stay for
+the rollback, and the copy on `.60` is the read-only record. To keep the old UI readable, move its site to its own
+port or server name with the read-only block from step 1 instead of removing the symlink.
 
 ## 3. Monitoring during the stabilisation period (42.5)
 
 * **Liveness**: `systemctl is-active hermclaw-api hermclaw-scheduler hermclaw-litellm postgresql` on `.225`,
   `hermclaw-exec-worker` on `.222`, `hermclaw-model-worker ollama` on `.224`, `nginx` on `.223`
-  (systemd restarts on failure; `journalctl -u hermclaw-scheduler -f` for the runtime log, JSON lines).
+  (systemd restarts on failure; `sudo journalctl -u hermclaw-scheduler -f` for the runtime log, JSON lines).
 * **Metrics**: Prometheus scrapes `GET /api/metrics` (bearer token with `read` scope):
   `hermclaw_jobs{status=…}`, `hermclaw_steps_in_flight`, `hermclaw_resource_leases`, `hermclaw_resource_requests_waiting`,
   `hermclaw_worker_up`, `hermclaw_worker_heartbeat_age_seconds`, `hermclaw_disk_free_mb`,
@@ -70,8 +82,8 @@ Announce the new URL; the old UI stays reachable read-only on its previous serve
   sleeping; `hermclaw_resource_leases` > 0 for > 2 h with `hermclaw_steps_in_flight` == 0 (stuck lease);
   `hermclaw_disk_free_mb{level="critical"}`; failed model invocations rising.
 * **Health**: `GET /api/health?deep=true` (DB + LiteLLM), UI dashboard (workers, resources, live events).
-* **Daily**: backup result (`journalctl -u hermclaw-backup --since -26h`), weekly the restore test
-  (`journalctl -u hermclaw-restore-test --since -8d`), `BUGS.md` triage.
+* **Daily**: backup result (`sudo journalctl -u hermclaw-backup --since -26h`), weekly the restore test
+  (`sudo journalctl -u hermclaw-restore-test --since -8d`), `BUGS.md` triage.
 
 ## 4. Rollback (42.4)
 
@@ -98,8 +110,9 @@ GitLab are separate from the old ones.
 Criteria: ≥ 14 days without P0/P1 bug, ≥ 20 real jobs succeeded, backup restore test passed twice, no rollback.
 Then, one component at a time, each with a fresh backup of what is removed:
 
-1. remove the old nginx site file and `/var/www/noobclaw` (after the copy on `.60` is verified);
+1. remove the old nginx site files (`noobclaw`, `noobclaw.pre-cutover`) and `/var/www/noobclaw` (after the copy
+   on `.60` is verified);
 2. remove the `hermclaw-patch-watcher.service` unit and its code from the bridge host;
 3. keep the archived GitLab project `local-ai/hermclaw` (archived projects cost nothing; history stays available);
-4. remove old Ollama models that are no longer referenced by `config/models.yaml` (`ollama rm <tag>`), never the
-   six Hermclaw Next roles.
+4. remove old Ollama models on `.224` that `/etc/hermclaw/models.yaml` on `.225` no longer references
+   (`ollama list`, then `ollama rm <tag>`), never one of the six Hermclaw Next models (INSTALLATION.md §7).

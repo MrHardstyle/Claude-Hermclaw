@@ -308,9 +308,7 @@ def test_ssh_options_from_config(tmp_path):
     # the GitLab host is no SSH tool target (only policies.ssh.allowed_hosts are)
     assert "gitlab-226" not in base.policies.ssh.allowed_hosts
     # a gitlab host without ssh block: no key, no known_hosts (ssh's own defaults)
-    bare = base.model_copy(
-        update={"hosts": HostsConfig(hosts=[HostConfig(id="gitlab-226", address="192.168.178.226", role="gitlab")])}
-    )
+    bare = base.model_copy(update={"hosts": HostsConfig(hosts=[HostConfig(id="gitlab-226", address="192.168.178.226", role="gitlab")])})
     assert ssh_options_from_config(bare).key_path is None and ssh_options_from_config(bare).known_hosts is None
     key = tmp_path / "id_ed25519"
     key.write_text("k")

@@ -327,7 +327,8 @@ def test_inventory_group_vars_take_effect_in_the_roles(tmp_path: Path) -> None:
             cwd=tmp_path,
         )
         assert res.returncode == 0, res.stdout[-2000:] + res.stderr[-2000:]
-        return json.loads(res.stdout)
+        host_vars: dict[str, Any] = json.loads(res.stdout)
+        return host_vars
 
     e, o = inventory_vars("e"), inventory_vars("o")
     assert e["hermclaw_api_port"] == 8000, "--playbook-dir loads playbooks/group_vars/all.yml"

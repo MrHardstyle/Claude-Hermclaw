@@ -14,35 +14,51 @@ repositories and workspaces). Every other host can be rebuilt from the repositor
 | `.60` Terra | the backup sets | new target, first backup + restore test (§6) | 30 min |
 | a credential | – | rotate (§7) | 10 min |
 
-Keep in the password manager (never in the repository): API admin token, LiteLLM master key, GitLab token, worker
-tokens, backup manifest key, the backup SSH key (or authorise a new one on `.60`). The encrypted credential blobs in
-`/etc/credstore.encrypted` are bound to the host key / TPM of the machine that created them.
+Keep in the password manager (never in the repository): GitLab token, worker tokens, backup manifest key, API admin
+token, the backup SSH key (or authorise a new one on `.60`). The encrypted credential blobs in
+`/etc/credstore.encrypted` are bound to the host key / TPM of the installation that created them. The LiteLLM master
+key and the runtime SSH key are generated again by the bootstrap (§1).
 
 All Ansible commands run on the admin machine in `infra/ansible` (INSTALLATION.md, chapter 4).
 
 ## 1. Orchestrator `.225`
 
-Follow `docs/operations/backup-restore.md` → *Disaster recovery* step by step. In short:
+Follow `docs/operations/backup-restore.md` → *Disaster recovery* step by step; the step numbers below are its steps.
+In short:
 
-1. Reinstall Debian 13 (INSTALLATION.md, chapter 3), keep the IP.
-2. `ansible-playbook -i inventory/hosts.yml playbooks/bootstrap.yml --limit orchestrator -K`, then the deployment
-   (`playbooks/deploy.yml --limit orchestrator`) with the **same** `hermclaw_version` as before; stop the services:
-   `sudo systemctl stop hermclaw-scheduler hermclaw-api`.
-3. Re-create the credentials from the password manager (the bootstrap generated new random ones):
-   `sudo /opt/hermclaw/bin/hermclaw-credential set <name> --force` for `api-admin-token`, `litellm-master-key`,
-   `gitlab-token`, `worker-token-exec-222`, `worker-token-model-224`, `backup-manifest-key`. Keeping the old worker
-   tokens means the workers need no change.
-4. Backup key and Terra host key into `/etc/hermclaw/ssh/`, `backup.yaml` in place, then list, choose and test the
-   newest good set, and `restore-full` it into the empty database (backup-restore.md, steps 2–5).
-5. Put config and artifacts into place (step 6), `hermclaw migrate` (step 7), start the services and run
-   `hermclaw doctor` (step 8). The scheduler recovers the jobs that were in flight at backup time.
-6. Repositories and workspaces are not in the backup: the Git engine re-clones a registered repository on first use.
-   Job branches that were pushed are on GitLab. Work that was not pushed is lost and the affected steps re-run.
-7. Fresh backup + restore test, then `scripts/ops/live-acceptance.sh`.
+1. Reinstall Debian 13 (INSTALLATION.md, chapter 3), keep the IP. Bootstrap:
+   `ansible-playbook -i inventory/hosts.yml playbooks/bootstrap.yml --limit orchestrator -K` (step 1). It generates
+   new random credentials and a new runtime SSH key, but never `gitlab-token` or `backup-manifest-key`.
+2. Re-create the credentials from the password manager **before** the deployment – its preflight stops without
+   `gitlab-token`: `sudo /opt/hermclaw/bin/hermclaw-credential set <name> --force` for `gitlab-token`,
+   `backup-manifest-key`, `worker-token-exec-222`, `worker-token-model-224` and, optionally, `api-admin-token`
+   (step 2). Keeping the old worker tokens means the workers need no change. `litellm-master-key` keeps the
+   bootstrap's value.
+3. Deploy the **same** `hermclaw_version` as before:
+   `ansible-playbook -i inventory/hosts.yml playbooks/deploy.yml --limit orchestrator -K`. It migrates the new
+   database and starts the services. Stop them again:
+   `sudo systemctl stop hermclaw-scheduler hermclaw-api hermclaw-backup.timer hermclaw-restore-test.timer` (step 3).
+4. Backup key and `backup.yaml` in place, `sudo hermclaw backup list`, then test the newest good set:
+   `sudo hermclaw backup restore-test <set-id>` (steps 4–5).
+5. Drop and re-create the database that the deployment migrated (`sudo -u postgres dropdb --force hermclaw`, then
+   `createdb` and the extension `vector`), and `sudo hermclaw backup restore-full` the set into it (step 6).
+6. Put config and artifacts into place (step 7), `sudo hermclaw migrate` (step 8).
+7. Authorise the new runtime SSH key: re-run the bootstrap of `.222`, `.223` and `.224`
+   (`--limit webui,execution_workers,model_workers`) and replace the GitLab deploy key (step 9).
+8. Start the services and the timers, check `http://192.168.178.225:8000/api/health?deep=true` and run
+   `sudo hermclaw doctor` (step 10). The scheduler recovers the jobs that were in flight at backup time.
+9. New admin API token: the one the deployment stored in step 3 was in the replaced database. Delete
+   `/etc/credstore.encrypted/hermclaw-api-operator-token`, re-run the orchestrator deployment, revoke the old host's
+   token (step 11).
+10. Repositories and workspaces are not in the backup: the Git engine re-clones a registered repository on first use.
+    Job branches that were pushed are on GitLab. Work that was not pushed is lost and the affected steps re-run.
+11. Fresh backup + restore test (step 12), then `sudo scripts/ops/live-acceptance.sh` in the source checkout
+    (INSTALLATION.md, chapter 12).
 
-Worker and UI runs (sections 2–4) check first that the orchestrator `.225` already runs `hermclaw_version`
-(`/api/health`). While `.225` itself is down or being rebuilt, add `-e hermclaw_release_require_orchestrator_first=false`
-to those `deploy.yml` runs.
+Worker and UI deployments (sections 2–4) check first that the orchestrator `.225` already runs `hermclaw_version`
+(`/api/health`). Only while `.225` itself is down or being rebuilt, add
+`-e hermclaw_release_require_orchestrator_first=false` to those `deploy.yml` runs. Once `.225` runs the release again,
+leave it out. `bootstrap.yml` does not check it.
 
 ## 2. Execution worker `.222`
 
@@ -54,8 +70,10 @@ ansible-playbook -i inventory/hosts.yml playbooks/deploy.yml --limit execution_w
 
 The bootstrap copies the worker token from the orchestrator's credential store, the deployment rebuilds the
 sandbox images and starts `hermclaw-exec-worker`. If the MAC address changed (new NIC): update `wol_mac` in the
-inventory **and** `hosts.yaml` (deployment renders it) before the run. Steps that were running on the lost worker
-fail with `WORKER_UNREACHABLE` and are retried by the scheduler.
+inventory before the run, and afterwards also run `playbooks/deploy.yml --limit orchestrator -K`. `hosts.yaml`
+(with `wake_on_lan.mac`) exists only on `.225` and is rendered from the inventory by the orchestrator's deployment,
+not by the worker run. Steps that were running on the lost worker fail with `WORKER_UNREACHABLE` and are retried by
+the scheduler.
 
 ## 3. Model worker `.224`
 
@@ -90,11 +108,13 @@ branches that were pushed after the GitLab backup are gone: re-run the affected 
 ## 6. Terra `.60` (backup target)
 
 Set up the new share (`infra/backup/unraid-share-setup.md`), authorise the backup key again
-(`restrict,from="192.168.178.225",command="rrsync …"`), update `known_hosts`, then:
+(`restrict,from="192.168.178.225",command="rrsync …"`), put Terra's new host key into the inventory
+(`common_known_hosts_extra`) and re-run the orchestrator bootstrap, which writes it to `/etc/hermclaw/ssh/known_hosts`,
+then:
 
 ```bash
 sudo systemctl start hermclaw-backup.service && sudo systemctl start hermclaw-restore-test.service
-journalctl -u hermclaw-backup -u hermclaw-restore-test --since -1h
+sudo journalctl -u hermclaw-backup -u hermclaw-restore-test --since -1h
 ```
 
 Old sets are lost with the old target. Until the first new backup exists there is **no** restore point – do this
@@ -108,7 +128,7 @@ first.
 | GitLab token | new token in GitLab → `hermclaw-credential set gitlab-token --force` → restart `hermclaw-scheduler` |
 | LiteLLM master key | `hermclaw-credential generate litellm-master-key --force` → restart `hermclaw-litellm hermclaw-scheduler` |
 | API admin token | `hermclaw-credential generate api-admin-token --force` → restart `hermclaw-api`; API tokens created with `hermclaw token-create` are revoked with `hermclaw token-revoke` |
-| backup manifest key | new key → `systemd-creds encrypt --name=backup-manifest-key …` → sets signed with the old key verify only with the old key (keep it in the password manager) |
+| backup manifest key | new key into the password manager → `hermclaw-credential set backup-manifest-key --force`; sets signed with the old key verify only with the old key (keep it in the password manager) |
 | SSH runtime key | `ssh-keygen` a new `/etc/hermclaw/ssh/id_ed25519` (or delete it and re-run the orchestrator bootstrap), re-run the bootstrap of `.222/.223/.224` (distributes the public key) and update the GitLab deploy key |
 
 Update the password manager entry after every rotation.

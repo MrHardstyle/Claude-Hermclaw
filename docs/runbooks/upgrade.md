@@ -40,7 +40,7 @@ ansible-playbook -i inventory/hosts.yml playbooks/deploy.yml -e hermclaw_version
 ansible-playbook -i inventory/hosts.yml playbooks/deploy.yml -e hermclaw_version=<new>
 
 # 4. verify
-curl -s http://192.168.178.225:8000/api/health?deep=true      # status ok, version = <new>
+curl -s 'http://192.168.178.225:8000/api/health?deep=true'    # status ok, version = <new>
 sudo hermclaw doctor                                           # on .225: config, DB head, workers, models, sandbox, research
 sudo journalctl -u hermclaw-scheduler --since -5min | grep -E '"scheduler started"|recovered'
 ```
@@ -55,9 +55,9 @@ so workers and UI never get ahead of the orchestrator.
 ## Rollback
 
 Re-run the deployment with the previous version. Its venv, payload and UI build are still on the hosts
-(`hermclaw_keep_releases`, default 3: the most recently active previous releases; the one active before the last
-switch is always kept), so nothing is reinstalled or rebuilt. `dist/release-<old>/` must still exist on the control
-node (the preflight verifies it). The switch back is the same atomic symlink rename:
+(`hermclaw_keep_releases` in the inventory, default 3: the most recently active previous releases; the one active
+before the last switch is always kept), so nothing is reinstalled or rebuilt. `dist/release-<old>/` must still exist
+on the control node (the preflight verifies it). The switch back is the same atomic symlink rename:
 
 ```bash
 ansible-playbook -i inventory/hosts.yml playbooks/deploy.yml -e hermclaw_version=<old>
@@ -80,15 +80,16 @@ ansible-playbook -i inventory/hosts.yml playbooks/deploy.yml -e hermclaw_version
 ```
 
 If a migration cannot be downgraded safely (data transformation), the release notes say so and the rollback is a
-restore of the pre-upgrade backup (`python -m hermclaw.backup restore-full --set <backup> --target-db-url …`,
-see `docs/operations/backup-restore.md`).
+restore of the pre-upgrade backup: stop the scheduler, the API and the backup timers, re-create the database empty
+and restore the set into it with `sudo hermclaw backup restore-full --set <backup> --target-db-url …`
+(`docs/operations/backup-restore.md` → *Disaster recovery*, step 6), then deploy `<old>`.
 
 ## Component-specific notes
 
 | Component | Upgrade rule |
 |---|---|
 | LiteLLM (`/opt/litellm/venv` → `venv-<version>-<lock>`, `systemd_skeleton_litellm_venv`) | pinned in the `litellm-proxy` extra of `pyproject.toml` (single source: `build-release.sh` resolves and hash-locks it into the release); bump only with the empirical gateway tests (`tests/integration/test_models_litellm_proxy.py`) green against the new version. The deployment installs the new venv next to the old one, regenerates `/etc/hermclaw/litellm.yaml` with `hermclaw litellm-config` and restarts `hermclaw-litellm` |
-| Ollama (`.224`) | pinned version; upgrade only after the GPU smoke test (`hermclaw-model-worker selftest`); never above the last driver branch supporting Pascal (R580, research R-017) |
-| Models | tags are fixed per role in `config/models.yaml`; a new tag is a config change (`hermclaw_config_overrides.models` in the inventory); the deployment then pulls every missing tag on `.224`: `/opt/hermclaw/bin/hermclaw-model-pull` for the fixed role set, then each remaining tag of `models.yaml` in its own transient unit `hermclaw-model-pull-tag` (`hermclaw_worker_pull_models`, disk precheck); embedding model changes trigger a re-index (embedding_model per chunk) |
+| Ollama (`.224`) | pinned version; upgrade only after the GPU smoke test (INSTALLATION.md 5.6 on `.224`: a short generate, `ollama ps` must show `100% GPU`); never above the last driver branch supporting Pascal (R580, research R-017) |
+| Models | tags are fixed per role in `config/models.example.yaml` (rendered to `/etc/hermclaw/models.yaml` on `.225`); a new tag is a config change (`hermclaw_config_overrides.models` in the inventory); the deployment then pulls every missing tag on `.224`: `/opt/hermclaw/bin/hermclaw-model-pull` for the fixed role set, then each remaining tag of `models.yaml` in its own transient unit `hermclaw-model-pull-tag` (`hermclaw_worker_pull_models`, disk precheck); embedding model changes trigger a re-index (embedding_model per chunk) |
 | UI (`.223`) | static build from the release (`hermclaw-ui-<version>.tar.gz`), unpacked to `/var/www/hermclaw-next-releases/<version>/`; the webroot `/var/www/hermclaw-next` is a symlink switched atomically (`docs/operations/ui.md`) |
 | PostgreSQL | minor updates via Debian packages; major upgrades with `pg_upgradecluster` after a backup |
