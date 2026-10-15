@@ -296,7 +296,22 @@ def test_runner_environment_is_hardened():
 
 def test_ssh_options_from_config(tmp_path):
     base = load_config()
-    assert ssh_options_from_config(base).key_path is None  # gitlab host without ssh block
+    # the shipped example: Git over SSH uses the orchestrator's runtime key and the pinned known_hosts out of the box
+    gitlab = base.hosts.by_role("gitlab")[0]
+    assert gitlab.id == "gitlab-226" and gitlab.ssh is not None and gitlab.ssh.user == "git"
+    shipped = ssh_options_from_config(base)
+    assert shipped.key_path == Path("/etc/hermclaw/ssh/id_ed25519")
+    assert shipped.known_hosts == Path("/etc/hermclaw/ssh/known_hosts")
+    command = shipped.command()
+    assert "-i /etc/hermclaw/ssh/id_ed25519" in command and "UserKnownHostsFile=/etc/hermclaw/ssh/known_hosts" in command
+    assert "StrictHostKeyChecking=yes" in command and "BatchMode=yes" in command
+    # the GitLab host is no SSH tool target (only policies.ssh.allowed_hosts are)
+    assert "gitlab-226" not in base.policies.ssh.allowed_hosts
+    # a gitlab host without ssh block: no key, no known_hosts (ssh's own defaults)
+    bare = base.model_copy(
+        update={"hosts": HostsConfig(hosts=[HostConfig(id="gitlab-226", address="192.168.178.226", role="gitlab")])}
+    )
+    assert ssh_options_from_config(bare).key_path is None and ssh_options_from_config(bare).known_hosts is None
     key = tmp_path / "id_ed25519"
     key.write_text("k")
     hosts = HostsConfig(

@@ -98,7 +98,8 @@ Worker. Jeder Ansible-Lauf ist idempotent: Sie können ihn jederzeit wiederholen
 
 ### 2.1 Mindestanforderungen
 
-Der Preflight (`scripts/bootstrap/check-host.sh`) prüft diese Mindestwerte und bricht darunter ab:
+Der Preflight (`scripts/bootstrap/check-host.sh`) prüft diese Mindestwerte und bricht darunter ab (beim RAM mit
+10 % Toleranz, Kapitel 5.1):
 
 | Host | CPU (logisch) | RAM | freier Platz unter `/var/lib` | Empfehlung |
 |---|---|---|---|---|
@@ -128,7 +129,7 @@ Mit 16 GB RAM passen die 26–30B-Modelle nicht. 32 GB sind die sinnvolle Größ
 |---|---|---|---|
 | .222, .224 | Wake-on-LAN (oft „Power On By PCI-E“, „Wake on LAN“, „ErP“ aus) | **an**, ErP/Deep-Sleep **aus** | Hermclaw legt die Worker bei Leerlauf schlafen und weckt sie per Magic Packet |
 | .222, .224 | Suspend-to-RAM (S3) | erlaubt | `systemctl suspend` als Leerlauf-Aktion |
-| .224 | Secure Boot | **aus** | Der NVIDIA-Treiber wird per DKMS gebaut und ist unsigniert. Alternative: DKMS-MOK-Schlüssel einschreiben (Kapitel 5.6) |
+| .224 | Secure Boot | **aus** | Der NVIDIA-Treiber wird per DKMS gebaut und ist unsigniert. Alternative: DKMS-MOK-Schlüssel einschreiben (Kapitel 5.5) |
 | .224 | Primäre Grafik | PCIe/GTX 1080 oder iGPU, egal | keine Desktop-Nutzung nötig |
 | alle | Virtualisierung (VT-x/AMD-V) | an (empfohlen) | rootless Podman braucht es nicht, schadet aber nicht |
 
@@ -159,7 +160,7 @@ Auf jedem der vier Hermclaw-Hosts:
    sudo apt update && sudo apt full-upgrade -y
    ip -br addr                                     # IP prüfen (Tabelle 1.1)
    ip -br link                                     # MAC notieren (.222/.224)
-   ssh-keygen -lf /etc/ssh/ssh_host_ed25519_key.pub   # Fingerabdruck notieren (Schritt 4.2)
+   ssh-keygen -lf /etc/ssh/ssh_host_ed25519_key.pub   # Fingerabdruck notieren (Schritt 4)
    ```
 
 4. Ihren öffentlichen SSH-Schlüssel des Admin-Rechners hinterlegen (vom Admin-Rechner aus):
@@ -206,12 +207,12 @@ export PATH=$HOME/.local/share/hermclaw/ansible-venv/bin:$PATH
 | `hermclaw_orchestrator_ip` | `all.vars` | `192.168.178.225` | IP des Orchestrators |
 | `hermclaw_lan_broadcast` | `all.vars` | `192.168.178.255` | Broadcast für Wake-on-LAN |
 | `ansible_host` | je Host | IPs aus Tabelle 1.1 | |
-| `hermclaw_web_server_name` | `hermclaw-webui` | `hermclaw.lan` | nginx `server_name` (`_` = Catch-all, nur wenn sonst keine Default-Site existiert) |
+| `hermclaw_web_server_name` | `hermclaw-webui` | `hermclaw.lan 192.168.178.223` | nginx `server_name` (Namen und/oder Adressen). Die Adresse drinlassen, sonst landen Aufrufe per IP auf Debians Default-Site. `_` = Catch-all, nur wenn sonst keine Default-Site existiert |
 | `hermclaw_worker_id` | Worker-Hosts | `exec-222`, `model-224` | Worker-IDs, müssen zu `hosts.yaml` passen |
 | `wol_mac` | `.222`, `.224` | `3c:7c:3f:12:34:56` | **echte MAC** aus Schritt 2.3 (der Platzhalter `00:00:00:00:00:00` wird von `hermclaw doctor` gemeldet) |
 | `wol_interface` | `.222`, `.224` | leer oder `enp3s0` | leer = Schnittstelle der Default-Route |
 | `common_known_hosts_extra` | `hermclaw-orchestrator` | siehe unten | SSH-Host-Schlüssel von GitLab und Terra |
-| `nvidia_secureboot_mok_enrolled` | `hermclaw-model-224` | `false` | nur `true`, wenn Sie Secure Boot anlassen und den DKMS-Schlüssel eingeschrieben haben |
+| `nvidia_secureboot_mok_enrolled` | `hermclaw-model-224` | `false` | nur `true`, wenn Sie Secure Boot anlassen und den DKMS-Schlüssel eingeschrieben haben (Kapitel 5.5) |
 
 ### 4.3 SSH-Host-Schlüssel von GitLab und Terra
 
@@ -219,10 +220,11 @@ Holen Sie die Schlüssel und vergleichen Sie den Fingerabdruck mit der Konsole d
 (`ssh-keygen -lf /etc/ssh/ssh_host_ed25519_key.pub`):
 
 ```bash
-ssh-keyscan -t ed25519 192.168.178.226 192.168.178.60
+ssh-keyscan -t ed25519 192.168.178.226 192.168.178.60 2>/dev/null > keyscan.txt   # Zeilen zum Eintragen
+ssh-keygen -lf keyscan.txt                                                        # Fingerabdrücke zum Vergleich
 ```
 
-und tragen Sie sie beim Orchestrator ein:
+Stimmen die Fingerabdrücke, tragen Sie die Zeilen aus `keyscan.txt` beim Orchestrator ein:
 
 ```yaml
     orchestrator:
@@ -265,7 +267,7 @@ Exit-Code 0 = in Ordnung (Warnungen erlaubt). Typische Abbrüche:
 | `os` / `arch` | kein Debian 13 / kein x86_64 | Host neu installieren |
 | `port:<n>` | ein fremder Dienst belegt einen geplanten Port | diesen Dienst verlegen/stoppen |
 | `unit:<name>` | eine fremde Unit mit Hermclaw-Namen existiert | umbenennen/entfernen |
-| `ram` / `cpu` / `disk` | unter dem Minimum (Tabelle 2.1) | aufrüsten |
+| `ram` / `cpu` / `disk` | unter dem Minimum (Tabelle 2.1). Den RAM misst der Preflight als `MemTotal` aus `/proc/meminfo`. Der Kernel reserviert Speicher, ein Rechner mit genau 8 GB bzw. 16 GB meldet weniger. Deshalb genügen 90 % des Minimums | aufrüsten, oder das Minimum im Inventar beim Host bewusst senken: `common_preflight_min_ram_mb` (MiB), `common_preflight_min_cpus`, `common_preflight_min_disk_gb` |
 | `gpu` (.224) | keine NVIDIA-GPU am PCI-Bus | Karte/Steckplatz prüfen |
 
 ### 5.2 Orchestrator .225
@@ -274,7 +276,8 @@ Exit-Code 0 = in Ordnung (Warnungen erlaubt). Typische Abbrüche:
 ansible-playbook -i inventory/hosts.yml playbooks/bootstrap.yml --limit orchestrator -K
 ```
 
-Was installiert wird: Basispakete, Python 3.13 + venv, Benutzer `hermclaw` und `hermclaw-admin`, Verzeichnisse
+Was installiert wird: Basispakete, Python 3.13 + venv, Benutzer `hermclaw` (das eingeschränkte SSH-Konto
+`hermclaw-admin` entsteht nur auf .223, .222 und .224), Verzeichnisse
 (`/opt/hermclaw`, `/etc/hermclaw`, `/var/lib/hermclaw/{workspaces,artifacts,repos}`, `/var/log/hermclaw`),
 **PostgreSQL 17 + pgvector ≥ 0.8.7 aus dem PGDG-Repository** (Debians pgvector 0.8.0 ist von CVE-2026-3172
 betroffen, 0.8.2–0.8.6 von CVE-2026-103484; Entscheidungen D-002, D-012), Datenbank `hermclaw`, rootless Podman für SearXNG, SSH-Schlüssel der Runtime
@@ -340,6 +343,20 @@ sudo -l -U hermclaw-admin                         # nur: /usr/bin/systemctl susp
 
 ### 5.5 Model Worker .224 – NVIDIA-Treiber und Ollama
 
+**Secure Boot anlassen?** Dann richten Sie den DKMS-Signaturschlüssel **vor** dem ersten Bootstrap von .224 ein.
+Solange `nvidia_secureboot_mok_enrolled` nicht `true` ist, bricht die Rolle `nvidia` schon vor dem Treiberbau ab.
+Auf .224:
+
+```bash
+sudo apt install dkms mokutil
+sudo dkms generate_mok                           # legt /var/lib/dkms/mok.key und mok.pub an
+sudo mokutil --import /var/lib/dkms/mok.pub      # fragt ein Einmal-Passwort für den MokManager ab
+sudo reboot                                      # im MokManager „Enroll MOK“ wählen, Passwort eingeben
+```
+
+Danach im Inventar beim Host `hermclaw-model-224` `nvidia_secureboot_mok_enrolled: true` setzen. DKMS signiert die
+Treibermodule mit diesem Schlüssel. Mit Secure Boot aus (Kapitel 2.2) entfällt dieser Schritt.
+
 ```bash
 ansible-playbook -i inventory/hosts.yml playbooks/bootstrap.yml --limit model_workers -K
 ```
@@ -373,7 +390,7 @@ nvidia-smi --query-gpu=driver_version,name,memory.total,compute_cap --format=csv
 #   580.173.02, NVIDIA GeForce GTX 1080, 8192 MiB, 6.1
 dkms status                                      # nvidia/580.173.02, <kernel>, x86_64: installed
 curl -s http://127.0.0.1:11434/api/version       # {"version":"0.40.4"}
-journalctl -u ollama -b --no-pager | grep -E 'inference compute|driver too old'
+sudo journalctl -u ollama -b --no-pager | grep -E 'inference compute|driver too old'
 #   muss "library=CUDA compute=6.1" zeigen, darf NICHT "driver too old" oder "id=cpu" zeigen
 sudo nft list table inet hermclaw_ollama         # 11434 nur lo + 192.168.178.225
 ```
@@ -397,9 +414,7 @@ Läuft der Test, schalten Sie Flash Attention und den q8_0-KV-Cache ein. Das spa
           ollama_kv_cache_type: q8_0
 ```
 
-Danach den Bootstrap für `model_workers` erneut ausführen. **Secure Boot anlassen?** Dann nach dem ersten
-Treiberbau: `sudo mokutil --import /var/lib/dkms/mok.pub`, neu starten, im MokManager bestätigen,
-`nvidia_secureboot_mok_enrolled: true` setzen, Bootstrap erneut ausführen.
+Danach den Bootstrap für `model_workers` erneut ausführen.
 
 **Kernel-Updates:** DKMS baut das Modul bei jedem Kernel-Update neu (`linux-headers-amd64` ist installiert).
 Prüfen Sie nach jedem Kernel-Update `nvidia-smi` und den Rauchtest. Treiber-Updates nur innerhalb von 580.x,
@@ -426,7 +441,10 @@ sudo -u hermclaw ssh -i /etc/hermclaw/ssh/id_ed25519 -o UserKnownHostsFile=/etc/
 Alle Geheimnisse liegen als **verschlüsselte systemd-Credentials** in `/etc/credstore.encrypted/hermclaw-<name>`
 (verschlüsselt mit dem Host-Schlüssel bzw. TPM2, `systemd-creds`). Die Dienste bekommen sie über
 `LoadCredentialEncrypted=` und lesen sie aus `$CREDENTIALS_DIRECTORY`. Kein Geheimnis steht in einer
-Konfigurationsdatei, einer Umgebungsvariable, einem Log oder auf einer Kommandozeile. Werkzeug auf jedem Host:
+Konfigurationsdatei, einem Log oder auf einer Kommandozeile. Zwei Ausnahmen bekommen ihr Geheimnis als
+Umgebungsvariable, weil sie es nur dort lesen: LiteLLM den Master-Key als `LITELLM_MASTER_KEY` (beim Start von
+`hermclaw-cred-env` aus dem Credential gesetzt), SearXNG sein Secret als `SEARXNG_SECRET` (ein Podman-Secret, kein
+systemd-Credential). Werkzeug auf .225, .222 und .224 (nicht auf .223, dort liegen keine Credentials):
 `/opt/hermclaw/bin/hermclaw-credential` (`set`, `generate`, `check`, `list`; Werte nur über stdin).
 
 | Credential | Host | Erzeugt von | Verwendet von |
@@ -453,6 +471,11 @@ Konfigurationsdatei, einer Umgebungsvariable, einem Log oder auf einer Kommandoz
    ```bash
    sudo cat /etc/hermclaw/ssh/id_ed25519.pub          # auf .225
    ```
+
+   Hermclaw verwendet diesen Schlüssel und die geprüften Host-Schlüssel aus `/etc/hermclaw/ssh/known_hosts`
+   (Kapitel 4.3) für Clone, Fetch und Push über SSH. Dafür hat der Eintrag `gitlab-226` in `hosts.yaml` einen
+   `ssh`-Block (`user: git`; Schlüssel und `known_hosts` sind die Standardwerte). Im Inventar ergänzen Sie dafür
+   nichts.
 
 4. Token auf .225 speichern (Eingabe wird nicht angezeigt):
 
@@ -487,11 +510,12 @@ Das Backup selbst richten Sie in Kapitel 11 ein.
 ### 6.3 Token rotieren
 
 ```bash
-# Worker-Token (auf .225), danach Worker-Play erneut, dann Dienste neu starten
+# Worker-Token (auf .225), danach Worker-Play erneut, dann Dienste auf .225 und .222 neu starten
 sudo /opt/hermclaw/bin/hermclaw-credential generate worker-token-exec-222 --force
-ssh admin@192.168.178.222 sudo rm /etc/credstore.encrypted/hermclaw-worker-token
+ssh -t admin@192.168.178.222 sudo rm /etc/credstore.encrypted/hermclaw-worker-token
 ansible-playbook -i inventory/hosts.yml playbooks/bootstrap.yml --limit execution_workers -K
 sudo systemctl restart hermclaw-api hermclaw-scheduler        # .225
+ssh -t admin@192.168.178.222 sudo systemctl restart hermclaw-exec-worker   # .222: liest das Token nur beim Start
 # GitLab: in GitLab ein neues Access Token erzeugen, dann
 sudo /opt/hermclaw/bin/hermclaw-credential set gitlab-token --force && sudo systemctl restart hermclaw-scheduler
 ```
@@ -526,11 +550,11 @@ sudo -u ollama /opt/hermclaw/bin/hermclaw-model-pull
 Gleichwertig ohne Skript: `ollama pull gemma4:26b`, `ollama pull gemma4:12b`, `ollama pull qwen3-coder:30b`,
 `ollama pull qwen3.8:27b`, `ollama pull qwen3:8b`, `ollama pull embeddinggemma:300m`.
 
-Ohne Planner-Fallback (spart 7,6 GB): `hermclaw-model-pull --skip-fallback-planner` und in `models.yaml` das
-Profil `planner-gemma-fallback` auf `enabled: false` setzen.
+Ohne Planner-Fallback (spart 7,6 GB): `sudo -u ollama /opt/hermclaw/bin/hermclaw-model-pull --skip-fallback-planner`
+und in `models.yaml` das Profil `planner-gemma-fallback` auf `enabled: false` setzen.
 
-Später auf EmbeddingGemma 2 wechseln (sobald Ollama es unter Linux/CUDA ausführt): `hermclaw-model-pull
---embedding embeddinggemma-2:740m`. Das Skript fällt automatisch auf `embeddinggemma:300m` zurück und nennt die
+Später auf EmbeddingGemma 2 wechseln (sobald Ollama es unter Linux/CUDA ausführt): `sudo -u ollama
+/opt/hermclaw/bin/hermclaw-model-pull --embedding embeddinggemma-2:740m`. Das Skript fällt automatisch auf `embeddinggemma:300m` zurück und nennt die
 nötige Änderung in `models.yaml` (Kapitel 9.2).
 
 ---
@@ -549,7 +573,12 @@ einmal auf dem Admin-Rechner gebaut, per SHA-256 geprüft und offline auf allen 
   Das Release muss zur Python-Version der Hosts passen; der Preflight vergleicht das.
 * **Node.js ≥ 22.23.2** mit npm (für den UI-Build), `tar`, `gzip`, `sha256sum`, Zugang zu PyPI, npm und GitHub.
 * Hat Ihr Admin-Rechner kein Python 3.13, bauen Sie das Release auf dem Orchestrator .225 (Debian 13) oder in einem
-  `debian:trixie`-Container aus demselben Checkout.
+  `debian:trixie`-Container aus demselben Checkout. Dort fehlt Node.js ≥ 22.12: Debian 13 liefert Node 20, und die
+  Rolle `nodejs` richtet Node 22 nur auf .223 ein. Bauen Sie die UI deshalb vorher auf einem Rechner mit Node.js
+  (`cd ui && npm ci && npm run build`), kopieren Sie `ui/dist` in den Checkout auf .225 bzw. im Container und
+  übergeben Sie `--ui-dist ui/dist`. Das fertige `dist/release-<version>/` kopieren Sie danach in `dist/` des
+  Checkouts auf dem Admin-Rechner, denn `playbooks/deploy.yml` liest es dort (oder Sie übergeben
+  `-e hermclaw_release_root=<Verzeichnis auf dem Admin-Rechner>`).
 
 ### 8.2 Inventar ergänzen
 
@@ -561,7 +590,7 @@ Zusätzlich zu Kapitel 4.2 in `infra/ansible/inventory/hosts.yml`:
 | `wol_mac` (Worker) | echte MAC | **Pflicht**: das Deployment verweigert Platzhalter-MACs |
 | `nginx_tls_enabled` (.223) | `true` / `false` | HTTPS für die Oberfläche (siehe 8.5) |
 | `hermclaw_config_overrides` | siehe Kapitel 9 | Ihre Anpassungen der Konfiguration |
-| `hermclaw_keep_releases` | `3` | ältere Releases für ein Rollback ohne Netz |
+| `hermclaw_keep_releases` | `3` | ältere Releases je Host (1–99, zusätzlich zum aktiven) für ein Rollback ohne Netz; unter `all.vars` gilt der Wert für alle Hosts |
 | `hermclaw_worker_pull_models` (.224) | `true` | Modelle automatisch laden (Kapitel 7) |
 
 ### 8.3 Release bauen
@@ -575,6 +604,9 @@ scripts/deploy/build-release.sh --wheel-cache ~/hermclaw-wheels
 ```
 
 Später ohne Internet neu bauen: `scripts/deploy/build-release.sh --offline-from ~/hermclaw-wheels --ui-dist ui/dist`.
+`build-release.sh` baut die UI nur in einem temporären Verzeichnis, und `ui/dist` gehört nicht zum Checkout. Legen Sie
+`ui/dist` deshalb an, solange npm erreichbar ist: `cd ui && npm ci && npm run build`. Gibt es `dist/release-<version>/`
+schon, hängen Sie `--force` an.
 
 ### 8.4 Ausrollen
 

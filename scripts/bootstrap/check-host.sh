@@ -3,7 +3,8 @@
 #
 # Read-only. Checks, for the given inventory group(s):
 #   * Debian 13 "trixie" on x86_64
-#   * CPU / RAM / free disk against conservative minima per role
+#   * CPU / RAM / free disk against conservative minima per role (RAM: MemTotal, which the
+#     kernel and firmware keep below the installed size, must reach 90 % of the minimum)
 #   * every port of the port plan (§6): free, or owned by the expected service
 #     (a port held by any other process is a CONFLICT – never overwrite existing services)
 #   * pre-existing systemd unit files with Hermclaw names that Hermclaw does not manage
@@ -13,6 +14,8 @@
 #                      [--min-disk-gb N] [--allow-conflicts] [--port-plan FILE]
 #                      [--os-release FILE]
 # Groups: orchestrator, webui, execution_workers, model_workers (others are ignored).
+# --min-cpus/--min-ram-mb/--min-disk-gb replace the role minima; --min-ram-mb is installed
+#   RAM in MiB (the 90 % MemTotal tolerance applies to it as well).
 # --port-plan FILE replaces the built-in port plan (same format: "group port service
 #   expect[,expect...]" per line, # comments; the environment variable HERMCLAW_PORT_PLAN
 #   with the same content is used when --port-plan is absent); --os-release FILE checks an
@@ -64,6 +67,10 @@ EOF
 )
 
 # --- minima per group: cpus ram_mb disk_gb (free space below /var/lib) -----------------
+# ram_mb is the installed RAM. MemTotal in /proc/meminfo is always lower (kernel, firmware and
+# reserved areas take their share), so a host with exactly 8 GB installed reports a few hundred
+# MiB less: the RAM check passes from RAM_TOLERANCE_PCT percent of the minimum on.
+readonly RAM_TOLERANCE_PCT=90
 min_for_group() {
     case "$1" in
         orchestrator) echo "4 8192 20" ;;
@@ -75,7 +82,7 @@ min_for_group() {
 }
 
 usage() {
-    sed -n '2,20p' "$0" | sed 's/^# \{0,1\}//'
+    sed -n '2,/^# Exit codes/p' "$0" | sed 's/^# \{0,1\}//'
 }
 
 ROLES=""
@@ -223,10 +230,12 @@ check_resources() {
     else
         add FAIL cpu "${cpus} logical CPUs, minimum ${need_cpus}"
     fi
-    if (( ram_mb >= need_ram )); then
-        add OK ram "${ram_mb} MiB RAM (minimum ${need_ram})"
+    # MemTotal >= RAM_TOLERANCE_PCT % of the minimum; ram_floor = that bound in MiB (rounded up)
+    local ram_floor=$(( (need_ram * RAM_TOLERANCE_PCT + 99) / 100 ))
+    if (( ram_mb * 100 >= need_ram * RAM_TOLERANCE_PCT )); then
+        add OK ram "${ram_mb} MiB RAM (minimum ${need_ram}, ${RAM_TOLERANCE_PCT} % tolerance)"
     else
-        add FAIL ram "${ram_mb} MiB RAM, minimum ${need_ram}"
+        add FAIL ram "${ram_mb} MiB RAM, minimum ${need_ram} (${RAM_TOLERANCE_PCT} % tolerance: at least ${ram_floor} MiB MemTotal)"
     fi
     local target=/var/lib avail_kb avail_gb
     [[ -d "$target" ]] || target=/

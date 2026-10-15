@@ -46,6 +46,12 @@ def test_registry_from_example_config() -> None:
     assert host.destination == "hermclaw-admin@192.168.178.222"
     assert host.known_hosts == Path("/etc/hermclaw/ssh/known_hosts") and host.known_hosts_name == "192.168.178.222"
     assert "/usr/bin/systemctl suspend" in host.allow_sudo_commands
+    # the GitLab host has an ssh block (Git over SSH) but is no SSH tool target
+    gitlab = next(h for h in config.hosts.hosts if h.id == "gitlab-226")
+    assert gitlab.ssh is not None and "gitlab-226" not in registry.ids() and not registry.is_allowed("gitlab-226")
+    with pytest.raises(SshPolicyError) as unlisted:
+        registry.get("gitlab-226")
+    assert unlisted.value.code == "SSH_HOST_NOT_ALLOWED"
 
 
 def test_unknown_and_unlisted_hosts_are_policy_violations() -> None:

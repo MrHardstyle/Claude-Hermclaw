@@ -1335,6 +1335,40 @@ def test_check_host_accepts_debian_13_and_rejects_others(tmp_path: Path) -> None
     assert code == 1 and {c["check"]: c for c in report["checks"]}["os"]["status"] == "FAIL"
 
 
+def test_check_host_ram_minimum_tolerates_kernel_reserved_memory(tmp_path: Path) -> None:
+    """MemTotal is below the installed RAM: the RAM check passes from 90 % of the minimum on (finding 5)."""
+    match = re.search(r"^MemTotal:\s+(\d+) kB$", Path("/proc/meminfo").read_text(encoding="utf-8"), re.M)
+    assert match is not None
+    ram_mb = int(match.group(1)) // 1024  # what check-host.sh measures
+
+    def ram_check(minimum: int) -> tuple[int, dict[str, str]]:
+        code, report = _check_host_with(tmp_path, "", "--min-ram-mb", str(minimum))
+        return code, {c["check"]: c for c in report["checks"]}["ram"]
+
+    # MemTotal at 93 % of the minimum (e.g. 7618 MiB on a host with 8192 MiB installed): passes
+    minimum = ram_mb * 100 // 93
+    assert 92.9 < ram_mb * 100 / minimum < 93.1
+    _, check = ram_check(minimum)
+    assert check["status"] == "OK", check
+    assert check["message"] == f"{ram_mb} MiB RAM (minimum {minimum}, 90 % tolerance)"
+    # MemTotal at 85 % of the minimum: fails, the message names the bound
+    minimum = -(-ram_mb * 100 // 85)
+    assert 84.9 < ram_mb * 100 / minimum <= 85.0
+    code, check = ram_check(minimum)
+    assert code == 1 and check["status"] == "FAIL", check
+    floor = -(-minimum * 90 // 100)
+    assert check["message"] == f"{ram_mb} MiB RAM, minimum {minimum} (90 % tolerance: at least {floor} MiB MemTotal)"
+    # exactly at the bound and one MiB above it
+    boundary = ram_mb * 10 // 9
+    assert ram_check(boundary)[1]["status"] == "OK"
+    assert ram_check(boundary + 1)[1]["status"] == "FAIL"
+    # the documented minima are installed RAM: the role defaults still apply without an override
+    code, report = _check_host_with(tmp_path, "")
+    assert {c["check"]: c for c in report["checks"]}["ram"]["message"].endswith("(minimum 0, 90 % tolerance)")
+    script = (SCRIPTS_DIR / "check-host.sh").read_text(encoding="utf-8")
+    assert "readonly RAM_TOLERANCE_PCT=90" in script and 'orchestrator) echo "4 8192 20"' in script
+
+
 def test_check_host_detects_port_conflicts(tmp_path: Path, listener: tuple[int, str]) -> None:
     port, comm = listener
 

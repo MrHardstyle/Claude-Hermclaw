@@ -50,6 +50,10 @@ hosts:
   - id: gitlab-226
     address: 192.168.178.226
     role: gitlab
+    # Git over SSH (clone/fetch/push) uses the orchestrator's runtime key and the pinned known_hosts:
+    # key_ref file:/etc/hermclaw/ssh/id_ed25519, known_hosts /etc/hermclaw/ssh/known_hosts (defaults).
+    # Not an SSH tool target: gitlab-226 is not in policies.ssh.allowed_hosts.
+    ssh: {user: git}
     services:
       - {name: ssh, port: 22}
   - id: terra-60
