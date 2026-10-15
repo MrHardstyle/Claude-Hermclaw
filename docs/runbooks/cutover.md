@@ -7,12 +7,12 @@ side by side on its own paths/ports until it has been stable, and every step has
 
 | Check | Command / evidence | Go when |
 |---|---|---|
-| RC tests green on the build host | `docs/operations/FINAL_BUILD_REPORT.md`, `scripts/dev/regression-matrix.sh` | all suites green |
+| RC tests green on the build host | `docs/operations/FINAL_BUILD_REPORT.md`, `docs/testing/test-matrix-results.md` (`scripts/dev/test_matrix.py`) | all suites green |
 | Hosts bootstrapped | `ansible-playbook -i inventory/hosts.yml playbooks/bootstrap.yml --check` shows no changes | idempotent |
 | Deployment healthy | `curl -s http://192.168.178.225:8000/api/health?deep=true` | `"status": "ok"` |
-| Models present on `.224` | `scripts/ops/hermclaw-model-pull --dry-run` then without `--dry-run` | exit 0 |
+| Models present on `.224` | `sudo -u ollama /opt/hermclaw/bin/hermclaw-model-pull --dry-run` (INSTALLATION.md §7) | exit 0, nothing missing |
 | Workers ready | `curl -s -H "Authorization: Bearer $TOKEN" http://192.168.178.225:8000/api/workers` | `exec-222`, `model-224` ready |
-| Backup + restore test | `scripts/ops/hermclaw-backup && scripts/ops/hermclaw-restore-test` | restore report "passed" |
+| Backup + restore test | `sudo systemctl start hermclaw-backup.service hermclaw-restore-test.service`, then `journalctl -u hermclaw-backup -u hermclaw-restore-test -n 40 -o cat` (INSTALLATION.md §11) | both JSON results `"ok": true` |
 | Live smoke job | one real job against a test repository on `.226` (see INSTALLATION.md §12) | job succeeded, MR created |
 | Port plan | `scripts/bootstrap/check-host.sh` on every host | no foreign owner of a Hermclaw port |
 
@@ -44,11 +44,13 @@ Nothing of the old system is deleted in this phase: no `rm`, no `DROP`, no branc
 
 Hermclaw Next uses its own webroot (`/var/www/hermclaw-next`), its own units (`hermclaw-*`), its own database
 (`hermclaw` on `.225`) and its own GitLab job branches (`hermclaw/<id8>-<slug>`), so the switch is a single nginx
-site change on `.223`:
+site change on `.223`. The deployment already installed and enabled `/etc/nginx/sites-enabled/hermclaw-next.conf`
+(server names `hermclaw_web_server_name`, never `default_server` while another site claims it); the switch removes
+the old site from the request path:
 
 ```bash
 # .223
-sudo ln -sf /etc/nginx/sites-available/hermclaw-next /etc/nginx/sites-enabled/hermclaw-next
+test -L /etc/nginx/sites-enabled/hermclaw-next.conf   # enabled by playbooks/deploy.yml
 sudo rm -f /etc/nginx/sites-enabled/noobclaw          # only the symlink; the site file stays (rollback)
 sudo nginx -t && sudo systemctl reload nginx
 curl -s http://192.168.178.223/api/health             # proxied to .225
@@ -68,7 +70,8 @@ Announce the new URL; the old UI stays reachable read-only on its previous serve
   sleeping; `hermclaw_resource_leases` > 0 for > 2 h with `hermclaw_steps_in_flight` == 0 (stuck lease);
   `hermclaw_disk_free_mb{level="critical"}`; failed model invocations rising.
 * **Health**: `GET /api/health?deep=true` (DB + LiteLLM), UI dashboard (workers, resources, live events).
-* **Daily**: backup timer result (`systemctl status hermclaw-backup.timer`, restore test weekly), `BUGS.md` triage.
+* **Daily**: backup result (`journalctl -u hermclaw-backup --since -26h`), weekly the restore test
+  (`journalctl -u hermclaw-restore-test --since -8d`), `BUGS.md` triage.
 
 ## 4. Rollback (42.4)
 
@@ -77,7 +80,7 @@ Rollback is possible at any time in the stabilisation period and loses no data o
 ```bash
 # .223 – UI back to the old system
 sudo ln -sf /etc/nginx/sites-available/noobclaw /etc/nginx/sites-enabled/noobclaw
-sudo rm -f /etc/nginx/sites-enabled/hermclaw-next
+sudo rm -f /etc/nginx/sites-enabled/hermclaw-next.conf   # a later deploy.yml run enables it again
 sudo cp -a /etc/nginx/sites-available/noobclaw.pre-cutover /etc/nginx/sites-available/noobclaw   # remove read-only block
 sudo nginx -t && sudo systemctl reload nginx
 # bridge host – old writer back
