@@ -194,7 +194,7 @@ even if the runtime is compromised.
 
 ```sh
 install -o root -g root -m 0755 scripts/ops/hermclaw-ssh-gate /usr/local/bin/hermclaw-ssh-gate
-install -o root -g root -m 0644 ssh-allowlist /etc/hermclaw/ssh-allowlist
+install -o root -g root -m 0644 ssh-allowlist /etc/hermclaw-ssh-allowlist
 # ~hermclaw-admin/.ssh/authorized_keys (authorized_keys_entry() builds this line):
 restrict,from="192.168.178.225",command="/usr/local/bin/hermclaw-ssh-gate" ssh-ed25519 AAAA… hermclaw-admin
 ```

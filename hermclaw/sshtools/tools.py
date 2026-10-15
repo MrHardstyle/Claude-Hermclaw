@@ -87,7 +87,7 @@ CRITICAL_REMOTE_FILES = frozenset(
     {
         "/etc/sudoers", "/etc/passwd", "/etc/shadow", "/etc/group", "/etc/gshadow", "/etc/subuid", "/etc/subgid",
         "/etc/fstab", "/etc/crontab", "/etc/environment", "/etc/ld.so.preload", "/etc/ld.so.conf", "/etc/profile",
-        "/etc/bash.bashrc", "/usr/local/bin/hermclaw-ssh-gate",
+        "/etc/bash.bashrc", "/usr/local/bin/hermclaw-ssh-gate", "/etc/hermclaw-ssh-allowlist",
     }
 )  # fmt: skip
 CRITICAL_REMOTE_DIRS = (

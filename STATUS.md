@@ -74,8 +74,8 @@
 - Embeddings: `embeddinggemma:300m` (768 dim; EmbeddingGemma 2 erst, wenn Ollama es unter Linux/CUDA ausführt, D-010)
 
 ## Bugs
-- 142 gefunden, **141 behoben**, 1 offen (P0 2, P1 26, P2 62, P3 49, P4 3) – `BUGS.md` (BUG-141: Koexistenz mit dem Portal auf .223, behoben;
-  BUG-142: optionales SSH-Gate liest seine Standard-Allowlist nicht, P3, offen, Gate standardmäßig aus)
+- 142 gefunden, **142 behoben**, 0 offen (P0 2, P1 26, P2 62, P3 49, P4 3) – `BUGS.md` (zuletzt BUG-141: Koexistenz mit dem Portal
+  auf .223; BUG-142: Allow-Liste des optionalen SSH-Gates nach `/etc/hermclaw-ssh-allowlist`)
 - Externer Blocker: BLOCKER-001
 
 ## Letzte Testresultate (2026-10-15, Build-Host)

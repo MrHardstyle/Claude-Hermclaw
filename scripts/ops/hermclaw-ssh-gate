@@ -3,7 +3,8 @@
 #
 # Install (target host, as root):
 #   install -o root -g root -m 0755 hermclaw-ssh-gate /usr/local/bin/hermclaw-ssh-gate
-#   install -o root -g root -m 0644 ssh-allowlist   /etc/hermclaw/ssh-allowlist
+#   install -o root -g root -m 0644 ssh-allowlist   /etc/hermclaw-ssh-allowlist
+#   (outside /etc/hermclaw, which is 0750 root:hermclaw: the gate runs as hermclaw-admin and must read the file)
 #   ~hermclaw-admin/.ssh/authorized_keys:
 #     restrict,from="192.168.178.225",command="/usr/local/bin/hermclaw-ssh-gate" ssh-ed25519 AAAA… hermclaw-admin
 #   (an optional first argument names a different allow-list file: command="/usr/local/bin/hermclaw-ssh-gate /path")
@@ -25,7 +26,7 @@
 
 set -u
 
-ALLOWLIST=${1:-/etc/hermclaw/ssh-allowlist}
+ALLOWLIST=${1:-/etc/hermclaw-ssh-allowlist}
 TAG=hermclaw-ssh-gate
 REJECT_STATUS=126
 MAX_LOG=400

@@ -299,6 +299,7 @@ def test_stale_materialised_keys_of_dead_processes_are_purged(tmp_path: Path) ->
         ("/etc/cron.d/backup", True),
         ("/etc/ld.so.preload", True),
         ("/etc/hermclaw/ssh-allowlist", True),
+        ("/etc/hermclaw-ssh-allowlist", True),
         ("/usr/local/bin/hermclaw-ssh-gate", True),
         ("/boot/grub/grub.cfg", True),
         ("/srv/app/config.yaml", False),

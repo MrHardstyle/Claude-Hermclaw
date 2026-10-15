@@ -30,9 +30,12 @@ P0/P1-Blocker werden sofort behoben. Nicht-blockierende Bugs werden reproduziert
   `docs/operations/FINAL_BUILD_REPORT.md` zuletzt geändert wurde (der Release-Candidate-Stand).
 
 ## Offene Bugs
+Noch keine.
+
+## Behobene Bugs
 
 ### BUG-142 – The optional SSH gate cannot read its default allow-list as the runtime user
-- Phase: D-013 (Koexistenz `.223`, Analyse) · Komponente: sshtools/deploy · Severity: P3 · blockierend: nein (das Gate ist standardmäßig nicht aktiv, `common_ssh_forced_command: ""`) · Status: **offen**
+- Phase: D-013 (Koexistenz `.223`, Analyse) · Komponente: sshtools/deploy · Severity: P3 · blockierend: nein (das Gate ist standardmäßig nicht aktiv, `common_ssh_forced_command: ""`) · Status: **behoben** (`tests/unit/test_sshtools_gate.py::test_default_allowlist_is_readable_outside_the_config_dir`, `::test_gate_reads_a_root_owned_allowlist_as_an_unprivileged_user`)
 - Reproduktion:
   1. On a bootstrapped target host, set `common_ssh_forced_command: /usr/local/bin/hermclaw-ssh-gate` and a
      non-empty `hermclaw_release_ssh_gate_allowlist`.
@@ -44,12 +47,11 @@ P0/P1-Blocker werden sofort behoben. Nicht-blockierende Bugs werden reproduziert
   group, so `[ -f "$ALLOWLIST" ]` fails. Every command is rejected with `allowlist-missing` (exit 126).
 - Workaround: keep the gate off (default). To keep the runtime away from a host completely, remove it from
   `policies.ssh.allowed_hosts` (`hermclaw_config_overrides`, RISK R-038).
-- Fix-Vorschlag: move the allow-list to a root-owned file the runtime user can reach, e.g.
+- Fix (umgesetzt): move the allow-list to a root-owned file the runtime user can reach, e.g.
   `/etc/hermclaw-ssh-allowlist`. That means changing the gate's default path, `hermclaw_release_ssh_gate_allowlist_file`
   and `CRITICAL_REMOTE_FILES` in `hermclaw/sshtools/tools.py`. Add a test that runs the gate as a non-root user
   against the deployed layout.
-
-## Behobene Bugs
+- Umgesetzt: default path `/etc/hermclaw-ssh-allowlist` (root:root 0644) in the gate, `hermclaw_release_ssh_gate_allowlist_file` and `CRITICAL_REMOTE_FILES`; the gate test runs the script as `nobody` against a root-owned list and shows that a list inside a 0750 directory is refused as `allowlist-missing`.
 
 ### BUG-001 – CommandRequest.workspace path traversal on the execution daemon
 - Phase: P07 · Komponente: workers · Severity: P0 · blockierend: nein · Status: **behoben** (Regressionstest in den workers-Tests)

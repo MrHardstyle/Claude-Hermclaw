@@ -142,3 +142,78 @@ def test_expansion_characters_need_a_shell_rule(gate: Gate, tmp_path: Path) -> N
     os.chmod(allow, 0o644)
     res = gate.run("echo {a,b}", allowlist=allow)
     assert res.returncode == 0 and res.stdout in (b"{a,b}\n", b"a b\n")  # dash keeps the braces, bash expands them
+
+
+# --------------------------------------------------------------------------------------------- deployed layout (BUG-142)
+
+REPO = Path(__file__).resolve().parents[2]
+
+
+def test_default_allowlist_is_readable_outside_the_config_dir() -> None:
+    """The gate runs as hermclaw-admin; /etc/hermclaw is 0750 root:hermclaw, so the default allow-list lives outside."""
+    import re
+
+    import yaml
+
+    default = re.search(r"^ALLOWLIST=\$\{1:-([^}]+)\}$", GATE.read_text(encoding="utf-8"), re.M)
+    assert default is not None
+    release = yaml.safe_load((REPO / "infra/ansible/roles/hermclaw_release/defaults/main.yml").read_text(encoding="utf-8"))
+    common = yaml.safe_load((REPO / "infra/ansible/roles/common/defaults/main.yml").read_text(encoding="utf-8"))
+    assert release["hermclaw_release_ssh_gate_allowlist_file"] == default.group(1) == "/etc/hermclaw-ssh-allowlist"
+    group_vars = yaml.safe_load((REPO / "infra/ansible/playbooks/group_vars/all.yml").read_text(encoding="utf-8"))
+
+    def resolve(path: str) -> str:
+        return re.sub(r"\{\{\s*(\w+)\s*\}\}", lambda m: str(group_vars[m.group(1)]), path)
+
+    config_dirs = [resolve(d["path"]) for d in common["common_directories"] if str(d.get("mode", "")).endswith(("750", "700"))]
+    assert "/etc/hermclaw" in config_dirs, config_dirs
+    assert not any(default.group(1).startswith(str(d).rstrip("/") + "/") for d in config_dirs), config_dirs
+    task = (REPO / "infra/ansible/roles/hermclaw_release/tasks/scripts.yml").read_text(encoding="utf-8")
+    block = task[task.index("Write the SSH gate allow-list") :]
+    assert "owner: root" in block and "group: root" in block and 'mode: "0644"' in block
+
+
+@pytest.mark.skipif(os.geteuid() != 0 or shutil.which("runuser") is None, reason="needs root and runuser")
+def test_gate_reads_a_root_owned_allowlist_as_an_unprivileged_user() -> None:
+    """Regression BUG-142: as a non-root user the gate reaches the allow-list in a traversable directory, and a list
+    inside a 0750 root directory (the old /etc/hermclaw layout) is reported as missing, not silently used."""
+    import tempfile
+
+    try:
+        subprocess.run(["id", "nobody"], check=True, capture_output=True)
+    except subprocess.CalledProcessError:
+        pytest.skip("no user nobody")
+    root = Path(tempfile.mkdtemp(prefix="hermclaw-gate-", dir="/tmp"))
+    try:
+        os.chmod(root, 0o755)
+        (root / "bin").mkdir(mode=0o755)
+        gate = root / "bin" / "hermclaw-ssh-gate"
+        shutil.copy(GATE, gate)
+        os.chmod(gate, 0o755)
+        syslog = root / "syslog"
+        syslog.touch()
+        os.chmod(syslog, 0o666)
+        logger = root / "bin" / "logger"
+        logger.write_text(f'#!/bin/sh\nprintf "%s\\n" "$*" >> "{syslog}"\n')
+        os.chmod(logger, 0o755)
+        readable = root / "hermclaw-ssh-allowlist"
+        readable.write_text("uptime\n")
+        os.chmod(readable, 0o644)
+        closed = root / "hermclaw"
+        closed.mkdir(mode=0o750)
+        (closed / "ssh-allowlist").write_text("uptime\n")
+        os.chmod(closed / "ssh-allowlist", 0o644)
+
+        def run(allowlist: Path) -> subprocess.CompletedProcess[bytes]:
+            env = {"PATH": f"{root / 'bin'}:/usr/bin:/bin", "SSH_CLIENT": "192.168.178.225 50000 22", "SSH_ORIGINAL_COMMAND": "uptime"}
+            return subprocess.run(
+                ["runuser", "-u", "nobody", "--", "/usr/bin/env", "-i", *[f"{k}={v}" for k, v in env.items()], "sh", str(gate), str(allowlist)],
+                capture_output=True, timeout=20, check=False, cwd="/",
+            )  # fmt: skip
+
+        ok = run(readable)
+        assert ok.returncode == 0 and b"load average" in ok.stdout, ok.stderr
+        denied = run(closed / "ssh-allowlist")
+        assert denied.returncode == 126 and "allowlist-missing" in syslog.read_text(), syslog.read_text()
+    finally:
+        shutil.rmtree(root, ignore_errors=True)

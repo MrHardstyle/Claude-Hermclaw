@@ -214,10 +214,10 @@ keine Chain-of-Thought in Logs, Events oder UI. Ergebnis im finalen Lauf: `tests
 |---|---|---|---|
 | P0 | 2 | 2 | 0 |
 | P1 | 26 | 26 | 0 |
-| P2 | 61 | 61 | 0 |
-| P3 | 48 | 48 | 0 |
+| P2 | 62 | 62 | 0 |
+| P3 | 49 | 49 | 0 |
 | P4 | 3 | 3 | 0 |
-| **gesamt** | **140** | **140** | **0** |
+| **gesamt** | **142** | **142** | **0** |
 
 Externer Blocker: **BLOCKER-001** (Ziel-LAN aus der Build-Umgebung nicht erreichbar) – kein Bug, siehe `BUGS.md`.
 

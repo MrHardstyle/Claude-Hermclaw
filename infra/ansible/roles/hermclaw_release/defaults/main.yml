@@ -45,10 +45,11 @@ hermclaw_release_operator_scripts:
     - {name: hermclaw-ssh-gate, dest: /usr/local/bin}
   webui:
     - {name: hermclaw-ssh-gate, dest: /usr/local/bin}
-# Allow-list of the SSH gate (/etc/hermclaw/ssh-allowlist, one ERE per line, see scripts/ops/hermclaw-ssh-gate).
+# Allow-list of the SSH gate (/etc/hermclaw-ssh-allowlist, one ERE per line, see scripts/ops/hermclaw-ssh-gate). Root-owned
+# 0644 outside /etc/hermclaw (0750 root:hermclaw): the gate runs as hermclaw-admin, which must read it (BUG-142).
 # Empty = the deployment never touches an existing allow-list.
 hermclaw_release_ssh_gate_allowlist: []
-hermclaw_release_ssh_gate_allowlist_file: "{{ hermclaw_config_dir }}/ssh-allowlist"
+hermclaw_release_ssh_gate_allowlist_file: /etc/hermclaw-ssh-allowlist
 
 # Units (per group) whose credentials are checked by the preflight and which the host roles enable.
 hermclaw_release_units:

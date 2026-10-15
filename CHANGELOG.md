@@ -88,9 +88,9 @@ getestet; die Live-Abnahme auf den Ziel-Hosts steht aus (BLOCKER-001, `scripts/o
 
 ### Behoben
 
-- 140 Fehler wurden während des Aufbaus gefunden und behoben, jeweils mit Regressionstest bzw. (bei reinen
-  Dokumentationsfehlern) einer Prüfung gegen den Code (`BUGS.md`, BUG-001 bis BUG-140; P0: 2, P1: 26, P2: 61,
-  P3: 48, P4: 3). Es gibt keine offenen Bugs.
+- 142 Fehler wurden während des Aufbaus gefunden und behoben, jeweils mit Regressionstest bzw. (bei reinen
+  Dokumentationsfehlern) einer Prüfung gegen den Code (`BUGS.md`, BUG-001 bis BUG-142; P0: 2, P1: 26, P2: 62,
+  P3: 49, P4: 3). Es gibt keine offenen Bugs.
 - Installationsanleitung und Runbooks wurden Befehl für Befehl gegen Code und Rollen geprüft (71 bestätigte Befunde,
   alle behoben; BUG-133 bis BUG-139).
 
