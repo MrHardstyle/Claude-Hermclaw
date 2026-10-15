@@ -4,11 +4,13 @@
                          Browser (LAN)
                               │ HTTPS
                               ▼
- ┌────────────────────────────────────────────┐
- │ .223  WebUI                                │
- │  Nginx :80/:443  → /var/www/hermclaw-next  │
- │  /api/*  ──────────────┐  (SSE ohne Buffer) │
- └────────────────────────┼───────────────────┘
+ ┌──────────────────────────────────────────────────────────────────┐
+ │ .223  WebUI (geteilt mit dem Portal Noob2Claw/Kowacore, D-013)    │
+ │  Nginx :8080/:8443 → /var/www/hermclaw-next   (der Kontrollraum)  │
+ │  /api/*  ──────────────┐  (SSE ohne Buffer, ohne Portal-Cookies)  │
+ │  Apache :80 → /var/www/noobclaw  (Portal, unverändert;            │
+ │    Menüpunkt "KI-Kontrollraum" verlinkt auf :8080)                │
+ └────────────────────────┼─────────────────────────────────────────┘
                           ▼
  ┌──────────────────────────────────────────────────────────────────┐
  │ .225  Orchestrator                                               │
@@ -39,7 +41,9 @@
 ```
 
 ## Datenflüsse
-1. UI → `.223` Nginx → `.225` API (`/api/...`, SSE `/api/jobs/{id}/events/stream`).
+1. UI → `.223` Nginx (`:8080`, TLS `:8443`) → `.225` API (`/api/...`, SSE `/api/jobs/{id}/events/stream`). Das Portal
+   auf `.223:80` (Apache, über Nginx Proxy Manager `.2` auch als `app.kowacore.com`) ist nicht Teil von Hermclaw; sein
+   Menüpunkt **KI-Kontrollraum** ist nur ein Link auf den Kontrollraum (D-013).
 2. Scheduler → LiteLLM (`.225:4000`) → Ollama (`.224:11434`) für alle Modellrollen.
 3. Scheduler → Model-Worker (`.224:8787`) für Load/Unload/GPU-Telemetrie/Media.
 4. Scheduler → Execution-Worker (`.222:8787`) für Sandbox-Kommandos/Tests in Workspaces.

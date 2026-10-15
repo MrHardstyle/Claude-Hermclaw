@@ -8,8 +8,12 @@ Backend contract: `docs/contracts/openapi.json`, `hermclaw/api/{jobs,events,syst
 
 ## 1. Purpose
 
-The operator console for Hermclaw Next, served from the web UI host `.223`. It **only reads and controls** state
-through the public API. It never plans, never edits scope, and never mutates git. It shows:
+The operator console for Hermclaw Next, the **Kontrollraum** of the autonomous AI worker. It is served by nginx on
+the web UI host `.223`, on its own ports (`http://192.168.178.223:8080/`, with TLS `:8443`). On the same host the legacy
+portal Noob2Claw/Kowacore keeps Apache on port 80 (D-013) and links here from its menu entry **Arbeit →
+KI-Kontrollraum** (a top-level link in a new tab: the UI forbids framing with `frame-ancestors 'none'`, and there
+is no single sign-on, the UI asks for its own bearer token). It **only reads and controls** state through the public
+API. It never plans, never edits scope, and never mutates git. It shows:
 
 * **Overview.** Jobs, queue, workers, model profiles, GPU leases, research, bugs, and errors on one dashboard.
 * **Job detail.** Plan DAG, steps (attempts, scope versions, tool calls, commands, tests, verifier checks, review
@@ -118,6 +122,7 @@ SSE  (EventSource, ?access_token=, Last-Event-ID) ─┘
 | `HERMCLAW_UI_API_TARGET` | dev/preview env | `http://127.0.0.1:8000` | proxy target for `/api` in `vite` / `vite preview` |
 | `HERMCLAW_UI_PORT` | preview env | `4173` | preview port |
 | Server side | `config/policies*.yaml` → `policies.events.heartbeat_seconds` | – | SSE heartbeat comments (keeps proxies from timing out) |
+| Ports on `.223` | inventory `hermclaw_webui_http_port` / `hermclaw_webui_https_port` | `8080` / `8443` | where nginx serves the UI; the portal button (`hermclaw_ui_portal_link_url`) and the health checks follow them |
 
 E2E harness variables: `HERMCLAW_E2E_API_PORT` (18765), `HERMCLAW_E2E_UI_PORT` (14173, browser-facing chaos
 proxy), `HERMCLAW_E2E_VITE_PORT` (UI port + 1), `HERMCLAW_E2E_CHAOS_PORT` (18766, +1/+2 control),

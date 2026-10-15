@@ -3,6 +3,11 @@
   ansible.builtin.import_tasks: validate.yml
   tags: [nodejs]
 
+- name: Refuse to replace the distribution's Node.js and npm
+  ansible.builtin.import_tasks: guard.yml
+  when: hermclaw_install_packages | bool
+  tags: [nodejs, packages]
+
 - name: Install Node.js from NodeSource
   when: hermclaw_install_packages | bool
   tags: [nodejs, packages]

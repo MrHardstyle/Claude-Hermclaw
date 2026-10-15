@@ -13,7 +13,7 @@ taking over services that already run there:
 | Host | Group | Roles (in order) |
 |---|---|---|
 | `.225` Orchestrator | `orchestrator` | common, postgresql, podman, systemd_skeleton |
-| `.223` WebUI | `webui` | common, nodejs, nginx |
+| `.223` WebUI | `webui` | common, nodejs (only `hermclaw_webui_shared_host: false`), nginx |
 | `.222` Execution worker | `execution_workers` | common, podman, wol_target, systemd_skeleton |
 | `.224` Model / media worker | `model_workers` | common, nvidia, ollama, wol_target, systemd_skeleton |
 
@@ -94,9 +94,28 @@ cgroup v2 delegation drop-in `/etc/systemd/system/user@.service.d/delegate.conf`
 (`Delegate=cpu cpuset io memory pids`), lingering, and a final `podman info` as the user that
 asserts rootless mode, cgroup v2 and the delegated controllers.
 
-### nodejs (1.11) – WebUI
+### nodejs (1.11) – WebUI (dedicated web host only)
 NodeSource `node_22.x` (`nodistro`) with an apt pin; gate: major 22 and `>= 22.12.0`
-(Vite: research 20261008-018); npm version recorded.
+(Vite: research 20261008-018); npm version recorded. The playbook skips the role on the shared `.223`
+(`hermclaw_webui_shared_host`, D-013): the UI is built on the control node, and NodeSource's nodejs would replace the
+legacy portal's Debian nodejs and remove its npm. `tasks/guard.yml` refuses that replacement on any host that has
+Debian's npm, unless `nodejs_replace_distribution_node: true`.
+
+### Shared web host (D-013)
+`.223` keeps the legacy portal (Apache :80, PHP, MariaDB, `/var/www/noobclaw`); `hermclaw_webui_shared_host: true`
+(`playbooks/group_vars/all.yml`) makes the bootstrap co-exist with it:
+
+* **Ports:** nginx listens on `hermclaw_webui_http_port`/`hermclaw_webui_https_port` (8080/8443). The port plan of
+  check-host follows them, and 80/443 are never planned or used there.
+* **nginx role:** `policy_rc_d: 101` (no start by the maintainer scripts), `tasks/default_site.yml` (only the
+  package's `sites-enabled/default` symlink), validation of `nginx_reserved_ports`, `tasks/listeners.yml` (every
+  `listen` of `nginx -T`, inside the rollback block), the start inside that block, `tasks/live_listeners.yml`
+  (`ss -Htlnp` after start/reload: nginx is stopped again if it took 80/443), and `tasks/firewall.yml` (`ufw allow`
+  only for `nginx_firewall_allow_from`, default the host's own IPv4 LAN, only when ufw is active; an empty list with
+  an active ufw that allows neither port stops the run). HSTS is refused.
+* **common role:** `tasks/time_shared.yml` (the time zone and NTP are only read) and `tasks/shared_guard.yml` (in
+  the preflight, before anything changes: refuses existing accounts without Hermclaw's GECOS and existing
+  directories with another owner/group than `common_directories`).
 
 ### nginx (1.12) – WebUI
 nginx, webroot `/var/www/hermclaw-next` (placeholder page, never overwrites a deployed UI),
@@ -108,7 +127,8 @@ IPv6 address (`nginx_listen_ipv6`; nginx does not start with it on a kernel with
 by the real-nginx test). It refuses a foreign site with the same name and a `nginx.conf` that does
 not include `sites-enabled/`; never claims `default_server` unless asked. `nginx -t` runs before
 the reload; on failure the previous site is restored / the new link removed and nginx is not
-reloaded. The TLS/rate-limit site is P32 (`infra/nginx/`).
+reloaded. The TLS/rate-limit site is P32 (`infra/nginx/`). The ports and the shared-host checks:
+section "Shared web host" above.
 
 ### nvidia (.224) – research 20261008-017, recheck 20261014-026
 GTX 1080 (Pascal, CC 6.1): the **580 branch is the last with Pascal support; 590+ dropped it**.
@@ -229,7 +249,7 @@ converge test; needs Podman, PostgreSQL binaries, systemd-analyze, shellcheck).
 ## Operating on the real hosts
 
 See the runbook [`docs/operations/bootstrap.md`](../operations/bootstrap.md). Live verification
-items (BLOCKER-001): PGDG install + pgvector version on `.225`, NodeSource on `.223`, nginx
-reload on `.223`, rootless `podman info` with delegation on `.222/.225`, 580 runfile + `nvidia-smi`
+items (BLOCKER-001): PGDG install + pgvector version on `.225`, nginx next to Apache on `.223`
+(8080/8443, Debian's default site disabled, `apache2` keeps :80), nginx reload on `.223`, rootless `podman info` with delegation on `.222/.225`, 580 runfile + `nvidia-smi`
 + Ollama GPU discovery on `.224`, `Wake-on: g` after reboot on `.222/.224`, SSH from the
 orchestrator with the runtime key.

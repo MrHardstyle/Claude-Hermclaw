@@ -6,7 +6,7 @@ bootstrapped state. Architecture and design rationale: [`docs/architecture/boots
 | Host | IP | Inventory group | What the bootstrap installs |
 |---|---|---|---|
 | Orchestrator | 192.168.178.225 | `orchestrator` | base, PostgreSQL 17 + pgvector ≥ 0.8.2, rootless Podman (SearXNG), SSH keys, unit skeleton, credentials |
-| WebUI | 192.168.178.223 | `webui` | base, Node.js 22 (UI build), nginx baseline site |
+| WebUI | 192.168.178.223 | `webui` | base, nginx baseline site on 8080 (next to the legacy portal's Apache on 80, D-013; no Node.js on the shared host) |
 | Execution worker | 192.168.178.222 | `execution_workers` | base, rootless Podman sandbox, Wake-on-LAN, worker unit |
 | Model / media worker | 192.168.178.224 | `model_workers` | base, NVIDIA 580 (GTX 1080), Ollama, Wake-on-LAN, worker unit |
 | GitLab | 192.168.178.226 | `gitlab` | nothing (inventory / known_hosts only) |
@@ -14,6 +14,24 @@ bootstrapped state. Architecture and design rationale: [`docs/architecture/boots
 
 Order matters: **orchestrator first** (it generates the SSH keys and the worker tokens), then
 WebUI and workers. Every step can be repeated; a rerun reports `changed=0`.
+
+`.223` is not a fresh installation: it keeps the legacy portal Noob2Claw/Kowacore (Apache on port 80, MariaDB,
+`/var/www/noobclaw`; D-013). With `hermclaw_webui_shared_host: true` (`playbooks/group_vars/all.yml`) the bootstrap
+behaves as follows there:
+
+- **nginx:** It runs on 8080/8443 only. The package is installed without starting (`policy_rc_d: 101`), and only
+  nginx's own Debian default site is disabled. The role refuses 80/443, checks the full configuration (`nginx -T`)
+  and, after the start, the live sockets.
+- **Node.js:** NodeSource is not added; the portal's Debian `nodejs`/`npm` stay.
+- **Time:** The time zone and NTP are left alone.
+- **Foreign names:** Accounts and directories with Hermclaw's names that Hermclaw did not create stop the run before
+  anything changes.
+- **ufw:** Allow rules for nginx's ports are added only for `nginx_firewall_allow_from` (default on the shared host:
+  its own IPv4 LAN) and only when ufw is active. An active ufw that allows neither port while the list is empty
+  stops the run.
+
+Apache, PHP, MariaDB, the portal's webroot (except the menu entry the *deployment* adds), its users and cron are
+never touched.
 
 > Never run the bootstrap against a host whose role differs from the table – host roles are
 > fixed (Bauplan §2). The preflight refuses to touch ports or units owned by other services.
@@ -55,6 +73,8 @@ Edit `infra/ansible/inventory/hosts.yml`:
 * `wol_mac` of `hermclaw-exec-222` and `hermclaw-model-224` (step 0.4), `wol_interface` if the
   interface is not the one of the default route
 * `hermclaw_web_server_name` (nginx `server_name`, e.g. `hermclaw.lan`)
+* `nginx_firewall_allow_from` on `hermclaw-webui` when ufw is active on `.223` and other sources than its own IPv4 LAN
+  (the default, e.g. `192.168.178.0/24`) need the Kontrollraum
 * optional: `common_known_hosts_extra` (step 0.6) on the orchestrator host or in `all.vars`:
 
 ```yaml
@@ -86,14 +106,19 @@ Alternatively directly on a host (copy the script first):
 ```sh
 sudo bash check-host.sh --role orchestrator            # human readable
 sudo bash check-host.sh --role model_workers --json    # JSON report
+sudo bash check-host.sh --role webui                   # plans 8080/8443 (D-013); other nginx ports: --port-plan FILE
 ```
+
+The built-in port plan carries this installation's defaults. On `.223` it never contains 80/443, which belong to the
+legacy portal. With other nginx ports, pass a plan file holding lines such as `webui 9080 nginx-http nginx`, or use
+the Ansible preflight, which always passes the configured ports.
 
 Exit code 0 = OK (warnings allowed), 1 = at least one FAIL. Typical FAILs and what to do:
 
 | FAIL | Meaning | Action |
 |---|---|---|
 | `os` / `arch` | not Debian 13 trixie / not x86_64 | reinstall the host |
-| `port:<n>` | a foreign process listens on a planned port (§6) | move or stop that service yourself; never override with `--allow-conflicts` unless the process is known to be the Hermclaw service |
+| `port:<n>` | a foreign process listens on a planned port (§6) | move or stop that service yourself; never override with `--allow-conflicts` unless the process is known to be the Hermclaw service. On `.223` never stop Apache: choose other nginx ports instead (`hermclaw_webui_http_port` / `hermclaw_webui_https_port`) |
 | `unit:<name>` | a unit file with a Hermclaw name that Hermclaw does not manage | rename/remove it manually |
 | `ram` / `cpu` / `disk` | below the per-role minimum | upgrade, or override `common_preflight_min_*` deliberately |
 | `gpu` (`.224`) | no NVIDIA GPU visible on the PCI bus | check the card / slot; the model worker needs the GTX 1080 |
@@ -139,12 +164,17 @@ ansible-playbook -i inventory/hosts.yml playbooks/bootstrap.yml --limit webui -K
 Verify on `.223`:
 
 ```sh
-node --version; npm --version                              # v22.x (>= 22.23.2, last 22.x security release)
 sudo nginx -t
-curl -sI http://127.0.0.1/ -H 'Host: hermclaw.lan' | head -5   # 200, placeholder page
+curl -sI http://127.0.0.1:8080/ -H 'Host: hermclaw.lan' | head -5   # 200, placeholder page
 cat /etc/nginx/sites-available/hermclaw-next.conf | grep -n 'proxy_buffering off'
+ls /etc/nginx/sites-enabled/                                   # hermclaw-next.conf only (Debian's default site disabled)
+sudo ss -Htlnp '( sport = :80 or sport = :8080 )'              # 80: apache2 (portal), 8080: nginx
+curl -s -o /dev/null -w '%{http_code}\n' http://127.0.0.1/login.php   # 200: the portal is untouched
 grep hermclaw-runtime ~hermclaw-admin/.ssh/authorized_keys     # restrict,from="192.168.178.225" ...
 ```
+
+Only on a web host that belongs to Hermclaw alone (`hermclaw_webui_shared_host: false`): `node --version; npm
+--version` shows v22.x (>= 22.23.2, the last 22.x security release).
 
 ## 5. Execution worker `.222`
 

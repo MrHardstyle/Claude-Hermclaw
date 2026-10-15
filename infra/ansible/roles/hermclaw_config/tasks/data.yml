@@ -41,6 +41,21 @@
       {%- endif -%}
       {%- endfor -%}{%- endfor -%}
       {{ out }}
+    # HTTP port of nginx per web host id (it answers /healthz also with TLS on): a host var nginx_listen_port, else
+    # the web host's hermclaw_webui_http_port (playbooks/group_vars/all.yml, 8080 on the shared .223 - D-013; this
+    # play's value when hostvars do not carry it). Role defaults of the nginx role are not visible here (another
+    # play), so the fallback is the variable they are derived from.
+    hermclaw_config_webui_http_ports: >-
+      {%- set out = {} -%}
+      {%- for host in groups.get('webui', []) -%}
+      {%- set hv = hostvars[host] -%}
+      {%- set host_id = hv.hermclaw_host_id | default(hv.hermclaw_worker_id | default('')) -%}
+      {%- if host_id | length > 0 -%}
+      {%- set port = hv.nginx_listen_port | default(hv.hermclaw_webui_http_port | default(hermclaw_webui_http_port | default(80))) -%}
+      {%- set _ = out.update({host_id: port | int}) -%}
+      {%- endif -%}
+      {%- endfor -%}
+      {{ out }}
 
 - name: Merge examples, overrides and inventory values
   ansible.builtin.set_fact:
@@ -66,7 +81,8 @@
       {%- if entry.role | default('') == 'webui' -%}
       {%- set services = [] -%}
       {%- for svc in entry.services | default([]) -%}
-      {%- set _ = services.append(svc | combine({'http_path': hermclaw_config_webui_probe_path}) if svc.name == 'nginx' else svc) -%}
+      {%- set nginx_patch = {'http_path': hermclaw_config_webui_probe_path, 'port': hermclaw_config_webui_http_ports.get(host_id, svc.port | default(80))} -%}
+      {%- set _ = services.append(svc | combine(nginx_patch) if svc.name == 'nginx' else svc) -%}
       {%- endfor -%}
       {%- set entry = entry | combine({'services': services}) -%}
       {%- endif -%}

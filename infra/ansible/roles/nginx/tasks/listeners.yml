@@ -1,0 +1,34 @@
+# Shared host (D-013): no listen directive of the complete nginx configuration (`nginx -T`: nginx.conf, conf.d/,
+# sites-enabled/ - Hermclaw's site and any other) may use a port reserved for the other web server of the host.
+# `nginx -t` cannot see this: it tolerates a port another process already owns. Runs inside the guarded block of
+# main.yml, so a violation rolls the Hermclaw site back before nginx is started or reloaded. A server block without
+# any listen directive (nginx then listens on *:80) is caught by the live check (live_listeners.yml).
+- name: Read the complete nginx configuration
+  ansible.builtin.command:
+    argv: [nginx, -T, -q]
+  register: nginx_full_config
+  changed_when: false
+  check_mode: false
+  no_log: true  # the dump may hold other sites' settings; the assertion below names the offending listeners
+
+- name: Refuse listeners on the reserved ports {{ nginx_reserved_ports | join(', ') }}
+  ansible.builtin.assert:
+    that: nginx_reserved_listeners | length == 0
+    fail_msg: >-
+      the nginx configuration listens on {{ nginx_reserved_listeners | join(', ') }}: port(s)
+      {{ nginx_reserved_ports | join(', ') }} belong to the other web server of this shared host (D-013) and are
+      never used by nginx here. Find the directive with `nginx -T | grep -n listen` and move or disable that site
+      (Hermclaw's own site follows hermclaw_webui_http_port / hermclaw_webui_https_port).
+    quiet: true
+  vars:
+    # first argument of every listen directive (comments removed): "80", "[::]:80", "127.0.0.1:8080", "*:80",
+    # "localhost" (= port 80); unix: sockets have no port
+    nginx_reserved_listeners: >-
+      {%- set found = [] -%}
+      {%- for token in nginx_full_config.stdout | regex_replace('(?m)#.*$', '') | regex_findall('(?:^|[;{}\s])listen\s+([^\s;]+)') -%}
+      {%- if not token.startswith('unix:') -%}
+      {%- set port = token if token is match('^[0-9]+$') else (token | regex_replace('^.*:', '') if token is search(':[0-9]+$') else '80') -%}
+      {%- if port | int in nginx_reserved_ports | map('int') | list -%}{%- set _ = found.append(token) -%}{%- endif -%}
+      {%- endif -%}
+      {%- endfor -%}
+      {{ found | unique }}

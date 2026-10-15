@@ -1,0 +1,64 @@
+# Shared web host (D-013), read-only, before anything changes: .223 also carries the legacy portal, whose ecosystem
+# uses the name "hermclaw" widely. The bootstrap would rewrite an existing account (group, home, shell, password)
+# and re-own existing directories with Hermclaw's names - it refuses both unless Hermclaw created them (accounts:
+# the GECOS the bootstrap sets; directories: the owner and group of common_directories). Like roles/nginx/tasks/
+# guard.yml: never take over what belongs to someone else. Other names: hermclaw_user, hermclaw_ssh_runtime_user
+# and the hermclaw_*_dir variables (host vars or -e).
+- name: Look up the accounts the bootstrap manages
+  ansible.builtin.command:
+    argv: [getent, passwd, "{{ item }}"]
+  loop:
+    - "{{ hermclaw_user }}"
+    - "{{ hermclaw_ssh_runtime_user }}"
+  register: common_shared_accounts
+  changed_when: false
+  failed_when: common_shared_accounts.rc not in [0, 2]
+  check_mode: false
+
+- name: Refuse existing accounts that Hermclaw did not create
+  ansible.builtin.assert:
+    that: common_shared_foreign_accounts | length == 0
+    fail_msg: >-
+      {{ inventory_hostname }} is a shared host (hermclaw_webui_shared_host) and already has the account(s)
+      {{ common_shared_foreign_accounts | join(', ') }} without Hermclaw's marker (GECOS
+      '{{ common_service_account_comment }}' / '{{ common_runtime_account_comment }}'): the bootstrap would rewrite
+      them. Choose other names (hermclaw_user, hermclaw_ssh_runtime_user as host vars) or check the account first.
+    quiet: true
+  vars:
+    common_shared_foreign_accounts: >-
+      {%- set out = [] -%}
+      {%- for r in common_shared_accounts.results if r.rc == 0 -%}
+      {%- set gecos = (r.stdout.split(':')[4] | default('')).split(',')[0] -%}
+      {%- set marker = common_service_account_comment if r.item == hermclaw_user else common_runtime_account_comment -%}
+      {%- if gecos != marker -%}{%- set _ = out.append(r.item ~ ' (GECOS: ' ~ (gecos or '-') ~ ')') -%}{%- endif -%}
+      {%- endfor -%}
+      {{ out }}
+
+- name: Inspect the directories the bootstrap creates and re-owns
+  ansible.builtin.stat:
+    path: "{{ item.path }}"
+    follow: false
+    get_checksum: false
+  # the credential store is systemd's (/etc/credstore.encrypted), not a Hermclaw name
+  loop: "{{ common_directories | rejectattr('path', 'equalto', hermclaw_credstore_dir) | list }}"
+  loop_control:
+    label: "{{ item.path }}"
+  register: common_shared_dirs
+
+- name: Refuse existing directories that are not Hermclaw's
+  ansible.builtin.assert:
+    that: common_shared_foreign_dirs | length == 0
+    fail_msg: >-
+      {{ inventory_hostname }} is a shared host (hermclaw_webui_shared_host) and already has
+      {{ common_shared_foreign_dirs | join(', ') }} with another owner, group or type than Hermclaw creates: the
+      bootstrap would re-own them. Move them away or point the hermclaw_*_dir variables elsewhere (host vars).
+    quiet: true
+  vars:
+    common_shared_foreign_dirs: >-
+      {%- set out = [] -%}
+      {%- for r in common_shared_dirs.results if r.stat.exists -%}
+      {%- if r.stat.islnk or not r.stat.isdir or r.stat.pw_name != r.item.owner or r.stat.gr_name != r.item.group -%}
+      {%- set _ = out.append(r.item.path ~ ' (' ~ r.stat.pw_name | default('?') ~ ':' ~ r.stat.gr_name | default('?') ~ ')') -%}
+      {%- endif -%}
+      {%- endfor -%}
+      {{ out }}

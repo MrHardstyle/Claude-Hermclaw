@@ -2,7 +2,12 @@
 # Static React build from {{ hermclaw_webroot }} (a symlink to the active build in {{ hermclaw_ui_releases_dir | default(hermclaw_webroot ~ '-releases') }}),
 # API proxy to {{ nginx_api_upstream }}. SSE endpoints are proxied unbuffered and uncompressed. Security headers and
 # the Content-Security-Policy are repeated in every location that sets its own add_header (nginx 1.26 does not
-# merge add_header levels). TLS: {{ 'on (port ' ~ nginx_tls_port ~ ', port ' ~ nginx_listen_port ~ ' redirects)' if nginx_tls_enabled | bool else 'off' }}.
+# merge add_header levels). TLS: {{ 'on (port ' ~ nginx_tls_port ~ ', port ' ~ nginx_listen_port ~ ' redirects)' if nginx_tls_enabled | bool else 'off (port ' ~ nginx_listen_port ~ ')' }}.
+{% if nginx_shared_host | bool %}
+# Shared host (D-013): another web server owns port(s) {{ nginx_reserved_ports | join(', ') }} of this host; nginx never listens there.
+{% endif %}
+# Cookies of other sites on the same host name (browsers scope cookies by host, not by port) never reach the API:
+# it authenticates with bearer tokens only.
 {% set hermclaw_headers = [
      ['Content-Security-Policy', nginx_csp ~ ('; upgrade-insecure-requests' if nginx_tls_enabled | bool else '')],
      ['X-Content-Type-Options', 'nosniff'],
@@ -88,13 +93,19 @@ server {
 
     # Server-Sent Events: job event stream and global event stream
     location ~ ^/api/(jobs/[^/]+/)?events/stream$ {
+        # error entries carry the request line, i.e. ?access_token= (EventSource cannot send headers): only crit
+        # here, so no token reaches a log file (the access log drops query strings, see hermclaw_noquery)
+        error_log /var/log/nginx/{{ nginx_site_name }}.error.log crit;
         proxy_pass http://hermclaw_api;
         proxy_http_version 1.1;
         proxy_set_header Connection "";
-        proxy_set_header Host $host;
+        # with the port: absolute redirects of the API (e.g. a trailing slash) stay on this server
+        proxy_set_header Host $host:$server_port;
         proxy_set_header X-Real-IP $remote_addr;
         proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
         proxy_set_header X-Forwarded-Proto $scheme;
+        proxy_set_header Cookie "";
+        proxy_hide_header Set-Cookie;
         proxy_buffering off;
         proxy_cache off;
         gzip off;
@@ -107,10 +118,13 @@ server {
         proxy_pass http://hermclaw_api;
         proxy_http_version 1.1;
         proxy_set_header Connection "";
-        proxy_set_header Host $host;
+        # with the port: absolute redirects of the API (e.g. a trailing slash) stay on this server
+        proxy_set_header Host $host:$server_port;
         proxy_set_header X-Real-IP $remote_addr;
         proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
         proxy_set_header X-Forwarded-Proto $scheme;
+        proxy_set_header Cookie "";
+        proxy_hide_header Set-Cookie;
         proxy_read_timeout 120s;
     }
 

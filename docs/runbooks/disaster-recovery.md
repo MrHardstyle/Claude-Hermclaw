@@ -9,7 +9,7 @@ repositories and workspaces). Every other host can be rebuilt from the repositor
 | `.225` orchestrator | database, config, artifacts, credentials | restore from the newest tested backup on Terra `.60` (§1) | 1–2 h |
 | `.222` execution worker | none (sandbox images can be rebuilt; workspaces are copies) | re-bootstrap + deploy (§2) | 30–45 min |
 | `.224` model worker | models (re-downloadable, ≈ 70 GB) | re-bootstrap (driver!) + deploy + model pull (§3) | 2–4 h |
-| `.223` web UI | none (static build) | re-bootstrap + deploy (§4) | 15 min |
+| `.223` web UI | none of Hermclaw's (static build); the host also carries the legacy portal (D-013) | portal first (its own backup), then re-bootstrap + deploy (§4) | 15 min + portal |
 | `.226` GitLab | the projects (outside Hermclaw) | GitLab's own backup; then re-register remotes (§5) | – |
 | `.60` Terra | the backup sets | new target, first backup + restore test (§6) | 30 min |
 | a credential | – | rotate (§7) | 10 min |
@@ -97,13 +97,24 @@ supported by the R580 driver (or, for a newer card, a newer branch: then reconsi
 
 ## 4. Web UI `.223`
 
+`.223` is shared with the legacy portal Noob2Claw/Kowacore (D-013: Apache on port 80, MariaDB,
+`/var/www/noobclaw`). Hermclaw keeps no state there. Hermclaw's backup does not cover the portal: restore it first.
+The cutover.md §1 snapshot on `.60` (webroot, MariaDB dump, Apache vhost) is a one-time copy from the cutover day;
+prefer the portal's own current backup. Then:
+
 ```bash
-# Debian 13 reinstalled (INSTALLATION.md chapter 3, steps 1-3), then:
+# only if the host itself was reinstalled:
 ssh-keygen -R 192.168.178.223       # admin machine: the reinstalled host has a new host key
-ssh-copy-id admin@192.168.178.223   # compare the new fingerprint (INSTALLATION.md chapter 3, step 4)
+ssh-copy-id admin@192.168.178.223   # your sudo login there (ansible_user of hermclaw-webui); compare the new
+                                    # fingerprint (INSTALLATION.md chapter 3, step 4)
+# Hermclaw's part next to the portal (nginx on 8080/8443, never 80/443) and the portal button
 ansible-playbook -i inventory/hosts.yml playbooks/bootstrap.yml --limit webui -K
 ansible-playbook -i inventory/hosts.yml playbooks/deploy.yml --limit webui -K
 ```
+
+Only the portal was restored, Hermclaw's nginx still runs: re-run just the button,
+`playbooks/deploy.yml --limit webui --tags portal_link -K`. The restore may have dropped
+`nav/work_ki_kontrollraum.php`.
 
 The UI is a static build; nothing is lost. TLS: restore the certificate/key you provided (or let the deployment
 create a new self-signed one and re-trust it in the browsers).

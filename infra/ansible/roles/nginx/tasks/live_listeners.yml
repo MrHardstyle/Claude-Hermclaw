@@ -1,0 +1,45 @@
+# Shared host (D-013), after nginx was started or reloaded: the sockets nginx really holds. nginx must hold its own
+# ports and none of the reserved ones (also catches a server block without a listen directive, which nginx puts on
+# *:80). A reload only signals the master process, so the check waits a few seconds for the new listeners. An nginx
+# that took a reserved port - the other web server was down - is stopped again, so that server gets its port back;
+# nothing else is touched.
+- name: Check the listeners nginx holds
+  vars:
+    # ss -Htlnp: State Recv-Q Send-Q Local-Address:Port Peer-Address:Port Process
+    nginx_live_ports: >-
+      {%- set found = [] -%}
+      {%- for line in nginx_sockets.stdout_lines | default([]) -%}
+      {%- set f = line.split() -%}
+      {%- if f | length >= 6 and '(("nginx",' in f[5:] | join(' ') -%}{%- set _ = found.append(f[3].split(':')[-1] | int) -%}{%- endif -%}
+      {%- endfor -%}
+      {{ found | unique | sort }}
+    nginx_expected_ports: "{{ [nginx_listen_port | int] + ([nginx_tls_port | int] if nginx_tls_enabled | bool else []) }}"
+    nginx_held_reserved: "{{ nginx_live_ports | intersect(nginx_reserved_ports | map('int') | list) }}"
+  block:
+    - name: Wait until nginx holds its ports and none of the reserved ports {{ nginx_reserved_ports | join(', ') }}
+      ansible.builtin.command:
+        argv: [ss, -Htlnp]
+      register: nginx_sockets
+      changed_when: false
+      check_mode: false
+      until: >-
+        nginx_sockets.rc == 0
+        and nginx_held_reserved | length == 0
+        and nginx_expected_ports | difference(nginx_live_ports) | length == 0
+      retries: "{{ nginx_listener_check_retries }}"
+      delay: "{{ nginx_listener_check_delay }}"
+  rescue:
+    - name: Stop nginx when it holds a port of the other web server
+      ansible.builtin.command:  # noqa: command-instead-of-module
+        argv: [systemctl, stop, nginx.service]
+      changed_when: true
+      when: nginx_held_reserved | length > 0
+
+    - name: Stop after the listener check
+      ansible.builtin.fail:
+        msg: >-
+          nginx listens on {{ nginx_live_ports | join(', ') if nginx_live_ports | length > 0 else 'no port' }},
+          expected {{ nginx_expected_ports | join(' and ') }} and none of {{ nginx_reserved_ports | join(', ') }}
+          (reserved for the other web server of this shared host, D-013).
+          {{ 'nginx was stopped again. ' if nginx_held_reserved | length > 0 else '' -}}
+          Check `nginx -T | grep -n listen`, `ss -Htlnp` and `journalctl -u nginx`.

@@ -1,0 +1,17 @@
+# Shared web host (D-013): the time setup belongs to the host's owner (the legacy portal's PHP, MariaDB and cron run
+# there). Nothing is changed - no /etc/localtime, /etc/timezone or timesyncd - a zone other than hermclaw_timezone is
+# only reported (log timestamps of Hermclaw's nginx then use the host's zone).
+- name: Read the time zone of the shared host
+  ansible.builtin.stat:
+    path: /etc/localtime
+    follow: false
+    get_checksum: false
+  register: common_localtime
+
+- name: Report a time zone other than hermclaw_timezone (left unchanged)
+  ansible.builtin.debug:
+    msg: >-
+      {{ inventory_hostname }} is a shared host: its time zone
+      ({{ (common_localtime.stat.lnk_target | default('') | regex_replace('^.*zoneinfo/', '')) or 'unknown' }}) differs
+      from hermclaw_timezone ({{ hermclaw_timezone }}) and is left as it is.
+  when: (common_localtime.stat.lnk_target | default('') | regex_replace('^.*zoneinfo/', '')) != hermclaw_timezone

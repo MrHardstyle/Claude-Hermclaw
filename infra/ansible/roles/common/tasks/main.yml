@@ -10,6 +10,12 @@
 
 - name: Time zone and NTP
   ansible.builtin.import_tasks: time.yml
+  when: not common_shared_host | bool
+  tags: [common, time]
+
+- name: Time zone of a shared host (read-only)
+  ansible.builtin.import_tasks: time_shared.yml
+  when: common_shared_host | bool
   tags: [common, time]
 
 - name: Users and groups

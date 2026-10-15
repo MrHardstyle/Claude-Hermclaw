@@ -444,7 +444,7 @@ VALIDATION_CASES: list[tuple[str, str, str, dict[str, Any], str]] = [
         },
         "PASS",
     ),
-    ("nginx-tls-same-port", "nginx", "validate.yml", {"hermclaw_web_server_name": "hermclaw.lan", "nginx_tls_port": 80}, "FAIL"),
+    ("nginx-tls-same-port", "nginx", "validate.yml", {"hermclaw_web_server_name": "hermclaw.lan", "nginx_tls_port": 8080}, "FAIL"),
     ("nginx-tls-source", "nginx", "validate.yml", {"hermclaw_web_server_name": "hermclaw.lan", "nginx_tls_source": "acme"}, "FAIL"),
     ("nginx-tls-days", "nginx", "validate.yml", {"hermclaw_web_server_name": "hermclaw.lan", "nginx_tls_self_signed_days": 825}, "FAIL"),
     (
@@ -519,7 +519,7 @@ def _config_inventory(tmp_path: Path, **host_vars: dict[str, Any]) -> Path:
             },
             "children": {
                 "orchestrator": {"hosts": {"o": {"ansible_host": "10.9.0.25", "hermclaw_host_id": "orchestrator-225"}}},
-                "webui": {"hosts": {"w": {"ansible_host": "10.9.0.23", "hermclaw_host_id": "webui-223"}}},
+                "webui": {"hosts": {"w": {"ansible_host": "10.9.0.23", "hermclaw_host_id": "webui-223", **host_vars.get("web", {})}}},
                 "execution_workers": {"hosts": {"e": exec_vars}},
                 "model_workers": {"hosts": {"m": model_vars}},
                 "gitlab": {"hosts": {"g": {"ansible_host": "10.9.0.26", "hermclaw_host_id": "gitlab-226"}}},
@@ -592,7 +592,8 @@ def test_configuration_from_examples_inventory_and_overrides(tmp_path: Path) -> 
         assert hosts[hid]["address"] == ip and hosts[hid]["worker_api"] == f"http://{ip}:8787"
         assert hosts[hid]["wake_on_lan"] == {**hosts[hid]["wake_on_lan"], "enabled": True, "mac": mac, "broadcast": "10.9.0.255"}
     assert hosts["exec-222"]["labels"]["lease_resources"] == "code-executor-222,gpu-x"
-    assert hosts["webui-223"]["services"] == [{"name": "nginx", "port": 80, "http_path": "/healthz"}]
+    # D-013: nginx's HTTP port on the shared .223 (hermclaw_webui_http_port), /healthz also answers with TLS on
+    assert hosts["webui-223"]["services"] == [{"name": "nginx", "port": 8080, "http_path": "/healthz"}]
     policies = yaml.safe_load((out / "policies.yaml").read_text(encoding="utf-8"))
     assert policies["coder"]["max_turns"] == 24 and policies["git"]["create_merge_request"] is True
     assert policies["coder"]["tool_output_chars"] == 12000, "deep merge keeps the other keys"
@@ -612,6 +613,18 @@ def test_configuration_from_examples_inventory_and_overrides(tmp_path: Path) -> 
     summary = json.loads(check.stdout)
     assert {h["id"]: h["address"] for h in summary["hosts"]}["exec-222"] == "10.9.0.22"
     assert summary["coder_max_turns"] == 24
+
+
+@pytest.mark.parametrize(
+    ("web_vars", "port"),
+    [({"nginx_listen_port": 9080}, 9080), ({"hermclaw_webui_http_port": 9180}, 9180), ({"hermclaw_webui_http_port": 80}, 80)],
+)
+def test_hosts_yaml_probes_the_configured_nginx_port(tmp_path: Path, web_vars: dict[str, Any], port: int) -> None:
+    """The readiness probe of webui-223 in hosts.yaml follows the web host's nginx port (host vars of the inventory)."""
+    res, out = _render_config(tmp_path, {}, web=web_vars)
+    assert res.returncode == 0, res.stdout[-4000:]
+    hosts = {h["id"]: h for h in yaml.safe_load((out / "hosts.yaml").read_text(encoding="utf-8"))["hosts"]}
+    assert hosts["webui-223"]["services"] == [{"name": "nginx", "port": port, "http_path": "/healthz"}]
 
 
 @pytest.mark.parametrize(
@@ -1660,7 +1673,7 @@ def tls_nginx(tmp_path: Path, nginx_image: str) -> Iterator[dict[str, Any]]:
 def test_final_site_redirects_to_https_and_serves_the_ui_with_csp(tls_nginx: dict[str, Any]) -> None:
     host = {"Host": "hermclaw.lan"}
     health = httpx.get(tls_nginx["http"] + "/healthz", headers=host, timeout=5.0)
-    assert health.status_code == 200 and health.text == "ok\n", "readiness probe of hosts.yaml stays 2xx on port 80"
+    assert health.status_code == 200 and health.text == "ok\n", "readiness probe of hosts.yaml stays 2xx on the HTTP port"
     redirect = httpx.get(tls_nginx["http"] + "/jobs/1?tab=plan", headers=host, timeout=5.0)
     assert redirect.status_code == 301
     assert redirect.headers["location"] == f"https://hermclaw.lan:{tls_nginx['tls_port']}/jobs/1?tab=plan"
@@ -1691,7 +1704,8 @@ def test_final_site_redirects_to_https_and_serves_the_ui_with_csp(tls_nginx: dic
         api = client.get(tls_nginx["https"] + "/api/health?access_token=hct_SECRETVALUE", headers=host)
         assert api.status_code == 200 and api.json()["status"] == "ok"
     seen = tls_nginx["upstream"].requests[-1]
-    assert seen["x-forwarded-proto"] == "https" and seen["host"] == "hermclaw.lan"
+    # the Host header carries nginx's port: the API's absolute redirects stay on this server, not the portal's 80/443
+    assert seen["x-forwarded-proto"] == "https" and seen["host"] == f"hermclaw.lan:{tls_nginx['tls_port']}"
     curl = shutil.which("curl")
     if curl:
         h2 = _run(
@@ -1708,7 +1722,7 @@ def test_final_site_redirects_to_https_and_serves_the_ui_with_csp(tls_nginx: dic
 def test_final_site_without_tls_keeps_http_with_csp(tmp_path: Path, nginx_image: str) -> None:
     site = _render_site(tmp_path, {"hermclaw_web_server_name": "hermclaw.lan"})
     text = site.read_text(encoding="utf-8")
-    assert "listen 80;" in text and "ssl" not in text.split("server {", 1)[1].split("location", 1)[0]
+    assert "listen 8080;" in text and "ssl" not in text.split("server {", 1)[1].split("location", 1)[0]
     assert "upgrade-insecure-requests" not in text and "Strict-Transport-Security" not in text
     assert "location = /healthz" in text and "hermclaw_noquery" in text
     assert text.count('add_header Content-Security-Policy "') == 3, "server level + index.html + assets"
@@ -1730,3 +1744,192 @@ def test_final_site_without_tls_keeps_http_with_csp(tmp_path: Path, nginx_image:
         "-t",
     )
     assert res.returncode == 0 and "test is successful" in res.stderr, res.stderr
+
+
+# --------------------------------------------------------------------------------------------- Kontrollraum button (D-013)
+
+PORTAL_TEMPLATE = ROLES_DIR / "hermclaw_ui" / "templates" / "portal-kontrollraum.php.j2"
+PORTAL_STATIC = REPO / "integrations" / "kowacore-portal" / "nav" / "work_ki_kontrollraum.php"
+PORTAL_FIELDS = ("ICON", "TITLE", "PRIO", "BEREICH", "RECHT")
+
+
+def _portal_meta(head_bytes: bytes) -> dict[str, str]:
+    """navigation_meta_laden() of the legacy portal (inc/funktionen_navigation.php), reimplemented: the first 700 bytes,
+    preg_match('/<FIELD>:\\s*(.+)/') per field - unanchored, the first match wins, PCRE '.' stops at a line break,
+    trim() -, all five fields or no menu entry at all, URL: optional (it replaces index.php?seite=<file>)."""
+    head = head_bytes[:700].decode("latin-1")
+    meta: dict[str, str] = {}
+    for field in PORTAL_FIELDS:
+        if m := re.search(field + r":\s*(.+)", head):
+            meta[field] = m.group(1).strip(" \t\n\r\0\x0b")
+    if len(meta) != len(PORTAL_FIELDS):
+        return {}
+    if m := re.search(r"URL:\s*(.+)", head):
+        meta["URL"] = m.group(1).strip(" \t\n\r\0\x0b")
+    return meta
+
+
+def _portal_vars(**extra: Any) -> dict[str, Any]:
+    return {"ansible_host": "192.168.178.223", "hermclaw_version": "0.1.0rc1", **extra}
+
+
+def _render_portal_button(tmp_path: Path, name: str, **extra: Any) -> bytes:
+    dest = tmp_path / f"{name}.php"
+    play = _local_play([{"name": "render", "ansible.builtin.template": {"src": str(PORTAL_TEMPLATE), "dest": str(dest), "mode": "0644"}}])
+    play[0]["vars_files"] += [str(ROLES_DIR / r / "defaults" / "main.yml") for r in ("nginx", "hermclaw_ui")]
+    res = _playbook(tmp_path, play, {"hermclaw_orchestrator_ip": "192.168.178.225", **_portal_vars(**extra)})
+    assert res.returncode == 0, res.stdout[-3000:]
+    return dest.read_bytes()
+
+
+def test_portal_button_parses_like_a_menu_entry_of_the_portal(tmp_path: Path) -> None:
+    default = _render_portal_button(tmp_path, "default")
+    meta = _portal_meta(default)
+    assert meta == {"ICON": "cpu", "TITLE": "KI-Kontrollraum", "PRIO": "19", "BEREICH": "work", "RECHT": "dashboard_anzeigen"}
+    assert "URL" not in meta, "the menu entry opens the portal page with the button (index.php?seite=work_ki_kontrollraum)"
+    assert default == PORTAL_STATIC.read_bytes(), "integrations/kowacore-portal is the deployment's file with the defaults"
+    text = default.decode("ascii")  # ASCII only: umlauts as entities, like the portal's own pages
+    header_end = text.index("?>") + 2
+    assert header_end < 700 and text.startswith("<?php\n/*\n") and text.count("<?") == 1 and text.count("?>") == 1
+    assert "Managed by Hermclaw" in text[:header_end], "the deployment's marker (never replaces a foreign page)"
+    assert '<a class="button button--primaer" href="http://192.168.178.223:8080/" target="_blank" rel="noopener noreferrer">' in text
+    assert "KI-Kontrollraum &ouml;ffnen</a>" in text and "<code>http://192.168.178.223:8080/</code>" in text
+    assert "<iframe" not in text and 'seitenkopf__eyebrow">Arbeit<' in text and "selbstsignierte" not in text
+    for word in ("ICON", "TITLE", "PRIO", "BEREICH", "RECHT", "URL"):
+        assert len(re.findall(word + ":", text[:700])) == (1 if word != "URL" else 0), f"{word}: appears once in the header"
+
+    tls = _render_portal_button(tmp_path, "tls", nginx_tls_enabled=True, hermclaw_web_server_name="hermclaw.lan")
+    assert 'href="https://192.168.178.223:8443/"' in tls.decode("ascii") and b"selbstsignierte Zertifikat" in tls
+    direct = _render_portal_button(tmp_path, "direct", hermclaw_ui_portal_link_direct=True, hermclaw_ui_portal_link_title="Kontrollraum")
+    meta = _portal_meta(direct)
+    assert meta["URL"] == "http://192.168.178.223:8080/" and meta["TITLE"] == "Kontrollraum", "the menu entry jumps there directly"
+    dedicated = _render_portal_button(tmp_path, "dedicated", hermclaw_webui_shared_host=False, hermclaw_webui_http_port=80)
+    assert b'href="http://192.168.178.223/"' in dedicated
+    # a header the portal would not take as a menu entry (negative control of the parser)
+    assert _portal_meta(b"<?php\n/*\nICON: cpu\nTITLE: x\nPRIO: 1\nBEREICH: work\n*/ ?>") == {}
+    assert _portal_meta(b"<?php /* " + b" " * 700 + b"ICON: cpu */ ?>") == {}
+
+
+def _portal_tree(root: Path, *, owner: int = 65534, group: int = 65534) -> Path:
+    (root / "nav").mkdir(parents=True)
+    (root / "index.php").write_text("<?php // front controller of the stand-in portal\n", encoding="utf-8")
+    (root / "nav" / "main_dashboard.php").write_text("<?php\n/*\nICON: layout-dashboard\nTITLE: Dashboard\n*/ ?>\n", encoding="utf-8")
+    os.chown(root / "nav", owner, group)
+    return root / "nav" / "work_ki_kontrollraum.php"
+
+
+def _portal_run(tmp_path: Path, root: Path, *args: str, **extra: Any) -> subprocess.CompletedProcess[str]:
+    tasks = [_include("hermclaw_ui", "portal_link.yml")]
+    return _playbook(tmp_path, _local_play(tasks), {**_portal_vars(hermclaw_ui_legacy_portal_root=str(root)), **extra}, args=args)
+
+
+def test_portal_button_is_installed_idempotently_with_the_portal_owner(tmp_path: Path) -> None:
+    if os.geteuid() != 0:
+        pytest.skip("needs root (owner of the portal's nav/)")
+    root = tmp_path / "noobclaw"
+    button = _portal_tree(root)
+    before = sorted(p.name for p in (root / "nav").iterdir())
+    dry = _portal_run(tmp_path, root, "--check")
+    assert dry.returncode == 0 and _changed(dry) == 1 and not button.exists(), "--check reports the button, writes nothing"
+    first = _portal_run(tmp_path, root)
+    assert first.returncode == 0 and _changed(first) == 1, first.stdout[-3000:]
+    st = button.stat()
+    assert (st.st_uid, st.st_gid, stat_mode(st.st_mode)) == (65534, 65534, 0o644), "owner/group of nav/, mode 0644"
+    assert button.read_bytes() == PORTAL_STATIC.read_bytes()
+    assert sorted(p.name for p in (root / "nav").iterdir()) == sorted([*before, button.name]), "nothing else changes"
+    second = _portal_run(tmp_path, root)
+    assert second.returncode == 0 and _changed(second) == 0, "idempotent"
+    # a changed address is rewritten; switched off, Hermclaw's button is removed again
+    moved = _portal_run(tmp_path, root, hermclaw_webui_http_port=9080)
+    assert moved.returncode == 0 and b"http://192.168.178.223:9080/" in button.read_bytes()
+    off = _portal_run(tmp_path, root, hermclaw_ui_portal_link=False)
+    assert off.returncode == 0 and not button.exists() and (root / "nav" / "main_dashboard.php").exists()
+    assert _portal_run(tmp_path, root, hermclaw_ui_portal_link=False).returncode == 0, "absent stays absent"
+
+
+def stat_mode(mode: int) -> int:
+    return mode & 0o7777
+
+
+@pytest.mark.parametrize(
+    ("layout", "extra", "outcome"),
+    [
+        ("no-portal", {}, "skip"),
+        ("index-only", {}, "skip"),
+        ("nav-only", {}, "skip"),
+        ("foreign-page", {}, "refused"),
+        ("foreign-page", {"hermclaw_ui_portal_link": False}, "refused"),
+        ("symlink", {}, "refused"),
+        ("portal", {"hermclaw_ui_portal_link_url": "javascript:alert(1)//"}, "invalid"),
+        ("portal", {"hermclaw_ui_portal_link_url": 'http://192.168.178.223:8080/" onmouseover="x'}, "invalid"),
+        ("portal", {"hermclaw_ui_portal_link_name": "../index"}, "invalid"),
+        ("portal", {"hermclaw_ui_portal_link_title": "KI\nURL: http://evil/"}, "invalid"),
+        ("portal", {"hermclaw_ui_portal_link_title": "RECHT: x"}, "invalid"),
+        ("portal", {"hermclaw_ui_portal_link_right": "__ausgeblendet__"}, "invalid"),
+        ("portal", {"hermclaw_ui_portal_link_prio": "19; x"}, "invalid"),
+        ("portal-in-webroot", {}, "invalid"),
+    ],
+)
+def test_portal_button_never_touches_an_unknown_or_foreign_page(tmp_path: Path, layout: str, extra: dict[str, Any], outcome: str) -> None:
+    root = tmp_path / "noobclaw"
+    button = root / "nav" / "work_ki_kontrollraum.php"
+    if layout in ("portal", "foreign-page", "symlink"):
+        _portal_tree(root, owner=os.getuid(), group=os.getgid())
+    elif layout == "index-only":
+        root.mkdir()
+        (root / "index.php").write_text("<?php\n", encoding="utf-8")
+    elif layout == "nav-only":
+        (root / "nav").mkdir(parents=True)
+    elif layout == "portal-in-webroot":
+        extra = {**extra, "hermclaw_webroot": str(tmp_path), "hermclaw_ui_releases_dir": str(tmp_path) + "-releases"}
+        _portal_tree(root, owner=os.getuid(), group=os.getgid())
+    if layout == "foreign-page":
+        button.write_text("<?php\n/*\nICON: cpu\nTITLE: Eigene Seite\nPRIO: 19\nBEREICH: work\nRECHT: x\n*/ ?>\n", encoding="utf-8")
+    if layout == "symlink":
+        (tmp_path / "elsewhere.php").write_text("<?php // Managed by Hermclaw (planted)\n", encoding="utf-8")
+        button.symlink_to(tmp_path / "elsewhere.php")
+    snapshot = {p: (p.read_bytes() if p.is_file() else None) for p in tmp_path.rglob("*") if not p.name.endswith((".yml", ".json"))}
+    res = _portal_run(tmp_path, root, **extra)
+    if outcome == "skip":
+        assert res.returncode == 0 and _changed(res) == 0 and not button.exists(), res.stdout[-3000:]
+    elif outcome == "refused":
+        assert res.returncode != 0 and "not Hermclaw's button" in res.stdout, res.stdout[-3000:]
+    else:
+        assert res.returncode != 0 and "invalid portal button settings" in res.stdout, res.stdout[-3000:]
+    after = {p: (p.read_bytes() if p.is_file() else None) for p in tmp_path.rglob("*") if not p.name.endswith((".yml", ".json"))}
+    assert {p: v for p, v in after.items() if "ansible" not in str(p)} == {p: v for p, v in snapshot.items() if "ansible" not in str(p)}
+
+
+@pytest.mark.parametrize(
+    ("extra", "base", "with_nginx_role"),
+    [
+        ({}, "http://192.168.178.223:8080", True),
+        ({}, "http://192.168.178.223:8080", False),
+        ({"nginx_tls_enabled": True}, "https://192.168.178.223:8443", True),
+        ({"nginx_tls_enabled": True}, "https://192.168.178.223:8443", False),
+        ({"nginx_listen_port": 9080}, "http://192.168.178.223:9080", False),
+        ({"hermclaw_webui_http_port": 80}, "http://192.168.178.223", True),
+        ({"hermclaw_webui_https_port": 443, "nginx_tls_enabled": True}, "https://192.168.178.223", True),
+    ],
+)
+def test_ui_health_and_portal_urls_follow_the_nginx_ports(tmp_path: Path, extra: dict[str, Any], base: str, with_nginx_role: bool) -> None:
+    out = tmp_path / "urls.json"
+    play = _local_play(
+        [
+            {
+                "name": "dump",
+                "ansible.builtin.copy": {
+                    "content": "{{ {'base': hermclaw_ui_base_url, 'link': hermclaw_ui_portal_link_url} | to_json }}",
+                    "dest": str(out),
+                    "mode": "0644",
+                },
+            }
+        ]
+    )
+    play[0]["vars_files"] += [
+        str(ROLES_DIR / r / "defaults" / "main.yml") for r in (["nginx"] if with_nginx_role else []) + ["hermclaw_ui"]
+    ]
+    res = _playbook(tmp_path, play, {"hermclaw_orchestrator_ip": "192.168.178.225", **_portal_vars(**extra)})
+    assert res.returncode == 0, res.stdout[-3000:]
+    urls = json.loads(out.read_text(encoding="utf-8"))
+    assert urls == {"base": base, "link": base + "/"}

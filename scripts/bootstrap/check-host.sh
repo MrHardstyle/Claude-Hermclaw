@@ -35,14 +35,17 @@ readonly SYSTEMD_DIR="/etc/systemd/system"
 
 # --- port plan (keep in sync with infra/ansible/playbooks/group_vars/all.yml) ---------
 # group port service expected-process-names(comma separated)
+# webui: Hermclaw's nginx on 8080/8443, next to the legacy portal (Apache) that keeps 80 on .223
+# (DECISIONS.md D-013). Other nginx ports: --port-plan FILE or HERMCLAW_PORT_PLAN (the Ansible
+# bootstrap always passes the configured ones).
 PORT_PLAN=$(cat <<'EOF'
 orchestrator 8000 hermclaw-api hermclaw,python3~hermclaw,python~hermclaw,uvicorn~hermclaw
 orchestrator 4000 litellm litellm,python3~litellm,python~litellm
 orchestrator 5432 postgresql postgres
 orchestrator 8888 searxng rootlessport,pasta,pasta.avx2,slirp4netns,conmon,uwsgi~searx,granian~searx,python3~searx
 orchestrator 9100 metrics hermclaw,python3~hermclaw,python~hermclaw
-webui 80 nginx-http nginx
-webui 443 nginx-https nginx
+webui 8080 nginx-http nginx
+webui 8443 nginx-https nginx
 execution_workers 8787 hermclaw-exec-worker hermclaw-exec-w,python3~hermclaw,python~hermclaw
 model_workers 8787 hermclaw-model-worker hermclaw-model-,python3~hermclaw,python~hermclaw
 model_workers 11434 ollama ollama

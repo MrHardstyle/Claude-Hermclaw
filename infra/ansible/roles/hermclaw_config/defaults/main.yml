@@ -29,7 +29,8 @@ hermclaw_config_unmanaged: []
 # wake_on_lan {mac: wol_mac, broadcast: hermclaw_lan_broadcast}. The entry is found by hermclaw_host_id
 # (inventory, default hermclaw_worker_id).
 hermclaw_config_inventory_groups: [orchestrator, webui, execution_workers, model_workers, gitlab, backup]
-# Readiness probe of nginx in hosts.yaml (2xx without redirects, also when port 80 redirects to HTTPS).
+# Readiness probe of nginx in hosts.yaml (2xx without redirects, also when the HTTP port redirects to HTTPS); the port
+# of the probe is nginx's HTTP port from the inventory (hermclaw_webui_http_port / nginx_listen_port, data.yml).
 hermclaw_config_webui_probe_path: /healthz
 # Wake-on-LAN cannot wake a host with a placeholder MAC (00:00:00:00:..); the deployment refuses it.
 hermclaw_config_allow_placeholder_macs: false

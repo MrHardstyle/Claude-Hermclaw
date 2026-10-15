@@ -108,6 +108,12 @@ nicht entfernen; `!reset` versteht podman-compose 1.0.x nicht. Die generierte Da
 * Vergleich mit (a) dem **Portplan §6** (`BAUPLAN_PORT_PLAN`, Owner pro Port; Adresse aus `hosts.yaml`) – nur der
   Owner (`owner=`) darf den Port nehmen – und (b) den **Live-Sockets** des Zielhosts (`ss -ltnpH`/`-lunpH`, lokal
   oder remote); ein vom Owner-Prozess gehaltener Port ist erwartet. Kollisionen tragen Owner, Prozess und PID.
+* D-013: Auf dem geteilten Web-Host `.223` gehören 8080/8443 dem Owner `nginx` (Hermclaws Kontrollraum). 80/443
+  gehören dem Owner `legacy-portal` (Apache des Portals Noob2Claw/Kowacore, Prozesse `apache2`/`httpd`). Eine
+  Konfiguration, die 80/443 anfordert, kollidiert also immer, auch Hermclaws eigenes nginx.
+  `PortPlan.from_hosts(hosts.yaml)` ergänzt die Dienst-Ports aus `hosts.yaml`, die der Plan noch nicht kennt (z. B.
+  nginx auf einem per Inventar geänderten Port); vorhandene Einträge ersetzt es nie. Der `PortChecker` nutzt das
+  standardmäßig.
 * `predeploy_check` ergänzt die Container-Inventur: rootful Podman veröffentlicht per netavark-DNAT ohne
   lauschenden Socket – `PORT_USED_BY_CONTAINER` fängt diese Fälle.
 

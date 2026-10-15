@@ -31,13 +31,27 @@ async def test_live_inventory_and_ports_on_execution_worker(tools: InfraTools) -
     assert report.live_checked, report.render()
 
 
-async def test_live_nginx_on_webui(tools: InfraTools) -> None:
+async def test_live_nginx_config_test_on_webui(tools: InfraTools) -> None:
+    """``sudo -n nginx -t`` as the runtime user. The bootstrap gives hermclaw-admin no sudo rule on the shared .223
+    (R-038; the deployment runs ``nginx -t`` as root), and without sudo ``nginx -t`` cannot open the logs, the pid
+    file or the TLS key - so the test only runs where an operator granted exactly that command."""
+    probe = await tools.executor.run(["sudo", "-n", "-l", "/usr/sbin/nginx", "-t"], host="webui-223", timeout=30)
+    if not probe.ok:
+        pytest.skip(f"the runtime user may not run 'sudo -n /usr/sbin/nginx -t' on webui-223: {probe.describe(200)}")
     tested = await tools.nginx.test_host("webui-223", sudo=True)
     assert tested.ok, tested.render()
+
+
+async def test_live_nginx_on_webui(tools: InfraTools) -> None:
     site = (ROOT / "infra/ansible/roles/nginx/templates/hermclaw-next.conf.j2").read_text()
     assert "events/stream" in site
     gate = await tools.predeploy_check("compose", "services:\n  a:\n    image: nginx:1.28\n    ports: ['80:80']\n", host="webui-223")
-    assert not gate.ok  # port 80 is owned by nginx on .223 (Bauplan §6)
+    assert not gate.ok  # port 80 belongs to the legacy portal (Apache) on the shared .223 (D-013)
+    assert gate.ports is not None and any(c.owner in {"legacy-portal", "apache2"} for c in gate.ports.collisions), gate.render()
+    # Hermclaw's own nginx on its port (hosts.yaml, hermclaw_webui_http_port) is the expected owner
+    port = next(s.port for s in tools.hosts.by_id("webui-223").services if s.name == "nginx") if tools.hosts else 8080
+    own = await tools.port_check(f"server {{ listen {port}; }}", kind="nginx", host="webui-223", owner="nginx")
+    assert own.live_checked and not own.collisions, own.render()
 
 
 async def test_live_sandbox_on_execution_worker(tools: InfraTools, tmp_path: Path) -> None:

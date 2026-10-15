@@ -6,7 +6,7 @@
       - nginx_site_name is match('^[a-z0-9][a-z0-9_.-]*$')
       - nginx_server_name is match('^[A-Za-z0-9_.* -]+$')
       - nginx_api_upstream is match('^http://[A-Za-z0-9.-]+(:[0-9]{1,5})?$')
-      - nginx_listen_port | int > 0
+      - (nginx_listen_port | string) is match('^[0-9]{1,5}$') and nginx_listen_port | int > 0 and nginx_listen_port | int < 65536
       - nginx_client_max_body_size is match('^[0-9]+[kmg]?$')
       - nginx_sse_read_timeout is match('^[0-9]+[smhd]?$')
     quiet: true
@@ -15,7 +15,7 @@
   ansible.builtin.assert:
     that:
       - nginx_tls_enabled | bool in [true, false]
-      - nginx_tls_port | int > 0 and nginx_tls_port | int < 65536
+      - (nginx_tls_port | string) is match('^[0-9]{1,5}$') and nginx_tls_port | int > 0 and nginx_tls_port | int < 65536
       - nginx_tls_port | int != nginx_listen_port | int
       - nginx_tls_source in ['self-signed', 'provided']
       - nginx_tls_dir is match('^/[A-Za-z0-9._/-]+$')
@@ -33,4 +33,28 @@
       invalid TLS/header settings: ports 1-65535 and different, nginx_tls_source self-signed|provided (provided needs
       nginx_tls_cert_src and nginx_tls_key_src), self-signed needs a DNS server name or an IPv4 ansible_host for the
       certificate (nginx_tls_san), at most 397 days, CSP/Permissions-Policy without double quotes, backslashes or line breaks.
+    quiet: true
+
+# D-013: next to another web server (the legacy portal on .223) nginx must never listen on its ports.
+- name: Validate the shared-host settings
+  ansible.builtin.assert:
+    that:
+      - nginx_shared_host | bool in [true, false]
+      - nginx_disable_debian_default_site | bool in [true, false]
+      - nginx_debian_default_site_link is match('^/[A-Za-z0-9._/-]+$')
+      - nginx_debian_default_site_file is match('^/[A-Za-z0-9._/-]+$')
+      - nginx_reserved_ports is sequence and nginx_reserved_ports is not string
+      - nginx_reserved_ports | map('string') | reject('match', '^[0-9]{1,5}$') | list | length == 0
+      - nginx_listen_port | int not in nginx_reserved_ports | map('int') | list
+      - not nginx_tls_enabled | bool or nginx_tls_port | int not in nginx_reserved_ports | map('int') | list
+      - not nginx_shared_host | bool or nginx_hsts_max_age | int == 0
+      - nginx_firewall_allow_from is sequence and nginx_firewall_allow_from is not string
+      - nginx_ufw_bin is match('^/[A-Za-z0-9._/-]+$')
+      - nginx_firewall_allow_from | map('string') | reject('match', '^[0-9A-Fa-f.:]+(/[0-9]{1,3})?$') | list | length == 0
+    fail_msg: >-
+      invalid shared-host settings: nginx_listen_port {{ nginx_listen_port }}{{ (' / nginx_tls_port ' ~ nginx_tls_port)
+      if nginx_tls_enabled | bool else '' }} must not be one of the ports reserved for the other web server on this host
+      ({{ nginx_reserved_ports | join(', ') }}; D-013: set hermclaw_webui_http_port / hermclaw_webui_https_port),
+      HSTS (nginx_hsts_max_age) is refused on a shared host (it would cover the other site of the host name), and
+      nginx_firewall_allow_from is a list of addresses or CIDRs.
     quiet: true

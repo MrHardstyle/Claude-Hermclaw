@@ -128,22 +128,68 @@ def test_plan_collision_and_owner_match() -> None:
     assert any("8000/tcp is planned for hermclaw-api" in n for n in notes)
 
 
+# the shared web host .223 (D-013): the legacy portal's Apache on 80, Hermclaw's nginx on 8080
+SS_WEB = """\
+LISTEN 0      511          0.0.0.0:80        0.0.0.0:*    users:(("apache2",pid=700,fd=4),("apache2",pid=701,fd=4))
+LISTEN 0      511          0.0.0.0:8080      0.0.0.0:*    users:(("nginx",pid=812,fd=6),("nginx",pid=811,fd=6))
+LISTEN 0      4096   192.168.178.223:8000    0.0.0.0:*
+"""
+
+
 def test_live_collision_owner_process_and_unknown_process() -> None:
-    _, ports, _ = requested_ports("server { listen 80; server_name x; }\nserver { listen 8000; }", "nginx")
-    listening = parse_ss(SS_TCP)
+    _, ports, _ = requested_ports("server { listen 8080; server_name x; }\nserver { listen 8000; }", "nginx")
+    listening = parse_ss(SS_WEB)
     plan = PortPlan().for_address("192.168.178.223")
     collisions, _ = evaluate_collisions(ports, plan_entries=plan, listening=listening, owner="nginx", check_duplicates=False)
-    # 80 is planned for nginx and served by an nginx process → expected; a wildcard listen on 8000 overlaps the
-    # specific 192.168.178.225:8000 socket of an unknown process → live collision
+    # 8080 is planned for nginx and served by an nginx process → expected; a wildcard listen on 8000 overlaps the
+    # specific 192.168.178.223:8000 socket of an unknown process → live collision
     assert [(c.port, c.kind, c.owner) for c in collisions] == [(8000, "live", "unknown process")]
     collisions, _ = evaluate_collisions(ports, plan_entries=plan, listening=listening, owner="caddy", check_duplicates=False)
-    live = [c for c in collisions if c.kind == "live" and c.port == 80]
+    live = [c for c in collisions if c.kind == "live" and c.port == 8080]
     assert len(live) == 1 and live[0].owner == "nginx" and live[0].pid == 812
-    assert any(c.kind == "plan" and c.port == 80 for c in collisions)
+    assert any(c.kind == "plan" and c.port == 8080 for c in collisions)
     # listening without process info (no root for ss -p) on a planned port of the owner → note, not a collision
-    anon = [ListeningSocket("0.0.0.0", 80, "tcp")]
+    anon = [ListeningSocket("0.0.0.0", 8080, "tcp")]
     collisions, notes = evaluate_collisions(ports[:1], plan_entries=plan, listening=anon, owner="nginx")
     assert not collisions and any("process unknown" in n for n in notes)
+
+
+def test_legacy_portal_ports_collide_even_for_hermclaws_nginx() -> None:
+    """D-013: 80/443 of the shared .223 belong to the legacy portal (Apache) - a config requesting them always collides."""
+    _, ports, _ = requested_ports("server { listen 80; listen 443 ssl; server_name hermclaw.lan; }", "nginx")
+    plan = PortPlan().for_address("192.168.178.223")
+    collisions, _ = evaluate_collisions(ports, plan_entries=plan, listening=parse_ss(SS_WEB), owner="nginx", check_duplicates=False)
+    assert {(c.port, c.kind, c.owner) for c in collisions} == {
+        (80, "plan", "legacy-portal"),
+        (443, "plan", "legacy-portal"),
+        (80, "live", "apache2"),
+    }
+    # the portal's own Apache is the expected owner of its port
+    _, apache, _ = requested_ports("[Socket]\nListenStream=80\n", "systemd")
+    collisions, notes = evaluate_collisions(apache, plan_entries=plan, listening=parse_ss(SS_WEB), owner="legacy-portal")
+    assert not collisions and any("already served by apache2" in n for n in notes)
+
+
+def test_port_plan_from_hosts_follows_the_deployed_ports() -> None:
+    """hosts.yaml services the base plan does not know are planned for their service; base entries are never replaced."""
+    hosts = HostsConfig(
+        hosts=[
+            HostConfig(id="webui-223", address="192.168.178.223", role="webui", services=[{"name": "nginx", "port": 9080}]),
+            HostConfig(id="orchestrator-225", address="192.168.178.225", role="orchestrator", services=[{"name": "api", "port": 8000}]),
+            HostConfig(id="dedicated", address="192.168.178.223", role="webui", services=[{"name": "nginx", "port": 80}]),
+        ]
+    )
+    plan = PortPlan.from_hosts(hosts)
+    web = {(e.port, e.owner) for e in plan.for_address("192.168.178.223")}
+    assert (9080, "nginx") in web and (8080, "nginx") in web
+    assert (80, "legacy-portal") in web and (80, "nginx") not in web, "the base keeps the portal's port"
+    assert [e.owner for e in plan.lookup("192.168.178.225", 8000, "tcp")] == ["hermclaw-api"]
+    assert PortPlan.from_hosts(None).entries == BAUPLAN_PORT_PLAN
+    _, ports, _ = requested_ports("server { listen 9080; }", "nginx")
+    collisions, notes = evaluate_collisions(ports, plan_entries=plan.for_address("192.168.178.223"), listening=None, owner="nginx")
+    assert not collisions and any("9080/tcp is planned for nginx" in n for n in notes)
+    checker = PortChecker(HostExecutor(remote=SsRunner(), hosts=hosts), hosts=hosts)
+    assert (9080, "nginx") in {(e.port, e.owner) for e in checker.plan.for_address("192.168.178.223")}, "the checker's default"
 
 
 def test_duplicate_requests_in_one_config() -> None:
@@ -158,12 +204,14 @@ def test_duplicate_requests_in_one_config() -> None:
 def test_port_plan_matches_bauplan_section_6() -> None:
     plan = {(p.address.rsplit(".", 1)[1], p.port) for p in BAUPLAN_PORT_PLAN}
     assert plan == {
-        ("223", 80), ("223", 443),
+        ("223", 8080), ("223", 8443), ("223", 80), ("223", 443),  # D-013: nginx next to the legacy portal
         ("225", 8000), ("225", 4000), ("225", 5432), ("225", 9100),
         ("222", 8787),
         ("224", 8787), ("224", 11434),
         ("226", 22), ("226", 80), ("226", 443),
     }  # fmt: skip
+    owners = {p.port: p.owner for p in BAUPLAN_PORT_PLAN if p.address == "192.168.178.223"}
+    assert owners == {8080: "nginx", 8443: "nginx", 80: "legacy-portal", 443: "legacy-portal"}
 
 
 async def test_checker_remote_host_uses_hosts_address_and_ss() -> None:

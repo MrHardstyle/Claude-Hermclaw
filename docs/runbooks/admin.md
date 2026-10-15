@@ -5,7 +5,7 @@ Day-to-day operation of Hermclaw Next. Installation: `docs/operations/INSTALLATI
 
 Conventions: commands on the orchestrator `.225` run through the operator wrapper `sudo hermclaw …` (the Hermclaw
 CLI as user `hermclaw` with the services' environment and credentials). API calls use a personal token in
-`$TOKEN` (`sudo hermclaw token-create`, §4) against `http://192.168.178.225:8000` or through nginx on `.223`.
+`$TOKEN` (`sudo hermclaw token-create`, §4) against `http://192.168.178.225:8000` or through nginx on `.223` (`http://192.168.178.223:8080`, D-013: the legacy portal keeps port 80).
 Ansible commands run on the admin machine in `infra/ansible` of the checkout. `journalctl` runs with `sudo`: a login
 outside the groups `adm` and `systemd-journal` sees no lines of system units.
 

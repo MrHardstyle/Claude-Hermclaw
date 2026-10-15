@@ -79,8 +79,8 @@ The exit codes are 0 (ok), 1 (build or self-test failure), 2 (usage) and 69 (mis
 reasons:
 
 * The artifact is then the same one the tests and the CSP check saw.
-* `.223` needs neither npm registry access nor a Node toolchain at deploy time. Its Node from the bootstrap stays
-  for local work.
+* `.223` needs neither npm registry access nor a Node toolchain at deploy time. The shared `.223` (D-013) gets no
+  Node.js from Hermclaw at all; on a web host that belongs to Hermclaw alone, the bootstrap's Node stays for local work.
 * Every UI version stays on the host, so a rollback is exact.
 * The checksum covers the UI the same way it covers the Python payload.
 
@@ -101,11 +101,13 @@ reasons:
   /opt/litellm/venv -> venv-<litellm>-<lock12>         # LiteLLM, own venv (systemd_skeleton_litellm_venv)
   /etc/hermclaw/litellm.yaml                           # `hermclaw litellm-config` from the validated models.yaml
   /usr/local/sbin/hermclaw                             # operator CLI (systemd-run in the services' context)
-.223
+.223 (shared with the legacy portal, D-013: Apache :80, /var/www/noobclaw, MariaDB stay untouched)
   /var/www/hermclaw-next -> ../hermclaw-next-releases/<v>     # webroot (hermclaw_webroot), atomic switch
   /var/www/hermclaw-next-releases/<v>/, <v>.release           # UI builds + completion markers
-  /etc/nginx/sites-available/hermclaw-next.conf               # shared with the bootstrap (roles/nginx)
+  /etc/nginx/sites-available/hermclaw-next.conf               # shared with the bootstrap (roles/nginx), :8080/:8443
   /usr/local/bin/hermclaw-ssh-gate                            # SSH gate of the release (P29)
+  /var/www/noobclaw/nav/work_ki_kontrollraum.php              # the portal's menu entry "KI-Kontrollraum" (only file
+                                                              # in the portal; owner of nav/, 0644, Hermclaw's marker)
 ```
 
 ## Roles and plays (`infra/ansible/playbooks/deploy.yml`)

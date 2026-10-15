@@ -47,10 +47,15 @@ class PlannedPort:
 
 
 _PY = ("python", "python3", "uvicorn", "gunicorn")
-#: Bauplan §6 "Netzwerk- und Portplan"
+_LEGACY_PORTAL = ("apache2", "httpd")
+#: Bauplan §6 "Netzwerk- und Portplan", with D-013: the web host .223 is shared with the legacy portal
+#: (Noob2Claw/Kowacore, Apache on port 80). Hermclaw's nginx serves the UI on 8080/8443 there, 80/443 stay reserved for
+#: the portal - a config that requests them collides, also when it is Hermclaw's own nginx.
 BAUPLAN_PORT_PLAN: tuple[PlannedPort, ...] = (
-    PlannedPort("192.168.178.223", 80, "nginx", "Nginx HTTP", processes=("nginx",)),
-    PlannedPort("192.168.178.223", 443, "nginx", "Nginx HTTPS", processes=("nginx",)),
+    PlannedPort("192.168.178.223", 8080, "nginx", "Nginx HTTP (Hermclaw web UI, D-013)", processes=("nginx",)),
+    PlannedPort("192.168.178.223", 8443, "nginx", "Nginx HTTPS (Hermclaw web UI, D-013)", processes=("nginx",)),
+    PlannedPort("192.168.178.223", 80, "legacy-portal", "Legacy portal (Apache) on the shared web host", processes=_LEGACY_PORTAL),
+    PlannedPort("192.168.178.223", 443, "legacy-portal", "Reserved for the legacy portal (shared web host)", processes=_LEGACY_PORTAL),
     PlannedPort("192.168.178.225", 8000, "hermclaw-api", "Hermclaw API intern", processes=(*_PY, "hermclaw", "hermclaw-api")),
     PlannedPort("192.168.178.225", 4000, "litellm", "LiteLLM Gateway", processes=(*_PY, "litellm")),
     PlannedPort(
@@ -77,6 +82,27 @@ BAUPLAN_PORT_PLAN: tuple[PlannedPort, ...] = (
 class PortPlan:
     def __init__(self, entries: Iterable[PlannedPort] = BAUPLAN_PORT_PLAN) -> None:
         self.entries = tuple(entries)
+
+    @classmethod
+    def from_hosts(cls, hosts: HostsConfig | None, base: Iterable[PlannedPort] = BAUPLAN_PORT_PLAN) -> PortPlan:
+        """The base plan plus every service port of ``hosts.yaml`` that the base does not plan yet.
+
+        The deployment writes the ports it configured into hosts.yaml (e.g. nginx on the web host follows
+        ``hermclaw_webui_http_port``), so a port changed in the inventory is planned for its service as well. A base
+        entry is never replaced: a hosts.yaml service on a port the base reserves for another owner still collides.
+        """
+        entries = list(base)
+        if hosts is not None:
+            planned = {(normalise_address(e.address), e.port, e.protocol) for e in entries}
+            for host in hosts.hosts:
+                for svc in host.services:
+                    key = (normalise_address(host.address), svc.port, "tcp")
+                    if key in planned:
+                        continue
+                    planned.add(key)
+                    description = f"{svc.name} on {host.id} (hosts.yaml)"
+                    entries.append(PlannedPort(host.address, svc.port, svc.name, description, processes=(svc.name,)))
+        return cls(entries)
 
     def for_address(self, address: str | None) -> list[PlannedPort]:
         if not address:
@@ -455,7 +481,7 @@ class PortChecker:
     ) -> None:
         self.executor = executor
         self.hosts = hosts
-        self.plan = plan or PortPlan()
+        self.plan = plan or PortPlan.from_hosts(hosts)
         self.timeout = timeout
 
     def address_of(self, host: str | None) -> str | None:

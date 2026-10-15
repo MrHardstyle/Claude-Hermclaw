@@ -1,0 +1,26 @@
+# NodeSource's nodejs replaces Debian's nodejs and removes Debian's npm (it conflicts with it): software of the host
+# that uses them would break. A host with Debian's npm is refused unless nodejs_replace_distribution_node is set.
+- name: Read the installed Node.js packages
+  ansible.builtin.command:
+    argv:
+      - dpkg-query
+      - -W
+      - '--showformat=${Package} ${db:Status-Abbrev} ${Version}\n'
+      - nodejs
+      - npm
+  register: nodejs_dpkg
+  changed_when: false
+  failed_when: false
+  check_mode: false
+
+- name: Refuse to replace the distribution's Node.js and npm
+  ansible.builtin.assert:
+    that: >-
+      nodejs_replace_distribution_node | bool
+      or nodejs_dpkg.stdout_lines | default([]) | select('match', '^npm [a-z][iUFWth]') | list | length == 0
+    fail_msg: >-
+      Debian's npm is installed on {{ inventory_hostname }} ({{ nodejs_dpkg.stdout_lines | default([]) | join('; ') }}):
+      NodeSource's nodejs would remove it and replace the host's nodejs, breaking the software that uses them. This
+      host is shared (hermclaw_webui_shared_host: true skips this role - the UI is built on the control node), or set
+      nodejs_replace_distribution_node: true deliberately.
+    quiet: true

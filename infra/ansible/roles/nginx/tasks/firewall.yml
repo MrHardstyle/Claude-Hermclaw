@@ -1,0 +1,70 @@
+# ufw on the web host (the legacy portal's install.sh allows only OpenSSH and 80/tcp when ufw is active): Hermclaw
+# never manages a firewall it does not own. It only reads the status and, for the sources in
+# nginx_firewall_allow_from (on a shared host by default the host's own IPv4 LAN), adds "allow" rules for nginx's own
+# ports to an ACTIVE ufw - never enable, disable, reset, reload, default or delete, and no other port.
+- name: Look for ufw
+  ansible.builtin.stat:
+    path: "{{ nginx_ufw_bin }}"
+    get_checksum: false
+  register: nginx_ufw
+
+- name: Read the ufw status (read-only)
+  ansible.builtin.command:
+    argv: ["{{ nginx_ufw_bin }}", status]
+  register: nginx_ufw_status
+  changed_when: false
+  failed_when: false
+  check_mode: false
+  when: nginx_ufw.stat.exists
+
+- name: Decide the ufw rules for the nginx ports
+  ansible.builtin.set_fact:
+    nginx_ufw_active: "{{ nginx_ufw.stat.exists and (nginx_ufw_status.stdout | default('')) is search('(?m)^Status: active') }}"
+    nginx_ufw_ports: "{{ [nginx_listen_port | int] + ([nginx_tls_port | int] if nginx_tls_enabled | bool else []) }}"
+
+# Ports an existing rule already allows: lines of `ufw status` such as "8080/tcp  ALLOW  ..." or "8080,8443/tcp  ALLOW
+# ..." (a rule for every port from one address, e.g. "Anywhere  ALLOW  192.168.178.225", does not count: it lets
+# the deployment's checks from .225 pass while every other browser times out).
+- name: Find the nginx ports no ufw rule allows
+  ansible.builtin.set_fact:
+    nginx_ufw_ports_not_allowed: >-
+      {{ nginx_ufw_ports | reject('in', (nginx_ufw_status.stdout | default(''))
+         | regex_findall('(?m)^([0-9][0-9,]*)(?:/tcp)?[ \t]+ALLOW') | join(',') | split(',')
+         | reject('equalto', '') | map('int') | list) | list }}
+
+- name: Refuse a shared web host whose active ufw blocks the nginx ports
+  ansible.builtin.fail:
+    msg: >-
+      ufw is active on {{ inventory_hostname }} and nginx_firewall_allow_from is empty: no ufw rule allows tcp
+      {{ nginx_ufw_ports_not_allowed | join(',') }}, so browsers and the deployment's health checks cannot reach nginx
+      (and the portal button would lead nowhere). Allow it with `sudo ufw allow proto tcp from 192.168.178.0/24 to any
+      port {{ nginx_ufw_ports | join(',') }} comment 'Hermclaw Next nginx'` or set nginx_firewall_allow_from (host var
+      of the web host).
+  when:
+    - nginx_shared_host | bool
+    - nginx_ufw_active | bool
+    - nginx_firewall_allow_from | length == 0
+    - nginx_ufw_ports_not_allowed | length > 0
+
+- name: Allow the nginx ports for the configured sources in the active ufw
+  ansible.builtin.command:
+    argv: ["{{ nginx_ufw_bin }}", allow, proto, tcp, from, "{{ item.0 }}", to, any, port, "{{ item.1 | string }}", comment, Hermclaw Next nginx]
+  loop: "{{ nginx_firewall_allow_from | product(nginx_ufw_ports) | list }}"
+  loop_control:
+    label: "{{ item.0 }} -> tcp/{{ item.1 }}"
+  register: nginx_ufw_allow
+  changed_when: nginx_ufw_allow.stdout is search('Rules? (added|updated)')
+  when: nginx_ufw_active | bool
+
+# A web host that belongs to Hermclaw alone (nginx_shared_host false) is only warned.
+- name: Warn that the active ufw may block the nginx ports
+  ansible.builtin.debug:
+    msg: >-
+      ufw is active on {{ inventory_hostname }} and nginx_firewall_allow_from is empty: no ufw rule allows tcp
+      {{ nginx_ufw_ports_not_allowed | join(',') }}, so browsers and the deployment's health checks cannot reach nginx.
+      Allow it with `sudo ufw allow proto tcp from 192.168.178.0/24 to any port {{ nginx_ufw_ports | join(',') }}
+      comment 'Hermclaw Next nginx'` or set nginx_firewall_allow_from (host var of the web host).
+  when:
+    - nginx_ufw_active | bool
+    - nginx_firewall_allow_from | length == 0
+    - nginx_ufw_ports_not_allowed | length > 0

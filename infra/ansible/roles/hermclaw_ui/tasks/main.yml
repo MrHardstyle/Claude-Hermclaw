@@ -185,3 +185,8 @@
   when:
     - hermclaw_ui_health | bool
     - not ansible_check_mode
+
+# after the checks: the portal only links to a web UI that answers
+- name: Kontrollraum button in the legacy portal
+  ansible.builtin.import_tasks: portal_link.yml
+  tags: [hermclaw_ui, portal_link]

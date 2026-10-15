@@ -13,7 +13,7 @@ und alle Modelle, die geladen werden.
 
 - [1. Überblick](#1-überblick)
 - [2. Hardware, BIOS und Netzwerk](#2-hardware-bios-und-netzwerk)
-- [3. Debian 13 installieren (.225, .223, .222, .224)](#3-debian-13-installieren-225-223-222-224)
+- [3. Debian 13 installieren (.225, .222, .224; .223 bleibt)](#3-debian-13-installieren-225-222-224-223-bleibt)
 - [4. Admin-Rechner (Ansible-Steuerrechner)](#4-admin-rechner-ansible-steuerrechner)
 - [5. Bootstrap der Hosts (P01)](#5-bootstrap-der-hosts-p01)
 - [6. Zugangsdaten und Schlüssel](#6-zugangsdaten-und-schlüssel)
@@ -37,11 +37,22 @@ Die Rollen sind durch die Architektur fest vorgegeben (Bauplan §2) und dürfen 
 | Host | IP | Rolle | Läuft dort |
 |---|---|---|---|
 | Orchestrator | 192.168.178.225 | `orchestrator` | Hermclaw-API (:8000), Scheduler/Agent-Runtime, PostgreSQL 17 + pgvector, LiteLLM-Proxy (:4000, nur lokal), SearXNG (:8888, rootless Podman), Backup-Timer, alle Git-Operationen |
-| Web-UI | 192.168.178.223 | `webui` | nginx: statische React-Oberfläche + Reverse-Proxy `/api` (mit SSE) zum Orchestrator |
+| Web-UI | 192.168.178.223 | `webui` | Hermclaw-nginx auf **eigenen Ports 8080/8443** (konfigurierbar), der **Kontrollraum**: statische React-Oberfläche + Reverse-Proxy `/api` (mit SSE) zum Orchestrator. Daneben unverändert das bestehende Portal Noob2Claw/Kowacore (Apache :80, MariaDB, Login/2FA, Wiki; extern über Nginx Proxy Manager `.2`) |
 | Execution Worker | 192.168.178.222 | `execution_workers` | `hermclaw-exec-worker` (:8787): Befehle und Tests der Jobs in rootless-Podman-Sandboxes; Wake-on-LAN |
 | Model/Media Worker | 192.168.178.224 | `model_workers` | Ollama (:11434, nur für .225 offen), `hermclaw-model-worker` (:8787), ffmpeg/NVENC; NVIDIA GTX 1080; Wake-on-LAN |
 | GitLab | 192.168.178.226 | `gitlab` | Ihre bestehende GitLab-Instanz (Ziel der Pushes und Merge Requests); keine Hermclaw-Software |
 | Terra (Unraid) | 192.168.178.60 | `backup` | Backup-Ziel (rsync über SSH); keine Hermclaw-Software |
+
+> **`.223` bleibt das bestehende Portal (Entscheidung D-013).** Der Rechner wird **nicht** neu installiert. Login,
+> 2FA und Wiki des Portals laufen weiter wie bisher. Hermclaw bringt dort nur Folgendes mit:
+>
+> - nginx auf den eigenen Ports 8080/8443, nie auf 80/443;
+> - seine eigenen Benutzer (`hermclaw`, `hermclaw-admin`) und Verzeichnisse (`/opt/hermclaw`, `/etc/hermclaw`,
+>   `/var/lib/hermclaw`, `/var/log/hermclaw`, `/var/www/hermclaw-next*`);
+> - genau eine Datei im Portal: den Menüpunkt **Arbeit → KI-Kontrollraum** (`/var/www/noobclaw/nav/work_ki_kontrollraum.php`).
+>   Sein Button öffnet den Kontrollraum `http://192.168.178.223:8080/`.
+>
+> Apache, PHP, MariaDB, Webroot, Benutzer, cron, Zeitzone und Node.js des Portals fasst Hermclaw nicht an.
 
 ### 1.2 Feste Modellrollen
 
@@ -63,14 +74,15 @@ Sobald Ollama es unter Linux/CUDA 12 ausführt, wechseln Sie in `models.yaml` (K
 | Schritt | Kapitel | Wo | Dauer (ca.) |
 |---|---|---|---|
 | Hardware, BIOS, Netzwerk vorbereiten | 2 | alle Hosts | 30 min |
-| Debian 13 installieren | 3 | .225, .223, .222, .224 | je 20 min |
+| Altes Agenten-/Worker-System stoppen und sichern | 3, [cutover.md](../runbooks/cutover.md) §1 | .225, .222, .224, Bridge | 15 min |
+| Debian 13 installieren | 3 | .225, .222, .224 (`.223` bleibt, D-013) | je 20 min |
 | Admin-Rechner einrichten, Inventar ausfüllen | 4 | Ihr Admin-Rechner | 15 min |
 | Bootstrap (Pakete, Benutzer, PostgreSQL, Podman, NVIDIA, Ollama …) | 5 | per Ansible | 45–90 min (inkl. zwei Neustarts von .224) |
 | Zugangsdaten (GitLab-Token, Backup-Schlüssel) | 6 | .225, GitLab, Terra | 15 min |
 | Modelle laden | 7 | .224 | 1–3 h (≈ 70 GB Download) |
 | Release bauen und ausrollen (Deployment) | 8 | per Ansible | 20–40 min |
 | Konfiguration prüfen und anpassen | 9 | .225 (`/etc/hermclaw`) | 20 min |
-| Erste Inbetriebnahme (Token, Repository, erster Job) | 10 | .225 / Browser | 15 min |
+| Erste Inbetriebnahme (Token, Repository, erster Job, Portal-Button) | 10 | .225 / Browser | 15 min |
 | Backup einrichten | 11 | .225, Terra | 15 min |
 | Live-Abnahme | 12 | .225, .222 | 30–60 min |
 
@@ -78,7 +90,7 @@ Reihenfolge immer: **Orchestrator zuerst** (er erzeugt SSH-Schlüssel und Worker
 Worker. Jeder Ansible-Lauf ist idempotent: Sie können ihn jederzeit wiederholen, ein zweiter Lauf meldet
 `changed=0`.
 
-### 1.4 Ports (Bauplan §6)
+### 1.4 Ports (Bauplan §6, für `.223` D-013)
 
 | Host | Port | Dienst | Erreichbar von |
 |---|---|---|---|
@@ -87,7 +99,8 @@ Worker. Jeder Ansible-Lauf ist idempotent: Sie können ihn jederzeit wiederholen
 | .225 | 5432 | PostgreSQL | nur lokal |
 | .225 | 8888 | SearXNG | lokal (Research Engine) |
 | .225 | 9100 | Metriken | LAN (optional) |
-| .223 | 80 / 443 | nginx (UI + `/api`) | Browser im LAN |
+| .223 | 8080 / 8443 | Hermclaw-nginx, der Kontrollraum (UI + `/api`); 8443 nur mit TLS (8.5) | Browser im LAN, Admin-Rechner (Health-Checks) |
+| .223 | 80 | **Portal Noob2Claw/Kowacore** (Apache), nicht Hermclaw; 443 bleibt ebenfalls frei für das Portal | Browser, Nginx Proxy Manager `.2` |
 | .222 | 8787 | Execution-Worker-API | .225 |
 | .224 | 8787 | Model-Worker-API | .225 |
 | .224 | 11434 | Ollama | nur .225 und lokal (nftables-Regel der Bootstrap-Rolle) |
@@ -104,7 +117,7 @@ Der Preflight (`scripts/bootstrap/check-host.sh`) prüft diese Mindestwerte und 
 | Host | CPU (logisch) | RAM | freier Platz unter `/var/lib` | Empfehlung |
 |---|---|---|---|---|
 | .225 Orchestrator | 4 | 8 GB | 20 GB | 8 Threads, 16 GB RAM, SSD ≥ 100 GB (Repos, Workspaces, Artefakte, PostgreSQL) |
-| .223 Web-UI | 1 | 1 GB | 2 GB | 2 GB RAM (für den UI-Build mit npm) |
+| .223 Web-UI | 1 | 1 GB | 2 GB | bestehender Portal-Rechner (D-013); Hermclaw braucht dort nur nginx und wenige MB für die UI-Builds |
 | .222 Execution Worker | 2 | 4 GB | 30 GB | 4–8 Threads, 16 GB RAM, SSD ≥ 100 GB (Sandbox-Images, Workspaces) |
 | .224 Model Worker | 4 | 16 GB | 80 GB | **32 GB RAM**, NVIDIA GTX 1080 8 GB, SSD ≥ 150 GB (≈ 70 GB Modelle + Ollama-Versionen) |
 
@@ -143,8 +156,12 @@ Mit 16 GB RAM passen die 26–30B-Modelle nicht. 32 GB sind die sinnvolle Größ
 4. Die Hosts brauchen Internetzugang (apt, PGDG, NVIDIA-Treiber, Ollama-Release, Modelle, PyPI, npm, Container-
    Images). Nach der Installation brauchen nur noch die Research Engine (über SearXNG) und neue Modell-Downloads das
    Internet.
-5. **Name der Oberfläche (DNS).** Legen Sie ihn vor dem Bootstrap von .223 fest. `hermclaw.lan` ist nur ein Beispiel.
-   Er funktioniert nur, wenn Ihr DNS ihn auf 192.168.178.223 auflöst. Eine Fritz!Box tut das nicht. Möglichkeiten:
+5. **Name der Oberfläche (DNS, optional).** Der Kontrollraum ist immer unter `http://192.168.178.223:8080/`
+   erreichbar; auch der Button im Portal verwendet diese Adresse. Ein Name ist nur nötig, wenn Sie ihn lieber
+   verwenden oder für das TLS-Zertifikat brauchen (8.5). Legen Sie ihn vor dem Bootstrap von .223 fest.
+   `hermclaw.lan` ist nur ein Beispiel. Er funktioniert nur, wenn Ihr DNS ihn auf 192.168.178.223 auflöst. Eine
+   Fritz!Box tut das nicht. Portal und Kontrollraum teilen sich den Rechner: Unter demselben Namen erreichen Sie
+   auf Port 80 das Portal und auf Port 8080 Hermclaw. Möglichkeiten:
 
    | DNS | Eintrag | `hermclaw_web_server_name` (Kapitel 4.2) |
    |---|---|---|
@@ -156,9 +173,36 @@ Mit 16 GB RAM passen die 26–30B-Modelle nicht. 32 GB sind die sinnvolle Größ
 
 ---
 
-## 3. Debian 13 installieren (.225, .223, .222, .224)
+## 3. Debian 13 installieren (.225, .222, .224; .223 bleibt)
 
-Auf jedem der vier Hermclaw-Hosts:
+**Vorher – altes Agenten-System sichern.** `.225`, `.222` und `.224` trugen bisher die Agenten und Worker des
+alten Systems. Stoppen und sichern Sie diese, bevor Sie die Rechner neu installieren: Block „.225, .222, .224 –
+before the reinstall“ in [cutover.md](../runbooks/cutover.md) §1 (alte Units stoppen, `/opt`, `/etc`, `/home`,
+`/var/lib` nach Terra `.60` kopieren). Das Portal auf `.223` ist davon nicht betroffen.
+
+**`.223` wird nicht neu installiert (D-013).** Das Portal Noob2Claw/Kowacore läuft dort weiter (Debian 13,
+Apache + PHP auf Port 80, MariaDB, `/var/www/noobclaw`). Prüfen Sie dort nur, nichts wird geändert:
+
+```bash
+ssh admin@192.168.178.223                       # Ihr bestehender sudo-fähiger Login (anderer Name: <name>@…; nicht hermclaw-admin)
+sudo ss -Htlnp                                  # Port 80: apache2; 8080/8443 müssen frei sein
+sudo ufw status                                 # "active"? nginx bekommt eine Regel für das LAN von .223 (4.2, nginx_firewall_allow_from)
+timedatectl show -p Timezone --value            # bleibt, wie es ist (Bootstrap ändert die Zeitzone auf .223 nicht)
+dpkg -l nodejs npm 2>/dev/null | grep ^ii       # Debians nodejs/npm des Portals: bleiben unverändert
+getent passwd hermclaw hermclaw-admin           # leer erwartet (sonst bricht der Bootstrap ab, 5.3)
+ssh-keygen -lf /etc/ssh/ssh_host_ed25519_key.pub
+```
+
+Hinterlegen Sie Ihren Admin-Schlüssel auch auf `.223` (Schritt 4 unten, für Ihren bestehenden Login). Ändern Sie
+auf `.223` weder Konto noch Passwort: Verwenden Sie Ihren bestehenden sudo-fähigen Login und vergeben Sie dem neuen
+`admin` auf .225, .222 und .224 dessen bestehendes sudo-Passwort (Schritt 5).
+
+Heißt Ihr bestehender Login auf `.223` nicht `admin`, setzen Sie in `inventory/hosts.yml` bei `hermclaw-webui` die
+Host-Variable `ansible_user: <name>` (Tabelle 4.2). Er braucht dasselbe sudo-Passwort wie `admin` auf den anderen
+Hosts, weil `-K` nur einmal fragt. Soll `.223` ein eigenes Passwort behalten, hinterlegen Sie es wie in Schritt 5
+beschrieben als `ansible_become_password` von `hermclaw-webui` in einer ansible-vault-Datei.
+
+Auf jedem der drei neu installierten Hermclaw-Hosts (.225, .222, .224):
 
 1. Debian 13 „trixie“ amd64 installieren (netinst-Image genügt). In der Softwareauswahl **nur** „SSH server“
    und „Standard-Systemwerkzeuge“ wählen (keine Desktop-Umgebung). Partitionierung: „Geführt – vollständige
@@ -183,7 +227,7 @@ Auf jedem der vier Hermclaw-Hosts:
 4. Ihren öffentlichen SSH-Schlüssel des Admin-Rechners hinterlegen (vom Admin-Rechner aus):
 
    ```bash
-   ssh-copy-id admin@192.168.178.225     # ebenso .223, .222, .224
+   ssh-copy-id admin@192.168.178.225     # ebenso .222, .224 und .223 (dort Ihr bestehender Login)
    ```
 
    Vergleichen Sie beim ersten Verbinden den angezeigten Fingerabdruck mit dem auf der Konsole notierten.
@@ -191,12 +235,21 @@ Auf jedem der vier Hermclaw-Hosts:
    Host einen neuen Host-Schlüssel: Entfernen Sie vorher den alten auf dem Admin-Rechner
    (`ssh-keygen -R 192.168.178.225`, ebenso für die anderen Adressen).
 
-5. Verlangt sudo ein Passwort, geben Sie dem Benutzer `admin` auf .225, .223, .222 und .224 **dasselbe** Passwort.
-   Ansible fragt es mit `-K` ab (alle Befehle unten), einmal, und verwendet es für alle Hosts eines Laufs. Die Plays
-   der Worker und der Web-UI führen zudem Schritte auf .225 aus (Host-Schlüssel in `/etc/hermclaw/ssh/known_hosts`,
-   Runtime-Schlüssel lesen, Worker-Token entschlüsseln). Mit unterschiedlichen Passwörtern scheitert schon der
-   Verbindungstest in 4.4 mit „Incorrect sudo password“. Auch ein Lauf mit `--limit webui` oder
-   `--limit execution_workers` scheitert dann an diesen Schritten auf .225.
+5. Verlangt sudo ein Passwort, geben Sie dem Benutzer `admin` auf .225, .222 und .224 **dasselbe** Passwort, und
+   zwar das bestehende sudo-Passwort Ihres Logins auf `.223`. Konto und Passwort auf `.223` ändern Sie nicht (das
+   Portal und seine Betreiber verwenden sie weiter). Ansible fragt das Passwort mit `-K` ab (alle Befehle unten),
+   einmal, und verwendet es für alle Hosts eines Laufs. Die Plays der Worker und der Web-UI führen zudem Schritte
+   auf .225 aus (Host-Schlüssel in `/etc/hermclaw/ssh/known_hosts`, Runtime-Schlüssel lesen, Worker-Token
+   entschlüsseln). Mit unterschiedlichen Passwörtern scheitert schon der Verbindungstest in 4.4 mit „Incorrect sudo
+   password“. Auch ein Lauf mit `--limit webui` oder `--limit execution_workers` scheitert dann an diesen Schritten
+   auf .225.
+
+   Hat Ihr Login auf `.223` ein anderes sudo-Passwort, das bleiben soll: Legen Sie es als Host-Variable
+   `ansible_become_password` von `hermclaw-webui` in einer ansible-vault-Datei ab, etwa mit
+   `ansible-vault create infra/ansible/inventory/host_vars/hermclaw-webui.yml` (Inhalt:
+   `ansible_become_password: <Passwort>`). Rufen Sie dann jeden Ansible-Befehl zusätzlich mit `--ask-vault-pass`
+   auf. Für `.223` gilt das Passwort aus der Datei, `-K` für .225, .222 und .224 (auch für die Schritte, die die
+   Plays von `.223` aus auf .225 ausführen).
 
 GitLab (.226) und Terra (.60) werden **nicht** neu installiert. Auf Terra schalten Sie vorher SSH und den Autostart
 des Arrays ein (Kapitel 6.2, „Terra vorbereiten“). Erst dann liefert Kapitel 4.3 Terras SSH-Host-Schlüssel.
@@ -229,14 +282,25 @@ export PATH=$HOME/.local/share/hermclaw/ansible-venv/bin:$PATH
 
 ### 4.2 Inventar anpassen: `infra/ansible/inventory/hosts.yml`
 
+Hatten Sie `hosts.yml` schon vor dieser Version angelegt: `bootstrap-control-node.sh` überschreibt sie nie. Die
+Ports 8080/8443 und `hermclaw_webui_shared_host: true` gelten trotzdem, weil sie aus `playbooks/group_vars/all.yml`
+kommen. Auch `nginx_firewall_allow_from` (ufw) brauchen Sie nicht nachzutragen: Auf dem geteilten Host ist der
+Standard das eigene IPv4-Netz von `.223` (192.168.178.0/24). Entfernen Sie bei `hermclaw-webui` nur einen alten
+Kommentar „http://192.168.178.223/ reaches Hermclaw“.
+
 | Variable | Wo | Wert / Beispiel | Bedeutung |
 |---|---|---|---|
 | `ansible_user` | `all.vars` | `admin` | Ihr sudo-Benutzer auf den Hosts |
+| `ansible_user` | `hermclaw-webui` (optional) | `<Login auf .223>` | Nur wenn Ihr bestehender sudo-fähiger Login auf `.223` nicht `admin` heißt (Kapitel 3). Er braucht dasselbe sudo-Passwort wie `admin` auf den anderen Hosts oder ein eigenes `ansible_become_password` aus einer ansible-vault-Datei (Kapitel 3, Schritt 5) |
 | `hermclaw_version` | `all.vars` | `0.1.0rc1` | Version, die ausgerollt wird (Kapitel 8) |
 | `hermclaw_orchestrator_ip` | `all.vars` | `192.168.178.225` | IP des Orchestrators |
 | `hermclaw_lan_broadcast` | `all.vars` | `192.168.178.255` | Broadcast für Wake-on-LAN |
 | `ansible_host` | je Host | IPs aus Tabelle 1.1 | |
-| `hermclaw_web_server_name` | `hermclaw-webui` | `hermclaw.lan 192.168.178.223` | nginx `server_name` (Namen und/oder Adressen). Nur Namen, die Ihr DNS auflöst (Kapitel 2.3, Schritt 5). Die Adresse drinlassen, sonst landen Aufrufe per IP auf Debians Default-Site. `_` = Catch-all, nur wenn sonst keine Default-Site existiert. Mit TLS auch die SANs des Zertifikats (Kapitel 8.5) |
+| `hermclaw_web_server_name` | `hermclaw-webui` | `hermclaw.lan 192.168.178.223` | nginx `server_name` (Namen und/oder Adressen). Nur Namen, die Ihr DNS auflöst (Kapitel 2.3, Schritt 5). Hermclaws Site ist der einzige Server auf ihrem Port; jeder Name erreicht sie dort. Mit TLS sind die Namen auch die SANs des Zertifikats (Kapitel 8.5) |
+| `hermclaw_webui_http_port` / `hermclaw_webui_https_port` | `hermclaw-webui` (Host-Variable) | Standard `8080` / `8443` | Ports des Kontrollraums auf `.223` (D-013). Port-Plan, `check-host.sh`, `hosts.yaml`, Health-Checks und Portal-Button folgen ihnen. 80/443 verweigert die nginx-Rolle auf dem geteilten Host |
+| `hermclaw_webui_shared_host` | `hermclaw-webui` (Host-Variable) | Standard `true` | `.223` teilt sich den Rechner mit dem Portal. `true` bedeutet: kein NodeSource-Node.js, Zeitzone/NTP bleiben, nginx' Debian-Default-Site wird abgeschaltet, keine Ports 80/443, kein HSTS, fremde Konten/Verzeichnisse mit Hermclaw-Namen werden verweigert. `false` nur für einen Web-Host, der allein Hermclaw gehört |
+| `nginx_firewall_allow_from` | `hermclaw-webui` | `[192.168.178.0/24]` (Standard auf dem geteilten Host: das IPv4-Netz der Default-Route von `.223`) | Ist ufw auf `.223` aktiv (das Portal-`install.sh` erlaubt nur OpenSSH und 80), ergänzt die nginx-Rolle für diese Quellen eine `allow`-Regel für 8080/8443. Sonst ändert sie an ufw nichts. `[]` = ufw wird nie angefasst; erlaubt dann bei aktivem ufw keine Regel 8080/8443, bricht die Rolle auf dem geteilten Host ab, bevor das Deployment einen Button schreibt, der ins Leere führt |
+| `hermclaw_ui_portal_link` | `hermclaw-webui` | Standard `true` | Menüpunkt **Arbeit → KI-Kontrollraum** im Portal (Kapitel 10.5); `false` entfernt ihn wieder |
 | `hermclaw_worker_id` | Worker-Hosts | `exec-222`, `model-224` | Worker-IDs, müssen zu `hosts.yaml` passen |
 | `wol_mac` | `.222`, `.224` | `3c:7c:3f:12:34:56` | **echte MAC** aus Schritt 2.3 (der Platzhalter `00:00:00:00:00:00` wird von `hermclaw doctor` gemeldet) |
 | `wol_interface` | `.222`, `.224` | leer oder `enp3s0` | leer = Schnittstelle der Default-Route |
@@ -280,9 +344,10 @@ ansible -i inventory/hosts.yml 'all:!gitlab:!backup' -m ansible.builtin.ping -K
 
 ## 5. Bootstrap der Hosts (P01)
 
-Der Bootstrap installiert Pakete, legt Benutzer und Verzeichnisse an, richtet PostgreSQL, Podman, Node.js,
-nginx, den NVIDIA-Treiber und Ollama ein und installiert die systemd-Units (noch **deaktiviert**; sie werden
-im Deployment, Kapitel 8, aktiviert). Ausführliche Prüfschritte: `docs/operations/bootstrap.md`.
+Der Bootstrap installiert Pakete, legt Benutzer und Verzeichnisse an, richtet PostgreSQL, Podman, nginx,
+den NVIDIA-Treiber und Ollama ein und installiert die systemd-Units (noch **deaktiviert**; sie werden
+im Deployment, Kapitel 8, aktiviert). Node.js aus NodeSource bekommt nur ein Web-Host, der allein Hermclaw gehört;
+der geteilte `.223` nicht (5.3). Ausführliche Prüfschritte: `docs/operations/bootstrap.md`.
 
 Alle Befehle im Verzeichnis `infra/ansible` auf dem Admin-Rechner.
 
@@ -297,7 +362,8 @@ Exit-Code 0 = in Ordnung (Warnungen erlaubt). Typische Abbrüche:
 | FAIL | Bedeutung | Abhilfe |
 |---|---|---|
 | `os` / `arch` | kein Debian 13 / kein x86_64 | Host neu installieren |
-| `port:<n>` | ein fremder Dienst belegt einen geplanten Port | diesen Dienst verlegen/stoppen |
+| `port:<n>` | ein fremder Dienst belegt einen geplanten Port | den fremden Dienst prüfen. Auf `.223` nie Apache stoppen: Dort plant Hermclaw nur 8080/8443. Belegt etwas anderes einen davon, setzen Sie andere Ports (`hermclaw_webui_http_port`/`hermclaw_webui_https_port`, 4.2) |
+| `port:80` auf `.223` | sollte nicht mehr vorkommen (Hermclaw plant 80 dort nicht, D-013) | `hosts.yml`/`-e` prüfen: Steht dort `hermclaw_webui_http_port: 80` oder `nginx_listen_port: 80`? |
 | `unit:<name>` | eine fremde Unit mit Hermclaw-Namen existiert | umbenennen/entfernen |
 | `ram` / `cpu` / `disk` | unter dem Minimum (Tabelle 2.1). Den RAM misst der Preflight als `MemTotal` aus `/proc/meminfo`. Der Kernel reserviert Speicher, ein Rechner mit genau 8 GB bzw. 16 GB meldet weniger. Deshalb genügen 90 % des Minimums | aufrüsten, oder das Minimum im Inventar beim Host bewusst senken: `common_preflight_min_ram_mb` (MiB), `common_preflight_min_cpus`, `common_preflight_min_disk_gb` |
 | `gpu` (.224) | keine NVIDIA-GPU am PCI-Bus | Karte/Steckplatz prüfen |
@@ -326,24 +392,58 @@ sudo /opt/hermclaw/bin/hermclaw-credential list              # api-admin-token l
 systemctl list-unit-files 'hermclaw-*'                       # installiert, disabled
 ```
 
-### 5.3 Web-UI .223
+### 5.3 Web-UI .223 (neben dem Portal)
 
 ```bash
 ansible-playbook -i inventory/hosts.yml playbooks/bootstrap.yml --limit webui -K
 ```
 
-Installiert Node.js 22 (für den UI-Build) und nginx mit einer Platzhalter-Seite und der SSE-fähigen Proxy-
-Konfiguration. Prüfen:
+Installiert nginx mit einer Platzhalter-Seite und der SSE-fähigen Proxy-Konfiguration auf **Port 8080** (mit TLS
+zusätzlich 8443, Kapitel 8.5), neben Apache. Auf dem geteilten `.223` (`hermclaw_webui_shared_host: true`, D-013)
+gilt dabei:
+
+- **nginx-Paket:** Es wird ohne Autostart installiert (`policy_rc_d: 101`). Nur nginx' eigene Debian-Default-Site
+  wird abgeschaltet, also der Symlink `sites-enabled/default` mit `listen 80 default_server`; erst danach startet
+  nginx.
+- **Ports 80/443:** Die Rolle verweigert sie. Nach dem Schreiben der Site prüft sie jedes `listen` der gesamten
+  Konfiguration (`nginx -T`), nach dem Start die echten Sockets (`ss`). Hält nginx dennoch 80/443, wird es wieder
+  gestoppt, und der Lauf bricht ab.
+- **Node.js:** Hermclaw installiert kein NodeSource-Node.js. Die UI wird auf dem Admin-Rechner gebaut (Kapitel 8.3);
+  Debians `nodejs`/`npm` des Portals bleiben.
+- **Zeitzone und NTP** bleiben, wie sie sind. Eine andere Zeitzone als `hermclaw_timezone` wird nur gemeldet.
+- **Fremde Konten und Verzeichnisse:** Existiert schon ein Konto `hermclaw`/`hermclaw-admin` oder ein Verzeichnis
+  wie `/opt/hermclaw`, das Hermclaw nicht angelegt hat, bricht der Bootstrap **vor jeder Änderung** ab
+  („refuse … Hermclaw did not create“). Abhilfe: andere Namen setzen (`hermclaw_user`, `hermclaw_ssh_runtime_user`,
+  `hermclaw_*_dir` als Host-Variablen) oder das Fremde prüfen und wegräumen.
+- **ufw:** Ist ufw aktiv, ergänzt die Rolle für `nginx_firewall_allow_from` (Standard: das IPv4-Netz von `.223`)
+  nur `allow`-Regeln für 8080/8443. Sie schaltet ufw nie ein oder aus und löscht keine Regel. Ist die Liste leer
+  und erlaubt keine bestehende Regel die Ports, bricht sie ab („nginx_firewall_allow_from is empty“). Eine Regel
+  nur für `.225` (z. B. `Anywhere ALLOW 192.168.178.225`) zählt nicht: Mit ihr bestünden die Health-Checks von
+  `.225` aus, alle anderen Browser im LAN liefen aber in einen Timeout.
+
+Prüfen:
 
 ```bash
-node --version                                   # v22.x (>= 22.23.2, letztes Sicherheitsrelease)
 sudo nginx -t
-curl -sI http://127.0.0.1/ -H 'Host: 192.168.178.223' | head -1    # HTTP/1.1 200 (die Adresse steht in jeder Variante von hermclaw_web_server_name, Kapitel 2.3)
+sudo ss -Htlnp '( sport = :80 or sport = :8080 )'                  # 80: apache2, 8080: nginx
+curl -s http://127.0.0.1:8080/healthz                              # ok
+curl -sI http://127.0.0.1:8080/ | head -1                          # HTTP/1.1 200 (Platzhalter-Seite)
+curl -s -o /dev/null -w '%{http_code}\n' http://127.0.0.1/login.php  # 200: das Portal antwortet weiter auf Port 80
+ls /etc/nginx/sites-enabled/                                       # nur hermclaw-next.conf
+sudo ufw status | grep -E '8080|8443'                              # nur bei aktivem ufw
 ```
 
-**Node.js-Mindestversion 22.23.2** (letztes Sicherheitsrelease der 22er-Linie). NodeSource hinkt Sicherheitsreleases
-manchmal hinterher (Research R-028 B9). Bricht die Rolle mit „does not satisfy 22.x >= 22.23.2“ ab, installieren Sie
-das offizielle Tarball (Prüfsumme gegen `SHASUMS256.txt`):
+**Ein Web-Host, der allein Hermclaw gehört** (`hermclaw_webui_shared_host: false`, wahlweise mit
+`hermclaw_webui_http_port: 80` / `hermclaw_webui_https_port: 443`) bekommt zusätzlich Node.js 22 aus NodeSource für
+lokale UI-Builds und verhält sich wie vor D-013. Ausnahme: Der Laufzeit-Portplan (`hermclaw/infratools/ports.py`,
+`BAUPLAN_PORT_PLAN`) reserviert `192.168.178.223:80/443` immer für `legacy-portal`; auf einem eigenen Web-Host mit
+80/443 melden `port_check`/`predeploy_check` Hermclaws nginx dort als Kollision. Ist dort Debians `npm` installiert,
+bricht die Rolle `nodejs` ab:
+NodeSource würde es entfernen. Bewusst zulassen können Sie das mit `nodejs_replace_distribution_node: true`.
+
+**Node.js-Mindestversion 22.23.2** (nur dieser Fall, letztes Sicherheitsrelease der 22er-Linie). NodeSource hinkt
+Sicherheitsreleases manchmal hinterher (Research R-028 B9). Bricht die Rolle mit „does not satisfy 22.x >= 22.23.2“
+ab, installieren Sie das offizielle Tarball (Prüfsumme gegen `SHASUMS256.txt`):
 
 ```bash
 V=22.23.3
@@ -465,6 +565,14 @@ Runtime-SSH vom Orchestrator testen:
 sudo -u hermclaw ssh -i /etc/hermclaw/ssh/id_ed25519 -o UserKnownHostsFile=/etc/hermclaw/ssh/known_hosts \
   -o StrictHostKeyChecking=yes hermclaw-admin@192.168.178.222 true && echo OK      # ebenso .223, .224
 ```
+
+Auf `.223` gibt es zwei Besonderheiten:
+
+- **sshd-Freigabe:** Erlaubt die sshd-Konfiguration des Portals nur bestimmte Konten (`AllowUsers`/`AllowGroups`),
+  nehmen Sie `hermclaw-admin` dort auf. Sonst scheitert der Test für `.223`; dem Portal schadet das nicht.
+- **Runtime-Konto:** `hermclaw-admin` hat auf `.223` kein sudo. Es kann aber alle weltlesbaren Dateien des Portals
+  lesen (RISK_REGISTER R-038). Soll die Runtime dort gar nicht per SSH arbeiten, nehmen Sie `webui-223` aus
+  `policies.ssh.allowed_hosts` (Kapitel 9.3, `hermclaw_config_overrides`).
 
 Testen Sie jetzt Wake-on-LAN von .222 und .224 von Hand (Kapitel 13.1, letzter Absatz). Noch läuft kein Scheduler, der
 die Worker schlafen legt. Nach dem ersten Deployment ändert sich das: Wecken Sie die Worker dann vor jedem weiteren
@@ -738,7 +846,8 @@ einmal auf dem Admin-Rechner gebaut, per SHA-256 geprüft und offline auf allen 
   `$(brew --prefix)/opt/coreutils/libexec/gnubin` vorn in den `PATH`.
 * Hat Ihr Admin-Rechner kein Python 3.13, bauen Sie das Release auf dem Orchestrator .225 (Debian 13) oder in einem
   `debian:trixie`-Container aus demselben Checkout. Dort fehlt Node.js ≥ 22.12: Debian 13 liefert Node 20, und die
-  Rolle `nodejs` richtet Node 22 nur auf .223 ein. Bauen Sie die UI deshalb vorher auf einem Rechner mit Node.js
+  Rolle `nodejs` richtet Node 22 nur auf einem Web-Host ein, der allein Hermclaw gehört (nicht auf dem geteilten
+  `.223`). Bauen Sie die UI deshalb vorher auf einem Rechner mit Node.js
   (`cd ui && npm ci && npm run build`), kopieren Sie `ui/dist` in den Checkout auf .225 bzw. in den Container und
   übergeben Sie `--ui-dist ui/dist`. Das fertige `dist/release-<version>/` kopieren Sie danach in `dist/` des
   Checkouts auf dem Admin-Rechner, denn `playbooks/deploy.yml` liest es dort. Liegt es auf dem Admin-Rechner
@@ -752,7 +861,7 @@ Zusätzlich zu Kapitel 4.2 in `infra/ansible/inventory/hosts.yml`:
 |---|---|---|
 | `hermclaw_version` | `"0.1.0rc1"` (in Anführungszeichen) | Version, die ausgerollt wird = Name von `dist/release-<version>/` |
 | `wol_mac` (Worker) | echte MAC | **Pflicht**: das Deployment verweigert Platzhalter-MACs |
-| `nginx_tls_enabled` (.223) | `true` / `false` | HTTPS für die Oberfläche (siehe 8.5) |
+| `nginx_tls_enabled` (.223) | `true` / `false` | HTTPS für die Oberfläche auf Port 8443 (siehe 8.5) |
 | `hermclaw_config_overrides` | siehe Kapitel 9 | Ihre Anpassungen der Konfiguration |
 | `hermclaw_keep_releases` | `3` | ältere Releases je Host (1–99, zusätzlich zum aktiven) für ein Rollback ohne Netz; unter `all.vars` gilt der Wert für alle Hosts |
 | `hermclaw_worker_pull_models` (.224) | `true` | fehlende Modelle automatisch laden. Laden Sie die Modelle trotzdem vorher (Kapitel 7), sonst legt der Scheduler .224 mitten im Download schlafen |
@@ -794,7 +903,7 @@ Was dabei passiert:
 | .225 | Release-venv `/opt/hermclaw/venv-<v>` (offline, Hash-geprüft) → `/etc/hermclaw/*.yaml` in einer Staging-Kopie rendern + mit `hermclaw config-check` des neuen Release prüfen → LiteLLM-venv installieren (noch nicht aktiv) → Schema-Entscheidung (bis hier ist nichts Laufendes verändert) → Units aktivieren → laufende Schritte sauber anhalten → `hermclaw migrate` (einmal, vor dem Neustart) → `/etc/hermclaw/*.yaml` + `litellm.yaml` installieren → Symlinks `/opt/litellm/venv` und `/opt/hermclaw/venv` umschalten → `hermclaw-litellm` muss gesund sein und unauthentifizierte Anfragen ablehnen → SearXNG, API, Scheduler, Backup- und Restore-Test-Timer starten → Health-Checks → Admin-API-Token anlegen (einmalig) |
 | .222 | Release-venv → Sandbox-Images bauen (rootless, nur fehlende) → `capabilities.yaml`, `policies.yaml` unmittelbar vor dem Umschalten → `hermclaw-exec-worker` → `/health` |
 | .224 | Release-venv → `capabilities.yaml` → ffmpeg → `hermclaw-model-worker` → `/health` → fehlende Modelle laden (in einer eigenen Unit, übersteht SSH-Abbrüche, bis 6 h; nach Kapitel 7 fehlt keines) |
-| .223 | nginx-Site (SSE, CSP, Sicherheits-Header, optional TLS) → UI nach `/var/www/hermclaw-next-releases/<v>/` → Symlink umschalten → `nginx -t` → Reload → Prüfung über nginx |
+| .223 | nginx-Site auf 8080/8443 (SSE, CSP, Sicherheits-Header, Cookies des Portals werden verworfen, optional TLS) → `nginx -t` + Listen-Prüfung (nie 80/443) → UI nach `/var/www/hermclaw-next-releases/<v>/` → Symlink umschalten → `nginx -t` → Reload → Prüfung über nginx vom Admin-Rechner → Menüpunkt **KI-Kontrollraum** im Portal (Kapitel 10.5) |
 | alle | zum Schluss `hermclaw doctor` auf .225 im Dienstkontext; jeder `fail` stoppt den Lauf |
 
 Worker und Oberfläche kommen dem Orchestrator nie zuvor: Ein Lauf mit `--limit execution_workers`, `--limit
@@ -816,7 +925,9 @@ löschen Sie sie, wenn alles läuft).
           hermclaw_web_server_name: "hermclaw.lan 192.168.178.223"   # auch die SANs des Zertifikats
 ```
 
-HTTP leitet dann auf HTTPS um. `nginx_hsts_max_age` erst setzen, wenn alle Browser dem Zertifikat vertrauen.
+Port 8080 leitet dann auf `https://<Name>:8443/` um. HSTS (`nginx_hsts_max_age`) verweigert die Rolle auf dem
+geteilten `.223`: HSTS gilt für den Namen auf allen Ports, also auch für das Portal auf Port 80, das kein HTTPS hat.
+Der Button im Portal führt mit TLS direkt auf `https://192.168.178.223:8443/`.
 
 * Die Namen und die Adresse aus `hermclaw_web_server_name` werden die SANs des selbstsignierten Zertifikats. Die Rolle
   erzeugt es nur, wenn es fehlt oder in 30 Tagen abläuft. Ändern Sie den Namen später, löschen Sie auf .223
@@ -825,8 +936,9 @@ HTTP leitet dann auf HTTPS um. `nginx_hsts_max_age` erst setzen, wenn alle Brows
   .223 in Browser bzw. Betriebssystem als vertrauenswürdig.
 * Bei `nginx_tls_source: provided` geben Sie für `nginx_tls_cert_src` und `nginx_tls_key_src` **absolute** Pfade auf
   dem Admin-Rechner an.
-* Port 80 antwortet dann nur noch auf `/healthz` und sonst mit `301`, ohne Sicherheits-Header. Die Prüfungen in 8.6
-  und 10.1 laufen deshalb über `https://`.
+* Port 8080 antwortet dann nur noch auf `/healthz` und sonst mit `301`, ohne Sicherheits-Header. Die Prüfungen in 8.6
+  und 10.1 laufen deshalb über `https://…:8443`.
+* Ist ufw aktiv, gehört 8443 mit in die Regel (`nginx_firewall_allow_from` erledigt das).
 
 ### 8.6 Prüfen
 
@@ -840,10 +952,11 @@ curl -s http://127.0.0.1:8888/healthz                                         # 
 sudo hermclaw doctor
 # .222 / .224 (schlafende Worker vorher wecken, Kapitel 13.1)
 curl -s http://192.168.178.222:8787/health; curl -s http://192.168.178.224:8787/health
-# .223
-curl -s http://192.168.178.223/healthz; curl -sI http://192.168.178.223/ | grep -i content-security-policy
-#   mit TLS (8.5) zeigt Port 80 nur den 301 ohne Header, stattdessen:
-curl -skI https://192.168.178.223/ | grep -i content-security-policy
+# .223 – der Kontrollraum auf seinem Port, das Portal unverändert auf Port 80
+curl -s http://192.168.178.223:8080/healthz; curl -sI http://192.168.178.223:8080/ | grep -i content-security-policy
+#   mit TLS (8.5) zeigt Port 8080 nur den 301 ohne Header, stattdessen:
+curl -skI https://192.168.178.223:8443/ | grep -i content-security-policy
+curl -s -o /dev/null -w '%{http_code}\n' http://192.168.178.223/login.php     # 200: Portal (Apache)
 ```
 
 Das Admin-API-Token für die erste Anmeldung in der Oberfläche (es wird nie ausgegeben):
@@ -1011,8 +1124,8 @@ Datenbank-URL noch die Geheimnisse.
 ```bash
 sudo hermclaw doctor                  # jede Zeile ok/warn; Exit 1 bei einem fail
 curl -s http://192.168.178.225:8000/api/health
-curl -s http://192.168.178.223/api/health          # über nginx
-curl -sk https://192.168.178.223/api/health        # über nginx mit TLS (8.5): Port 80 liefert dann nur den 301
+curl -s http://192.168.178.223:8080/api/health          # über nginx (Kontrollraum)
+curl -sk https://192.168.178.223:8443/api/health        # über nginx mit TLS (8.5): Port 8080 liefert dann nur den 301
 ```
 
 `hermclaw doctor` prüft: Modellrollen, `hosts.yaml` (echte Dateien, keine Platzhalter-MACs), SSH-Hosts,
@@ -1033,8 +1146,9 @@ sudo hermclaw token-create viewer-<name> --scopes read                    # nur 
 | `control` | Jobs anlegen, abbrechen, wiederholen, Repositories (remote) registrieren |
 | `admin` | SSH-Mutationen freigeben, Worker-Details/Drain, lokale Repositories, Token-Verwaltung |
 
-Öffnen Sie `http://<Name aus Kapitel 2.3>/` bzw. `http://192.168.178.223/` (mit TLS: `https://…`) und melden Sie sich
-mit dem Token an. Das Token liegt nur im `sessionStorage` des Tabs.
+Öffnen Sie den Kontrollraum unter `http://192.168.178.223:8080/` bzw. `http://<Name aus Kapitel 2.3>:8080/`
+(mit TLS: `https://…:8443/`) oder über den Button im Portal (10.5) und melden Sie sich mit dem Token an. Das Token liegt
+nur im `sessionStorage` des Tabs. Portal-Login und Hermclaw-Token sind getrennt; ein Single Sign-on gibt es nicht.
 
 ### 10.3 Repository registrieren
 
@@ -1094,6 +1208,55 @@ warten auf Ihre Freigabe im Tab „Freigaben“ (Admin-Token).
 
 Mit der GTX 1080 dauert ein solcher Job je nach Größe 10–60 Minuten: Die großen Modelle laufen größtenteils aus dem RAM
 (Kapitel 2.1).
+
+### 10.5 Kontrollraum-Button im Portal
+
+Das Deployment schreibt nach den Health-Checks des Kontrollraums genau eine Datei ins Portal:
+`/var/www/noobclaw/nav/work_ki_kontrollraum.php`. Das ist der Menüpunkt **Arbeit → KI-Kontrollraum** mit dem
+Button **KI-Kontrollraum öffnen**, der `http://192.168.178.223:8080/` (mit TLS `https://192.168.178.223:8443/`) in
+einem neuen Tab öffnet. Für die Datei gilt:
+
+- **Wann:** nur wenn `index.php` und `nav/` unter `hermclaw_ui_legacy_portal_root` (Standard `/var/www/noobclaw`)
+  existieren.
+- **Rechte:** Besitzer und Gruppe von `nav/`, Modus `0644`.
+- **Fremde Seiten:** Eine Seite gleichen Namens ohne die Markierung „Managed by Hermclaw“ überschreibt das
+  Deployment nie.
+- **Sichtbarkeit:** Den Menüpunkt sieht jedes Konto mit dem Recht `dashboard_anzeigen`. Es gibt keine
+  Datenbankänderung und keinen neuen Login; Apache wird nicht neu geladen.
+
+Sonst ändert sich am Portal nichts. Einzelheiten, eine statische Kopie und die manuelle Installation stehen in
+[`integrations/kowacore-portal/README.md`](../../integrations/kowacore-portal/README.md).
+
+```bash
+# Admin-Rechner: nur den Button neu schreiben (z. B. nach einer Wiederherstellung des Portals)
+ansible-playbook -i inventory/hosts.yml playbooks/deploy.yml --limit webui --tags portal_link -K
+# entfernen (nur Hermclaws markierte Datei)
+ansible-playbook -i inventory/hosts.yml playbooks/deploy.yml --limit webui --tags portal_link -e hermclaw_ui_portal_link=false -K
+# .223 prüfen
+grep -c 'Managed by Hermclaw' /var/www/noobclaw/nav/work_ki_kontrollraum.php                         # 1
+stat -c '%U:%G %a' /var/www/noobclaw/nav /var/www/noobclaw/nav/work_ki_kontrollraum.php              # gleicher Besitzer, 644
+curl -s -o /dev/null -w '%{http_code}\n' 'http://192.168.178.223/index.php?seite=work_ki_kontrollraum'  # 302 (Portal-Login)
+```
+
+Im Browser prüfen:
+
+1. Im Portal anmelden.
+2. **Arbeit → KI-Kontrollraum** öffnen.
+3. **KI-Kontrollraum öffnen** drücken. Im neuen Tab erscheint die Anmeldung von Hermclaw; mit dem Token aus 10.2
+   anmelden.
+
+Von außen (`app.kowacore.com` über Nginx Proxy Manager) führt der Button ins Leere: Der Kontrollraum ist nur im LAN
+erreichbar (RISK_REGISTER R-036).
+
+Variablen (Host-Variablen von `hermclaw-webui`):
+
+| Variable | Standard | Bedeutung |
+|---|---|---|
+| `hermclaw_ui_portal_link` | `true` | Menüpunkt anlegen; `false` entfernt ihn |
+| `hermclaw_ui_portal_link_title` | `KI-Kontrollraum` | Titel im Menü und auf der Seite |
+| `hermclaw_ui_portal_link_url` | aus Adresse und Port | Ziel des Buttons; muss mit `/` enden |
+| `hermclaw_ui_portal_link_direct` | `false` | `true`: Der Menüpunkt springt direkt in den Kontrollraum (gleicher Tab) |
+| `hermclaw_ui_legacy_portal_root` | `/var/www/noobclaw` | Webroot des Portals |
 
 ---
 
@@ -1366,6 +1529,12 @@ ping antworten (`ping_timeout_seconds` in `hosts.yaml`). Sonst prüfen Sie BIOS 
 | UI lädt, Live-Status bleibt stehen | nginx puffert SSE | `sudo nginx -T \| grep -A10 events/stream` muss `proxy_buffering off` zeigen; Deployment erneut |
 | Backup-Timer meldet Exit 75 | ein anderer Backup-Vorgang hält die Sperre | nichts tun, der nächste Lauf wiederholt |
 | `hermclaw-searxng` startet nicht | Podman-Secret fehlt (gewollt: kein Start mit bekanntem Schlüssel) | Deployment erneut ausführen (legt das Secret an) |
+| Kontrollraum (`:8080`) antwortet nicht, Health-Checks des Deployments laufen in einen Timeout, oder die nginx-Rolle bricht mit „nginx_firewall_allow_from is empty“ ab | ufw auf `.223` aktiv, 8080/8443 nicht erlaubt (z. B. `nginx_firewall_allow_from: []` gesetzt, oder die Rolle kannte kein IPv4-Netz der Default-Route) | `sudo ufw status`; `nginx_firewall_allow_from: [192.168.178.0/24]` setzen (4.2) oder von Hand `sudo ufw allow proto tcp from 192.168.178.0/24 to any port 8080,8443 comment 'Hermclaw Next nginx'` |
+| nginx-Rolle: „listens on … reserved for the other web server“ | eine nginx-Site will Port 80/443 des Portals (z. B. eine selbst angelegte Default-Site) | `sudo nginx -T \| grep -n listen`, die Site verlegen oder abschalten; Apache **nicht** anfassen |
+| nginx-Rolle: „exists and is not managed by Hermclaw“ bzw. Bootstrap: „Hermclaw did not create“ | fremde Site, fremdes Konto oder Verzeichnis mit Hermclaw-Namen auf `.223` | prüfen, was es ist; andere Namen per Host-Variable (5.3) |
+| Portal-Button fehlt | Portal nicht unter `/var/www/noobclaw` gefunden, oder das Konto hat das Recht `dashboard_anzeigen` nicht | `hermclaw_ui_legacy_portal_root` setzen; Rechte der Gruppe im Portal prüfen (Einstellungen → Benutzer) |
+| Deployment: „is not Hermclaw's button“ | `nav/work_ki_kontrollraum.php` gehört nicht Hermclaw | Datei prüfen oder `hermclaw_ui_portal_link_name` ändern |
+| `app.kowacore.com` zeigt „Welcome to nginx“ | nginx hat Port 80 belegt (geht nur, wenn Apache nicht lief und eine nginx-Site 80 verlangt) | `sudo ss -Htlnp 'sport = :80'`; `sudo systemctl stop nginx`, `sudo systemctl start apache2`, dann `sudo nginx -T \| grep -n listen`. Das Deployment stoppt nginx in diesem Fall selbst |
 
 Weitere Hinweise: `docs/operations/bootstrap.md` (Bootstrap-Fehler), `docs/operations/backup-restore.md`
 (*Troubleshooting*), `docs/architecture/*.md` (Fehlercodes je Komponente).

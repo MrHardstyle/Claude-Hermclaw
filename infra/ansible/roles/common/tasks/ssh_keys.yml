@@ -93,7 +93,7 @@
         shell: /bin/bash
         create_home: true
         password: "!"
-        comment: Hermclaw runtime SSH administration
+        comment: "{{ common_runtime_account_comment }}"
         state: present
       when: common_runtime_user.rc == 2
 

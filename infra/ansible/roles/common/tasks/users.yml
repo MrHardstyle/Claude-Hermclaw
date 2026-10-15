@@ -14,7 +14,7 @@
     create_home: true
     shell: /usr/sbin/nologin
     password: "!"
-    comment: Hermclaw Next service account
+    comment: "{{ common_service_account_comment }}"
     state: present
 
 - name: Restrict the hermclaw home directory

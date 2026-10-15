@@ -3,13 +3,23 @@
   ansible.builtin.import_tasks: validate.yml
   tags: [nginx]
 
+# policy-rc.d 101: the package's maintainer scripts never start nginx (Debian's default site would try port 80,
+# which another web server may own on a shared host); the role starts it below, after its own checks.
 - name: Install nginx
   ansible.builtin.apt:
     name: nginx
     state: present
     install_recommends: false
+    policy_rc_d: 101
   when: hermclaw_install_packages | bool
   tags: [nginx, packages]
+
+# A fresh install links sites-enabled/default (listen 80 default_server, [::]:80) and enables nginx.service: on a
+# shared host it would compete with the other web server for port 80 at every boot.
+- name: Disable nginx's Debian default site on a shared host
+  ansible.builtin.import_tasks: default_site.yml
+  when: nginx_disable_debian_default_site | bool
+  tags: [nginx]
 
 - name: Create the webroot
   ansible.builtin.file:
@@ -88,6 +98,22 @@
       when:
         - hermclaw_install_packages | bool
         - not ansible_check_mode
+
+    # `nginx -t` accepts a listen on a port another process owns (EADDRINUSE is tolerated in test mode): on a shared
+    # host every listen directive of the complete configuration is checked against the reserved ports.
+    - name: Check the listeners of the complete configuration
+      ansible.builtin.import_tasks: listeners.yml
+      when:
+        - nginx_reserved_ports | length > 0
+        - hermclaw_install_packages | bool
+        - not ansible_check_mode
+
+    - name: Enable and start nginx
+      ansible.builtin.systemd_service:
+        name: nginx
+        enabled: true
+        state: started
+      when: hermclaw_manage_services | bool
   rescue:
     - name: Restore the previous site file
       ansible.builtin.copy:
@@ -114,10 +140,19 @@
           {{ ansible_failed_result.msg | default('') | truncate(400) }}{{ (' ' ~ (ansible_failed_result.stderr | default('') | truncate(400))) }}
           - previous site configuration restored, the running nginx was not reloaded.
 
-- name: Enable and start nginx
-  ansible.builtin.systemd_service:
-    name: nginx
-    enabled: true
-    state: started
-  when: hermclaw_manage_services | bool
+- name: Firewall (ufw) rules for the nginx ports
+  ansible.builtin.import_tasks: firewall.yml
+  tags: [nginx, firewall]
+
+# a changed site or a disabled default site takes effect now, so the live check below sees the new listeners
+- name: Apply pending nginx changes
+  ansible.builtin.meta: flush_handlers
+  tags: [nginx]
+
+- name: Check the live listeners of nginx on a shared host
+  ansible.builtin.import_tasks: live_listeners.yml
+  when:
+    - nginx_reserved_ports | length > 0
+    - hermclaw_manage_services | bool
+    - not ansible_check_mode
   tags: [nginx]

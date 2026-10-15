@@ -106,3 +106,47 @@ async def test_api_errors_never_echo_tokens(app: Any) -> None:  # noqa: F811
     async with _client(app, token=secret) as c:
         r = await c.get("/api/jobs")
     assert r.status_code == 401 and secret not in r.text
+
+
+# ------------------------------------------------------------------------------- shared web host .223 (D-013)
+
+PORTAL_FILES = (
+    ROOT / "infra/ansible/roles/hermclaw_ui/templates/portal-kontrollraum.php.j2",
+    ROOT / "integrations/kowacore-portal/nav/work_ki_kontrollraum.php",
+    ROOT / "integrations/kowacore-portal/README.md",
+)
+
+
+def test_portal_button_carries_no_secret_and_no_code() -> None:
+    """The one file Hermclaw writes into the legacy portal: a link, no credential, no PHP besides the menu header."""
+    scanner = SecretScanner()
+    for path in PORTAL_FILES:
+        lines = path.read_text(encoding="utf-8").splitlines()
+        findings = [
+            f for f in scanner.scan_file(str(path), [AddedLine(i + 1, t) for i, t in enumerate(lines)]) if f.rule != "redacted_secret"
+        ]
+        assert findings == [], findings
+    for path in PORTAL_FILES[:2]:
+        text = path.read_text(encoding="utf-8")
+        php = text[: text.index("?>") + 2]
+        assert text.count("<?") == 1 and text.count("?>") == 1, "only the header comment is PHP"
+        code = "\n".join(
+            line for line in php.splitlines() if not line.startswith(("ICON:", "TITLE:", "PRIO:", "BEREICH:", "RECHT:", "URL:", "{%"))
+        )
+        assert "$" not in code and "(" not in code.replace("(Ansible-Rolle hermclaw_ui, D-013)", ""), "no PHP statement"
+        for forbidden in ("<script", "<iframe", "<form", "access_token", "hct_", "Authorization", "password", "passwort"):
+            assert forbidden.lower() not in text.lower(), forbidden
+        assert 'rel="noopener noreferrer"' in text, "the opened tab cannot reach back into the portal (window.opener)"
+
+
+def test_nginx_site_never_forwards_cookies_to_the_api() -> None:
+    """Cookies are scoped by host, not port: the portal's session and 2FA-device cookies must stop at nginx."""
+    site = (ROOT / "infra/ansible/roles/nginx/templates/hermclaw-next.conf.j2").read_text(encoding="utf-8")
+    locations = [block for block in site.split("    location ")[1:] if "proxy_pass" in block]
+    assert len(locations) == 2, "SSE location and /api/"
+    for block in locations:
+        body = block[: block.index("\n    }")]
+        assert 'proxy_set_header Cookie "";' in body and "proxy_hide_header Set-Cookie;" in body, body[:80]
+    # the UI may never be framed by the portal (or anyone): the button is a top-level link
+    defaults = (ROOT / "infra/ansible/roles/nginx/defaults/main.yml").read_text(encoding="utf-8")
+    assert "frame-ancestors 'none'" in defaults and "['X-Frame-Options', 'DENY']" in site

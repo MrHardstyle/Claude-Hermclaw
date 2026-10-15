@@ -15,7 +15,7 @@ drawn in [system-diagram.md](system-diagram.md).
 | `.225` | `hermclaw-searxng` (podman) | SearXNG | web search for the research engine (JSON API, local) |
 | `.222` execution worker | `hermclaw-exec-worker` | `worker/execution/` | rootless Podman sandbox: commands/tests on a synced workspace copy (no `.git`) |
 | `.224` model/media worker | `hermclaw-model-worker`, `ollama` | `worker/model/`, `worker/media/` | model load/unload/GPU telemetry, ffmpeg/ComfyUI media jobs (GTX 1080 8 GB) |
-| `.223` WebUI | `nginx` | `ui/` (React/Vite build) | static UI, reverse proxy `/api/*` to `.225:8000` (SSE unbuffered) |
+| `.223` WebUI | `nginx` (:8080/:8443, next to the legacy portal on Apache :80, D-013) | `ui/` (React/Vite build) | static UI (the Kontrollraum), reverse proxy `/api/*` to `.225:8000` (SSE unbuffered); the portal links to it from one menu entry |
 | `.226` GitLab | – | – | remote repositories, merge requests (runtime pushes job branches only) |
 | `.60` Terra/Unraid | – | – | backup target (`hermclaw-backup.timer` on `.225`) |
 

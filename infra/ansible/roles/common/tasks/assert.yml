@@ -15,6 +15,10 @@
 - name: Validate the common settings
   ansible.builtin.import_tasks: validate.yml
 
+- name: Refuse foreign accounts and directories with Hermclaw's names (shared host, read-only)
+  ansible.builtin.import_tasks: shared_guard.yml
+  when: common_shared_host | bool
+
 - name: Run host preflight (scripts/bootstrap/check-host.sh, read-only)
   ansible.builtin.script:
     cmd: >-

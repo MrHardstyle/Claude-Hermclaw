@@ -37,13 +37,31 @@ all:
         hermclaw-webui:
           ansible_host: 192.168.178.223
           hermclaw_host_id: webui-223
-          # nginx server_name of the Hermclaw site (names and/or addresses; "_" = catch-all, only if no other
-          # default site exists). Keep the address in it so http://192.168.178.223/ reaches Hermclaw.
+          # Your existing sudo login on .223 when it is not called admin; its account and password stay as they are
+          # (INSTALLATION.md chapter 3).
+          # ansible_user: <login>
+          # .223 is shared (D-013): the legacy portal Noob2Claw/Kowacore keeps Apache on port 80 (login/2FA, wiki,
+          # app./wiki.kowacore.com via Nginx Proxy Manager .2) and is never reinstalled or changed. Hermclaw's nginx
+          # (the Kontrollraum) runs next to it: http://192.168.178.223:8080/ (TLS: https://192.168.178.223:8443/).
+          # Defaults from playbooks/group_vars/all.yml; other ports or a host that belongs to Hermclaw alone:
+          # hermclaw_webui_http_port: 8080
+          # hermclaw_webui_https_port: 8443
+          # hermclaw_webui_shared_host: true
+          # nginx server_name of the Hermclaw site (names and/or addresses). nginx is the only server on its port,
+          # so every name reaches it there; the names matter for the TLS certificate (SAN).
           hermclaw_web_server_name: hermclaw.lan 192.168.178.223
+          # ufw: the portal's install.sh allows only OpenSSH and 80/tcp when ufw is active. Sources allowed to reach
+          # nginx's ports (rules are only added to an active ufw, nothing else is changed). Default on the shared host:
+          # its own IPv4 LAN (default route). [] = never touched; with an active ufw that allows neither port the
+          # role then stops.
+          nginx_firewall_allow_from: [192.168.178.0/24]
           # HTTPS (P32 32.7): self-signed certificate generated on .223, or your own (nginx_tls_source: provided,
-          # nginx_tls_cert_src / nginx_tls_key_src = files on the control node). Port 80 then redirects.
+          # nginx_tls_cert_src / nginx_tls_key_src = files on the control node). Port 8080 then redirects to 8443.
           # nginx_tls_enabled: true
           # nginx_tls_source: self-signed
+          # Kontrollraum button in the portal (nav/work_ki_kontrollraum.php, only when the portal is found under
+          # hermclaw_ui_legacy_portal_root, default /var/www/noobclaw); false removes Hermclaw's button again.
+          # hermclaw_ui_portal_link: true
     execution_workers:
       hosts:
         hermclaw-exec-222:

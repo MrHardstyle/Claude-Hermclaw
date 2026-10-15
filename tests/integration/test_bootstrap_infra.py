@@ -204,7 +204,8 @@ def _render(tmp_path: Path, out: Path, overrides: Mapping[str, Any]) -> dict[str
             "connection": "local",
             "gather_facts": False,
             "become": False,
-            "vars_files": [str(GROUP_VARS)] + [str(ROLES_DIR / r / "defaults" / "main.yml") for r in ROLES],
+            # + the deployment role whose template (the portal button, D-013) reads its own defaults
+            "vars_files": [str(GROUP_VARS)] + [str(ROLES_DIR / r / "defaults" / "main.yml") for r in [*ROLES, "hermclaw_ui"]],
             "tasks": [
                 {
                     "name": "render",
@@ -334,29 +335,51 @@ def test_example_inventory_keeps_fixed_host_roles(tmp_path: Path) -> None:
 # --------------------------------------------------------------------------------------------- consistency
 
 
+# webui ports of the plan follow nginx's configuration: a host var nginx_listen_port/nginx_tls_port, else the shared
+# group_vars hermclaw_webui_http_port/hermclaw_webui_https_port (D-013)
+WEBUI_PORT_TEMPLATES = {
+    "{{ nginx_listen_port | default(hermclaw_webui_http_port) }}": "hermclaw_webui_http_port",
+    "{{ nginx_tls_port | default(hermclaw_webui_https_port) }}": "hermclaw_webui_https_port",
+}
+
+
 def test_port_plan_is_in_sync_and_matches_bauplan() -> None:
     ports, _ = _check_host_tables()
     gv = yaml.safe_load(GROUP_VARS.read_text(encoding="utf-8"))
-    plan = {(g, e["port"], e["service"]) for g, entries in gv["hermclaw_port_plan"].items() for e in entries}
+
+    def port_of(entry: dict[str, Any]) -> int:
+        value = entry["port"]
+        if isinstance(value, str):
+            assert value in WEBUI_PORT_TEMPLATES, value
+            return int(gv[WEBUI_PORT_TEMPLATES[value]])
+        return int(value)
+
+    plan = {(g, port_of(e), e["service"]) for g, entries in gv["hermclaw_port_plan"].items() for e in entries}
     assert plan == ports, "check-host.sh PORT_PLAN and group_vars hermclaw_port_plan differ"
-    expect_names = {(g, e["port"]): ",".join(e["expect"]) for g, entries in gv["hermclaw_port_plan"].items() for e in entries}
+    templated = [e["port"] for e in gv["hermclaw_port_plan"]["webui"]]
+    assert templated == list(WEBUI_PORT_TEMPLATES), "the webui entries follow the nginx ports"
+    expect_names = {(g, port_of(e)): ",".join(e["expect"]) for g, entries in gv["hermclaw_port_plan"].items() for e in entries}
     text = (SCRIPTS_DIR / "check-host.sh").read_text(encoding="utf-8")
     for (group, port), names in expect_names.items():
         assert re.search(rf"^{group} {port} \S+ {re.escape(names)}$", text, re.M), (group, port)
     by_group = {(g, p) for g, p, _ in ports}
-    # Bauplan §6
+    # Bauplan §6; the web host's nginx on 8080/8443 next to the legacy portal (D-013, DECISIONS.md)
     for required in [
         ("orchestrator", 8000),
         ("orchestrator", 4000),
         ("orchestrator", 5432),
         ("orchestrator", 9100),
-        ("webui", 80),
-        ("webui", 443),
+        ("webui", 8080),
+        ("webui", 8443),
         ("execution_workers", 8787),
         ("model_workers", 8787),
         ("model_workers", 11434),
     ]:
         assert required in by_group
+    assert not {("webui", 80), ("webui", 443)} & by_group, "80/443 stay with the legacy portal on .223"
+    assert gv["hermclaw_webui_shared_host"] is True
+    assert (gv["hermclaw_webui_http_port"], gv["hermclaw_webui_https_port"]) == (8080, 8443)
+    assert "D-013" in (REPO / "DECISIONS.md").read_text(encoding="utf-8")
     assert gv["hermclaw_api_port"] == 8000 and gv["hermclaw_litellm_port"] == 4000
     assert gv["hermclaw_postgres_port"] == 5432 and gv["hermclaw_ollama_port"] == 11434
     assert gv["hermclaw_worker_port"] == 8787
@@ -969,8 +992,9 @@ def test_check_host_reports_json_and_refuses_non_debian() -> None:
     res = _check_host("--role", "orchestrator,webui", "--json")
     report = json.loads(res.stdout)
     checks = {c["check"]: c for c in report["checks"]}
-    for port in (8000, 4000, 5432, 8888, 9100, 80, 443):
+    for port in (8000, 4000, 5432, 8888, 9100, 8080, 8443):
         assert f"port:{port}" in checks
+    assert "port:80" not in checks and "port:443" not in checks, "the legacy portal's ports are not Hermclaw's (D-013)"
     assert "unit:hermclaw-api.service" in checks
     os_release = Path("/etc/os-release").read_text(encoding="utf-8")
     is_trixie = "ID=debian" in os_release and 'VERSION_ID="13"' in os_release
@@ -1040,6 +1064,8 @@ VALIDATION_CASES: list[tuple[str, str, dict[str, Any], str]] = [
     ("common-forced-command-quote", "common", {"common_ssh_forced_command": '/usr/local/bin/gate" ,x'}, "FAIL"),
     ("common-forced-command-ok", "common", {"common_ssh_forced_command": "/usr/local/bin/hermclaw-ssh-gate"}, "PASS"),
     ("common-shared-admin-login", "common", {"ansible_user": "hermclaw-admin"}, "FAIL"),
+    ("common-account-comment-colon", "common", {"common_service_account_comment": "Hermclaw: x"}, "FAIL"),
+    ("common-account-comments-equal", "common", {"common_runtime_account_comment": "Hermclaw Next service account"}, "FAIL"),
     ("common-shared-admin-allowed", "common", {"ansible_user": "hermclaw-admin", "common_allow_shared_admin_login": True}, "PASS"),
     (
         "common-known-hosts-ok",
@@ -1096,6 +1122,40 @@ VALIDATION_CASES: list[tuple[str, str, dict[str, Any], str]] = [
         "PASS",
     ),
     ("nginx-defaults", "nginx", {"hermclaw_web_server_name": "hermclaw.lan"}, "PASS"),
+    # D-013: on the shared web host 80/443 belong to the legacy portal
+    ("nginx-shared-port-80", "nginx", {"hermclaw_webui_http_port": 80}, "FAIL"),
+    ("nginx-shared-listen-443", "nginx", {"nginx_listen_port": 443}, "FAIL"),
+    (
+        "nginx-shared-tls-443",
+        "nginx",
+        {"nginx_tls_enabled": True, "hermclaw_web_server_name": "hermclaw.lan", "nginx_tls_port": 443},
+        "FAIL",
+    ),
+    ("nginx-shared-tls-8443", "nginx", {"nginx_tls_enabled": True, "hermclaw_web_server_name": "hermclaw.lan"}, "PASS"),
+    (
+        "nginx-shared-hsts",
+        "nginx",
+        {"nginx_tls_enabled": True, "hermclaw_web_server_name": "hermclaw.lan", "nginx_hsts_max_age": 300},
+        "FAIL",
+    ),
+    ("nginx-dedicated-port-80", "nginx", {"hermclaw_webui_shared_host": False, "hermclaw_webui_http_port": 80}, "PASS"),
+    (
+        "nginx-dedicated-hsts",
+        "nginx",
+        {
+            "hermclaw_webui_shared_host": False,
+            "nginx_tls_enabled": True,
+            "hermclaw_web_server_name": "hermclaw.lan",
+            "nginx_hsts_max_age": 300,
+        },
+        "PASS",
+    ),
+    ("nginx-listen-port-range", "nginx", {"nginx_listen_port": 70000}, "FAIL"),
+    ("nginx-listen-port-text", "nginx", {"nginx_listen_port": "8080; listen 80"}, "FAIL"),
+    ("nginx-reserved-string", "nginx", {"nginx_reserved_ports": "80"}, "FAIL"),
+    ("nginx-firewall-ok", "nginx", {"nginx_firewall_allow_from": ["192.168.178.0/24", "192.168.178.2", "fd00::/8"]}, "PASS"),
+    ("nginx-firewall-injection", "nginx", {"nginx_firewall_allow_from": ["192.168.178.0/24 port 22"]}, "FAIL"),
+    ("nginx-firewall-string", "nginx", {"nginx_firewall_allow_from": "192.168.178.0/24"}, "FAIL"),
     ("nginx-server-name-injection", "nginx", {"hermclaw_web_server_name": "x; return 301 http://evil"}, "FAIL"),
     ("nginx-upstream-injection", "nginx", {"nginx_api_upstream": "http://192.168.178.225:8000/; deny all"}, "FAIL"),
     ("ollama-defaults", "ollama", {}, "PASS"),
@@ -1217,7 +1277,7 @@ def test_role_input_validation(tmp_path: Path) -> None:
 
 def test_role_defaults_per_group(tmp_path: Path) -> None:
     """Group-dependent defaults: sudo allowlist on workers only, port plan rendered for check-host.sh."""
-    inventory = {
+    inventory: dict[str, Any] = {
         "all": {
             "vars": {"ansible_connection": "local", "hermclaw_orchestrator_ip": "192.168.178.225"},
             "children": {
@@ -1244,7 +1304,10 @@ def test_role_defaults_per_group(tmp_path: Path) -> None:
                     "name": "dump",
                     "ansible.builtin.copy": {
                         "dest": f"{out}/{{{{ inventory_hostname }}}}.json",
-                        "content": "{{ {'sudo': common_ssh_runtime_sudo_commands, 'plan': common_preflight_port_plan} | to_json }}",
+                        "content": (
+                            "{{ {'sudo': common_ssh_runtime_sudo_commands, 'plan': common_preflight_port_plan,"
+                            " 'shared': common_shared_host | bool} | to_json }}"
+                        ),
                         "mode": "0644",
                     },
                 }
@@ -1268,6 +1331,23 @@ def test_role_defaults_per_group(tmp_path: Path) -> None:
     text = (SCRIPTS_DIR / "check-host.sh").read_text(encoding="utf-8")
     builtin = re.search(r"PORT_PLAN=\$\(cat <<'EOF'\n(.*?)\nEOF", text, re.S).group(1)  # type: ignore[union-attr]
     assert sorted(dumps["o"]["plan"].splitlines()) == sorted(builtin.splitlines())
+    # D-013: only the web host is a shared host (time setup, account/directory guard)
+    assert {h: d["shared"] for h, d in dumps.items()} == {"o": False, "w": True, "e": False, "m": False}
+
+    # the plan follows the nginx ports of the web host (host vars; vars_files here are play vars, so the group_vars
+    # ports themselves are overridden through nginx_*_port - test_deploy_infra.py covers the real precedence chain),
+    # the shared flag can be switched off per host
+    inventory["all"]["children"]["webui"]["hosts"]["w"] = {"nginx_listen_port": 9080, "nginx_tls_port": 9443}
+    inventory["all"]["children"]["webui"]["hosts"]["w2"] = {}
+    inv.write_text(yaml.safe_dump(inventory), encoding="utf-8")
+    res = _run([str(ANSIBLE_PLAYBOOK), "-i", str(inv), str(pb)], env=_ansible_env(tmp_path), cwd=tmp_path)
+    assert res.returncode == 0, res.stdout[-3000:] + res.stderr[-2000:]
+    w = json.loads((out / "w.json").read_text(encoding="utf-8"))
+    assert {"webui 9080 nginx-http nginx", "webui 9443 nginx-https nginx"} <= set(w["plan"].splitlines())
+    assert not any(line.startswith("webui 8080") for line in w["plan"].splitlines())
+    assert {"webui 8080 nginx-http nginx", "webui 8443 nginx-https nginx"} <= set(
+        json.loads((out / "w2.json").read_text(encoding="utf-8"))["plan"].splitlines()
+    )
 
 
 # --------------------------------------------------------------------------------------------- check-host behaviour

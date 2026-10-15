@@ -3,7 +3,8 @@
 # The UI is built once per release on the control node by scripts/deploy/build-release.sh (npm ci && npm run build
 # from ui/package-lock.json): the deployed bundle is the one the E2E suite ran against, its checksum is part of the
 # release, .223 needs neither the npm registry nor a build at deploy time, and a rollback reuses the exact old
-# bundle. (Node 22 on .223, role nodejs, stays available for operator rebuilds, e.g. HERMCLAW_UI_BASE builds.)
+# bundle. (Node 22 on a dedicated web host, role nodejs, stays available for operator rebuilds, e.g. HERMCLAW_UI_BASE
+# builds; the shared .223 of D-013 gets no Node.js from Hermclaw.)
 #
 # Layout: <hermclaw_ui_releases_dir>/<version>/ (unpacked bundle) + <version>.release (completion marker, outside the
 # served tree); hermclaw_webroot -> <releases>/<version> is switched atomically; old builds are pruned
@@ -22,10 +23,14 @@ hermclaw_keep_releases: 3  # noqa: var-naming[no-role-prefix]
 
 # 32.9 – checks through .223 from the control node after the switch: /healthz, / (index.html + CSP), /api/health
 hermclaw_ui_health: "{{ hermclaw_manage_services | bool }}"
+# The ports are nginx's (role nginx, which runs before this role), falling back to hermclaw_webui_http_port /
+# hermclaw_webui_https_port of playbooks/group_vars/all.yml (8080/8443 on the shared .223, D-013).
+hermclaw_ui_http_port: "{{ nginx_listen_port | default(hermclaw_webui_http_port | default(80)) }}"
+hermclaw_ui_https_port: "{{ nginx_tls_port | default(hermclaw_webui_https_port | default(443)) }}"
 hermclaw_ui_base_url: >-
   {{ ('https://' if nginx_tls_enabled | default(false) | bool else 'http://') ~ (ansible_host | default(inventory_hostname))
-     ~ ((':' ~ nginx_tls_port) if nginx_tls_enabled | default(false) | bool and nginx_tls_port | default(443) | int != 443 else '')
-     ~ ((':' ~ nginx_listen_port) if not nginx_tls_enabled | default(false) | bool and nginx_listen_port | default(80) | int != 80 else '') }}
+     ~ ((':' ~ hermclaw_ui_https_port) if nginx_tls_enabled | default(false) | bool and hermclaw_ui_https_port | int != 443 else '')
+     ~ ((':' ~ hermclaw_ui_http_port) if not nginx_tls_enabled | default(false) | bool and hermclaw_ui_http_port | int != 80 else '') }}
 # Host header of the checks: the first real server_name (the site is not necessarily the default server)
 hermclaw_ui_host_header: >-
   {{ ((nginx_server_name | default('_')).split() | reject('equalto', '_') | list + [ansible_host | default(inventory_hostname)])[0] }}
@@ -33,3 +38,28 @@ hermclaw_ui_host_header: >-
 hermclaw_ui_validate_certs: false
 hermclaw_ui_health_retries: 15
 hermclaw_ui_health_delay: 2
+
+# --- Kontrollraum button in the legacy portal (D-013) ---------------------------------------------------------------
+# The shared .223 keeps the old PHP portal (Noob2Claw/Kowacore). The deployment adds exactly one file to it: a menu
+# entry <root>/nav/<name>.php (section "Arbeit") whose page carries the button that opens Hermclaw's web UI. Only
+# when the portal is found there (index.php and nav/), never anything else in the portal, idempotent; the file gets
+# the owner and group of nav/ and mode 0644, like the portal's own pages. Static copy and manual installation:
+# integrations/kowacore-portal/. false removes the button again (only the file carrying Hermclaw's marker).
+hermclaw_ui_portal_link: true
+hermclaw_ui_legacy_portal_root: /var/www/noobclaw
+# file name without .php ([a-z0-9_], becomes index.php?seite=<name>; work_ = section "Arbeit" by convention)
+hermclaw_ui_portal_link_name: work_ki_kontrollraum
+# menu header (the portal reads ICON/TITLE/PRIO/BEREICH/RECHT from the first 700 bytes): icon with a glyph in the
+# portal's css/navigation.css, sort order (Arbeit starts at 20, so the button comes first), section, and the right
+# that shows it - dashboard_anzeigen guards the portal's start page, so every working account holds it.
+hermclaw_ui_portal_link_title: KI-Kontrollraum
+hermclaw_ui_portal_link_icon: cpu
+hermclaw_ui_portal_link_prio: 19
+hermclaw_ui_portal_link_area: work
+hermclaw_ui_portal_link_right: dashboard_anzeigen
+# where the button leads: the web UI as browsers in the LAN reach it (http://192.168.178.223:8080/; with TLS the
+# HTTPS port directly). Must end with "/".
+hermclaw_ui_portal_link_url: "{{ hermclaw_ui_base_url }}/"
+# true: the menu entry itself jumps to the web UI (portal header URL:, same tab); false: it opens the portal page
+# with the button (new tab, notes on the token login).
+hermclaw_ui_portal_link_direct: false

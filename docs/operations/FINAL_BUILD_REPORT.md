@@ -27,7 +27,7 @@ mit `[~]` markiert. Die Live-Abnahme holt sie nach: `docs/operations/INSTALLATIO
 | 192.168.178.225 | Orchestrator (API, Scheduler, PostgreSQL 17 + pgvector, LiteLLM, SearXNG, Backup) | nicht deployt (BLOCKER-001) | Bootstrap + Deployment im Debian-13-Container (`test_bootstrap_converge.py`, `test_deploy_converge.py`): zweiter Lauf changed=0, Upgrade, Rollback, Trockenläufe |
 | 192.168.178.222 | Execution Worker (rootless Podman-Sandbox) | nicht deployt (BLOCKER-001) | Converge im Container, echte Podman-Sandbox-Tests |
 | 192.168.178.224 | Model/Media Worker (GTX 1080, Ollama 0.40.4, NVIDIA R580) | nicht deployt (BLOCKER-001) | Converge im Container mit simuliertem NVIDIA-Gerät; GPU-Pfad nur live |
-| 192.168.178.223 | Web-UI / nginx | nicht deployt (BLOCKER-001) | nginx 1.28 im Container (SSE, CSP, TLS), Playwright gegen echtes Backend |
+| 192.168.178.223 | Web-UI / nginx (Kontrollraum, 8080/8443) neben dem bestehenden Portal Noob2Claw/Kowacore (Apache :80), wird nicht neu installiert (D-013) | nicht deployt (BLOCKER-001) | nginx 1.28 im Container (SSE, CSP, TLS, neben fremdem Server auf Port 80), Portal-Button gegen den Menü-Parser des Portals, Playwright gegen echtes Backend |
 | 192.168.178.226 | GitLab | bestehend, nicht verändert | GitLab-API gegen Testdoppel; Live-Push in der Abnahme |
 | 192.168.178.60 | Terra/Unraid Backup | bestehend, nicht verändert | rsync über sshd mit rrsync-Forced-Command lokal |
 
@@ -43,7 +43,7 @@ mit `[~]` markiert. Die Live-Abnahme holt sie nach: `docs/operations/INSTALLATIO
 | .225 | `hermclaw-backup.timer` / `hermclaw-restore-test.timer` | – | Backup täglich 02:30, Restore-Test sonntags 04:30 |
 | .222 | `hermclaw-exec-worker.service` | 8787 | Befehle/Tests in der rootless Podman-Sandbox |
 | .224 | `hermclaw-model-worker.service`, `ollama.service`, `hermclaw-ollama-firewall.service` | 8787, 11434 (nur von .225) | Modelle, Media (ffmpeg/NVENC) |
-| .223 | `nginx` (Site `hermclaw-next.conf`) | 80/443 | statische UI, Proxy `/api` inkl. SSE |
+| .223 | `nginx` (Site `hermclaw-next.conf`) | 8080/8443 (D-013: 80 bleibt beim Portal Noob2Claw/Kowacore) | statische UI (Kontrollraum), Proxy `/api` inkl. SSE; Button im Portal |
 | .222/.224 | `hermclaw-wol@<nic>.service` | – | Wake-on-LAN im NIC aktivieren |
 
 ## Models

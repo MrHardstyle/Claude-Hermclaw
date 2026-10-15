@@ -1,0 +1,88 @@
+# Kontrollraum button in the legacy portal on the shared .223 (D-013): exactly one file, <root>/nav/<name>.php, and only
+# when the portal is found (index.php and the directory nav/). The portal finds its menu entries itself (glob of
+# nav/*.php, header in the first 700 bytes): no PHP is run, no database row, no Apache reload. A file with that name
+# that Hermclaw did not write is never replaced or removed (like roles/nginx/tasks/guard.yml).
+- name: Validate the portal button settings
+  ansible.builtin.assert:
+    that:
+      - hermclaw_ui_portal_link | bool in [true, false]
+      - hermclaw_ui_portal_link_direct | bool in [true, false]
+      - hermclaw_ui_legacy_portal_root is match('^/[A-Za-z0-9._/-]+$')
+      - "'/../' not in hermclaw_ui_legacy_portal_root ~ '/' and '/./' not in hermclaw_ui_legacy_portal_root ~ '/'"
+      - (hermclaw_ui_legacy_portal_root | regex_replace('/+$', '')) not in ['', '/var/www', hermclaw_webroot, hermclaw_ui_releases_dir]
+      - not (hermclaw_ui_legacy_portal_root ~ '/').startswith(hermclaw_webroot ~ '/')
+      - hermclaw_ui_portal_link_name is match('^[a-z0-9_]{1,64}$')
+      - hermclaw_ui_portal_link_title is match('^[A-Za-z0-9][A-Za-z0-9 ._()-]{0,59}$')
+      - hermclaw_ui_portal_link_icon is match('^[a-z0-9-]{1,40}$')
+      - (hermclaw_ui_portal_link_prio | string) is match('^[0-9]{1,3}$')
+      - hermclaw_ui_portal_link_area is match('^[a-z0-9_]{1,32}$')
+      - hermclaw_ui_portal_link_right is match('^[a-z0-9_]{1,64}$')
+      - hermclaw_ui_portal_link_right != '__ausgeblendet__'
+      - hermclaw_ui_portal_link_url is match('^https?://[A-Za-z0-9.-]+(:[0-9]{1,5})?/[A-Za-z0-9._~/-]*$')
+    fail_msg: >-
+      invalid portal button settings: hermclaw_ui_legacy_portal_root an absolute path outside the Hermclaw webroot,
+      hermclaw_ui_portal_link_name [a-z0-9_], title letters/digits/space/._()- (no colon, at most 60), icon [a-z0-9-],
+      prio 0-999, area and right [a-z0-9_] (not __ausgeblendet__), hermclaw_ui_portal_link_url
+      http(s)://host[:port]/[path] (got {{ hermclaw_ui_portal_link_url }}).
+    quiet: true
+
+- name: Detect the legacy portal ({{ hermclaw_ui_legacy_portal_root }})
+  ansible.builtin.stat:
+    path: "{{ hermclaw_ui_legacy_portal_root }}/{{ item }}"
+    follow: false
+    get_checksum: false
+  loop: [index.php, nav]
+  register: hermclaw_ui_portal_paths
+
+- name: Decide whether the portal is there
+  ansible.builtin.set_fact:
+    hermclaw_ui_portal_found: >-
+      {{ hermclaw_ui_portal_paths.results[0].stat.isreg | default(false)
+         and hermclaw_ui_portal_paths.results[1].stat.isdir | default(false) }}
+    hermclaw_ui_portal_nav: "{{ hermclaw_ui_portal_paths.results[1].stat }}"
+    hermclaw_ui_portal_file: "{{ hermclaw_ui_legacy_portal_root }}/nav/{{ hermclaw_ui_portal_link_name }}.php"
+
+- name: Button file of an existing portal
+  when: hermclaw_ui_portal_found | bool
+  block:
+    - name: Inspect the button file
+      ansible.builtin.stat:
+        path: "{{ hermclaw_ui_portal_file }}"
+        follow: false
+        get_checksum: false
+      register: hermclaw_ui_portal_existing
+
+    - name: Read the existing button file
+      ansible.builtin.slurp:
+        src: "{{ hermclaw_ui_portal_file }}"
+      register: hermclaw_ui_portal_existing_raw
+      when: hermclaw_ui_portal_existing.stat.isreg | default(false)
+
+    - name: Refuse to replace a portal page that Hermclaw did not write
+      ansible.builtin.assert:
+        that:
+          - not hermclaw_ui_portal_existing.stat.exists or hermclaw_ui_portal_existing.stat.isreg
+          - >-
+            not hermclaw_ui_portal_existing.stat.isreg | default(false)
+            or 'Managed by Hermclaw' in (hermclaw_ui_portal_existing_raw.content | b64decode)
+        fail_msg: >-
+          {{ hermclaw_ui_portal_file }} exists and is not Hermclaw's button (no "Managed by Hermclaw" marker, or not a
+          regular file): refusing to change the portal. Choose another hermclaw_ui_portal_link_name or remove the file.
+        quiet: true
+
+    - name: Write the Kontrollraum button ({{ hermclaw_ui_portal_link_url }})
+      ansible.builtin.template:
+        src: portal-kontrollraum.php.j2
+        dest: "{{ hermclaw_ui_portal_file }}"
+        owner: "{{ hermclaw_ui_portal_nav.pw_name }}"
+        group: "{{ hermclaw_ui_portal_nav.gr_name }}"
+        mode: "0644"
+      when: hermclaw_ui_portal_link | bool
+
+    - name: Remove Hermclaw's button (hermclaw_ui_portal_link false)
+      ansible.builtin.file:
+        path: "{{ hermclaw_ui_portal_file }}"
+        state: absent
+      when:
+        - not hermclaw_ui_portal_link | bool
+        - hermclaw_ui_portal_existing.stat.isreg | default(false)

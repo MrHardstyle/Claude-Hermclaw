@@ -14,7 +14,7 @@ operator scripts. It is built once on the control node and verified by checksum:
 | `.225` orchestrator | release venv `/opt/hermclaw/venv-<v>` (offline, hash-checked) → `/etc/hermclaw/*.yaml` rendered + validated in a staging copy → LiteLLM venv installed → schema decision (nothing live has changed yet) → units enabled → drain → `hermclaw migrate` (once, before the restart) → live configuration + `litellm.yaml` → atomic switch of `/opt/litellm/venv` and `/opt/hermclaw/venv` → `hermclaw-litellm` (healthy and authenticated before anything else starts) → SearXNG, `hermclaw-api`, `hermclaw-scheduler`, `hermclaw-backup.timer`, `hermclaw-restore-test.timer` → health → admin API token (once) |
 | `.222` execution worker | release venv → `capabilities.yaml`, `policies.yaml` validated → sandbox images (rootless, missing tags only) → configuration installed → switch → `hermclaw-exec-worker` → `/health` |
 | `.224` model worker | release venv → `capabilities.yaml` validated → ffmpeg → configuration installed → switch → missing Ollama tags of `models.yaml` pulled with `hermclaw-model-worker` stopped (`hermclaw-model-pull`, then any other tag on its own; no heartbeat, so the scheduler cannot suspend the host mid-download) → `hermclaw-model-worker` → `/health` |
-| `.223` web UI | nginx site (headers, CSP, optional TLS) → UI build into `/var/www/hermclaw-next-releases/<v>/` → atomic switch of `/var/www/hermclaw-next` → `nginx -t` → reload → checks through nginx |
+| `.223` web UI (shared with the legacy portal, D-013) | nginx site on 8080/8443 (headers, CSP, portal cookies dropped, optional TLS) → `nginx -t` + listener guard (never 80/443) → UI build into `/var/www/hermclaw-next-releases/<v>/` → atomic switch of `/var/www/hermclaw-next` → `nginx -t` → reload → checks through nginx → the portal's menu entry **KI-Kontrollraum** (only when the portal is found) |
 | all | at the end: `hermclaw doctor` on `.225` in the services' context; any failed check stops the play |
 
 ## 1. Prerequisites
@@ -56,8 +56,12 @@ operator scripts. It is built once on the control node and verified by checksum:
 | `wol_mac` | each worker | **required** | real MAC address of the Wake-on-LAN interface (`ip -br link`). The deployment refuses `00:00:00:00:..` |
 | `hermclaw_host_id` | each host | `orchestrator-225`, `webui-223`, `gitlab-226`, `terra-60` | id of the host's entry in `hosts.yaml` (workers: `hermclaw_worker_id`) |
 | `hermclaw_web_server_name` | `.223` | `hermclaw.lan 192.168.178.223` | nginx `server_name`, also the SAN of a self-signed certificate |
+| `hermclaw_webui_http_port` / `hermclaw_webui_https_port` | `.223` (host var or `-e`; playbook group_vars) | `8080` / `8443` | nginx's ports next to the legacy portal (D-013); port plan, `hosts.yaml` probe, health checks and the portal button follow them |
+| `hermclaw_webui_shared_host` | `.223` (host var or `-e`; playbook group_vars) | `true` | the web host also runs the legacy portal: 80/443 and HSTS refused, Debian's nginx default site disabled, no NodeSource, time setup untouched, foreign accounts/directories with Hermclaw's names refused |
+| `nginx_firewall_allow_from` | `.223` | shared host: its own IPv4 LAN (`<network>/<prefix>` of the default route, e.g. `[192.168.178.0/24]`); otherwise `[]` | sources for which an **active** ufw gets `allow` rules for nginx's ports; nothing else of ufw is touched. Empty while an active ufw allows neither port: the role stops on the shared host, warns on a dedicated one |
+| `hermclaw_ui_portal_link` | `.223` | `true` | write the portal's menu entry `nav/work_ki_kontrollraum.php` (only when `hermclaw_ui_legacy_portal_root`, default `/var/www/noobclaw`, holds `index.php` and `nav/`); `false` removes Hermclaw's file again |
 | `nginx_tls_enabled` / `nginx_tls_source` | `.223` | `false` / `self-signed` | HTTPS; `provided` + `nginx_tls_cert_src` / `nginx_tls_key_src` (files on the control node) |
-| `nginx_hsts_max_age` | `.223` | `0` | send Strict-Transport-Security only once every client trusts the certificate |
+| `nginx_hsts_max_age` | `.223` | `0` | send Strict-Transport-Security only once every client trusts the certificate; refused on the shared `.223` (it would cover the portal's host name) |
 | `hermclaw_keep_releases` | `all.vars` | `3` | previous releases kept for a fast rollback (venvs, payloads, UI builds), 1–99: the most recently **active** ones, so the release active before the last switch is always kept |
 | `hermclaw_release_root` | `-e` | `<repo>/dist` | where the release directories are on the control node; a playbook group_var (`playbooks/group_vars/all.yml`), so `all.vars` has no effect: pass `-e hermclaw_release_root=<dir>` |
 | `hermclaw_config_overrides` | `all.vars` | `{}` | `{<file>: mapping}` deep-merged into `config/<file>.example.yaml` (section 5) |
@@ -297,8 +301,10 @@ does not abort a multi-hour download (`hermclaw_worker_model_pull_timeout`, defa
 
 ```bash
 readlink /var/www/hermclaw-next; ls /var/www/hermclaw-next-releases
-sudo nginx -t && curl -s http://192.168.178.223/healthz
-curl -sI http://192.168.178.223/ | grep -i content-security-policy
+sudo nginx -t && curl -s http://192.168.178.223:8080/healthz
+curl -sI http://192.168.178.223:8080/ | grep -i content-security-policy        # TLS: curl -skI https://192.168.178.223:8443/
+sudo ss -Htlnp 'sport = :80'                                                   # apache2 (the portal), never nginx
+grep -c 'Managed by Hermclaw' /var/www/noobclaw/nav/work_ki_kontrollraum.php   # 1: the portal's menu entry
 ```
 
 ## 9. Health checks (32.9)
@@ -308,7 +314,11 @@ After its restarts each host role checks:
 * `.225`: LiteLLM `/health/liveliness` and `/v1/models` refusing requests without a key (before the API and the
   scheduler start), SearXNG `/healthz`, `/api/health` shows `ok` and the new version;
 * the workers: `/health` shows `ok` and the new version;
-* `.223`, from the control node: `/healthz`, `/` (UI build with CSP) and `/api/health` through nginx.
+* `.223`, from the control node: `/healthz`, `/` (UI build with CSP) and `/api/health` through nginx on its port
+  (`http://192.168.178.223:8080`, with TLS `https://…:8443`). An active ufw without a rule for these ports makes
+  them time out (`nginx_firewall_allow_from`). On the shared host the nginx role refuses that state before these
+  checks. A rule for every port from `.225` alone would let them pass only when `.225` is the control node. The
+  nginx role has also already checked the live sockets there: nginx holds its ports and none of 80/443.
 
 The last play runs `hermclaw doctor` in the services' context, covering configuration, database head and pgvector,
 data paths, admin token, LiteLLM aliases, worker registration and heartbeats, the models of `.224`, the sandbox

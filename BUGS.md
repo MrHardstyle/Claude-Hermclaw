@@ -30,7 +30,24 @@ P0/P1-Blocker werden sofort behoben. Nicht-blockierende Bugs werden reproduziert
   `docs/operations/FINAL_BUILD_REPORT.md` zuletzt geändert wurde (der Release-Candidate-Stand).
 
 ## Offene Bugs
-Noch keine.
+
+### BUG-142 – The optional SSH gate cannot read its default allow-list as the runtime user
+- Phase: D-013 (Koexistenz `.223`, Analyse) · Komponente: sshtools/deploy · Severity: P3 · blockierend: nein (das Gate ist standardmäßig nicht aktiv, `common_ssh_forced_command: ""`) · Status: **offen**
+- Reproduktion:
+  1. On a bootstrapped target host, set `common_ssh_forced_command: /usr/local/bin/hermclaw-ssh-gate` and a
+     non-empty `hermclaw_release_ssh_gate_allowlist`.
+  2. Run bootstrap and deploy.
+  3. Run `ssh hermclaw-admin@<host> uptime` from `.225` with an allow-list rule `^uptime$`.
+- Erwartet: the gate runs `uptime`.
+- Tatsächlich: the gate runs as `hermclaw-admin` and reads `/etc/hermclaw/ssh-allowlist`. `/etc/hermclaw` is
+  `0750 root:hermclaw` (`roles/common/defaults/main.yml`, `common_directories`), and `hermclaw-admin` is not in the
+  group, so `[ -f "$ALLOWLIST" ]` fails. Every command is rejected with `allowlist-missing` (exit 126).
+- Workaround: keep the gate off (default). To keep the runtime away from a host completely, remove it from
+  `policies.ssh.allowed_hosts` (`hermclaw_config_overrides`, RISK R-038).
+- Fix-Vorschlag: move the allow-list to a root-owned file the runtime user can reach, e.g.
+  `/etc/hermclaw-ssh-allowlist`. That means changing the gate's default path, `hermclaw_release_ssh_gate_allowlist_file`
+  and `CRITICAL_REMOTE_FILES` in `hermclaw/sshtools/tools.py`. Add a test that runs the gate as a non-root user
+  against the deployed layout.
 
 ## Behobene Bugs
 
@@ -850,6 +867,57 @@ Noch keine.
   - A guard test scans `hermclaw/` for job metadata writes and reads with keys that are not reserved or are string literals. Reads also count through a local name the function loads via `select(Job.metadata_)` or `_locked_metadata` (`meta.get(K)`, `meta[0]`, `_list(meta, K)`): that is how the SSH approval readers in `sshtools/approvals.py`, `sshtools/tools.py` and `api/approvals.py` read, and the scan's sanity test asserts that it finds them. The scanned forms are listed in `docs/architecture/api.md` §2.
   - The `JobCreate.metadata` schema description lists the keys (`docs/contracts/openapi.json` regenerated). The API doc is `docs/architecture/api.md`.
 - Hinweis: free-form keys such as `ticket` and a job-level `sandbox_image` remain client-settable. The runtime reads `sandbox_image` only from repository metadata, checked against `policies.sandbox`. No in-repo client (UI, CLI, soak, E2E seed) sends metadata, so none is affected. No release has been deployed (BLOCKER-001), so there are no existing rows with planted keys.
+
+### BUG-141 – Bootstrap and deployment of `.223` would have failed on, or harmed, the legacy portal sharing the host
+- Phase: D-013 (Betreiberentscheidung: `.223` behält das Portal Noob2Claw/Kowacore) · Komponente: infra/ansible, deploy, infratools · Severity: P2 · blockierend: ja (für `.223`) · Status: **behoben**
+- Reproduktion: `playbooks/bootstrap.yml --limit webui` and `playbooks/deploy.yml` against a Debian 13 host whose
+  Apache 2.4 owns port 80. The host also has Debian's `nodejs` + `npm` and an active ufw.
+- Erwartet: Hermclaw's nginx runs next to Apache, and nothing of the portal changes.
+- Tatsächlich:
+  - **Preflight:** `check-host.sh` failed on `port:80`, because webui planned 80/443. The fail-safe then aborted
+    every host's deployment (`any_errors_fatal`). Any workaround (`--allow-conflicts`, only `nginx_listen_port`)
+    led to the following problems.
+  - **Node.js:** The `nodejs` role pinned NodeSource over Debian's nodejs and then failed its assert. An upgrade
+    would have removed Debian's `npm`, which the portal uses.
+  - **nginx package:** The fresh install enabled Debian's default site (`listen 80 default_server`) and
+    `nginx.service`, so nginx competed with Apache for port 80 at every boot.
+  - **Port check:** `nginx -t` accepts a busy port. 'Enable and start nginx' sat outside the rescue block, so a
+    bind failure left a `:80` site enabled.
+  - **Time:** The time zone of PHP/MariaDB/cron was force-set.
+  - **Accounts and directories:** Existing accounts and directories with Hermclaw names would have been rewritten.
+  - **Host header:** The API saw `Host` without the port, so an absolute redirect (e.g. a trailing slash) pointed at
+    the portal on port 80.
+  - **Cookies:** The portal's session and 2FA-device cookies were forwarded to the API.
+  - **Probe and port plan:** The `hosts.yaml` probe and the runtime port plan named `.223:80` as nginx.
+- Fix (D-013):
+  - **Ports:** Hermclaw uses `hermclaw_webui_http_port`/`hermclaw_webui_https_port` (8080/8443). The port plan,
+    check-host's table, the nginx defaults, `hosts.yaml`, the health URLs and the portal button follow them.
+  - **Shared-host mode** (`hermclaw_webui_shared_host`):
+    - 80/443 and HSTS are refused;
+    - nginx is installed with `policy_rc_d: 101`, and the package's default-site symlink is disabled;
+    - every listener of `nginx -T` is checked, and so are the live sockets after the start (nginx is stopped again
+      if it took a reserved port), with the start inside the rollback block;
+    - NodeSource is skipped, and a guard refuses to replace Debian's npm;
+    - the time setup is only read;
+    - foreign accounts and directories are refused before anything changes;
+    - ufw `allow` rules are added only for the sources in `nginx_firewall_allow_from` (default on the shared host:
+      its own IPv4 LAN) and only when ufw is active; an active ufw that allows neither nginx port while the list
+      is empty stops the role on the shared host (a rule for every port from `.225` alone does not count).
+  - **API proxy:** It sends `Host: $host:$server_port`, drops `Cookie` and hides `Set-Cookie`.
+  - **Runtime port plan:** `.223:8080/8443` belong to nginx, `.223:80/443` to `legacy-portal`, plus the `hosts.yaml`
+    ports.
+- Regression Tests:
+  - `tests/integration/test_bootstrap_infra.py::test_port_plan_is_in_sync_and_matches_bauplan`,
+    `::test_role_defaults_per_group`, `::test_check_host_reports_json_and_refuses_non_debian`, the `nginx-shared-*`
+    cases of `::test_role_input_validation`;
+  - `tests/integration/test_bootstrap_roles.py::test_shared_host_*`, `::test_firewall_*`, `::test_nodejs_*`;
+  - `tests/integration/test_bootstrap_nginx.py::test_shared_host_nginx_runs_next_to_a_foreign_server_on_port_80`,
+    `::test_listen_ports_follow_the_web_host_ports`, `::test_api_proxy_headers_and_keepalive`;
+  - `tests/integration/test_deploy_infra.py::test_hosts_yaml_probes_the_configured_nginx_port`,
+    `::test_ui_health_and_portal_urls_follow_the_nginx_ports`;
+  - `tests/unit/test_infratools_ports.py::test_legacy_portal_ports_collide_even_for_hermclaws_nginx`,
+    `::test_port_plan_from_hosts_follows_the_deployed_ports`;
+  - `tests/security/test_security_checks.py::test_nginx_site_never_forwards_cookies_to_the_api`.
 
 ## Template
 

@@ -42,6 +42,14 @@ hermclaw_timezone: Europe/Berlin  # noqa: var-naming[no-role-prefix]
 # Time: empty list keeps Debian's default NTP pool for systemd-timesyncd.
 common_ntp_servers: []
 
+# Shared web host (D-013; hermclaw_webui_shared_host of playbooks/group_vars/all.yml): .223 also runs the legacy
+# portal (Apache, PHP, MariaDB, cron). On it the bootstrap leaves the time zone and NTP setup alone (read-only
+# check) and refuses accounts and directories with Hermclaw's names it did not create (shared_guard.yml).
+common_shared_host: "{{ (hermclaw_webui_shared_host | default(false) | bool) and 'webui' in group_names }}"
+# GECOS of the accounts the bootstrap creates (users.yml, ssh_keys.yml): the shared-host guard's ownership marker.
+common_service_account_comment: Hermclaw Next service account
+common_runtime_account_comment: Hermclaw runtime SSH administration
+
 # 1.4 – SSH keys, generated on the orchestrator only (private keys never leave it).
 common_ssh_keys:
   - name: id_ed25519          # runtime SSH administration (research 20261008-021)

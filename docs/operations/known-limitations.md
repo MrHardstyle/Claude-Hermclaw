@@ -1,7 +1,8 @@
 # Bekannte Einschränkungen – Hermclaw Next 0.1.0rc1
 
-Stand 2026-10-15. Jede Einschränkung nennt ihre Auswirkung und den Umgang damit. Offene Bugs gibt es nicht
-(`BUGS.md`). Risiken mit Bewertung stehen in `RISK_REGISTER.md`.
+Stand 2026-10-15. Jede Einschränkung nennt ihre Auswirkung und den Umgang damit. Offen ist nur BUG-142 (das
+optionale SSH-Gate kann seine Standard-Allowlist nicht lesen; es ist standardmäßig aus, `BUGS.md`). Risiken mit
+Bewertung stehen in `RISK_REGISTER.md`.
 
 ## 1. Nicht live verifiziert (BLOCKER-001)
 
@@ -42,8 +43,9 @@ wenn alle Suiten grün sind, ist das System abgenommen.
   statt eines Overrides (Compose führt `ports` additiv zusammen).
 * **SSH-Tools:** Die Klassifikation ist statisch: Shell-Startdateien und Glob-Expansion auf dem Zielhost werden nicht
   modelliert. Netzwerkbefehle ohne ssh (z. B. `curl`) gelten als `mutate` und brauchen eine Freigabe. Lesende
-  Befehle sehen alles, was der Admin-Benutzer lesen darf. Das optionale Forced-Command-Gate braucht eine Allowlist,
-  die auch die Befehle der Container-Tools erlaubt.
+  Befehle sehen alles, was der Admin-Benutzer lesen darf; auf dem geteilten `.223` also auch die weltlesbaren Dateien
+  des Portals (R-038). Das optionale Forced-Command-Gate braucht eine Allowlist, die auch die Befehle der
+  Container-Tools erlaubt, und eine für den Runtime-Benutzer lesbare Allowlist-Datei (BUG-142).
 * **Scope:** `ScopeContract` kennt keine Operationen pro Pfad. Die Einschränkung auf vorgesehene Löschungen setzt
   das Audit durch, nicht die Prüfung zur Werkzeugzeit.
 * **Git:** Lokale `file://`-Repositories darf nur ein Admin-Token registrieren. Ein vorhandener aktiver Workspace
@@ -81,3 +83,28 @@ wenn alle Suiten grün sind, ist das System abgenommen.
   `-e hermclaw_orchestrator_allow_schema_downgrade=true` (RISK R-033, `docs/runbooks/upgrade.md`).
 * **Restore-Test:** Die Dienstrolle `hermclaw` hat `CREATEDB`, damit der wöchentliche Restore-Test seine Wegwerf-
   Datenbank anlegen kann (RISK R-034).
+
+## 5. Geteilter Web-Host `.223` (D-013)
+
+`.223` trägt weiterhin das Portal Noob2Claw/Kowacore (Apache :80, MariaDB, Login/2FA, Wiki). Hermclaws nginx läuft
+daneben auf 8080/8443.
+
+* **Nur im Heimnetz:** Der Kontrollraum ist nicht über Nginx Proxy Manager veröffentlicht. Wer das Portal von außen
+  über `app.kowacore.com` nutzt, erreicht über den Button nichts (R-036). Eine Veröffentlichung wäre eine eigene
+  Entscheidung: NPM-Proxy-Host mit Zugriffsliste, SSE-Pufferung aus.
+* **Kein Single Sign-on:** Portal-Login und Hermclaw-Token sind getrennt. Ein Token gilt nur im jeweiligen Tab
+  (`sessionStorage`).
+* **Kein HSTS:** Die Rolle verweigert HSTS auf dem geteilten Host, denn HSTS gilt für den Namen auf allen Ports und
+  damit auch für das Portal ohne HTTPS (R-039). Mit TLS führt der Button direkt auf `https://…:8443/`.
+* **Cookies:** Browser schicken die Cookies des Portals auch an Port 8080 (Cookies gelten je Host, nicht je Port).
+  nginx verwirft sie vor der API (R-037).
+* **Gleicher Host:** Der Menüpunkt liegt im Verzeichnis `nav/` des Portals, das `www-data` gehört. Ein
+  kompromittiertes Portal kann den Link ändern. Er ist keine Sicherheitsgrenze; der Kontrollraum verlangt immer ein
+  Hermclaw-Token (R-040).
+* **Weitergeleitete Adressen:** Die API vertraut `X-Forwarded-For/-Proto` der Adresse `.223`, also jedem Prozess
+  dort, auch dem PHP des Portals. Client-IPs im Audit können von `.223` aus gefälscht werden (R-039).
+* **Andere Ports:** Wechseln Sie die Ports per `hermclaw_webui_http_port`/`hermclaw_webui_https_port`, dann folgt
+  der Laufzeit-Portplan (`hermclaw/infratools/ports.py`) über `hosts.yaml`. Die eingebaute Tabelle
+  `BAUPLAN_PORT_PLAN` (`hermclaw/infratools/ports.py`) nennt 8080/8443 (Bauplan §6: 80/443) und reserviert 80/443
+  für das Portal; `hosts.yaml` kann diese beiden Einträge nicht ersetzen.
+

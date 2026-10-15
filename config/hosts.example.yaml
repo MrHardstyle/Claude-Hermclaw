@@ -13,7 +13,9 @@ hosts:
     role: webui
     ssh: {user: hermclaw-admin}
     services:
-      - {name: nginx, port: 80, http_path: /}
+      # Hermclaw's nginx next to the legacy portal (Apache keeps port 80, D-013); the deployment sets the port from
+      # the inventory (hermclaw_webui_http_port) - /healthz answers on it also when TLS is on
+      - {name: nginx, port: 8080, http_path: /healthz}
   - id: exec-222
     address: 192.168.178.222
     role: execution_worker

@@ -37,12 +37,15 @@
     - role: podman
     - role: systemd_skeleton
 
-- name: WebUI .223 - Node.js build tooling, Nginx
+# A shared .223 (hermclaw_webui_shared_host, D-013: the legacy portal stays) gets no NodeSource repository: the UI is
+# built on the control node (scripts/deploy/build-release.sh), and the host's own Debian nodejs/npm stays untouched.
+- name: WebUI .223 - Node.js build tooling (dedicated host only), Nginx
   hosts: webui
   become: true
   roles:
     - role: common
     - role: nodejs
+      when: not hermclaw_webui_shared_host | bool
     - role: nginx
 
 - name: Execution worker .222 - rootless Podman sandbox, Wake-on-LAN, units

@@ -1,0 +1,38 @@
+<?php
+/*
+ICON: {{ hermclaw_ui_portal_link_icon }}
+TITLE: {{ hermclaw_ui_portal_link_title }}
+PRIO: {{ hermclaw_ui_portal_link_prio }}
+BEREICH: {{ hermclaw_ui_portal_link_area }}
+RECHT: {{ hermclaw_ui_portal_link_right }}
+{% if hermclaw_ui_portal_link_direct | bool %}
+URL: {{ hermclaw_ui_portal_link_url }}
+{% endif %}
+*/
+// Managed by Hermclaw - Kontrollraum-Button von Hermclaw Next (Ansible-Rolle hermclaw_ui, D-013).
+// Wird bei jedem Deployment neu geschrieben; Quelle integrations/kowacore-portal im Hermclaw-Repository.
+?>
+<section class="seitenkopf">
+    <div>
+        <p class="seitenkopf__eyebrow">{{ {'main': 'Uebersicht', 'work': 'Arbeit', 'tools': 'Tools', 'control': 'Betrieb', 'settings': 'Einstellungen'}.get(hermclaw_ui_portal_link_area, hermclaw_ui_portal_link_area | capitalize) }}</p>
+        <h1>{{ hermclaw_ui_portal_link_title | e }}</h1>
+        <p>Hermclaw Next: Auftr&auml;ge, Pl&auml;ne, Worker, Ressourcen und Live-Ereignisse des autonomen KI-Workers.</p>
+    </div>
+    <div class="seitenkopf__aktionen">
+        <a class="button button--primaer" href="{{ hermclaw_ui_portal_link_url | e }}" target="_blank" rel="noopener noreferrer">{{ hermclaw_ui_portal_link_title | e }} &ouml;ffnen</a>
+    </div>
+</section>
+<section class="panel">
+    <header class="panel__kopf">
+        <div>
+            <h2>Hinweise</h2>
+            <p>Der Kontrollraum &ouml;ffnet sich in einem neuen Tab und ist nur im Heimnetz erreichbar.</p>
+        </div>
+        <span class="badge badge--information">Heimnetz</span>
+    </header>
+    <p>Anmeldung mit einem pers&ouml;nlichen Hermclaw-Zugangstoken, nicht mit dem Portal-Login. Das Token gilt nur im jeweiligen Tab.</p>
+    <p>Adresse: <code>{{ hermclaw_ui_portal_link_url | e }}</code></p>
+{% if nginx_tls_enabled | default(false) | bool and nginx_tls_source | default('self-signed') == 'self-signed' %}
+    <p>Beim ersten Aufruf das selbstsignierte Zertifikat im Browser best&auml;tigen.</p>
+{% endif %}
+</section>

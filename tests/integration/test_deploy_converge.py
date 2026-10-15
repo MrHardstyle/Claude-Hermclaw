@@ -660,8 +660,13 @@ def test_site_converges_bootstrap_and_deployment(deployment: dict[str, Any]) -> 
     assert '<div id="root">' in a.out("cat /var/www/hermclaw-next/index.html")
     a.out(f"test -f /var/www/hermclaw-next-releases/{V1}.release")
     site = a.out("cat /etc/nginx/sites-enabled/hermclaw-next.conf")
-    assert "listen 443 ssl;" in site and "http2 on;" in site and "return 301 https://$host$request_uri;" in site
-    assert "upgrade-insecure-requests" in site
+    # D-013: the shared .223 keeps 80/443 for the legacy portal, Hermclaw's nginx uses 8080/8443
+    assert "listen 8443 ssl;" in site and "http2 on;" in site and "return 301 https://$host:8443$request_uri;" in site
+    assert "listen 8080;" in site and not re.search(r"listen (\[::\]:)?(80|443)[ ;]", site)
+    assert "upgrade-insecure-requests" in site and 'proxy_set_header Cookie "";' in site
+    assert hosts["webui-223"]["services"] == [{"name": "nginx", "port": 8080, "http_path": "/healthz"}]
+    # no legacy portal in the container: the portal button is skipped, nothing else is written below /var/www
+    assert a.out("ls -A /var/www").split() == ["hermclaw-next", "hermclaw-next-releases"]
     san = a.out("openssl x509 -in /etc/nginx/tls/hermclaw-web.crt -noout -ext subjectAltName")
     assert "DNS:hermclaw.lan" in san and "IP Address:192.168.178.223" in san
     assert a.out("stat -c '%a' /etc/nginx/tls/hermclaw-web.key").strip() == "600"

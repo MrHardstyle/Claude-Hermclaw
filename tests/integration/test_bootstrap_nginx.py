@@ -21,6 +21,7 @@ host network so it can reach it. Skipped only when Podman or the image is unavai
 from __future__ import annotations
 
 import json
+import re
 import shutil
 import socket
 import subprocess
@@ -178,6 +179,7 @@ class _Upstream:
                 body = json.dumps({"path": self.path, "headers": {k.lower(): v for k, v in self.headers.items()}}).encode()
                 self.send_response(200)
                 self.send_header("Content-Type", "application/json")
+                self.send_header("Set-Cookie", "upstream_session=1; Path=/")  # must never reach the browser
                 self.send_header("Content-Length", str(len(body)))
                 self.end_headers()
                 self.wfile.write(body)
@@ -256,17 +258,38 @@ def test_nginx_accepts_the_rendered_site_and_rejects_a_broken_one(tmp_path: Path
 def test_ipv6_listener_follows_the_host(tmp_path: Path) -> None:
     """``listen [::]`` breaks nginx on kernels without IPv6 (found by the real nginx test above)."""
     without = _render_site(tmp_path, {}).read_text(encoding="utf-8")  # no facts = no IPv6 address
-    assert "listen 80;" in without and "[::]" not in without
+    assert "listen 8080;" in without and "[::]" not in without
     (tmp_path / "v6").mkdir()
     facts = {"ansible_facts": {"all_ipv6_addresses": ["fd00::225"]}}
     with_v6 = _render_site(tmp_path / "v6", facts).read_text(encoding="utf-8")
-    assert "listen 80;" in with_v6 and "listen [::]:80;" in with_v6
+    assert "listen 8080;" in with_v6 and "listen [::]:8080;" in with_v6
     (tmp_path / "forced").mkdir()
     forced = _render_site(tmp_path / "forced", {"nginx_listen_ipv6": False, **facts}).read_text(encoding="utf-8")
     assert "[::]" not in forced
     (tmp_path / "default-server").mkdir()
     default = _render_site(tmp_path / "default-server", {"nginx_default_server": True, **facts}).read_text(encoding="utf-8")
-    assert "listen 80 default_server;" in default and "listen [::]:80 default_server;" in default
+    assert "listen 8080 default_server;" in default and "listen [::]:8080 default_server;" in default
+
+
+def test_listen_ports_follow_the_web_host_ports(tmp_path: Path) -> None:
+    """D-013: 8080/8443 on the shared .223 (group_vars), any port per host, 80/443 for a host of Hermclaw alone."""
+    tls = {"nginx_tls_enabled": True, "hermclaw_web_server_name": "hermclaw.lan"}
+    shared = _render_site(tmp_path, tls).read_text(encoding="utf-8")
+    assert "listen 8443 ssl;" in shared and "listen 8080;" in shared
+    assert "return 301 https://$host:8443$request_uri;" in shared
+    assert not re.search(r"listen (\[::\]:)?(80|443)[ ;]", shared), "never the legacy portal's ports"
+    assert "Shared host (D-013)" in shared
+    (tmp_path / "custom").mkdir()
+    custom = _render_site(tmp_path / "custom", {**tls, "hermclaw_webui_http_port": 9080, "hermclaw_webui_https_port": 9443})
+    text = custom.read_text(encoding="utf-8")
+    assert "listen 9443 ssl;" in text and "listen 9080;" in text and "https://$host:9443$request_uri" in text
+    (tmp_path / "dedicated").mkdir()
+    dedicated = _render_site(
+        tmp_path / "dedicated",
+        {**tls, "hermclaw_webui_shared_host": False, "hermclaw_webui_http_port": 80, "hermclaw_webui_https_port": 443},
+    ).read_text(encoding="utf-8")
+    assert "listen 443 ssl;" in dedicated and "listen 80;" in dedicated and "return 301 https://$host$request_uri;" in dedicated
+    assert "Shared host" not in dedicated
 
 
 @pytest.mark.parametrize("path", ["/api/events/stream", "/api/jobs/7f3c2a/events/stream"])
@@ -305,12 +328,23 @@ def test_generic_api_location_buffers_streams(running_nginx: str, upstream: _Ups
 
 
 def test_api_proxy_headers_and_keepalive(running_nginx: str, upstream: _Upstream) -> None:
-    resp = httpx.get(running_nginx + "/api/health?x=1", headers={"Host": "hermclaw.lan"}, timeout=5.0)
+    # the legacy portal's cookies (same host name, other port: browsers send them along) never reach the API
+    portal_cookies = {"Cookie": "hermclaw_session=portal-secret; hermclaw_2fa_geraet=sel:val"}
+    resp = httpx.get(running_nginx + "/api/health?x=1", headers={"Host": "hermclaw.lan", **portal_cookies}, timeout=5.0)
     assert resp.status_code == 200
     seen = resp.json()
     assert seen["path"] == "/api/health?x=1"
     headers = seen["headers"]
-    assert headers["host"] == "hermclaw.lan"
+    # with the port: absolute redirects of the API stay on this server (8080 here, the portal owns 80)
+    assert headers["host"] == f"hermclaw.lan:{running_nginx.rsplit(':', 1)[1]}"
+    assert "cookie" not in headers and "set-cookie" not in resp.headers
+    with (
+        httpx.Client(timeout=httpx.Timeout(10.0, read=5.0)) as client,
+        client.stream("GET", running_nginx + "/api/events/stream", headers={"Host": "hermclaw.lan", **portal_cookies}) as stream,
+    ):
+        assert stream.status_code == 200 and "set-cookie" not in stream.headers
+        upstream.release.set()
+    assert "cookie" not in upstream.requests[-1], "the SSE location drops the cookies too"
     assert headers["x-forwarded-proto"] == "http"
     assert headers["x-real-ip"] == "127.0.0.1" and headers["x-forwarded-for"] == "127.0.0.1"
     assert headers.get("connection", "").lower() != "close", "upstream keepalive (proxy_set_header Connection '')"
@@ -330,3 +364,125 @@ def test_spa_fallback_and_security_headers(running_nginx: str) -> None:
     assert asset.headers["x-content-type-options"] == "nosniff"
     missing = httpx.get(running_nginx + "/assets/missing.js", headers=host, timeout=5.0)
     assert missing.status_code == 404, "assets never fall back to index.html"
+
+
+# --------------------------------------------------------------------------------------------- shared web host (D-013)
+
+# the legacy portal stand-in: another web server that owns port 80 of the host (Apache on .223)
+FOREIGN_CONF = """pid /tmp/foreign.pid;
+error_log /dev/stderr warn;
+events { worker_connections 16; }
+http { access_log off; server { listen 80; return 200 "legacy-portal\\n"; } }
+"""
+# what Debian's nginx package enables on a fresh install (sites-enabled/default -> sites-available/default), without
+# its `listen [::]:80 default_server;` (the test container has no IPv6: nginx -t would fail on that line already)
+DEBIAN_DEFAULT = """server {
+\tlisten 80 default_server;
+\troot /var/www/html;
+\tserver_name _;
+}
+"""
+SHARED_SCRIPT = r"""
+get() { exec 3<>"/dev/tcp/127.0.0.1/$1"; printf 'GET %s HTTP/1.0\r\nHost: hermclaw.lan\r\n\r\n' "$2" >&3; cat <&3; exec 3<&-; }
+nginx -c /etc/nginx/foreign.conf && echo FOREIGN-STARTED
+get 80 / | tail -n 1
+nginx -t 2>&1 && echo HERMCLAW-T-OK
+nginx -T -q > /out/hermclaw.dump
+nginx && echo HERMCLAW-STARTED
+get 8080 /healthz | tail -n 1
+get 80 / | tail -n 1
+nginx -s quit; sleep 1
+ln -s /etc/nginx/sites-available/default /etc/nginx/sites-enabled/default
+nginx -t 2>&1 && echo DEFAULT-T-OK
+nginx -T -q > /out/with-default.dump
+nginx 2>&1 || echo DEFAULT-START-FAILED
+"""
+
+
+def test_shared_host_nginx_runs_next_to_a_foreign_server_on_port_80(tmp_path: Path, nginx_image: str) -> None:
+    """A real nginx with the rendered site (8080) next to another web server on port 80, as on .223.
+
+    It starts and serves while the other server keeps port 80. With Debian's default site enabled nginx cannot
+    start at all - `nginx -t` still reports success (it tolerates the busy port), which is why the role disables
+    that site and checks the listen directives of `nginx -T` itself (listeners.yml, run here on the real dumps).
+    """
+    from tests.integration.test_bootstrap_roles import Case, _fake_tool, _run_cases
+
+    site = _render_site(tmp_path, {"hermclaw_web_server_name": "hermclaw.lan 192.168.178.223", "nginx_api_upstream": "http://127.0.0.1:9"})
+    mounts = _mounts(tmp_path, site)
+    (tmp_path / "foreign.conf").write_text(FOREIGN_CONF, encoding="utf-8")
+    (tmp_path / "default").write_text(DEBIAN_DEFAULT, encoding="utf-8")
+    out = tmp_path / "out"
+    out.mkdir()
+    for path in (tmp_path / "foreign.conf", tmp_path / "default"):
+        path.chmod(0o644)
+    # sites-enabled must be writable inside the container (the default site gets linked there)
+    mounts = [m.replace(":/etc/nginx/sites-enabled/hermclaw-next.conf:ro", ":/etc/nginx/hermclaw-next.conf:ro") for m in mounts]
+    # the image's own conf.d/default.conf listens on 80 as well: gone, like the Debian default site on .223
+    script = "set -u; rm -f /etc/nginx/conf.d/default.conf; mkdir -p /etc/nginx/sites-enabled /var/www/html; " + (
+        "ln -s /etc/nginx/hermclaw-next.conf /etc/nginx/sites-enabled/hermclaw-next.conf; " + SHARED_SCRIPT
+    )
+    res = _podman(
+        "run", "--rm", "--network", "none", *mounts,
+        "-v", f"{tmp_path / 'foreign.conf'}:/etc/nginx/foreign.conf:ro",
+        "-v", f"{tmp_path / 'default'}:/etc/nginx/sites-available/default:ro",
+        "-v", f"{out}:/out",
+        nginx_image, "bash", "-c", script,
+    )  # fmt: skip
+    log = res.stdout + res.stderr
+    assert "FOREIGN-STARTED" in log and log.count("legacy-portal") == 2, log
+    assert "HERMCLAW-T-OK" in log and "HERMCLAW-STARTED" in log, log
+    assert "\nok\n" in log.replace("\r", ""), f"/healthz on 8080: {log}"
+    # the busy port is invisible to nginx -t, but the start fails on it
+    assert "DEFAULT-T-OK" in log and "DEFAULT-START-FAILED" in log, log
+    assert "bind() to 0.0.0.0:80 failed (98" in log, log
+
+    bindir = tmp_path / "bin"
+    _fake_tool(bindir, "nginx", '[ "$1" = "-T" ] || exit 64\ncat "$FAKE_NGINX_DUMP"\n')
+    cases: list[Case] = [
+        ("real-dump-hermclaw", "nginx", "listeners.yml", {}, {"FAKE_NGINX_DUMP": str(out / "hermclaw.dump")}, "PASS"),
+        ("real-dump-with-default", "nginx", "listeners.yml", {}, {"FAKE_NGINX_DUMP": str(out / "with-default.dump")}, "FAIL"),
+    ]
+    _run_cases(tmp_path, cases, bindir)
+    assert "listen 8080;" in (out / "hermclaw.dump").read_text(encoding="utf-8")
+
+
+def test_tokens_of_event_streams_never_reach_the_logs(tmp_path: Path, nginx_image: str) -> None:
+    """The legacy portal's PHP runs as www-data on the same host: no log file may hold an ?access_token= (D-013)."""
+    port, dead = _free_port(), _free_port()  # nothing listens on `dead`: every proxied request fails with 502
+    site = _render_site(
+        tmp_path, {"hermclaw_web_server_name": "hermclaw.lan", "nginx_listen_port": port, "nginx_api_upstream": f"http://127.0.0.1:{dead}"}
+    )
+    logs = tmp_path / "logs"
+    logs.mkdir()
+    logs.chmod(0o777)
+    name = f"hcl-nginx-logs-{uuid.uuid4().hex[:8]}"
+    res = _podman(
+        "run", "-d", "--rm", "--name", name, "--network", "host", *_mounts(tmp_path, site), "-v", f"{logs}:/var/log/nginx",
+        nginx_image, "nginx", "-g", "daemon off;",
+    )  # fmt: skip
+    if res.returncode != 0 and "network" in res.stderr.lower():
+        pytest.skip(f"podman host networking unavailable: {res.stderr.strip()[:200]}")
+    assert res.returncode == 0, res.stderr
+    base, host = f"http://127.0.0.1:{port}", {"Host": "hermclaw.lan"}
+    try:
+        deadline = time.monotonic() + 30
+        while True:
+            try:
+                httpx.get(f"{base}/healthz", headers=host, timeout=1.0)
+                break
+            except httpx.TransportError:
+                if time.monotonic() > deadline:
+                    pytest.fail(_podman("logs", name).stderr[-2000:])
+                time.sleep(0.2)
+        stream = httpx.get(f"{base}/api/events/stream?access_token=hct_STREAMSECRET", headers=host, timeout=10.0)
+        job = httpx.get(f"{base}/api/jobs/7/events/stream?access_token=hct_JOBSECRET", headers=host, timeout=10.0)
+        plain = httpx.get(f"{base}/api/health", headers=host, timeout=10.0)
+        assert stream.status_code == job.status_code == plain.status_code == 502
+        time.sleep(0.5)
+    finally:
+        _podman("rm", "-f", "-t", "0", name)
+    text = "".join(f.read_text(encoding="utf-8", errors="replace") for f in logs.iterdir() if f.is_file())
+    # negative control: the error log works and writes the request line (it would carry a query string)
+    assert "connect() failed" in text and 'request: "GET /api/health HTTP/1.1"' in text, text[-2000:]
+    assert "STREAMSECRET" not in text and "JOBSECRET" not in text and "access_token" not in text

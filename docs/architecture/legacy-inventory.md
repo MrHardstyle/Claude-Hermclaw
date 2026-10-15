@@ -7,7 +7,10 @@ Quellen (nur lesend):
 Bekannte Bestandteile laut Relay-Struktur und Bauplan:
 - `agent_core/agent_core.py` (eingefrorener Monolith, Agent-Loop mit festem Rundenlimit),
 - `model_runtime/` (Shell-Pipeline, Modellwechsel via Ollama, aufgabenspezifische Discovery/Acceptance),
-- Bridge-Dienst `hermclaw-patch-watcher.service`, WebUI unter `/var/www/noobclaw` auf `.223`.
+- Bridge-Dienst `hermclaw-patch-watcher.service`, WebUI unter `/var/www/noobclaw` auf `.223`. Diese WebUI ist das Portal
+  Noob2Claw/Kowacore (Apache 2.4 + mod_php auf Port 80, MariaDB, Login/2FA, Wiki). Es bleibt nach D-013 in Betrieb
+  und wird nicht abgelöst; Hermclaw Next läuft daneben (nginx :8080/:8443) und ergänzt nur den Menüpunkt
+  „KI-Kontrollraum“.
 
 Übernommene Lessons Learned (als Anforderungen, nicht als Code):
 - Kein Runtime-State unter `/tmp`; PostgreSQL ist Source of Truth.

@@ -64,7 +64,7 @@
 | 192.168.178.225 | Orchestrator | nicht deployt (BLOCKER-001); Bootstrap + Deployment im Debian-13-Container verifiziert |
 | 192.168.178.222 | Coding / Execution Worker | nicht deployt (BLOCKER-001); Converge im Container, echte Podman-Sandbox-Tests |
 | 192.168.178.224 | Model / Media Worker | nicht deployt (BLOCKER-001); Converge im Container (GPU-Pfad nur live) |
-| 192.168.178.223 | WebUI / Nginx | nicht deployt (BLOCKER-001); nginx 1.28 im Container, Playwright gegen echtes Backend |
+| 192.168.178.223 | WebUI / Nginx (Kontrollraum auf 8080/8443) neben dem bestehenden Portal Noob2Claw/Kowacore (Apache :80, bleibt, D-013) | nicht deployt (BLOCKER-001); nginx 1.28 im Container (auch neben fremdem Server auf :80), Portal-Button gegen den Menü-Parser des Portals getestet, Playwright gegen echtes Backend |
 | 192.168.178.226 | GitLab | bestehend, unverändert; Vorbereitung INSTALLATION.md 6.1 |
 | 192.168.178.60 | Terra / Unraid Backup | bestehend, unverändert; Vorbereitung INSTALLATION.md 6.2 / 11 |
 
@@ -74,7 +74,8 @@
 - Embeddings: `embeddinggemma:300m` (768 dim; EmbeddingGemma 2 erst, wenn Ollama es unter Linux/CUDA ausführt, D-010)
 
 ## Bugs
-- 140 gefunden, **140 behoben**, 0 offen (P0 2, P1 26, P2 61, P3 48, P4 3) – `BUGS.md` (zuletzt BUG-140: reservierte Job-Metadaten-Schlüssel)
+- 142 gefunden, **141 behoben**, 1 offen (P0 2, P1 26, P2 62, P3 49, P4 3) – `BUGS.md` (BUG-141: Koexistenz mit dem Portal auf .223, behoben;
+  BUG-142: optionales SSH-Gate liest seine Standard-Allowlist nicht, P3, offen, Gate standardmäßig aus)
 - Externer Blocker: BLOCKER-001
 
 ## Letzte Testresultate (2026-10-15, Build-Host)
@@ -84,6 +85,20 @@
   ansible-lint (production) sauber
 - Dependency-Audit 2026-10-15: keine bekannten Schwachstellen (runtime 107, LiteLLM 116 Pakete, UI 0)
 
+## Betreiberentscheidung D-013 (2026-10-15)
+`.223` bleibt das Portal Noob2Claw/Kowacore (Login/2FA, Wiki; wird nicht neu installiert). Hermclaws nginx läuft
+daneben auf 8080/8443. Ins Portal kommt nur der Menüpunkt **Arbeit → KI-Kontrollraum** mit dem Button zum
+Kontrollraum. Umsetzung:
+
+- Ansible: Rollen nginx, common, nodejs und hermclaw_ui, Portplan, `check-host.sh`;
+- `hosts.yaml`-Probe, Laufzeit-Portplan;
+- Doku: INSTALLATION, cutover.md, Runbooks, Architektur;
+- Risiken R-036–R-040, BUG-141/142.
+
+Tests 2026-10-15, einzeln ausgeführt: `test_bootstrap_infra` 63, `test_bootstrap_roles` 15, `test_bootstrap_nginx` 10,
+`test_bootstrap_converge` 1, `test_deploy_infra` 64, `test_infratools_ports` 14 und `test_security_checks` 6, alle
+bestanden; ansible-lint (production) sauber. `test_deploy_converge` ist angepasst; ihn führt der Integrator aus.
+
 ## Nächster Schritt
-Installation auf den Zielhosts nach `docs/operations/INSTALLATION.md`, danach Live-Abnahme (Kapitel 12) und Cutover
-nach `docs/runbooks/cutover.md`.
+Installation auf den Zielhosts nach `docs/operations/INSTALLATION.md` (`.223` nur ergänzen, nicht neu installieren),
+danach Live-Abnahme (Kapitel 12) und Cutover nach `docs/runbooks/cutover.md`.

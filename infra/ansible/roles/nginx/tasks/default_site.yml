@@ -1,0 +1,19 @@
+# Shared host (D-013): Debian's nginx package links sites-enabled/default -> sites-available/default on a fresh
+# install (listen 80 default_server and [::]:80). Only that symlink is removed - while it still points at the
+# package's file -, before nginx is started for the first time; the conffile itself and every other site stay.
+# Upgrades of the package never re-create the link (nginx-common.postinst only does so on a fresh install).
+- name: Inspect nginx's Debian default site
+  ansible.builtin.stat:
+    path: "{{ nginx_debian_default_site_link }}"
+    follow: false
+    get_checksum: false
+  register: nginx_debian_default
+
+- name: Disable nginx's Debian default site (only the package's symlink)
+  ansible.builtin.file:
+    path: "{{ nginx_debian_default_site_link }}"
+    state: absent
+  when:
+    - nginx_debian_default.stat.islnk | default(false)
+    - nginx_debian_default.stat.lnk_source | default('') == nginx_debian_default_site_file
+  notify: Reload nginx

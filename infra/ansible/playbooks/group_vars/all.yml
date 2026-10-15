@@ -38,10 +38,27 @@ hermclaw_worker_port: 8787
 hermclaw_ollama_port: 11434
 hermclaw_searxng_port: 8888
 
+# --- Web UI host .223, shared with the legacy portal (D-013) ------------------------------------------------------
+# .223 keeps the existing portal (Apache on port 80, MariaDB, login/2FA, wiki; published by Nginx Proxy Manager
+# on .2). Hermclaw's nginx (the Kontrollraum: React UI + /api incl. SSE to .225) runs next to it on its own ports
+# and never claims 80/443 there: the nginx role refuses them, removes nothing but nginx's own Debian default site
+# and checks every listener; the bootstrap leaves the host's time setup and Node.js alone (roles nginx, common,
+# playbooks/bootstrap.yml). A host that belongs to Hermclaw alone: hermclaw_webui_shared_host: false and, if
+# wanted, ports 80/443 (Bauplan §6) - as host vars of the web host (or -e), like every value in this file.
+hermclaw_webui_shared_host: true
+# Ports of Hermclaw's nginx: HTTP (with TLS only /healthz and the redirect) and HTTPS (nginx_tls_enabled).
+# The nginx role (nginx_listen_port / nginx_tls_port), the port plan below, check-host.sh, hosts.yaml and the
+# health checks of the deployment follow them.
+hermclaw_webui_http_port: 8080
+hermclaw_webui_https_port: 8443
+
 # Port plan per inventory group. scripts/bootstrap/check-host.sh carries the same
 # table (tests/integration/test_bootstrap_infra.py keeps both in sync).
 # expect = process names (/proc/<pid>/comm) that may legitimately own the port already;
 # "name~word" additionally requires word in the command line (generic interpreters).
+# webui: the ports nginx is configured for (nginx_listen_port / nginx_tls_port as host vars, otherwise
+# hermclaw_webui_http_port / hermclaw_webui_https_port) - 8080/8443 here, D-013; check-host.sh's built-in table
+# carries these defaults.
 hermclaw_port_plan:
   orchestrator:
     - {port: 8000, service: hermclaw-api, expect: [hermclaw, python3~hermclaw, python~hermclaw, uvicorn~hermclaw]}
@@ -52,8 +69,8 @@ hermclaw_port_plan:
       expect: [rootlessport, pasta, pasta.avx2, slirp4netns, conmon, uwsgi~searx, granian~searx, python3~searx]
     - {port: 9100, service: metrics, expect: [hermclaw, python3~hermclaw, python~hermclaw]}
   webui:
-    - {port: 80, service: nginx-http, expect: [nginx]}
-    - {port: 443, service: nginx-https, expect: [nginx]}
+    - {port: "{{ nginx_listen_port | default(hermclaw_webui_http_port) }}", service: nginx-http, expect: [nginx]}
+    - {port: "{{ nginx_tls_port | default(hermclaw_webui_https_port) }}", service: nginx-https, expect: [nginx]}
   execution_workers:
     - {port: 8787, service: hermclaw-exec-worker, expect: [hermclaw-exec-w, python3~hermclaw, python~hermclaw]}
   model_workers:
