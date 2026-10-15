@@ -4,12 +4,14 @@
 |---|---|---|---|---|
 | 2026-10-13 | runtime venv (`.venv`, Python 3.12, all extras incl. dev) | pip-audit (PyPI advisory DB / OSV) | 98 | **No known vulnerabilities** |
 | 2026-10-13 | LiteLLM venv (`litellm[proxy]==1.104.2`, separate venv per DECISIONS) | pip-audit | 115 | **No known vulnerabilities** |
-| pending UI merge | `ui/` npm dependencies (production) | `npm audit --omit=dev` | – | run by `scripts/dev/dependency-audit.sh` once the UI lockfile is final |
+| 2026-10-15 (RC) | runtime venv (`.venv`, all extras incl. dev) | pip-audit | 107 | **No known vulnerabilities** |
+| 2026-10-15 (RC) | LiteLLM venv (`litellm[proxy]==1.104.2` + `prisma==0.15.0`) | pip-audit | 116 | **No known vulnerabilities** |
+| 2026-10-15 (RC) | `ui/` npm dependencies (production, `package-lock.json`) | `npm audit --omit=dev` | – | **0 vulnerabilities** (info/low/moderate/high/critical: 0) |
 
 ## Re-run
 
 ```bash
-scripts/dev/dependency-audit.sh .venv /opt/hermclaw/litellm-venv   # reports in ./audit-reports/
+scripts/dev/dependency-audit.sh .venv /opt/litellm/venv   # reports in ./audit-reports/
 ```
 
 The script installs pip-audit into a throw-away venv (never into the runtime venv), freezes each venv (pip or uv
