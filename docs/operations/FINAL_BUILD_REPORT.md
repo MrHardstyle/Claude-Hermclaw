@@ -139,6 +139,11 @@ D-011 NVIDIA-R580-Runfile, D-012 pgvector-Untergrenze).
 | Last/Performance | 1 | 8 | 0 | 0 | 0 |
 | **gesamt** | **208** | **3232** | **0** | **0** | 24 |
 
+Nach dem Matrixlauf kam der Sicherheitsfix BUG-140 hinzu (reservierte Job-Metadaten-Schlüssel auf `POST /api/jobs`):
+`tests/unit/test_job_metadata.py` 31 und `tests/integration/test_api_job_metadata.py` 27 neue Tests, grün; die
+berührten Suiten (`test_api.py`, `test_scheduler.py`, `test_runtime_driver.py`, Contract-Docs, Security, UI/Playwright)
+wurden einzeln erneut ausgeführt, ebenfalls grün.
+
 Quelle: `docs/testing/test-matrix-results.{md,json}` (`scripts/dev/test_matrix.py`, eine pytest-Instanz pro Datei, Python
 3.12 auf dem Build-Host; zweiter vollständiger Lauf am 2026-10-15 plus Nachlauf der fünf danach geänderten Dateien).
 Zusätzlich innerhalb von `tests/e2e/test_ui_playwright.py`: **Vitest 48** UI-Unit-Tests sowie **Playwright 35** Tests
@@ -208,11 +213,11 @@ keine Chain-of-Thought in Logs, Events oder UI. Ergebnis im finalen Lauf: `tests
 | Severity | gefunden | behoben | offen |
 |---|---|---|---|
 | P0 | 2 | 2 | 0 |
-| P1 | 25 | 25 | 0 |
+| P1 | 26 | 26 | 0 |
 | P2 | 61 | 61 | 0 |
 | P3 | 48 | 48 | 0 |
 | P4 | 3 | 3 | 0 |
-| **gesamt** | **139** | **139** | **0** |
+| **gesamt** | **140** | **140** | **0** |
 
 Externer Blocker: **BLOCKER-001** (Ziel-LAN aus der Build-Umgebung nicht erreichbar) – kein Bug, siehe `BUGS.md`.
 
