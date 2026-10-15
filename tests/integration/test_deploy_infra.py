@@ -45,6 +45,13 @@ from tests.integration.test_bootstrap_infra import (
 pytestmark = pytest.mark.integration
 
 DEPLOY_ROLES = ["hermclaw_release", "hermclaw_config", "hermclaw_orchestrator", "hermclaw_worker", "hermclaw_ui", "hermclaw_verify"]
+# Settings operators set in the inventory (all.vars, group vars) that keep a shared name: role defaults of every role
+# that reads them, never playbook group_vars (those beat all.vars and the group vars of hosts.yml, findings 15/27).
+SHARED_ROLE_SETTINGS: dict[str, list[str]] = {
+    "hermclaw_keep_releases": ["hermclaw_release", "hermclaw_ui"],
+    "hermclaw_sandbox_image_version": ["hermclaw_config", "hermclaw_release", "hermclaw_worker"],
+    "hermclaw_timezone": ["common"],
+}
 NGINX_IMAGE = "docker.io/library/nginx:1.28"
 BUILD = REPO / "scripts" / "deploy" / "build-release.sh"
 
@@ -152,7 +159,9 @@ def test_deploy_playbook_structure() -> None:
         meta = yaml.safe_load((ROLES_DIR / role / "meta" / "main.yml").read_text(encoding="utf-8"))
         assert meta["galaxy_info"]["platforms"] == [{"name": "Debian", "versions": ["trixie"]}]
         defaults = yaml.safe_load((ROLES_DIR / role / "defaults" / "main.yml").read_text(encoding="utf-8"))
-        assert all(k.startswith(role + "_") for k in defaults), f"{role}: role variables carry the role prefix"
+        assert all(k.startswith(role + "_") or k in SHARED_ROLE_SETTINGS for k in defaults), (
+            f"{role}: role variables carry the role prefix (shared inventory settings: SHARED_ROLE_SETTINGS)"
+        )
 
 
 def test_deploy_tasks_are_idempotent_by_construction() -> None:
@@ -200,6 +209,181 @@ def test_build_script_is_shellcheck_clean() -> None:
     res = _run([shellcheck, str(BUILD)], cwd=REPO)
     assert res.returncode == 0, res.stdout + res.stderr
     assert os.access(BUILD, os.X_OK)
+
+
+# --------------------------------------------------------------------------------------------- inventory settings
+
+
+def _role_defaults(role: str) -> dict[str, Any]:
+    return yaml.safe_load((ROLES_DIR / role / "defaults" / "main.yml").read_text(encoding="utf-8")) or {}
+
+
+def _group_level_inventory_names(text: str) -> set[str]:
+    """Variables an inventory sets or mentions as a commented example (``# name: value``) at group level.
+
+    Group level = the ``vars`` of ``all`` or of a group (also nested), never below ``hosts`` (host vars beat the
+    playbook group_vars anyway).
+    """
+    key_re = re.compile(r"^( *)([A-Za-z_][A-Za-z0-9_-]*):(?:\s|$)")
+    example_re = re.compile(r"^( *)# ([a-z_][a-z0-9_]*):(?:\s|$)")  # exactly one space: no nested keys
+    names: set[str] = set()
+    stack: list[tuple[int, str]] = []
+
+    def group_level(path: list[str]) -> bool:
+        return len(path) >= 2 and path[-1] == "vars" and "hosts" not in path
+
+    for line in text.splitlines():
+        if m := key_re.match(line):
+            indent = len(m.group(1))
+            while stack and stack[-1][0] >= indent:
+                stack.pop()
+            if group_level([k for _, k in stack]):
+                names.add(m.group(2))
+            stack.append((indent, m.group(2)))
+        elif c := example_re.match(line):
+            if group_level([k for i, k in stack if i < len(c.group(1))]):
+                names.add(c.group(2))
+    return names
+
+
+def test_shared_inventory_settings_are_role_defaults_that_agree() -> None:
+    """Every role that reads a shared inventory setting defines it with the same default; group_vars do not."""
+    group_vars = yaml.safe_load(GROUP_VARS.read_text(encoding="utf-8"))
+    roles = sorted(p.name for p in ROLES_DIR.iterdir() if (p / "defaults" / "main.yml").exists())
+    for name, owners in SHARED_ROLE_SETTINGS.items():
+        assert name not in group_vars, f"{name} in playbooks/group_vars/all.yml would beat all.vars and group vars"
+        word = re.compile(rf"\b{name}\b")
+        readers = sorted(
+            role
+            for role in roles
+            if any(
+                word.search(f.read_text(encoding="utf-8"))
+                for sub in ("tasks", "templates", "handlers", "vars", "meta")
+                for f in (ROLES_DIR / role / sub).rglob("*")
+                if f.is_file()
+            )
+        )
+        assert readers == owners, f"{name}: read by {readers}, SHARED_ROLE_SETTINGS says {owners}"
+        defined = {role: _role_defaults(role)[name] for role in roles if name in _role_defaults(role)}
+        assert sorted(defined) == owners, f"{name}: every role that reads it defines a default ({sorted(defined)})"
+        assert len({json.dumps(v) for v in defined.values()}) == 1, f"{name}: role defaults differ: {defined}"
+        for playbook in PLAYBOOKS_DIR.glob("*.yml"):
+            assert not word.search(playbook.read_text(encoding="utf-8")), f"{playbook.name} reads {name} outside its roles"
+    assert _role_defaults("hermclaw_release")["hermclaw_keep_releases"] == 3
+    assert _role_defaults("hermclaw_worker")["hermclaw_sandbox_image_version"] == "1"
+    assert _role_defaults("common")["hermclaw_timezone"] == "Europe/Berlin"
+    # a role variable without the role prefix is a shared setting from the list above (ansible-lint noqa)
+    for role in roles:
+        stray = [k for k in _role_defaults(role) if not k.startswith(role + "_") and k not in SHARED_ROLE_SETTINGS]
+        assert not stray, f"{role}: {stray}"
+
+
+def test_inventory_example_settings_are_not_playbook_group_vars() -> None:
+    """A setting the inventory example offers at group level must take effect there (findings 15/27)."""
+    text = EXAMPLE_INVENTORY.read_text(encoding="utf-8")
+    names = _group_level_inventory_names(text)
+    inventory = yaml.safe_load(text)
+    assert set(inventory["all"]["vars"]) <= names, "the parser sees every real all.vars key"
+    assert {"hermclaw_keep_releases", "hermclaw_sandbox_image_version", "hermclaw_timezone"} <= names, "commented examples"
+    assert {"hermclaw_config_overrides", "hermclaw_config_host_overrides"} <= names
+    assert not names & {"policies", "exec-222", "wol_mac", "hermclaw_host_id", "nginx_tls_enabled"}, "nested keys, host vars"
+    group_vars = yaml.safe_load(GROUP_VARS.read_text(encoding="utf-8"))
+    shadowed = sorted(names & set(group_vars))
+    assert not shadowed, f"set in all.vars/group vars of hosts.yml but beaten by playbooks/group_vars/all.yml: {shadowed}"
+    # the parser itself: group vars of a (nested) group count, host vars and nested mappings do not
+    sample = (
+        "all:\n  vars:\n    a_one: 1\n    # a_two: 2\n    #   a_nested: 3\n    a_map:\n      a_inner: 4\n"
+        "  children:\n    g:\n      vars:\n        # g_one: 1\n      hosts:\n        h:\n          h_one: 1\n"
+        "          # h_two: 2\n      children:\n        sub:\n          vars: {s_flow: 1}\n          hosts:\n"
+        "            h2:\n              vars_like: 1\n"
+    )
+    assert _group_level_inventory_names(sample) == {"a_one", "a_two", "a_map", "g_one"}
+
+
+def test_inventory_group_vars_take_effect_in_the_roles(tmp_path: Path) -> None:
+    """ansible-inventory and a real play with the playbooks' group_vars: all.vars and group vars reach the roles."""
+    inventory = {
+        "all": {
+            "vars": {
+                "ansible_connection": "local",
+                "hermclaw_keep_releases": 7,
+                "hermclaw_timezone": "UTC",
+                "hermclaw_release_root": "/inventory/dist",  # a playbook group_var: -e or host vars only
+            },
+            "children": {
+                "orchestrator": {"hosts": {"o": {}}},
+                "execution_workers": {"vars": {"hermclaw_sandbox_image_version": "2"}, "hosts": {"e": {}}},
+            },
+        }
+    }
+    inv = tmp_path / "hosts.yml"
+    inv.write_text(yaml.safe_dump(inventory), encoding="utf-8")
+    env = _env(tmp_path)
+
+    def inventory_vars(host: str) -> dict[str, Any]:
+        res = _run(
+            [str(VENV_BIN / "ansible-inventory"), "-i", str(inv), "--playbook-dir", str(PLAYBOOKS_DIR), "--host", host],
+            env=env,
+            cwd=tmp_path,
+        )
+        assert res.returncode == 0, res.stdout[-2000:] + res.stderr[-2000:]
+        return json.loads(res.stdout)
+
+    e, o = inventory_vars("e"), inventory_vars("o")
+    assert e["hermclaw_api_port"] == 8000, "--playbook-dir loads playbooks/group_vars/all.yml"
+    assert e["hermclaw_keep_releases"] == o["hermclaw_keep_releases"] == 7
+    assert e["hermclaw_sandbox_image_version"] == "2" and "hermclaw_sandbox_image_version" not in o
+    assert e["hermclaw_timezone"] == "UTC"
+    # negative control: a playbook group_var still beats all.vars
+    assert e["hermclaw_release_root"] == "{{ playbook_dir }}/../../../dist"
+
+    # the real precedence chain: playbook-adjacent group_vars (a copy of the real file) + the role defaults
+    pbdir = tmp_path / "playbooks"
+    (pbdir / "group_vars").mkdir(parents=True)
+    shutil.copy(GROUP_VARS, pbdir / "group_vars" / "all.yml")
+    out = tmp_path / "out"
+    out.mkdir()
+    content = (
+        "{{ {'keep': hermclaw_keep_releases, 'image': hermclaw_sandbox_image_version, 'tz': hermclaw_timezone,"
+        " 'root': hermclaw_release_root} | to_json }}"
+    )
+    play = [
+        {
+            "name": "dump the settings the roles see",
+            "hosts": "all",
+            "gather_facts": False,
+            "become": False,
+            "roles": ["common", "hermclaw_release", "hermclaw_config", "hermclaw_worker", "hermclaw_ui"],
+            "post_tasks": [
+                {
+                    "name": "dump",
+                    "ansible.builtin.copy": {"dest": f"{out}/{{{{ inventory_hostname }}}}.json", "content": content, "mode": "0644"},
+                    "tags": ["dump"],
+                }
+            ],
+        }
+    ]
+    pb = pbdir / "dump.yml"
+    pb.write_text(yaml.safe_dump(play, width=1000), encoding="utf-8")
+
+    def dump(inventory_file: Path, *args: str) -> dict[str, dict[str, Any]]:
+        for f in out.glob("*.json"):
+            f.unlink()
+        res = _run([str(ANSIBLE_PLAYBOOK), "-i", str(inventory_file), str(pb), "--tags", "dump", *args], env=env, cwd=tmp_path)
+        assert res.returncode == 0, res.stdout[-3000:] + res.stderr[-2000:]
+        return {f.stem: json.loads(f.read_text(encoding="utf-8")) for f in out.glob("*.json")}
+
+    seen = dump(inv)
+    assert seen["e"]["keep"] == seen["o"]["keep"] == 7 and seen["e"]["tz"] == seen["o"]["tz"] == "UTC"
+    assert seen["e"]["image"] == "2" and seen["o"]["image"] == "1", "group vars beat the role default"
+    assert seen["o"]["root"] != "/inventory/dist" and seen["o"]["root"].endswith("/dist"), "playbook group_var wins"
+    plain = tmp_path / "plain.yml"
+    plain.write_text(
+        yaml.safe_dump({"all": {"vars": {"ansible_connection": "local"}, "children": {"orchestrator": {"hosts": {"o": {}}}}}}),
+        encoding="utf-8",
+    )
+    seen = dump(plain, "-e", "hermclaw_release_root=/extra/dist")
+    assert seen["o"] == {"keep": 3, "image": "1", "tz": "Europe/Berlin", "root": "/extra/dist"}, "role defaults; -e wins"
 
 
 # --------------------------------------------------------------------------------------------- input validation

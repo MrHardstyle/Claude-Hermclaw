@@ -36,6 +36,9 @@ common_create_venv: true
 # 1.9 – Git
 common_git_min_version: "2.39"
 
+# Time zone of every Hermclaw host (/etc/localtime, /etc/timezone). A role default, not a playbook group_var, so a
+# value in the inventory (all.vars, group or host vars) takes effect.
+hermclaw_timezone: Europe/Berlin  # noqa: var-naming[no-role-prefix]
 # Time: empty list keeps Debian's default NTP pool for systemd-timesyncd.
 common_ntp_servers: []
 
@@ -85,7 +88,8 @@ common_preflight_port_plan: |-
   {{ group }} {{ entry.port }} {{ entry.service }} {{ entry.expect | join(',') }}
   {% endfor %}
   {% endfor %}
-# Override the per-role minima of check-host.sh (empty = script defaults).
+# Override the per-role minima of check-host.sh (empty = script defaults), e.g. per host in the inventory.
+# common_preflight_min_ram_mb is installed RAM in MiB: MemTotal passes from 90 % of it (kernel-reserved memory).
 common_preflight_min_cpus: ""
 common_preflight_min_ram_mb: ""
 common_preflight_min_disk_gb: ""

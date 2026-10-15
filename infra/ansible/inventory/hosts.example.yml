@@ -15,6 +15,12 @@ all:
     # Previous releases kept on every host for a fast rollback (in addition to the active one; 1-99, the most
     # recently active ones, so the release active before the last switch is always kept).
     # hermclaw_keep_releases: 3
+    # Tag of the sandbox toolchain images built on .222: bump it to build new images (existing tags are never rebuilt).
+    # hermclaw_sandbox_image_version: "1"
+    # Time zone of the Hermclaw hosts.
+    # hermclaw_timezone: Europe/Berlin
+    # Variables of playbooks/group_vars/all.yml (e.g. hermclaw_release_root) beat all.vars and group vars here:
+    # pass them with -e <name>=<value> or set them per host.
     # Configuration overrides deep-merged into config/<name>.example.yaml (docs/operations/deployment.md):
     # hermclaw_config_overrides:
     #   policies: {git: {create_merge_request: true}}

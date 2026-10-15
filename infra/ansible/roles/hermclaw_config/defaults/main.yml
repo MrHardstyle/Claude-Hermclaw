@@ -35,6 +35,9 @@ hermclaw_config_webui_probe_path: /healthz
 hermclaw_config_allow_placeholder_macs: false
 # policies.sandbox.image/images -> the toolchain images built on .222 (hermclaw_sandbox_toolchains, R-022).
 hermclaw_config_sandbox_toolchain_images: true
+# Tag of those images: localhost/hermclaw-sandbox-<toolchain>:<tag>. Shared with the roles hermclaw_release and
+# hermclaw_worker (same default, test_deploy_infra.py keeps them equal); set it in the inventory (all.vars).
+hermclaw_sandbox_image_version: "1"  # noqa: var-naming[no-role-prefix]
 
 hermclaw_config_staging_dir: "{{ hermclaw_config_dir }}/deploy-staging"
 # false: main.yml installs the validated files right away. playbooks/deploy.yml sets true: the host role

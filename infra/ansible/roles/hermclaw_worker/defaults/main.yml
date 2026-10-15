@@ -10,6 +10,9 @@ hermclaw_worker_health_delay: 2
 # --- execution worker: sandbox toolchain images (rootless Podman of hermclaw, R-022) ----------------------
 # Built with the release's scripts/ops/hermclaw-build-sandbox-images; tags that exist are never rebuilt (bump
 # hermclaw_sandbox_image_version for new images). Needs Podman, the user manager and network for the base images.
+# The tag of the images (localhost/hermclaw-sandbox-<toolchain>:<tag>). Shared with the roles hermclaw_release and
+# hermclaw_config (same default, test_deploy_infra.py keeps them equal); bump it in the inventory (all.vars).
+hermclaw_sandbox_image_version: "1"  # noqa: var-naming[no-role-prefix]
 hermclaw_worker_build_sandbox_images: "{{ hermclaw_manage_services | bool }}"
 hermclaw_worker_sandbox_build_timeout: 7200
 hermclaw_worker_sandbox_images_dir: "{{ hermclaw_releases_dir }}/{{ hermclaw_version }}/sandbox-images"

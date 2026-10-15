@@ -441,11 +441,11 @@ sudo -u hermclaw ssh -i /etc/hermclaw/ssh/id_ed25519 -o UserKnownHostsFile=/etc/
 Alle Geheimnisse liegen als **verschlüsselte systemd-Credentials** in `/etc/credstore.encrypted/hermclaw-<name>`
 (verschlüsselt mit dem Host-Schlüssel bzw. TPM2, `systemd-creds`). Die Dienste bekommen sie über
 `LoadCredentialEncrypted=` und lesen sie aus `$CREDENTIALS_DIRECTORY`. Kein Geheimnis steht in einer
-Konfigurationsdatei, einem Log oder auf einer Kommandozeile. Zwei Ausnahmen bekommen ihr Geheimnis als
-Umgebungsvariable, weil sie es nur dort lesen: LiteLLM den Master-Key als `LITELLM_MASTER_KEY` (beim Start von
-`hermclaw-cred-env` aus dem Credential gesetzt), SearXNG sein Secret als `SEARXNG_SECRET` (ein Podman-Secret, kein
-systemd-Credential). Werkzeug auf .225, .222 und .224 (nicht auf .223, dort liegen keine Credentials):
-`/opt/hermclaw/bin/hermclaw-credential` (`set`, `generate`, `check`, `list`; Werte nur über stdin).
+Konfigurationsdatei, einem Log oder auf einer Kommandozeile. Ausnahmen sind zwei Dienste, die ihr Geheimnis nur aus
+der Umgebung lesen: LiteLLM bekommt den Master-Key als `LITELLM_MASTER_KEY` (`hermclaw-cred-env` setzt ihn beim Start
+aus dem Credential), SearXNG sein Secret als `SEARXNG_SECRET` (ein Podman-Secret, kein systemd-Credential).
+Werkzeug auf .225, .222 und .224 (nicht auf .223, dort liegen keine Credentials): `/opt/hermclaw/bin/hermclaw-credential`
+(`set`, `generate`, `check`, `list`; Werte nur über stdin).
 
 | Credential | Host | Erzeugt von | Verwendet von |
 |---|---|---|---|
@@ -554,8 +554,8 @@ Ohne Planner-Fallback (spart 7,6 GB): `sudo -u ollama /opt/hermclaw/bin/hermclaw
 und in `models.yaml` das Profil `planner-gemma-fallback` auf `enabled: false` setzen.
 
 Später auf EmbeddingGemma 2 wechseln (sobald Ollama es unter Linux/CUDA ausführt): `sudo -u ollama
-/opt/hermclaw/bin/hermclaw-model-pull --embedding embeddinggemma-2:740m`. Das Skript fällt automatisch auf `embeddinggemma:300m` zurück und nennt die
-nötige Änderung in `models.yaml` (Kapitel 9.2).
+/opt/hermclaw/bin/hermclaw-model-pull --embedding embeddinggemma-2:740m`. Das Skript fällt automatisch auf
+`embeddinggemma:300m` zurück und nennt die nötige Änderung in `models.yaml` (Kapitel 9.2).
 
 ---
 
@@ -575,10 +575,10 @@ einmal auf dem Admin-Rechner gebaut, per SHA-256 geprüft und offline auf allen 
 * Hat Ihr Admin-Rechner kein Python 3.13, bauen Sie das Release auf dem Orchestrator .225 (Debian 13) oder in einem
   `debian:trixie`-Container aus demselben Checkout. Dort fehlt Node.js ≥ 22.12: Debian 13 liefert Node 20, und die
   Rolle `nodejs` richtet Node 22 nur auf .223 ein. Bauen Sie die UI deshalb vorher auf einem Rechner mit Node.js
-  (`cd ui && npm ci && npm run build`), kopieren Sie `ui/dist` in den Checkout auf .225 bzw. im Container und
+  (`cd ui && npm ci && npm run build`), kopieren Sie `ui/dist` in den Checkout auf .225 bzw. in den Container und
   übergeben Sie `--ui-dist ui/dist`. Das fertige `dist/release-<version>/` kopieren Sie danach in `dist/` des
-  Checkouts auf dem Admin-Rechner, denn `playbooks/deploy.yml` liest es dort (oder Sie übergeben
-  `-e hermclaw_release_root=<Verzeichnis auf dem Admin-Rechner>`).
+  Checkouts auf dem Admin-Rechner, denn `playbooks/deploy.yml` liest es dort. Liegt es auf dem Admin-Rechner
+  woanders, übergeben Sie `-e hermclaw_release_root=<Verzeichnis, das release-<version>/ enthält>`.
 
 ### 8.2 Inventar ergänzen
 
@@ -696,7 +696,7 @@ sudo systemd-creds decrypt --name=api-operator-token /etc/credstore.encrypted/he
 | `/etc/hermclaw/models.yaml` | .225 | Modellprofile (Rollen, Ollama-Tags, Kontext, Timeouts), LiteLLM-Adresse |
 | `/etc/hermclaw/policies.yaml` | .225, .222 | Befehls-/Sandbox-/Scope-/Coder-/Review-/Research-/Git-/SSH-/WoL-Richtlinien |
 | `/etc/hermclaw/capabilities.yaml` | alle Worker | Schrittarten → Capability → Worker-Art, Modellrolle, Ressourcen |
-| `/etc/hermclaw/logging.yaml` | .225 | Log-Level je Logger |
+| `/etc/hermclaw/logging.yaml` | .225 | `level`, `json`, `service`; wird nur geprüft. Den Log-Level der Dienste setzt `HERMCLAW_LOG_LEVEL` in `hermclaw.env` (Inventar: `systemd_skeleton_log_level`) |
 | `/etc/hermclaw/databases.yaml` | .225 | Datenbanken Ihrer Projekte für die DB-Tools (optional) |
 | `/etc/hermclaw/backup.yaml` | .225 | Backup-Ziel, Aufbewahrung (Kapitel 11) |
 | `/etc/hermclaw/litellm.yaml` | .225 | aus `models.yaml` erzeugt (`hermclaw litellm-config`), nicht von Hand ändern |
@@ -749,7 +749,7 @@ Deployment erneut ausführen (Kapitel 8.4).
 | `models` → `profiles[*].model` | feste Tags (Kapitel 1.2) | nur ein anderer Build desselben Modells, nie eine andere Rolle |
 | `models` → Profil `planner-gemma-fallback` | aktiv | `enabled: false`, wenn `gemma4:12b` nicht geladen ist |
 | `models` → Profil `embedding` | `embeddinggemma:300m` | `embeddinggemma-2:740m`, sobald Ollama es unter Linux/CUDA ausführt |
-| `hosts` → je Worker `idle_sleep_command` | `sudo /usr/bin/systemctl suspend` | entfernen, wenn ein Worker nie schlafen soll |
+| `hosts` → je Worker `idle_sleep_command` | `sudo /usr/bin/systemctl suspend` | auf `null` setzen, wenn ein Worker nie schlafen soll: `hermclaw_config_host_overrides: {exec-222: {idle_sleep_command: null}}`. Löschen auf dem Host macht das nächste Deployment rückgängig |
 | `databases` → `targets`, `sandbox` | keine | Projekt-Datenbanken für die DB-Tools (siehe 9.4) |
 
 Die Modellrollen sind fest (Gemma = Planner, Qwen3-Coder 30B = Implementation Worker, Qwen3.8 27B = Heavy Reviewer,
@@ -769,7 +769,7 @@ targets:
     environment: production              # production = immer read-only
 sandbox:                                 # Wegwerf-Datenbanken für Migrationstests: NICHT der Produktionsserver
   admin_dsn_ref: cred:sandbox-pg-admin   # Rolle mit CREATEDB + CREATEROLE
-  client_host: 192.168.178.225           # wie der Execution Worker den Server erreicht
+  client_host: sandbox-db.lan            # wie der Execution Worker (.222) diesen Server erreicht; nicht .225 (lauscht nur auf localhost)
 ```
 
 Credentials anlegen: `sudo /opt/hermclaw/bin/hermclaw-credential set shop-db-dsn` (Wert über stdin). Damit der
@@ -846,7 +846,7 @@ sudo hermclaw job-submit "Füge einen /health-Endpunkt hinzu, der {\"status\": \
 Beobachten Sie den Job in der UI: Triage (Fast Router) → Plan (Gemma) → Schritte (Qwen3-Coder, Werkzeuge, Tests in
 der Sandbox auf .222) → Verifier → Heavy Review (Qwen3.8) → Commit, Push auf `hermclaw/<id>-…` (und ein Merge Request,
 wenn `git.create_merge_request: true`, Kapitel 9.3). Die UI zeigt Status und Ergebnisse, **keine** Chain-of-Thought. Schritte, die einen Host ändern (SSH),
-warten auf Ihre Freigabe im Tab „Approvals“.
+warten auf Ihre Freigabe im Tab „Freigaben“ (Admin-Token).
 
 Mit der GTX 1080 dauert ein solcher Job je nach Größe 10–60 Minuten: Die großen Modelle laufen größtenteils aus dem RAM
 (Kapitel 2.1).
@@ -896,7 +896,8 @@ sudo -u hermclaw ssh -i /etc/hermclaw/ssh/backup_ed25519 -o UserKnownHostsFile=/
 ```
 
 Variante B ist die per NFS auf .225 eingebundene Freigabe (`infra/backup/unraid-share-setup.md`, Abschnitt 3). Dann
-muss die Unit dorthin schreiben dürfen – im Inventar beim Orchestrator:
+muss die Unit dorthin schreiben dürfen – im Inventar beim Orchestrator (danach das Deployment des Orchestrators
+erneut ausführen, Befehl in 11.3; erst dann steht der Pfad in `ReadWritePaths=` beider Units):
 
 ```yaml
     orchestrator:
@@ -938,7 +939,7 @@ sudoedit /etc/hermclaw/backup.yaml
 | `target.remote_rsync_path` | Zeile löschen bei `rrsync` | sonst `/usr/bin/rsync` |
 | `target.bwlimit_kbps` | `60000` | ~60 MB/s, hält das LAN während des Laufs nutzbar |
 | `manifest_signing_key_ref` | `cred:backup-manifest-key` | Zeile löschen, wenn Sie 11.3 ausgelassen haben |
-| `credstore_dirs` | `[]` | verschlüsselte Credentials sind an diesen Host gebunden; nur für eine Wiederherstellung auf derselben Maschine sinnvoll (`[/etc/credstore.encrypted]`) |
+| `credstore_dirs` | `[]` | so lassen: `/etc/credstore.encrypted` ist `0700 root:root`, die Backup-Units laufen als `hermclaw` und überspringen das Verzeichnis als unlesbar. Bei einer Wiederherstellung legen Sie die Credentials aus dem Passwortmanager neu an (11.7) |
 | `retention` | `keep_last: 2`, `keep_daily: 7`, `keep_weekly: 4`, `keep_monthly: 3` | nach Platz auf Terra anpassen |
 | `restore_test.template` | `hermclaw_restore_template` | von der Rolle `postgresql` angelegt |
 
@@ -954,10 +955,10 @@ backup:
 ```bash
 sudo hermclaw backup list                              # {"sets": []} – Ziel erreichbar, Konfiguration gültig
 sudo systemctl start hermclaw-backup.service           # dauert je nach Datenmenge Minuten
-journalctl -u hermclaw-backup -n 30 -o cat             # letzte Zeile: JSON mit "ok": true und der Set-ID
+sudo journalctl -u hermclaw-backup -n 30 -o cat        # mehrzeiliges JSON mit "set_id" und "transfer": {… "verified": true}; bei einem Fehler "ok": false und "error"
 sudo hermclaw backup verify --latest                   # Prüfsummen, Archive, Dump-Katalog
 sudo systemctl start hermclaw-restore-test.service
-journalctl -u hermclaw-restore-test -n 30 -o cat       # "ok": true; RESTORE_REPORT.json liegt neben dem Satz auf Terra
+sudo journalctl -u hermclaw-restore-test -n 30 -o cat  # "ok": true; RESTORE_REPORT.json liegt neben dem Satz auf Terra
 systemctl list-timers 'hermclaw-*'                     # nächste Läufe: täglich 02:30, sonntags 04:30
 ```
 
@@ -967,11 +968,12 @@ nach).
 
 ### 11.6 Überwachung
 
-* täglich: `journalctl -u hermclaw-backup --since -26h` – ein erfolgreicher Lauf; Alarm, wenn 26 Stunden lang kein
+* täglich: `sudo journalctl -u hermclaw-backup --since -26h` – ein erfolgreicher Lauf; Alarm, wenn 26 Stunden lang kein
   Event `backup.completed` kommt;
-* wöchentlich: `journalctl -u hermclaw-restore-test --since -8d` – `"ok": true`; Alarm, wenn 8 Tage lang kein
+* wöchentlich: `sudo journalctl -u hermclaw-restore-test --since -8d` – `"ok": true`; Alarm, wenn 8 Tage lang kein
   `backup.restore_test.passed` kommt;
-* die Events `backup.*` erscheinen auch im Event-Stream der Oberfläche (`/api/events`).
+* die Events `backup.*` stehen auch im globalen SSE-Stream der API (`/api/events/stream`, Token mit Scope `read`);
+  die Oberfläche selbst zeigt sie nicht an.
 
 ### 11.7 Wiederherstellen
 
@@ -1026,7 +1028,7 @@ Log der Suite lesen und Kapitel 14 prüfen.
 | Status aller Dienste (.225) | `systemctl status hermclaw-api hermclaw-scheduler hermclaw-litellm postgresql@17-main` |
 | SearXNG (rootless, Benutzer hermclaw) | `systemctl --user --machine=hermclaw@.host status hermclaw-searxng` |
 | Worker | `.222`: `systemctl status hermclaw-exec-worker` · `.224`: `systemctl status hermclaw-model-worker ollama` |
-| Logs (JSON) | `journalctl -u hermclaw-scheduler -f` (ebenso `-u hermclaw-api`, `-u hermclaw-litellm`) |
+| Logs (JSON) | `sudo journalctl -u hermclaw-scheduler -f` (ebenso `-u hermclaw-api`, `-u hermclaw-litellm`) |
 | Gesundheit | `sudo hermclaw doctor` · `curl -s http://192.168.178.225:8000/api/health?deep=true` |
 | Geladene Modelle | auf .224: `ollama ps` |
 | Speicherplatz | `df -h /var/lib/hermclaw /var/lib/ollama` (Hermclaw warnt unter 10 GB frei, stoppt neue Arbeit unter 2 GB) |
@@ -1045,18 +1047,18 @@ Der Scheduler weckt sie vor jedem Schritt per Wake-on-LAN. Ein schlafender Worke
 
 | Symptom | Ursache | Abhilfe |
 |---|---|---|
-| `doctor`: `database:pgvector` fail/warn | pgvector aus Debian (0.8.0) oder < 0.8.7 | `apt-cache policy postgresql-17-pgvector` (Quelle PGDG?), aktualisieren, `ALTER EXTENSION vector UPDATE;` in `hermclaw`, `systemctl restart postgresql@17-main` |
+| `doctor`: `database:pgvector` fail/warn | pgvector aus Debian (0.8.0) oder < 0.8.7 | `apt-cache policy postgresql-17-pgvector` (Quelle PGDG?), aktualisieren, `ALTER EXTENSION vector UPDATE;` in `hermclaw`, `sudo systemctl restart postgresql@17-main` |
 | `doctor`: `config:files` fail | `/etc/hermclaw/*.yaml` fehlen, nur `.example.yaml` vorhanden | Deployment erneut ausführen (Kapitel 8) |
 | `doctor`: `config:wake_on_lan` warn | Platzhalter-MAC im Inventar | `wol_mac` setzen (Kapitel 4.2), Deployment erneut |
-| `doctor`: `litellm` fail, Gateway meldet `MODEL_AUTH_FAILED` | Master-Key fehlt/falsch | `hermclaw-credential check litellm-master-key`; `systemctl restart hermclaw-litellm hermclaw-scheduler` |
-| `doctor`: `models:model-224` fail | Modell nicht geladen | `hermclaw-model-pull` auf .224 (Kapitel 7) |
-| Modelle laufen auf der CPU (`ollama ps`: `100% CPU`) | Treiber zu alt / nicht geladen, nach Suspend GPU verloren | `nvidia-smi`; `journalctl -u ollama -b \| grep 'inference compute'`; nach Suspend: `rmmod nvidia_uvm && modprobe nvidia_uvm`, `systemctl restart ollama` |
-| `nvidia-smi`: „couldn't communicate with the NVIDIA driver“ nach Kernel-Update | DKMS-Modul fehlt | `dkms status`; `dkms autoinstall`; Neustart |
+| `doctor`: `litellm` fail, Gateway meldet `MODEL_AUTH_FAILED` | Master-Key fehlt/falsch | `sudo /opt/hermclaw/bin/hermclaw-credential check litellm-master-key`; `sudo systemctl restart hermclaw-litellm hermclaw-scheduler` |
+| `doctor`: `models:model-224` fail | Modell nicht geladen | `sudo -u ollama /opt/hermclaw/bin/hermclaw-model-pull` auf .224 (Kapitel 7) |
+| Modelle laufen auf der CPU (`ollama ps`: `100% CPU`) | Treiber zu alt / nicht geladen, nach Suspend GPU verloren | `nvidia-smi`; `sudo journalctl -u ollama -b \| grep 'inference compute'`; nach Suspend: `sudo rmmod nvidia_uvm && sudo modprobe nvidia_uvm`, `sudo systemctl restart ollama` |
+| `nvidia-smi`: „couldn't communicate with the NVIDIA driver“ nach Kernel-Update | DKMS-Modul fehlt | `dkms status`; `sudo dkms autoinstall`; Neustart |
 | Schritte scheitern mit `WORKER_UNREACHABLE` | Worker schläft und wacht nicht auf | WoL im BIOS/`ethtool … \| grep Wake-on: g`, MAC in `hosts.yaml`, `sudo hermclaw doctor` |
 | Schritte scheitern mit `SANDBOX_IMAGE_UNSAFE` | Image mit gefährlichen Metadaten (Podman-CVEs) | nur die von `hermclaw-build-sandbox-images` gebauten Images verwenden |
-| `SANDBOX_ENV_NOT_ALLOWED` | Projekt-Befehl setzt eine nicht erlaubte Umgebungsvariable | `policies.sandbox.env_allowlist` in `policies.yaml` ergänzen |
-| SSH-Schritt wartet | Mutation braucht Freigabe | UI → Job → „Approvals“ (Admin-Token) |
-| UI lädt, Live-Status bleibt stehen | nginx puffert SSE | `nginx -T \| grep -A3 events/stream` muss `proxy_buffering off` zeigen; Deployment erneut |
+| `SANDBOX_ENV_NOT_ALLOWED` | Projekt-Befehl setzt eine nicht erlaubte Umgebungsvariable | `policies.sandbox.env_allowlist` über `hermclaw_config_overrides` im Inventar ergänzen (vollständige Liste, Kapitel 9.2), Deployment erneut ausführen (wirksam auf .222) |
+| SSH-Schritt wartet | Mutation braucht Freigabe | UI → Job → Tab „Freigaben“ (Admin-Token) |
+| UI lädt, Live-Status bleibt stehen | nginx puffert SSE | `sudo nginx -T \| grep -A10 events/stream` muss `proxy_buffering off` zeigen; Deployment erneut |
 | Backup-Timer meldet Exit 75 | ein anderer Backup-Vorgang hält die Sperre | nichts tun, der nächste Lauf wiederholt |
 | `hermclaw-searxng` startet nicht | Podman-Secret fehlt (gewollt: kein Start mit bekanntem Schlüssel) | Deployment erneut ausführen (legt das Secret an) |
 

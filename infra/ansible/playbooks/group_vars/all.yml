@@ -1,6 +1,10 @@
 # Hermclaw Next – variables shared by every bootstrap role (Bauplan §2, §5, §6).
-# Host-specific values (MAC addresses, interfaces) belong in inventory/hosts.yml.
-# Override per host/group in the inventory; never put secrets here.
+# Host-specific values (MAC addresses, interfaces) belong in inventory/hosts.yml; never put secrets here.
+# Precedence: these playbook group_vars beat the group vars of the inventory file (all.vars and the vars of a
+# group in hosts.yml). Change a value defined here with -e <name>=<value> or as a host var in the inventory.
+# Settings operators are meant to set in all.vars or group vars (hermclaw_keep_releases,
+# hermclaw_sandbox_image_version, hermclaw_timezone, ...) are role defaults (roles/<role>/defaults/main.yml)
+# and must never be defined here (tests/integration/test_deploy_infra.py enforces it).
 
 # --- Target platform (1.1, research 20261008-001) ---------------------------
 hermclaw_debian_major: "13"
@@ -60,23 +64,22 @@ hermclaw_port_plan:
 # false = render/configure files only (image or chroot builds); never use to hide failures.
 hermclaw_install_packages: true
 hermclaw_manage_services: true
-hermclaw_timezone: Europe/Berlin
+# hermclaw_timezone (default Europe/Berlin): roles/common/defaults/main.yml, set it in the inventory.
 
 # --- Deployment (P32, playbooks/deploy.yml, docs/operations/deployment.md) ----
 # hermclaw_version comes from the inventory or `-e hermclaw_version=<v>`: the canonical PEP 440 version of a
 # release built by scripts/deploy/build-release.sh (dist/release-<v>/, e.g. 0.1.0rc1).
 # The same pattern (without anchors) names venv-<v>, releases/<v> and the UI builds; pruning only touches those.
 hermclaw_version_pattern: '[0-9]+(\.[0-9]+)*((a|b|rc)[0-9]+)?(\.post[0-9]+)?(\.dev[0-9]+)?'
-# Release directory on the control node.
+# Release directory on the control node (another location: -e hermclaw_release_root=<dir>).
 hermclaw_release_root: "{{ playbook_dir }}/../../../dist"
 hermclaw_release_dir: "{{ hermclaw_release_root }}/release-{{ hermclaw_version }}"
 # Unpacked release payloads (wheelhouse, sandbox images, metadata) and versioned venvs on the hosts:
 # <install_dir>/releases/<v> and <install_dir>/venv-<v>; hermclaw_venv is the symlink to the active venv and
 # <install_dir>/current the symlink to the active payload.
 hermclaw_releases_dir: "{{ hermclaw_install_dir }}/releases"
-# Previous releases kept for a fast rollback, in addition to the active one (venvs, payloads, UI builds): the most
-# recently active ones, so the release active before the last switch is always among them. 1-99.
-hermclaw_keep_releases: 3
+# hermclaw_keep_releases (default 3, previous releases kept for a fast rollback): defaults of the roles
+# hermclaw_release and hermclaw_ui, set it in the inventory (all.vars).
 # UI builds on .223: <webroot>-releases/<v>/, hermclaw_webroot becomes the symlink to the active build.
 hermclaw_ui_releases_dir: "{{ hermclaw_webroot }}-releases"
 # LiteLLM proxy venvs on .225: <litellm_root>/venv-<litellm version>-<lock>; the unit's venv path
@@ -86,7 +89,7 @@ hermclaw_litellm_root: /opt/litellm
 hermclaw_cli_wrapper: /usr/local/sbin/hermclaw
 # Sandbox toolchain images built on the execution worker (scripts/ops/hermclaw-build-sandbox-images) and
 # referenced by policies.sandbox (orchestrator and worker): localhost/hermclaw-sandbox-<toolchain>:<version>.
-# Bump hermclaw_sandbox_image_version to rebuild them (existing tags are never rebuilt).
+# hermclaw_sandbox_image_version (default "1", the tag; bump it in the inventory, all.vars, to rebuild them,
+# existing tags are never rebuilt): defaults of the roles hermclaw_release, hermclaw_config and hermclaw_worker.
 hermclaw_sandbox_toolchains: [python, node, php, generic]
-hermclaw_sandbox_image_version: "1"
 hermclaw_sandbox_default_toolchain: generic

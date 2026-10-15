@@ -15,6 +15,11 @@ hermclaw_ui_group: "{{ nginx_webroot_group | default('www-data') }}"
 # the bootstrap's placeholder page (roles/nginx/templates/index.html.j2); a webroot holding only it is replaced
 hermclaw_ui_placeholder_marker: "Managed by Hermclaw – placeholder"
 
+# Previous UI builds kept for a fast rollback, in addition to the active one: the most recently active ones. 1-99.
+# Shared with the role hermclaw_release (same default, test_deploy_infra.py keeps them equal); a role default, so a
+# value in the inventory (all.vars, group or host vars) takes effect.
+hermclaw_keep_releases: 3  # noqa: var-naming[no-role-prefix]
+
 # 32.9 – checks through .223 from the control node after the switch: /healthz, / (index.html + CSP), /api/health
 hermclaw_ui_health: "{{ hermclaw_manage_services | bool }}"
 hermclaw_ui_base_url: >-

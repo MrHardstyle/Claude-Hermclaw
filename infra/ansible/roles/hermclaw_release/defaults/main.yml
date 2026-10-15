@@ -12,6 +12,17 @@ hermclaw_release_current_link: "{{ hermclaw_install_dir }}/current"
 hermclaw_release_venv_marker: .hermclaw-release
 hermclaw_release_unpack_marker: .hermclaw-unpacked
 
+# Settings for the inventory (all.vars, group or host vars). They are role defaults, not playbook group_vars, so a
+# value set there takes effect. Every role that reads one defines the same default under the shared name (hence the
+# noqa of the role-prefix rule); test_deploy_infra.py keeps them equal.
+# Previous releases kept for a fast rollback, in addition to the active one (venvs, payloads, UI builds): the most
+# recently active ones, so the release active before the last switch is always among them. 1-99. Also hermclaw_ui.
+hermclaw_keep_releases: 3  # noqa: var-naming[no-role-prefix]
+# Tag of the sandbox toolchain images built on .222 and named in policies.sandbox
+# (localhost/hermclaw-sandbox-<toolchain>:<tag>). Bump it to build new images; existing tags are never rebuilt.
+# Also hermclaw_config and hermclaw_worker.
+hermclaw_sandbox_image_version: "1"  # noqa: var-naming[no-role-prefix]
+
 # Inventory groups whose hosts run the Python runtime (venv) and the payloads they need from the release.
 hermclaw_release_python_groups: [orchestrator, execution_workers, model_workers]
 # Console entry points each group verifies after the install (its units start them).

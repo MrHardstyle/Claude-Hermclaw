@@ -1362,9 +1362,10 @@ def test_check_host_ram_minimum_tolerates_kernel_reserved_memory(tmp_path: Path)
     boundary = ram_mb * 10 // 9
     assert ram_check(boundary)[1]["status"] == "OK"
     assert ram_check(boundary + 1)[1]["status"] == "FAIL"
-    # the documented minima are installed RAM: the role defaults still apply without an override
-    code, report = _check_host_with(tmp_path, "")
-    assert {c["check"]: c for c in report["checks"]}["ram"]["message"].endswith("(minimum 0, 90 % tolerance)")
+    # without an override the role minimum (installed RAM, Table 2.1) applies with the same tolerance
+    res = _check_host("--role", "webui", "--json")
+    check = {c["check"]: c for c in json.loads(res.stdout)["checks"]}["ram"]
+    assert check["message"].endswith("MiB RAM (minimum 1024, 90 % tolerance)") or "minimum 1024 (90 % tolerance" in check["message"]
     script = (SCRIPTS_DIR / "check-host.sh").read_text(encoding="utf-8")
     assert "readonly RAM_TOLERANCE_PCT=90" in script and 'orchestrator) echo "4 8192 20"' in script
 
