@@ -296,6 +296,16 @@ def test_bootstrap_playbook_structure() -> None:
     assert by_hosts["webui"] == ["common", "nodejs", "nginx"]
     assert by_hosts["execution_workers"] == ["common", "podman", "wol_target", "systemd_skeleton"]
     assert by_hosts["model_workers"] == ["common", "nvidia", "ollama", "wol_target", "systemd_skeleton"]
+    # BUG-149: the compose sandbox of the container tools needs podman-compose on the execution worker only
+    podman_vars = {
+        p["hosts"]: next(r.get("vars", {}) for r in p["roles"] if r["role"] == "podman")
+        for p in plays
+        if p.get("roles") and any(r["role"] == "podman" for r in p["roles"])
+    }
+    assert podman_vars["execution_workers"].get("podman_extra_packages") == ["podman-compose"]
+    assert "podman_extra_packages" not in podman_vars["orchestrator"]
+    podman_main = (ROLES_DIR / "podman" / "tasks" / "main.yml").read_text(encoding="utf-8")
+    assert '"{{ podman_packages + podman_extra_packages }}"' in podman_main
     # orchestrator first: it generates SSH keys and worker tokens the other hosts consume
     role_plays = [p["hosts"] for p in plays if p.get("roles")]
     assert role_plays[0] == "orchestrator"
@@ -1195,6 +1205,9 @@ VALIDATION_CASES: list[tuple[str, str, dict[str, Any], str]] = [
     ("podman-defaults", "podman", {}, "PASS"),
     ("podman-bad-controller", "podman", {"podman_delegate_controllers": ["cpu", "devices"]}, "FAIL"),
     ("podman-low-subids", "podman", {"podman_subid_start": 1000}, "FAIL"),
+    ("podman-extra-packages", "podman", {"podman_extra_packages": ["podman-compose"]}, "PASS"),
+    ("podman-extra-packages-string", "podman", {"podman_extra_packages": "podman-compose"}, "FAIL"),
+    ("podman-extra-packages-option", "podman", {"podman_extra_packages": ["-o=evil"]}, "FAIL"),
     ("nvidia-defaults", "nvidia", {}, "PASS"),
     ("nvidia-590-drops-pascal", "nvidia", {"nvidia_driver_branch": "590"}, "FAIL"),
     # Debian's 550 drives Pascal, but Ollama >= 0.30 ignores CC 6.1 GPUs below driver 570 (research 026 O7)

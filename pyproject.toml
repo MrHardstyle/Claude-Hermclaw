@@ -34,6 +34,8 @@ dev = [
   "pytest>=8",
   "pytest-asyncio>=0.24",
   "hypothesis>=6",
+  # fake HTTP servers (workers, Ollama, LiteLLM, WoL probes) in unit/integration/failure tests
+  "aiohttp>=3.10",
   "ruff>=0.6",
   "mypy>=1.10",
   "types-PyYAML",

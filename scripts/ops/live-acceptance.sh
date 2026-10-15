@@ -248,6 +248,48 @@ configure_suite() { # sets UNIT_PROPS/UNIT_ENV for a suite; returns 3 to skip it
     return 0 # the optional `[[ -n … ]] && …` overrides above must not decide the status
 }
 
+suite_marker() { # pytest -m expression of a suite
+    case "$1" in
+        # every test of the podman module is the live verification of the rootless sandbox on .222, not only the
+        # one marked live (BUG-146)
+        sandbox) echo "integration or live" ;;
+        *) echo live ;;
+    esac
+}
+
+SANDBOX_TEST_IMAGE=docker.io/library/alpine:3.20
+SANDBOX_IMAGE_PULLED=0
+as_run_user_podman() { # podman of the service user (rootless storage of the worker)
+    local uid
+    uid="$(id -u "$RUN_USER")"
+    (cd / && runuser -u "$RUN_USER" -- env XDG_RUNTIME_DIR="/run/user/${uid}" podman "$@")
+}
+
+ensure_sandbox_image() { # the podman tests need their small test image in the worker's storage (pulled, never built)
+    as_run_user_podman image exists "$SANDBOX_TEST_IMAGE" && return 0
+    log "sandbox: pulling test image $SANDBOX_TEST_IMAGE as $RUN_USER (removed again afterwards)"
+    if as_run_user_podman pull -q "$SANDBOX_TEST_IMAGE" >/dev/null; then
+        SANDBOX_IMAGE_PULLED=1
+    else
+        log "sandbox: could not pull $SANDBOX_TEST_IMAGE – the podman tests will be skipped"
+    fi
+}
+
+remove_sandbox_image() {
+    [[ $SANDBOX_IMAGE_PULLED -eq 1 ]] || return 0
+    as_run_user_podman rmi -f "$SANDBOX_TEST_IMAGE" >/dev/null 2>&1 || log "sandbox: could not remove $SANDBOX_TEST_IMAGE"
+}
+
+junit_counts() { # junit_counts <xml> -> "<tests> <skipped>" (empty when unreadable)
+    python3 - "$1" 2>/dev/null <<'PY' || true
+import sys
+import xml.etree.ElementTree as ET
+root = ET.parse(sys.argv[1]).getroot()
+suites = [root] if root.tag == "testsuite" else list(root.iter("testsuite"))
+print(sum(int(s.get("tests", 0)) for s in suites), sum(int(s.get("skipped", 0)) for s in suites))
+PY
+}
+
 run_suite() {
     local suite="$1" unit files rc=0
     unit="hermclaw-acceptance-${suite//_/-}-$$"
@@ -257,16 +299,27 @@ run_suite() {
         return 0
     }
     log "== $suite (${files[*]})"
-    local -a cmd=("${CHECKOUT}/.venv/bin/python" -m pytest -q -p no:cacheprovider -m live
-        --junitxml="${OUT_DIR}/${STAMP}-${suite}.xml" "${files[@]}")
+    local xml="${OUT_DIR}/${STAMP}-${suite}.xml"
+    local -a cmd=("${CHECKOUT}/.venv/bin/python" -m pytest -q -rs -p no:cacheprovider -m "$(suite_marker "$suite")"
+        --junitxml="$xml" "${files[@]}")
     if [[ "$suite" == sandbox ]]; then
+        ensure_sandbox_image
         run_unit "$unit" "${cmd[@]}" || rc=$?
+        remove_sandbox_image
     else
         run_unit "$unit" "${CHECKOUT}/infra/systemd/hermclaw-cred-env" HERMCLAW_TEST_ADMIN_URL=test-admin-url -- "${cmd[@]}" || rc=$?
     fi
-    if [[ $rc -eq 0 ]]; then RESULTS+=("PASS  $suite"); else
+    local counts tests=0 skipped=0
+    counts="$(junit_counts "$xml")"
+    [[ -n "$counts" ]] && read -r tests skipped <<<"$counts"
+    if [[ $rc -ne 0 ]]; then
         RESULTS+=("FAIL  $suite (exit $rc)")
         FAILED=1
+    elif [[ $tests -eq 0 || $skipped -ge $tests ]]; then
+        # nothing was verified: never reported as PASS (BUG-146); the reasons are in the log above (-rs)
+        RESULTS+=("SKIP  $suite (all ${tests} test(s) skipped, see log)")
+    else
+        RESULTS+=("PASS  $suite (${tests} tests, ${skipped} skipped)")
     fi
 }
 

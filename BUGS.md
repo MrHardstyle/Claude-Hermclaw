@@ -20,6 +20,7 @@ P0/P1-Blocker werden sofort behoben. Nicht-blockierende Bugs werden reproduziert
 - Auswirkung: Live-Inventur, Deployment, Modell-Downloads, GPU-/WOL-/GitLab-Live-Tests, Backup nach `.60`, Soak-Test auf Zielhosts.
 - Workaround: Alle Schritte als Skripte/Ansible-Playbooks + Installationsanleitung; lokale Integrationstests mit echten Diensten (PostgreSQL, Podman, Git, LiteLLM) wo möglich, sonst klar gekennzeichnete Fakes ausschließlich im Testcode.
 - Fortsetzung: Auf dem Orchestrator `docs/operations/INSTALLATION.md` abarbeiten, danach `scripts/ops/live-acceptance.sh` ausführen.
+- Status: **aufgehoben** (2026-10-16): Installation erfolgt, Live-Abnahme auf .225/.222 durchgeführt (STATUS.md, BUG-143–152).
 
 ### BLOCKER-002 – Tag-Push aus der Build-Umgebung verweigert
 - Zeit: 2026-10-15T05:40Z · Phase: P41 (41.9) · Severity: extern
@@ -29,10 +30,87 @@ P0/P1-Blocker werden sofort behoben. Nicht-blockierende Bugs werden reproduziert
 - Fortsetzung (einmalig, in einem Checkout mit Schreibrecht): `git fetch origin claude/hermclaw-next-build && git tag -a v0.1.0rc1 -m "Hermclaw Next 0.1.0rc1 – Release Candidate" $(git log -1 --format=%H origin/claude/hermclaw-next-build -- docs/operations/FINAL_BUILD_REPORT.md) && git push origin v0.1.0rc1`. Das Tag markiert den Commit, in dem
   `docs/operations/FINAL_BUILD_REPORT.md` zuletzt geändert wurde (der Release-Candidate-Stand).
 
+### BLOCKER-003 – Deploy-Key des Orchestrators ohne Schreibrecht im Wegwerf-Projekt `local-ai/hermclaw-test`
+- Zeit: 2026-10-16T00:30+02:00 · Phase: Live-Abnahme (Suite `gitops`) · Severity: extern (GitLab-Einstellung)
+- Reproduktion (als `hermclaw` auf .225, Schlüssel `/etc/hermclaw/ssh/id_ed25519`): Push eines Branches nach
+  `git@192.168.178.226:local-ai/hermclaw-test.git` → `remote: This deploy key does not have write access to this project.`
+  Lesen (`clone`, `ls-remote`) funktioniert.
+- Auswirkung: Die GitLab-Suite (Push des Job-Branches, Merge Request) und echte Jobs auf diesem Projekt können nicht pushen.
+- Fortsetzung: In GitLab unter *local-ai/hermclaw-test → Settings → Repository → Deploy keys* beim Schlüssel des
+  Orchestrators „Grant write permissions to this key“ aktivieren (INSTALLATION.md 6.1), dann
+  `sudo HERMCLAW_LIVE_GITLAB_PROJECT=local-ai/hermclaw-test HERMCLAW_LIVE_GITLAB_API=http://192.168.178.226 HERMCLAW_LIVE_GITLAB_REPO_URL=git@192.168.178.226:local-ai/hermclaw-test.git scripts/ops/live-acceptance.sh --suite gitops`.
+
 ## Offene Bugs
 Noch keine.
 
 ## Behobene Bugs
+
+### BUG-152 – Abgelehnter Push meldet nur „see stderr“ statt der Begründung des Servers
+- Phase: Live-Abnahme (Kapitel 12, Suite `gitops`, 2026-10-16) · Komponente: gitops · Severity: P3 · blockierend: nein · Status: **behoben** (`tests/unit/test_gitops_errors_hint.py`, `tests/integration/test_gitops_push.py::test_server_side_refusal_names_the_servers_reason`)
+- Reproduktion: `scripts/ops/live-acceptance.sh --suite gitops` gegen `local-ai/hermclaw-test`, dessen Deploy-Key kein Schreibrecht hat.
+- Erwartet: Die Fehlermeldung (Job-Fehler, UI, Test) nennt den Grund.
+- Tatsächlich: `PushRejectedError: push of 'hermclaw/…' was rejected: see stderr`; der Grund („remote: This deploy key does not have write access to this project.“) stand nur in `details.stderr`.
+- Fix: `gitops.engine.push_stderr_hint` zieht die `remote:`-Zeilen (sonst die `fatal:`/`error:`-Zeile, auch deutsche Locale) redigiert und auf 300 Zeichen gekürzt in die Meldung.
+
+### BUG-151 – WoL-Live-Test schlägt fehl, solange Wake-on-LAN bewusst deaktiviert ist
+- Phase: Live-Abnahme (Suite `wol`) · Komponente: tests/wol · Severity: P3 · blockierend: nein · Status: **behoben** (`tests/integration/test_wol_live.py::test_live_probes`, `::test_live_magic_packet`)
+- Reproduktion: `hosts.yaml` mit `wake_on_lan.enabled: false` (WoL noch nicht eingerichtet, Platzhalter-MAC), `live-acceptance.sh --suite wol`.
+- Erwartet: Probes (Ping/SSH/API/Dienste) laufen; das Magic Packet wird mit Grund übersprungen.
+- Tatsächlich: `AssertionError: host has no Wake-on-LAN configuration`, die Probes liefen nie.
+- Fix: Test geteilt. `test_live_probes` prüft Konfiguration und Erreichbarkeit immer, `test_live_magic_packet` überspringt bei `enabled: false` mit Grund und verlangt bei `enabled: true` eine echte MAC.
+
+### BUG-150 – Planner-Fallback `gemma4:12b` lädt mit 32K Kontext nicht auf der GTX 1080 (CUDA-Allokationsfehler)
+- Phase: Live-Abnahme (Suite `models`, `test_live_planner_fallback_alias_serves`) · Komponente: models/config · Severity: P2 · blockierend: nein (nur der technische Fallback des Planners ist betroffen) · Status: **behoben im Code/Config**, Produktivwirkung erst nach dem nächsten Deployment (`tests/integration/test_models_litellm_proxy.py::test_gpu_layers_reach_ollama_as_num_gpu`, `tests/unit/test_models_profiles.py::test_example_fallback_caps_gpu_layers`)
+- Reproduktion (auf .224, auch bei leerer GPU): `curl -s localhost:11434/api/generate -d '{"model":"gemma4:12b","prompt":"Reply with: ok","stream":false,"options":{"num_ctx":32768}}'` → `CUDA error: the resource allocation failed`. Mit `num_ctx` 8192/16384 oder `num_gpu: 30` lädt das Modell (≈15 s); mit `num_gpu: 40` meldet llama.cpp `cudaMalloc failed: out of memory` („Gemma4Assistant requires ctx_other…“ in der Speicherschätzung). Ollama 0.40.4 überschätzt, wie viele Layer passen.
+- Erwartet: Der Fallback antwortet mit dem konfigurierten 32K-Kontext (CPU-Offload für den Rest).
+- Fix: Neues optionales Profilfeld `gpu_layers` (→ Ollama `num_gpu`; ungesetzt = Ollama entscheidet wie bisher). Der Gateway sendet es pro Request, `litellm_config` setzt es als Deployment-Default; empirisch gegen echten LiteLLM 1.104.2 geprüft. `config/models.example.yaml`: `planner-gemma-fallback.gpu_layers: 30`.
+- Live-Nachweis ohne Produktionseingriff: temporärer LiteLLM-Proxy mit der neuen Konfiguration gegen das echte Ollama auf .224 → `planner-gemma-fallback` antwortet `ok` (32K).
+- Offen: Deployment des Orchestrators (neues Release), damit `/etc/hermclaw/models.yaml` und `litellm.yaml` das Feld bekommen.
+- Nebenbefund (kein Fehler, dokumentiert): `ModelResidency` (P08 8.10) ist nicht in die Runtime verdrahtet; Modellwechsel macht Ollama selbst (`OLLAMA_MAX_LOADED_MODELS=2`). Planner 26b, Coder 30b und Heavy 27b (24K) laden live korrekt.
+
+### BUG-149 – `podman-compose` fehlt auf dem Execution Worker; Compose-Sandbox meldet INFRA_SANDBOX_UNAVAILABLE
+- Phase: Live-Abnahme (Suite `infratools`, `test_live_sandbox_on_execution_worker`) · Komponente: deployment (Ansible-Rolle podman) · Severity: P2 · blockierend: nein · Status: **behoben** und auf .222 angewendet (`tests/integration/test_bootstrap_infra.py::test_bootstrap_playbook_structure`, `::test_role_input_validation` Fälle `podman-extra-packages*`)
+- Reproduktion: `compose_up_sandbox(..., host="exec-222")` → `no usable container engine: no compose implementation installed (docker compose, docker-compose, podman-compose, podman compose)`.
+- Ursache: Die podman-Rolle installierte kein `podman-compose`, obwohl die Container-Tools (P28) und `known-limitations.md` darauf bauen.
+- Fix: `podman_extra_packages` (validiert, Default `[]`), im Play „Execution worker“ `[podman-compose]`. Angewendet mit `playbooks/bootstrap.yml --limit hermclaw-exec-222 --tags podman` → `podman-compose version 1.3.0`.
+
+### BUG-148 – SearXNG-Live-Test nutzt eine feste LAN-Adresse statt der deployten URL
+- Phase: Live-Abnahme (Suite `research`) · Komponente: tests/research · Severity: P3 · blockierend: nein · Status: **behoben** (`tests/integration/test_research_fetch_search.py::test_live_searxng_on_target_host`)
+- Reproduktion: `live-acceptance.sh --suite research` → `SearchUnavailable: SearXNG unreachable: ConnectError` auf `http://192.168.178.225:8888`.
+- Ursache: SearXNG lauscht wie vorgesehen nur auf `127.0.0.1:8888` (`policies.research.searxng_url`); der Test hatte die LAN-Adresse fest eingetragen. Die Research des ersten Testauftrags lief über die richtige URL.
+- Fix: Default aus `load_config().policies.research.searxng_url`, `HERMCLAW_LIVE_SEARXNG_URL` überschreibt weiterhin.
+
+### BUG-147 – Docker-Adapter kann unter einer rootless Engine nicht in den Workspace schreiben
+- Phase: Live-Abnahme (Suite `sandbox` auf .222, `test_docker_adapter_flags_run_on_podman_cli`) · Komponente: worker/execution sandbox · Severity: P3 · blockierend: nein (Produktion nutzt den Podman-Adapter) · Status: **behoben** (`tests/unit/test_sandbox_command_line.py::test_docker_user_follows_the_engine_rootless_state`, `::test_docker_name_answered_by_podman_is_parsed_as_podman`, verschärfter Live-Test)
+- Reproduktion: `DockerSandbox(executable="podman")` als `hermclaw` (rootless) → `echo d > docker.txt` scheitert („can't create docker.txt“); der alte Test verdeckte das, weil der Befehl mit `;` verkettet war (Exit 0).
+- Ursache: (1) `--user=<Host-uid des Besitzers>` ist nur bei rootful Docker richtig; rootless wird diese uid auf eine subuid ohne Schreibrecht abgebildet. (2) `docker info --format '{{json .}}'` liefert bei Podman (auch beim `podman-docker`-Shim) Podmans Format; `parse_docker_info` meldete dann immer „rootful“.
+- Fix: `health()/preflight()` merken den Rootless-Zustand; rootless läuft der Container als uid 0 (= Workspace-Besitzer, ohne Capabilities, no-new-privileges). `engine_info` erkennt Podman-Format hinter dem Docker-Namen.
+
+### BUG-146 – Abnahmeskript: Sandbox-Suite prüft nichts und meldet trotzdem PASS
+- Phase: Live-Abnahme (Suite `sandbox` auf .222) · Komponente: scripts/ops/live-acceptance.sh · Severity: P2 · blockierend: nein · Status: **behoben** (`tests/integration/test_live_acceptance_script.py::test_sandbox_suite_runs_every_podman_test_not_only_the_live_one`, `::test_junit_counts_feed_the_skip_classification`)
+- Reproduktion: `sudo scripts/ops/live-acceptance.sh` auf .222 → `1 skipped, 24 deselected`, Summary `PASS  sandbox`.
+- Ursache: (1) `-m live` deselektierte 24 der 25 Podman-Tests, obwohl genau sie die Live-Verifikation auf .222 sind (Modul-Docstring). (2) Das Testimage `alpine:3.20` fehlte im Speicher des Dienstbenutzers; Kapitel 12 erwähnte es nicht. (3) Eine Suite mit ausschließlich übersprungenen Tests galt als PASS.
+- Fix: Marker je Suite (`sandbox`: `integration or live`), Testimage wird bei Bedarf als Dienstbenutzer gezogen und danach wieder entfernt, Ergebnis aus der JUnit-XML: `SKIP (all N test(s) skipped)` bzw. `PASS (N tests, M skipped)`; `-rs` zeigt die Skip-Gründe. Danach auf .222: 25 passed.
+
+### BUG-145 – Dev-venv aus Kapitel 12 kann die Testsuite nicht sammeln
+- Phase: Live-Abnahme (Vorbereitung) · Komponente: pyproject/tests · Severity: P2 · blockierend: ja für lokale Regressionstests auf den Hosts (behoben) · Status: **behoben**
+- Reproduktion: `python3 -m venv .venv && .venv/bin/pip install -e '.[dev]' && .venv/bin/pytest --collect-only tests` als Nicht-root auf .225.
+- Tatsächlich: (1) `ModuleNotFoundError: No module named 'aiohttp'` in 22 Testmodulen (Fake-Server); in der Build-Umgebung war aiohttp nur zufällig installiert. (2) `tests/integration/test_backup_live.py` wertet `Path('/etc/hermclaw/backup.yaml').is_file()` beim Import aus; `/etc/hermclaw` ist `0750` → `PermissionError` bricht die ganze Sammlung ab.
+- Fix: `aiohttp>=3.10` im Extra `dev`; der Backup-Live-Test behandelt eine unlesbare Konfiguration als „nicht vorhanden“ (Skip mit Grund). Danach: `3336 tests collected`, keine Sammelfehler.
+
+### BUG-144 – Planner plant Web-Research über das eigene Repository
+- Phase: Live-Abnahme (erster Testauftrag `4af00159…`) · Komponente: planner/prompt · Severity: P3 · blockierend: nein · Status: **behoben** (`tests/unit/test_planner_prompt.py::test_research_is_for_external_facts_not_the_repository_itself`)
+- Reproduktion: Job „/health-Endpunkt mit Test“ auf dem README-only-Repository `hermclaw-test`.
+- Tatsächlich: Gemma legte `research_needed: "What is the programming language and web framework used in this repository?"` an; die Web-Suche lieferte widersprüchliche Aussagen über fremde Projekte (Next.js, Ruby, Rust) und kostete ≈5 min.
+- Fix: Regel in Planner- und Replanner-Prompt: Research nur für externe Fakten; Fakten über das Repository kommen aus `repository_inventory`/`retrieved_context`; ein (fast) leeres Repository hat noch keinen Stack – einen passenden wählen und als Annahme nennen.
+
+### BUG-143 – Erster Testauftrag scheitert: Plan mit Implement-Steps ohne jede Scope-Quelle wird angenommen
+- Phase: Live-Abnahme (erster Testauftrag `4af00159-69f9-49c1-9527-8741dea3f631`, 2026-10-15 23:50) · Komponente: planner/validation · Severity: P1 · blockierend: ja (behoben) · Status: **behoben** (`tests/unit/test_planner_validation.py::test_workspace_steps_without_any_scope_source_are_rejected`, `::test_checking_step_error_names_candidate_dependencies`, `tests/unit/test_planner_loop.py::test_unscoped_implement_step_is_repaired_before_it_can_block`)
+- Reproduktion: Repository `hermclaw-test` (nur `README.md`), Auftrag „Füge einen /health-Endpunkt hinzu, der {"status": "ok"} liefert, mit Test.“
+- Ablauf (Events/`model_invocations`): Gemma plante S003/S004 (`implement`) ohne `repo_hints` und ohne `allowed_new_paths` (nur `diff.must_change: ["*"]`). Die semantische Validierung nahm den Plan an. S003 wurde nach ≈6 min Research mit `SCOPE_UNAVAILABLE / no_resolvable_scope` blockiert (`journalctl -u hermclaw-scheduler`: „scope generated … scope_status unavailable“). Der Replan (Gemma) lieferte vier Steps ganz ohne `depends_on`; der Fehler „step S010: verify step must depend on the step(s) it checks“ kam dreimal identisch zurück → `PLANNER_INVALID_OUTPUT`, Job `failed`.
+- Erwartet: Ein Plan, dessen schreibende Steps keine Dateien nennen, wird schon beim Planen abgelehnt; die Repair-Meldung sagt, was zu tun ist.
+- Ursache: Die Scope-Engine baut den Scope ausschließlich aus `repo_hints`, `allowed_new_paths` und konkreter `presence`-Evidence (Scope bleibt explizit); die Validierung prüfte nicht, dass ein workspace-schreibender Step mindestens eine dieser Quellen hat. Die Abhängigkeitsmeldung für Prüf-Steps nannte keine Kandidaten.
+- Fix: `validation._scope_source_errors`: `implement`/`database`/`docker`/`documentation`-Steps ohne Hints, ohne neue Pfade und ohne `presence`-Evidence für eine noch nicht existierende Datei → semantischer Fehler mit Anleitung (im leeren Repository gehört jede Datei in `allowed_new_paths`). Die Meldung für review/verify ohne Abhängigkeit nennt die davor liegenden schreibenden Steps (`"depends_on": ["S007", "S008"]`). Keine Sonderfälle, keine Änderung an Scope-Engine oder Modellrollen.
 
 ### BUG-142 – The optional SSH gate cannot read its default allow-list as the runtime user
 - Phase: D-013 (Koexistenz `.223`, Analyse) · Komponente: sshtools/deploy · Severity: P3 · blockierend: nein (das Gate ist standardmäßig nicht aktiv, `common_ssh_forced_command: ""`) · Status: **behoben** (`tests/unit/test_sshtools_gate.py::test_default_allowlist_is_readable_outside_the_config_dir`, `::test_gate_reads_a_root_owned_allowlist_as_an_unprivileged_user`)

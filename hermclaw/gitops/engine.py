@@ -313,6 +313,24 @@ class _VerifiedRun:
     content_digest: str | None
 
 
+def push_stderr_hint(stderr: str, *, limit: int = 300) -> str | None:
+    """The server's own explanation of a rejected push (``remote: ...`` lines, e.g. GitLab's "This deploy key does
+    not have write access to this project."), else git's ``fatal:``/``error:`` line – redacted and short (BUG-152:
+    the error said only "see stderr", the UI and the job error never showed why)."""
+    remote: list[str] = []
+    fatal: str | None = None
+    for raw in stderr.splitlines():
+        line = raw.strip()
+        if line.lower().startswith("remote:"):
+            text = line[7:].strip().strip("=").strip()
+            if text and any(c.isalnum() for c in text):
+                remote.append(text)
+        elif fatal is None and line.lower().startswith(("fatal:", "error:", "schwerwiegend:", "fehler:")):
+            fatal = line
+    hint = " ".join(remote) or fatal
+    return DEFAULT_REDACTOR.text(hint)[:limit] if hint else None
+
+
 class GitEngine:
     """All runtime git writes. One instance per process; safe for concurrent use (per-mirror/workspace locks)."""
 
@@ -1143,8 +1161,10 @@ class GitEngine:
                     results = [r for r in parse_push_porcelain(res.text) if r.destination == ref]
                     if res.returncode != 0 or not results or not results[0].ok:
                         reason = results[0].reason or results[0].summary if results else None
+                        hint = push_stderr_hint(res.err)
+                        why = f"{reason} ({hint})" if reason and hint else reason or hint or "see stderr"
                         raise PushRejectedError(
-                            f"push of '{info.branch}' was rejected: {reason or 'see stderr'}",
+                            f"push of '{info.branch}' was rejected: {why}",
                             details={
                                 "branch": info.branch,
                                 "reason": reason,

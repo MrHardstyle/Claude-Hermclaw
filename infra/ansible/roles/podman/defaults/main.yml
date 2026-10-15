@@ -10,6 +10,9 @@ podman_packages:
   - crun
   - dbus-user-session
   - systemd-container
+# Additional packages per host group: the execution worker (.222) sets [podman-compose] for the compose sandbox of
+# the container tools (P28; BUG-149: without it compose_up_sandbox reports INFRA_SANDBOX_UNAVAILABLE).
+podman_extra_packages: []
 podman_min_version: "5.0"
 
 # Users that run rootless containers.

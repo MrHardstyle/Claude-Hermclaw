@@ -420,7 +420,10 @@ def _base_rules(kind_capability: dict[str, str], capability_names: Sequence[str]
         "(reports) go into allowed_new_paths like in any repository.",
         "If information is missing and must be researched first, add an entry to research_needed "
         "(question + reason); the runtime schedules research before the dependent work. A research step "
-        "(kind research) must be a dependency of the steps that need its result.",
+        "(kind research) must be a dependency of the steps that need its result. Research searches the web: use it "
+        "only for external facts (documentation, APIs, versions). Facts about this repository itself (language, "
+        "framework, layout, tests) come from repository_inventory and retrieved_context; an empty or nearly empty "
+        "repository has no stack yet, so choose one that fits the job and state it as an assumption.",
         "Review steps (kind review) and verify steps (kind verify) must depend on the steps they check.",
         "Network is off by default. Set network true (on a step or on command evidence) only for steps whose "
         "capability has network=true in capabilities.",

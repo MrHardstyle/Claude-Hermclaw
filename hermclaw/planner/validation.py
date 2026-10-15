@@ -292,6 +292,41 @@ def _hint_errors(step: PlanStep, ctx: ValidationContext) -> list[str]:
     return errors
 
 
+def _scope_source_errors(step: PlanStep, ctx: ValidationContext) -> list[str]:
+    """A workspace-mutating step must name the files it works on: the runtime builds its scope only from
+    repo_hints, allowed_new_paths and concrete presence evidence (Bauplan §15, scope stays explicit). Without any
+    of them the step can never run (SCOPE_UNAVAILABLE), so the plan is rejected while the planner can still fix it."""
+    if step.kind.value not in WORKSPACE_MUTATING_KINDS or step.repo_hints or step.allowed_new_paths:
+        return []
+    for crit in step.acceptance:
+        # the scope engine turns presence evidence for a concrete file that does not exist yet into a new path
+        if isinstance(crit, PresenceEvidence) and not any(ch in GLOB_CHARS for ch in crit.path_glob):
+            try:
+                if not ctx.path_exists(normalise_path(crit.path_glob)):
+                    return []
+            except ValueError:
+                pass
+    return [
+        f"step {step.id}: {step.kind.value} step names no files to work on; list the existing files it changes in "
+        "repo_hints and/or the files or directories it creates in allowed_new_paths (repository-relative, e.g. "
+        "'app/main.py' or 'tests/'). The runtime builds the step's scope only from these; in an empty or new "
+        "repository every file is created and belongs in allowed_new_paths"
+    ]
+
+
+def _checked_candidates(plan: PlanContract, step: PlanStep) -> str:
+    """Repair hint for a checking step without dependencies: the mutating steps listed before it."""
+    before: list[str] = []
+    for other in plan.steps:
+        if other.id == step.id:
+            break
+        if other.kind.value in MUTATING_KINDS:
+            before.append(other.id)
+    if not before:
+        return "; add the ids of those steps to its depends_on"
+    return f'; add the ids of those steps to its depends_on, e.g. "depends_on": {json.dumps(before[-3:])}'
+
+
 def _acceptance_errors(step: PlanStep, ctx: ValidationContext) -> list[str]:
     errors: list[str] = []
     kind = step.kind.value
@@ -412,6 +447,7 @@ def semantic_errors(
 
     for step in new_steps:
         errors.extend(_capability_errors(step, ctx))
+        errors.extend(_scope_source_errors(step, ctx))
         errors.extend(_hint_errors(step, ctx))
         errors.extend(_acceptance_errors(step, ctx))
 
@@ -441,7 +477,7 @@ def semantic_errors(
     for step in new_steps:
         kind = step.kind.value
         if kind in CHECKING_KINDS and not step.depends_on:
-            errors.append(f"step {step.id}: {kind} step must depend on the step(s) it checks")
+            errors.append(f"step {step.id}: {kind} step must depend on the step(s) it checks{_checked_candidates(plan, step)}")
         if kind in INFO_KINDS and has_work and dependants.get(step.id, 0) == 0:
             errors.append(
                 f"step {step.id}: {kind} step is unreachable for the rest of the plan (no step depends on it); "

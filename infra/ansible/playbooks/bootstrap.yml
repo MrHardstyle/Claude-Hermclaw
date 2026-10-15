@@ -54,6 +54,9 @@
   roles:
     - role: common
     - role: podman
+      vars:
+        # compose sandbox of the container tools (P28, BUG-149)
+        podman_extra_packages: [podman-compose]
     - role: wol_target
     - role: systemd_skeleton
 

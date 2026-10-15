@@ -1417,7 +1417,8 @@ aus.
 
 Vor der GitLab-Suite legen Sie in GitLab die Gruppe `hermclaw` an und darin das Wegwerf-Projekt `sandbox` mit
 „Initialize repository with a README“ (Default-Branch `main`, von GitLab geschützt). Aktivieren Sie dort den
-Deploy-Key des Orchestrators mit „Grant write permissions to this key“ (6.1). Das gespeicherte `gitlab-token` muss auf
+Deploy-Key des Orchestrators mit „Grant write permissions to this key“ (6.1). Ohne dieses Häkchen scheitert der Push
+mit `remote: This deploy key does not have write access to this project.` (Lesen funktioniert trotzdem). Das gespeicherte `gitlab-token` muss auf
 dieses Projekt zugreifen dürfen: ein Group Access Token dieser Gruppe, oder der Bot-Benutzer ist dort Developer. Ein
 Project Access Token eines anderen Projekts reicht nicht. Liegen Ihre Projekte und Ihr Group Access Token in einer
 anderen Gruppe, legen Sie `sandbox` dort an und passen `HERMCLAW_LIVE_GITLAB_PROJECT` und
@@ -1452,8 +1453,14 @@ sudo scripts/ops/live-acceptance.sh
 sudo scripts/ops/live-acceptance.sh --cleanup-db
 ```
 
-Ergebnis: `/var/lib/hermclaw/acceptance/<zeit>-summary.txt` plus JUnit-XML je Suite. Alles `PASS` (oder `SKIP` mit
-Grund, z. B. GitLab ohne Wegwerf-Projekt) = abgenommen. Tragen Sie das Ergebnis in `STATUS.md` ein. Bei `FAIL`: das
+Die Sandbox-Suite auf .222 führt alle Podman-Tests aus (nicht nur die mit `live` markierten). Ihr Testimage
+`docker.io/library/alpine:3.20` zieht das Skript bei Bedarf in den Speicher des Dienstbenutzers und entfernt es danach
+wieder; .222 braucht dafür Zugang zur Registry (bzw. zum Registry-Proxy).
+
+Ergebnis: `/var/lib/hermclaw/acceptance/<zeit>-summary.txt` plus JUnit-XML je Suite. Jede Zeile nennt die Zahl der
+Tests, z. B. `PASS  sandbox (25 tests, 0 skipped)`. Eine Suite, deren Tests alle übersprungen wurden, heißt
+`SKIP … (all N test(s) skipped)`; die Gründe stehen im Log (`-rs`). Alles `PASS` (oder `SKIP` mit
+Grund, z. B. GitLab ohne Wegwerf-Projekt, Wake-on-LAN noch deaktiviert) = abgenommen. Tragen Sie das Ergebnis in `STATUS.md` ein. Bei `FAIL`: das
 Log der Suite lesen und Kapitel 14 prüfen.
 
 ---
@@ -1521,6 +1528,7 @@ ping antworten (`ping_timeout_seconds` in `hosts.yaml`). Sonst prüfen Sie BIOS 
 | `doctor`: `litellm` fail, Gateway meldet `MODEL_AUTH_FAILED` | Master-Key fehlt/falsch | `sudo /opt/hermclaw/bin/hermclaw-credential check litellm-master-key`; `sudo systemctl restart hermclaw-litellm hermclaw-scheduler` |
 | `doctor`: `models:model-224` fail | Modell nicht geladen | .224 wecken (Kapitel 13.1) und `playbooks/deploy.yml --limit model_workers -K` ausführen (lädt fehlende Tags mit angehaltenem Worker-Daemon), oder von Hand wie am Ende von Kapitel 7 (Daemon stoppen, `systemd-run … hermclaw-model-pull`, Daemon starten) |
 | Modelle laufen auf der CPU (`ollama ps`: `100% CPU`) | Treiber zu alt / nicht geladen, nach Suspend GPU verloren | `nvidia-smi`; `sudo journalctl -u ollama -b \| grep 'inference compute'`; nach Suspend: `sudo rmmod nvidia_uvm && sudo modprobe nvidia_uvm`, `sudo systemctl restart ollama` |
+| Modellaufruf scheitert mit `CUDA error: the resource allocation failed` (auch bei leerer GPU) | Ollama überschätzt, wie viele Layer des Modells mit dem Kontext in die 8 GB passen (z. B. `gemma4:12b` mit 32K, BUG-150) | im Profil `gpu_layers` setzen (Ollama `num_gpu`, z. B. 30) über `hermclaw_config_overrides`, Deployment; vorher auf .224 prüfen: `curl -s localhost:11434/api/generate -d '{"model":"<tag>","prompt":"ok","stream":false,"options":{"num_ctx":32768,"num_gpu":30}}'` |
 | `nvidia-smi`: „couldn't communicate with the NVIDIA driver“ nach Kernel-Update | DKMS-Modul fehlt | `dkms status`; `sudo dkms autoinstall`; Neustart |
 | Schritte scheitern mit `WORKER_UNREACHABLE` | Worker schläft und wacht nicht auf | WoL im BIOS/`ethtool … \| grep Wake-on: g`, MAC in `hosts.yaml`, `sudo hermclaw doctor` |
 | Schritte scheitern mit `SANDBOX_IMAGE_UNSAFE` | Image mit gefährlichen Metadaten (Podman-CVEs) | nur die von `hermclaw-build-sandbox-images` gebauten Images verwenden |

@@ -5,7 +5,7 @@
 
 - name: Install Podman and rootless helpers
   ansible.builtin.apt:
-    name: "{{ podman_packages }}"
+    name: "{{ podman_packages + podman_extra_packages }}"
     state: present
     install_recommends: false
   when: hermclaw_install_packages | bool

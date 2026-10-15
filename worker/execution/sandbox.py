@@ -48,6 +48,7 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
+import dataclasses
 import fnmatch
 import hashlib
 import json
@@ -626,6 +627,10 @@ async def engine_info(engine: Literal["podman", "docker"], executable: str | Non
         data = json.loads(out)
     except json.JSONDecodeError as exc:
         return EngineInfo(engine=engine, available=False, error=f"unparseable {engine} info output: {exc}")
+    if engine == "docker" and isinstance(data.get("host"), Mapping) and "ServerVersion" not in data:
+        # a podman CLI behind the docker name (podman-docker shim, or executable=podman) answers in podman's
+        # format: parsed as docker info it would always look rootful (BUG-147)
+        return dataclasses.replace(parse_podman_info(data), engine="docker")
     return parse_podman_info(data) if engine == "podman" else parse_docker_info(data)
 
 
@@ -728,6 +733,7 @@ class ContainerSandbox:
         self.shm_size = _normalize_size(shm_size)
         self._active: dict[str, str] = {}  # container name -> request id
         self._image_verdicts: dict[str, str | None] = {}  # image -> None (safe) or the refusal reason
+        self._engine_rootless: bool | None = None  # from the last health()/preflight(); None = not checked yet
 
     # ------------------------------------------------------------------ introspection
     def active_containers(self) -> dict[str, str]:
@@ -752,7 +758,10 @@ class ContainerSandbox:
         return verdict
 
     async def health(self) -> EngineInfo:
-        return await engine_info(self.engine, self.executable)
+        info = await engine_info(self.engine, self.executable)
+        if info.available:
+            self._engine_rootless = info.rootless
+        return info
 
     async def preflight(self) -> EngineInfo:
         """Startup check (18.1): the engine answers and – with ``require_rootless`` – really runs rootless.
@@ -1097,9 +1106,15 @@ class DockerSandbox(ContainerSandbox):
     default_allowed_network: ClassVar[str] = "bridge"
 
     def _engine_args(self, workspace: Path) -> list[str]:
-        st = workspace.stat()  # run as the owner of the workspace so the bind mount stays writable without root
         mount = f"type=bind,source={workspace},target={WORKDIR}"
-        return [f"--user={st.st_uid}:{st.st_gid}", f"--shm-size={self.shm_size}", "--log-driver=none", f"--mount={mount}"]
+        if self._engine_rootless:
+            # rootless engine: container uid 0 IS the host user that owns the workspace (no capabilities, no new
+            # privileges); the owner's host uid would map to an unprivileged subuid that cannot write it (BUG-147)
+            user = "0:0"
+        else:
+            st = workspace.stat()  # rootful daemon: run as the owner of the workspace so the bind mount stays writable
+            user = f"{st.st_uid}:{st.st_gid}"
+        return [f"--user={user}", f"--shm-size={self.shm_size}", "--log-driver=none", f"--mount={mount}"]
 
 
 # ---------------------------------------------------------------------------------------------- local

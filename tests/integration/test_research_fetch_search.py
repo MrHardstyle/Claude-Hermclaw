@@ -320,10 +320,13 @@ async def test_searxng_with_mock_transport() -> None:
 
 @pytest.mark.live
 async def test_live_searxng_on_target_host() -> None:
-    """BLOCKER-001: needs the SearXNG container on the orchestrator host (.225)."""
+    """BLOCKER-001: needs the SearXNG container on the orchestrator host (.225). Default URL: the deployed
+    ``policies.research.searxng_url`` (SearXNG listens on 127.0.0.1 only; a fixed LAN address failed, BUG-148)."""
     import os
 
-    url = os.environ.get("HERMCLAW_LIVE_SEARXNG_URL", "http://192.168.178.225:8888")
+    from hermclaw.core.config import load_config
+
+    url = os.environ.get("HERMCLAW_LIVE_SEARXNG_URL") or load_config().policies.research.searxng_url
     provider = SearxngSearchProvider(url, timeout_seconds=20)
     try:
         results = await provider.search("python asyncio documentation", limit=5)

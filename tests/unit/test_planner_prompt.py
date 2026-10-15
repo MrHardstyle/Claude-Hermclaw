@@ -189,6 +189,16 @@ def test_planner_system_prompt_rules() -> None:
     assert "Answer with exactly ONE JSON object" in system
 
 
+def test_research_is_for_external_facts_not_the_repository_itself() -> None:
+    """BUG-144: for a README-only repository Gemma planned web research "what language/framework does this repository
+    use" (answers about Next.js, Ruby and Rust from foreign pages). Both prompts say where repository facts come from."""
+    kc = _kc()
+    for system in (planner_system_prompt(kc, sorted(set(kc.values())), 30), replanner_system_prompt(kc, sorted(set(kc.values())), 30)):
+        assert "use it only for external facts" in system
+        assert "Facts about this repository itself" in system and "come from repository_inventory and retrieved_context" in system
+        assert "an empty or nearly empty repository has no stack yet" in system
+
+
 def test_replanner_system_prompt_adds_rerun_rules() -> None:
     kc = _kc()
     system = replanner_system_prompt(kc, sorted(set(kc.values())), 30)

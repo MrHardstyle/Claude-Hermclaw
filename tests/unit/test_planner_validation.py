@@ -372,3 +372,58 @@ def test_diff_globs_must_be_repository_relative() -> None:
     errors = _errors(plan("Diff", [_impl(acceptance=[diff])]))
     assert any("must_change entry '../outside.py' must be repository-relative" in e for e in errors)
     assert any("must_not_change entry '/etc/passwd' must be repository-relative" in e for e in errors)
+
+
+# --------------------------------------------------------------------------------------------- BUG-143
+def test_workspace_steps_without_any_scope_source_are_rejected() -> None:
+    """BUG-143 (live test job, README-only repository): Gemma planned implement steps with neither repo_hints nor
+    allowed_new_paths. The plan was accepted and the step blocked at run time with SCOPE_UNAVAILABLE; now the
+    planner gets the error in its repair turn."""
+    diff = {"type": "diff", "must_change": ["*"], "must_not_change": [], "allow_empty": False}
+    data = plan(
+        "goal",
+        [
+            step("S001", "discover", "discover", "Identify the programming language and project structure."),
+            step("S003", "implement", "coding", "Add a new route /health that returns ok.", depends_on=["S001"], acceptance=[diff]),
+            step("S004", "documentation", "documentation", "Document the new health route.", depends_on=["S003"]),
+        ],
+    )
+    errors = _errors(data)
+    assert any(e.startswith("step S003: implement step names no files to work on") and "allowed_new_paths" in e for e in errors)
+    assert any(e.startswith("step S004: documentation step names no files to work on") for e in errors)
+    # any one source is enough: hints, allowed new paths, or presence evidence for a file that does not exist yet
+    for extra in (
+        {"repo_hints": ["app/main.py"]},
+        {"allowed_new_paths": ["app/health.py", "tests/"]},
+        {"acceptance": [{"type": "presence", "path_glob": "app/health.py"}]},
+    ):
+        ok = plan("goal", [step("S001", "implement", "coding", "Add a new route /health that returns ok.", **extra)])
+        assert not any("names no files" in e for e in _errors(ok)), extra
+    # presence evidence for an existing file creates nothing, and a glob is not a concrete new file
+    for glob in ("app/main.py", "app/*.py"):
+        bad = plan("goal", [step("S001", "implement", "coding", "Add a new route.", acceptance=[{"type": "presence", "path_glob": glob}])])
+        assert any("names no files" in e for e in _errors(bad)), glob
+    # read-only and remote kinds build no workspace scope
+    remote = plan("goal", [step("S001", "verify", "testing", "Run the test suite."), step("S002", "discover", "discover", "Look around.")])
+    assert not any("names no files" in e for e in _errors(remote))
+
+
+def test_checking_step_error_names_candidate_dependencies() -> None:
+    """BUG-143: in the replan of the live job Gemma returned the same plan three times for 'verify step must
+    depend on the step(s) it checks'; the error now says which ids to add."""
+    data = plan(
+        "goal",
+        [
+            _impl("S007", allowed_new_paths=["app/"]),
+            _impl("S008", repo_hints=["app/main.py"]),
+            step("S010", "verify", "testing", "Run the newly created tests."),
+        ],
+    )
+    errors = _errors(data)
+    assert any(
+        e.startswith("step S010: verify step must depend on the step(s) it checks; add the ids of those steps to its depends_on")
+        and '"depends_on": ["S007", "S008"]' in e
+        for e in errors
+    ), errors
+    lone = plan("goal", [step("S001", "review", "review", "Review everything carefully.")])
+    assert any(e.endswith("add the ids of those steps to its depends_on") for e in _errors(lone))

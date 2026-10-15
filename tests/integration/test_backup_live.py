@@ -23,7 +23,16 @@ def _config_path() -> Path:
     return Path(os.environ.get("HERMCLAW_BACKUP_CONFIG", "/etc/hermclaw/backup.yaml"))
 
 
-@pytest.mark.skipif(not _config_path().is_file(), reason="no production backup.yaml (BLOCKER-001: run on .225)")
+def _config_available() -> bool:
+    # /etc/hermclaw is 0750 root:hermclaw: for an operator without access this is "not available", never a
+    # collection error that aborts the whole test run (BUG-145)
+    try:
+        return _config_path().is_file()
+    except OSError:
+        return False
+
+
+@pytest.mark.skipif(not _config_available(), reason="no readable production backup.yaml (run on .225 as root/hermclaw)")
 async def test_live_backup_to_terra_60_and_restore_test() -> None:
     cfg = load_backup_config(_config_path())
     made = await create_backup(config=cfg)

@@ -40,6 +40,8 @@ def _deployment(profile: ModelProfileConfig, api_base: str, *, keep_alive: str |
         "num_ctx": profile.context_tokens,
         "timeout": profile.timeout_seconds,
     }
+    if profile.gpu_layers is not None:
+        params["num_gpu"] = profile.gpu_layers
     if keep_alive:
         params["keep_alive"] = keep_alive
     info: dict[str, Any] = {"mode": profile.kind, "max_input_tokens": profile.context_tokens}

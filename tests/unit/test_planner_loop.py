@@ -150,3 +150,42 @@ async def test_on_repair_hook_reports_remaining_budget() -> None:
         chat, CALL, list(BASE), _plan_validator, ctx=CallContext(purpose="planner"), settings=PlannerSettings(), on_repair=hook
     )
     assert seen == [(1, "parse", 1), (2, "schema", 0)]
+
+
+async def test_unscoped_implement_step_is_repaired_before_it_can_block() -> None:
+    """BUG-143: the live plan for a README-only repository had implement steps without repo_hints and
+    allowed_new_paths. Semantic validation now rejects it, and the repair turn tells the model where files go."""
+    from hermclaw.core.config import get_config
+    from hermclaw.planner.validation import ValidationContext, semantic_errors
+
+    ctx = ValidationContext.build(get_config(), FASTAPI.inputs, PlannerSettings())
+
+    def validate(data: dict[str, Any]) -> PlanContract:
+        contract = validate_schema(PlanContract, data)
+        errors = semantic_errors(contract, ctx)
+        if errors:
+            raise PlanInvalid("semantic", errors)
+        return contract
+
+    unscoped = {
+        "goal": "Add a /health endpoint with a test.",
+        "summary": "plan",
+        "steps": [
+            {
+                "id": "S001",
+                "title": "Implement /health",
+                "kind": "implement",
+                "capability": "coding",
+                "goal": "Add a new route /health that returns ok.",
+                "acceptance": [{"type": "diff", "must_change": ["*"], "must_not_change": [], "allow_empty": False}],
+            },
+        ],
+    }
+    fixed = json.loads(json.dumps(unscoped))
+    fixed["steps"][0]["allowed_new_paths"] = ["app/health.py", "tests/test_health.py"]
+    chat = ScriptedChat([unscoped, fixed])
+    outcome = await _run(chat, validate)
+    assert outcome.repair_attempts == 1 and outcome.attempts[0].phase == "semantic"
+    repair = chat.calls[1].messages[-1].content
+    assert "step S001: implement step names no files to work on" in repair and "allowed_new_paths" in repair
+    assert outcome.value.steps[0].allowed_new_paths == ["app/health.py", "tests/test_health.py"]

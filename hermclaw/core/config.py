@@ -116,6 +116,10 @@ class ModelProfileConfig(_Strict):
     memory_gb: float = 4.0
     fallback_for: str | None = None
     embedding_dimensions: int | None = None
+    # Ollama ``num_gpu``: layers offloaded to the GPU. Unset = Ollama's own memory estimate. Set it only where that
+    # estimate overcommits the GPU (BUG-150: gemma4:12b at 32K on the 8 GB GTX 1080 fails with a CUDA allocation
+    # error instead of offloading to the CPU).
+    gpu_layers: int | None = Field(default=None, ge=0, le=1000)
     enabled: bool = True
 
 

@@ -196,6 +196,21 @@ def test_ollama_base_url_from_hosts() -> None:
         ollama_base_url(cfg.hosts, "ghost")
 
 
+def test_example_fallback_caps_gpu_layers() -> None:
+    """BUG-150: gemma4:12b at 32K does not load on the 8 GB GTX 1080 with Ollama's own layer estimate; the example
+    profile caps the GPU offload, every other profile leaves it to Ollama. Negative values are refused."""
+    cfg = load_config()
+    by_role = {p.role: p for p in cfg.models.profiles}
+    assert by_role["planner_fallback"].gpu_layers == 30 and by_role["planner_fallback"].context_tokens == 32768
+    assert all(p.gpu_layers is None for p in cfg.models.profiles if p.role != "planner_fallback")
+    conf = build_litellm_config(cfg.models, ollama_urls_by_host={"model-224": "http://10.0.0.5:11434"})
+    params = {m["model_name"]: m["litellm_params"] for m in conf["model_list"]}
+    assert params[by_role["planner_fallback"].alias]["num_gpu"] == 30
+    assert all("num_gpu" not in v for k, v in params.items() if k != by_role["planner_fallback"].alias)
+    with pytest.raises(ValueError):
+        by_role["planner_fallback"].model_validate({**by_role["planner_fallback"].model_dump(), "gpu_layers": -1})
+
+
 # ----------------------------------------------------------------------------------------------- litellm config (8.1)
 def test_build_litellm_config() -> None:
     cfg = models_config()

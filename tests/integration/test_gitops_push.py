@@ -150,6 +150,29 @@ async def test_remote_rejection_is_reported(world):
     assert op.operation == "push" and op.status == "refused" and op.details["error_code"] == "PUSH_REJECTED"
 
 
+async def test_server_side_refusal_names_the_servers_reason(world):
+    """BUG-152 (live acceptance against GitLab .226): a deploy key without write access made the push fail with only
+    "see stderr". The server's ``remote:`` explanation is now part of the error message."""
+    job_id, _step, ws, _commit = await _committed_workspace(world)
+    hook = Path(world.upstream.bare) / "hooks" / "pre-receive"
+    hook.write_text(
+        "#!/bin/sh\n"
+        "echo '' >&2\n"
+        "echo '========================================================================' >&2\n"
+        "echo 'This deploy key does not have write access to this project.' >&2\n"
+        "echo '========================================================================' >&2\n"
+        "exit 1\n",
+        encoding="utf-8",
+    )
+    hook.chmod(0o755)
+    with pytest.raises(PushRejectedError) as err:
+        await world.engine.push_job_branch(ws)
+    assert "This deploy key does not have write access to this project." in err.value.message
+    assert "see stderr" not in err.value.message
+    op = (await world.git_ops(job_id))[-1]
+    assert op.status == "refused" and op.details["error_code"] == "PUSH_REJECTED"
+
+
 async def test_force_with_lease_updates_rebased_job_branch(world):
     job_id, _step, ws, first = await _committed_workspace(world)
     await world.engine.push_job_branch(ws)

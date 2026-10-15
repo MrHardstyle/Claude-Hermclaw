@@ -259,3 +259,30 @@ def test_generated_config_shape(stack: dict[str, Any]) -> None:
     assert conf["general_settings"]["master_key"] == "os.environ/LITELLM_MASTER_KEY"
     text = Path(stack["path"]).read_text(encoding="utf-8")
     assert MASTER_KEY not in text and "sk-" not in text
+
+
+async def test_gpu_layers_reach_ollama_as_num_gpu(stack: dict[str, Any], proxy_bin: str, tmp_path: Path) -> None:
+    """BUG-150: the profile's ``gpu_layers`` caps Ollama's GPU offload (``options.num_gpu``) – per request through the
+    gateway and as the proxy's deployment default; unset profiles send nothing (Ollama decides, as before)."""
+    fake: FakeOllama = stack["fake"]
+    cfg = models_config(stack["proxy_url"])
+    capped = cfg.model_copy(
+        update={"profiles": [p.model_copy(update={"gpu_layers": 30}) if p.role == "planner_fallback" else p for p in cfg.profiles]}
+    )
+    async with gateway(stack, models=capped) as gw:
+        await gw.chat("planner-gemma-fallback", [ChatMessage("user", "plan")], ctx=CTX, max_tokens=16)
+        await gw.chat("planner-gemma", [ChatMessage("user", "plan")], ctx=CTX, max_tokens=16)
+    fallback_body, planner_body = fake.bodies("/api/chat")[-2:]
+    assert fallback_body["model"] == "gemma4:12b" and fallback_body["options"]["num_gpu"] == 30
+    assert planner_body["model"] == "gemma4:26b" and "num_gpu" not in planner_body["options"]
+
+    # deployment default in the generated proxy config, also without the gateway's per-request passthrough
+    conf = build_litellm_config(capped, ollama_urls_by_host={"model-224": stack["ollama_url"]}, keep_alive="10m")
+    params = {m["model_name"]: m["litellm_params"] for m in conf["model_list"]}
+    assert params["planner-gemma-fallback"]["num_gpu"] == 30 and "num_gpu" not in params["planner-gemma"]
+    path = write_litellm_config(tmp_path / "config.yaml", conf)
+    async with litellm_proxy(proxy_bin, path) as proxy_url:
+        direct = models_config(proxy_url)
+        async with LiteLLMGateway(direct, api_key=MASTER_KEY, options=GatewayOptions(ollama_passthrough=False)) as gw:
+            await gw.chat("planner-gemma-fallback", [ChatMessage("user", "plan")], ctx=CTX, max_tokens=16)
+    assert fake.bodies("/api/chat")[-1]["options"]["num_gpu"] == 30

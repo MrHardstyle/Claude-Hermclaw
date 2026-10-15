@@ -5,8 +5,8 @@ Run on the orchestrator (.225) with the production configuration::
     HERMCLAW_CONFIG_DIR=/etc/hermclaw HERMCLAW_LIVE_WOL_WORKER=model-224 \\
         .venv/bin/pytest -m live tests/integration/test_wol_live.py -v
 
-``test_live_magic_packet_and_probes`` only sends a magic packet and probes ping/SSH/API/services (safe while
-the host is awake – the packet is ignored). ``test_live_ensure_worker_ready`` runs the full pipeline against
+``test_live_probes`` checks ping/SSH/API/services, ``test_live_magic_packet`` sends one magic packet (safe while
+the host is awake – the packet is ignored; skipped while Wake-on-LAN is disabled). ``test_live_ensure_worker_ready`` runs the full pipeline against
 the production database configured by ``HERMCLAW_DATABASE_URL`` (heartbeats arrive there), so it is opt-in
 via ``HERMCLAW_LIVE_WOL_DB=1``.
 """
@@ -31,14 +31,14 @@ def _worker_id() -> str:
     return wid
 
 
-async def test_live_magic_packet_and_probes() -> None:
+async def test_live_probes() -> None:
+    """Production hosts.yaml passes the wake config check, and ping/SSH/API/services of the worker answer. Runs
+    with Wake-on-LAN disabled too: the readiness probes do not depend on it."""
     cfg = load_config()
     host = cfg.hosts.by_id(_worker_id())
     issues = assert_wake_config(cfg)  # 10.1 on the production hosts.yaml: no errors (raises otherwise)
     assert all(i.severity == IssueSeverity.warning for i in issues)
     wol = host.wake_on_lan
-    assert wol.enabled and wol.mac, "host has no Wake-on-LAN configuration"
-    assert await send_magic_packet(wol.mac, wol.broadcast, wol.port) == 102
     probes = Probes()
     try:
         ssh_port = host.ssh.port if host.ssh else 22
@@ -53,6 +53,18 @@ async def test_live_magic_packet_and_probes() -> None:
             assert out.ok, f"{svc.name}: {out.detail}"
     finally:
         await probes.aclose()
+
+
+async def test_live_magic_packet() -> None:
+    """Sends one magic packet (ignored by an awake host). Skipped while the operator keeps Wake-on-LAN disabled in
+    hosts.yaml (not set up yet): a deliberate configuration, not a failure (BUG-151)."""
+    cfg = load_config()
+    host = cfg.hosts.by_id(_worker_id())
+    wol = host.wake_on_lan
+    if not wol.enabled:
+        pytest.skip(f"Wake-on-LAN is disabled for {host.id} in hosts.yaml (wake_on_lan.enabled: false)")
+    assert wol.mac and wol.mac != "00:00:00:00:00:00", "Wake-on-LAN enabled without a real MAC"
+    assert await send_magic_packet(wol.mac, wol.broadcast, wol.port) == 102
 
 
 async def test_live_ensure_worker_ready() -> None:

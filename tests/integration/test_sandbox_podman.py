@@ -296,10 +296,16 @@ async def test_concurrent_commands_are_isolated(ws: Path, tmp_path: Path) -> Non
 async def test_docker_adapter_flags_run_on_podman_cli(ws: Path) -> None:
     """The Docker adapter's flag set is docker-CLI compatible; podman's CLI accepts it, so it is run for real."""
     s = DockerSandbox(policy(), executable="podman", pull="never", managed_label="hermclaw.p18test=true", max_output_bytes=10_000)
-    r = await s.run(req("echo d > docker.txt; grep NoNewPrivs /proc/self/status; touch /usr/x 2>/dev/null || echo RO"), ws)
+    await s.preflight()  # as the worker does at startup: tells the adapter whether the engine is rootless
+    # `&&`: a workspace that is not writable must fail the command (BUG-147: on rootless podman the write failed
+    # silently because the container ran as the owner's host uid, which maps to an unprivileged subuid)
+    r = await s.run(req("echo d > docker.txt && grep NoNewPrivs /proc/self/status && (touch /usr/x 2>/dev/null || echo RO)"), ws)
     assert r.exit_code == 0, r
     assert "NoNewPrivs:\t1" in r.stdout and "RO" in r.stdout and r.sandbox == "docker"
     assert (ws / "docker.txt").read_text() == "d\n"
+    assert (ws / "docker.txt").stat().st_uid == os.getuid()
+    caps = await s.run(req("grep CapEff /proc/self/status"), ws)
+    assert caps.stdout.split() == ["CapEff:", "0000000000000000"]  # container root without any capability
 
 
 async def test_ensure_images_and_health() -> None:

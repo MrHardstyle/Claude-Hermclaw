@@ -103,3 +103,64 @@ def test_prepare_db_lets_a_non_superuser_create_migrated_test_databases(tmp_path
         assert conn.execute("SELECT count(*) FROM pg_database WHERE datname LIKE 'hermclaw_acceptance%'").fetchone() == (0,)
         assert conn.execute("SELECT count(*) FROM pg_database WHERE datname = %s", (name,)).fetchone() == (0,)
     assert not (tmp_path / "secrets" / "acceptance-test-admin-url").exists()
+
+
+def _script_function(name: str) -> str:
+    """The source of one shell function of the script (to call it without running the main part)."""
+    lines = SCRIPT.read_text(encoding="utf-8").splitlines()
+    start = next(i for i, line in enumerate(lines) if line.startswith(f"{name}() "))
+    end = next(i for i in range(start, len(lines)) if lines[i] == "}")
+    return "\n".join(lines[start : end + 1])
+
+
+def _call(function: str, *args: str) -> str:
+    script = _script_function(function) + f'\n{function} "$@"\n'
+    res = subprocess.run(["bash", "-c", script, "bash", *args], capture_output=True, text=True, timeout=60, check=True)
+    return res.stdout.strip()
+
+
+def test_sandbox_suite_runs_every_podman_test_not_only_the_live_one() -> None:
+    """BUG-146: with ``-m live`` the sandbox suite on .222 deselected 24 of 25 podman tests (the module docstring
+    calls exactly these the live verification) and reported PASS for one skipped test."""
+    marker = _call("suite_marker", "sandbox")
+    assert _call("suite_marker", "gitops") == "live"
+    collected = subprocess.run(
+        [
+            str(ROOT / ".venv" / "bin" / "python"),
+            "-m",
+            "pytest",
+            "-q",
+            "--collect-only",
+            "-p",
+            "no:cacheprovider",
+            "-m",
+            marker,
+            "tests/integration/test_sandbox_podman.py",
+        ],
+        capture_output=True,
+        text=True,
+        cwd=ROOT,
+        timeout=120,
+        check=False,
+    )
+    ids = [line for line in collected.stdout.splitlines() if "::test_" in line]
+    assert len(ids) >= 20 and any("test_live_222_rootless" in i for i in ids), collected.stdout[-2000:]
+
+
+@pytest.mark.parametrize(
+    ("xml", "expected"),
+    [
+        ('<testsuites><testsuite name="pytest" tests="25" skipped="1" failures="0"/></testsuites>', "25 1"),
+        ('<testsuite name="pytest" tests="1" skipped="1"/>', "1 1"),
+        ('<testsuites><testsuite tests="3" skipped="0"/><testsuite tests="2" skipped="2"/></testsuites>', "5 2"),
+        ("not xml", ""),
+    ],
+)
+def test_junit_counts_feed_the_skip_classification(tmp_path: Path, xml: str, expected: str) -> None:
+    """BUG-146: a suite whose tests were all skipped is reported as SKIP, never as PASS."""
+    f = tmp_path / "suite.xml"
+    f.write_text(xml, encoding="utf-8")
+    assert _call("junit_counts", str(f)) == expected
+    assert _call("junit_counts", str(tmp_path / "missing.xml")) == ""
+    body = SCRIPT.read_text(encoding="utf-8")
+    assert 'RESULTS+=("SKIP  $suite (all ${tests} test(s) skipped, see log)")' in body

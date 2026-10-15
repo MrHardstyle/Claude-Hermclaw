@@ -107,6 +107,26 @@ def test_docker_argv_equivalent_flags(ws: Path) -> None:
     assert flag(argv, "--tmpfs") == ["/tmp:rw,nosuid,nodev,size=128m,mode=1777"]
 
 
+@pytest.mark.parametrize(("rootless", "available"), [(True, True), (False, True), (None, True), (True, False)])
+async def test_docker_user_follows_the_engine_rootless_state(
+    ws: Path, monkeypatch: pytest.MonkeyPatch, rootless: Any, available: bool
+) -> None:
+    """BUG-147: on a rootless engine container uid 0 is the workspace owner; the owner's host uid would map to an
+    unprivileged subuid that cannot write the bind mount. Rootful or unknown: run as the owner, as before."""
+
+    async def fake_info(engine: str, executable: str) -> sb.EngineInfo:
+        return sb.EngineInfo(engine="docker", available=available, rootless=rootless)
+
+    monkeypatch.setattr(sb, "engine_info", fake_info)
+    s = DockerSandbox(POLICY, max_output_bytes=10_000)
+    await s.health()
+    st = ws.stat()
+    expected = "0:0" if rootless and available else f"{st.st_uid}:{st.st_gid}"
+    argv = s.build_invocation(req(), ws).argv
+    assert flag(argv, "--user") == [expected]
+    assert "--cap-drop=ALL" in argv and "--security-opt=no-new-privileges" in argv
+
+
 def test_network_modes(ws: Path) -> None:
     assert flag(
         PodmanSandbox(POLICY, max_output_bytes=10_000, allowed_network="pasta").build_invocation(req(network=True), ws).argv, "--network"
@@ -422,6 +442,29 @@ def test_docker_info_assessment() -> None:
         }
     )
     assert info.rootless is True and info.cgroup_version == "v2" and info.limits_effective
+
+
+async def test_docker_name_answered_by_podman_is_parsed_as_podman(monkeypatch: pytest.MonkeyPatch) -> None:
+    """BUG-147: behind the docker name (podman-docker shim or executable=podman) podman answers `info` in its own
+    format; read as docker info it always looked rootful. Real docker output keeps the docker parser."""
+    import json as _json
+
+    podman_out = {
+        "host": {"cgroupVersion": "v2", "cgroupControllers": ["cpu", "memory", "pids"], "security": {"rootless": True}},
+        "version": {"Version": "5.4.2"},
+    }
+    docker_out = {"ServerVersion": "27.0", "CgroupVersion": "2", "SecurityOptions": ["name=seccomp"], "MemoryLimit": True}
+    answers = iter([podman_out, docker_out])
+
+    async def fake_exec(argv: list[str], timeout_seconds: float = 60) -> tuple[int, str, str]:
+        assert argv[1:] == ["info", "--format", "{{json .}}"]
+        return 0, _json.dumps(next(answers)), ""
+
+    monkeypatch.setattr(sb, "engine_exec", fake_exec)
+    shim = await sb.engine_info("docker", "docker")
+    assert shim.engine == "docker" and shim.rootless is True and shim.version == "5.4.2" and shim.limits_effective
+    real = await sb.engine_info("docker", "docker")
+    assert real.engine == "docker" and real.rootless is False and real.version == "27.0"
 
 
 async def test_engine_info_unavailable() -> None:

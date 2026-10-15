@@ -36,6 +36,10 @@ profiles:
     model: gemma4:12b
     fallback_for: planner-gemma
     context_tokens: 32768
+    # Ollama 0.40.4 overestimates how many layers of gemma4:12b fit the 8 GB GTX 1080 at 32K and fails with
+    # "CUDA error: the resource allocation failed" (live acceptance 2026-10-16, BUG-150); 30 layers on the GPU load
+    # in ~15 s. Remove it on a GPU with more memory.
+    gpu_layers: 30
     max_output_tokens: 8192
     temperature: 0.2
     think: false

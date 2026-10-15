@@ -231,7 +231,11 @@ tokens, reasoning chars, avg/p50/p95/p99/max latency (PostgreSQL `percentile_con
 - `models.litellm.request_timeout_seconds` – upper bound for any single call.
 - `models.model_host_capacity_gb` – capacity warning threshold for resident models.
 - `models.profiles[]`: `alias, role, model, kind, host, context_tokens, max_output_tokens, temperature, think,
-  timeout_seconds, priority, resource_group, exclusive, memory_gb, fallback_for, embedding_dimensions, enabled`.
+  timeout_seconds, priority, resource_group, exclusive, memory_gb, fallback_for, embedding_dimensions, gpu_layers, enabled`.
+  `gpu_layers` (optional, ≥ 0) becomes Ollama `options.num_gpu` – per request (top-level `num_gpu`, passed through by
+  LiteLLM 1.104.2, `tests/integration/test_models_litellm_proxy.py::test_gpu_layers_reach_ollama_as_num_gpu`) and as
+  the proxy deployment default. Unset = Ollama's own layer estimate. The example sets 30 for `planner-gemma-fallback`:
+  `gemma4:12b` at 32K fails on the 8 GB GTX 1080 with "CUDA error: the resource allocation failed" otherwise (BUG-150).
 - `hosts.yaml`: the `ollama` service port of the model host (default 11434) for residency/health/config generation.
 - LiteLLM process environment: `LITELLM_MASTER_KEY` (from a systemd credential; never written into the config file).
 

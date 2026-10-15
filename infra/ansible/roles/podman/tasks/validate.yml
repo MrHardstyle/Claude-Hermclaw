@@ -8,4 +8,6 @@
       - podman_subid_count | int >= 65536
       - podman_delegate_controllers | difference(['cpu', 'cpuset', 'io', 'memory', 'pids']) | length == 0
       - podman_rootless_network_cmd in ['pasta', 'slirp4netns']
+      - podman_extra_packages is sequence and podman_extra_packages is not string
+      - podman_extra_packages | select('match', '^[a-z0-9][a-z0-9+.-]+$') | list | length == podman_extra_packages | length
     quiet: true

@@ -11,6 +11,7 @@ gateway request field              reaches Ollama ``/api/chat`` as              
 ``response_format.json_schema``    ``format`` = the JSON schema                 Ollama structured outputs
 ``think`` (top level)              ``think``                                    Ollama thinking control
 ``num_ctx`` (top level)            ``options.num_ctx``                          overrides the config default
+``num_gpu`` (top level, optional)  ``options.num_gpu``                          profile ``gpu_layers`` (BUG-150)
 ``keep_alive`` (top level)         ``keep_alive``                               keeps residency stable
 ``timeout`` (top level)            – (LiteLLM-side upstream timeout)            proxy aborts → HTTP 408
 =================================  ===========================================  ==================================
@@ -601,6 +602,8 @@ class LiteLLMGateway:
         if self.options.ollama_passthrough:
             body["think"] = profile.think
             body["num_ctx"] = profile.context_tokens
+            if profile.gpu_layers is not None:
+                body["num_gpu"] = profile.gpu_layers
             if self.options.keep_alive:
                 body["keep_alive"] = self.options.keep_alive
         return body
@@ -665,6 +668,8 @@ class LiteLLMGateway:
         body: dict[str, Any] = {"model": profile.alias, "input": batch, "timeout": self._timeout(profile, None)}
         if self.options.ollama_passthrough:
             body["options"] = {"num_ctx": profile.context_tokens}
+            if profile.gpu_layers is not None:
+                body["options"]["num_gpu"] = profile.gpu_layers
             if self.options.keep_alive:
                 body["keep_alive"] = self.options.keep_alive
         record = await self._start(
