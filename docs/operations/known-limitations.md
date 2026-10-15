@@ -50,6 +50,10 @@ wenn alle Suiten grün sind, ist das System abgenommen.
   eines Jobs wird auch dann wiederverwendet, wenn ein anderer Basis-Branch angefragt wird.
 * **Web-UI:** Der globale Dashboard-Stream hat kein REST-Gegenstück. Ein stiller Stream wird nur über die
   regelmäßigen Zähler-Abfragen bemerkt.
+* **Schlafende Worker und Ansible:** Nur der Scheduler weckt die Worker, und zwar vor Schritten. Ein erneuter
+  Bootstrap- oder Deployment-Lauf, SSH- oder `curl`-Prüfungen gegen einen schlafenden Worker scheitern mit
+  „unreachable“; vorher wecken (INSTALLATION.md 13.1). Große Modell-Downloads auf .224 laufen deshalb vor dem
+  ersten Deployment oder mit abgeschaltetem Suspend (Kapitel 7).
 * **Wake-on-LAN:** Ein Idle-Suspend kann mit einem gleichzeitigen Weckvorgang kollidieren. Der Schritt scheitert dann
   mit `SSH_TIMEOUT` und wird vom Scheduler-Retry korrekt geweckt.
 
