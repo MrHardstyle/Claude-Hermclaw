@@ -783,6 +783,36 @@ Noch keine.
 - Erwartet: the redirect-only HTTP server (`location / { return 301 https://… }`) is not an SSE path; the template test renders the real template.
 - Tatsächlich: two `SSE_PROBE_NOT_PROXIED` warnings for the port-80 server of every TLS site; the unit test rendered the template with string replacements and failed with `NGINX_SYNTAX` on the macro-based template. Fixed: servers/locations that answer with `return 3xx` are skipped by the probe; the test renders the template with Jinja (trim_blocks, Ansible filters/tests) from the role defaults in three variants (HTTP + default_server + IPv6, TLS + HSTS, IPv4 only).
 
+### BUG-133 – Git over SSH to GitLab used neither the runtime key nor the pinned known_hosts (clone/push fail)
+- Phase: P41 (Doku-Abgleich) · Komponente: config/gitops · Severity: P1 · blockierend: ja · Status: **behoben** (`tests/unit/test_gitops_units.py::test_ssh_options_from_config`, `tests/unit/test_sshtools_registry_keys.py`)
+- Reproduktion: Deploy with the shipped `config/hosts.example.yaml`, register `git@192.168.178.226:<group>/<project>.git` (INSTALLATION.md 10.3) and run a job.
+- Erwartet: `GIT_SSH_COMMAND` carries `-i /etc/hermclaw/ssh/id_ed25519` and `UserKnownHostsFile=/etc/hermclaw/ssh/known_hosts` (the deploy key from INSTALLATION.md 6.1, GitLab's host key from 4.3).
+- Tatsächlich: `ssh_options_from_config` reads the `ssh` block of the gitlab host; the example's `gitlab-226` had none, so ssh ran as `hermclaw` without key and known_hosts and every clone/push failed with "Host key verification failed". Fixed: `gitlab-226` carries `ssh: {user: git}` (key and known_hosts from the `SshConfig` defaults); GitLab stays outside `policies.ssh.allowed_hosts` (the SSH tools still refuse it). Found by the documentation cross-check (workflow `install-docs-verify`).
+
+### BUG-134 – Inventory group vars had no effect for `hermclaw_keep_releases`, `hermclaw_sandbox_image_version`, `hermclaw_timezone`
+- Phase: P41 (Doku-Abgleich) · Komponente: deploy · Severity: P2 · blockierend: nein · Status: **behoben** (`tests/integration/test_deploy_infra.py::test_shared_inventory_settings_are_role_defaults_that_agree`, `::test_inventory_example_settings_are_not_playbook_group_vars`, `::test_inventory_group_vars_take_effect_in_the_roles`)
+- Reproduktion: set `hermclaw_keep_releases: 7` or `hermclaw_sandbox_image_version: "2"` under `all.vars` in `inventory/hosts.yml` (as INSTALLATION.md 8.2 and admin.md say), then `ansible-inventory --playbook-dir playbooks --host <h>`.
+- Erwartet: the inventory value.
+- Tatsächlich: `playbooks/group_vars/all.yml` defined both (and the timezone); playbook group_vars/all outrank inventory-file group vars, so the shipped 3 / "1" won silently – no image rebuild after a bump, pruning not as configured. Fixed: the three settings are defaults of every role that reads them (equal values, asserted); `hermclaw_release_root` stays a playbook default and is documented as `-e` only.
+
+### BUG-135 – `check-host.sh` rejected hosts with exactly the documented RAM minimum
+- Phase: P41 (Doku-Abgleich) · Komponente: bootstrap · Severity: P3 · blockierend: nein · Status: **behoben** (`tests/integration/test_bootstrap_infra.py::test_check_host_ram_minimum_tolerates_kernel_reserved_memory`)
+- Reproduktion: `.225` with 8 GB installed RAM (MemTotal ≈ 7.7 GiB) → `scripts/bootstrap/check-host.sh --role orchestrator`.
+- Erwartet: the documented minimum (INSTALLATION.md 2.1) passes.
+- Tatsächlich: MemTotal is compared with 8192 MiB and is always below the installed RAM → `ram FAIL`. Fixed: the check passes at ≥ 90 % of the minimum (message names the tolerance); `usage()` no longer cuts the help text.
+
+### BUG-136 – Disaster-recovery procedure for `.225` could not work as written
+- Phase: P41 (Doku-Abgleich) · Komponente: docs/backup · Severity: P2 · blockierend: nein · Status: **behoben** (zwei unabhängige Prüfdurchläufe gegen den Code, zuletzt ohne Befund)
+- Reproduktion: follow `docs/operations/backup-restore.md` "Disaster recovery" / `docs/runbooks/disaster-recovery.md` §1 on a reinstalled `.225`.
+- Erwartet: a running Hermclaw with the newest good backup.
+- Tatsächlich: deployment before the credentials (preflight stops on the missing `gitlab-token`), `restore-full` into the database the deployment had already migrated (refused: not empty), backup commands in a plain `sudo -u hermclaw` shell (no database URL, no manifest key), credentials written to the wrong file name, a recursive `chown` that made the SSH keys unreadable for the services, `migrate` without the services' environment, the admin machine still pinning the old host key, the old runtime key left authorised on the workers, the new admin token not valid after the restore. Fixed: one 12-step procedure (bootstrap → credentials → deploy → stop → empty database → `sudo hermclaw backup restore-test/restore-full` → files with correct ownership → `sudo hermclaw migrate` → workers/GitLab key → start → new admin token → fresh backup), the same order in the runbook and in INSTALLATION.md 11.7.
+
+### BUG-137 – Installation guide and runbooks: wrong commands, paths and references
+- Phase: P41 (Doku-Abgleich) · Komponente: docs · Severity: P3 · blockierend: nein · Status: **behoben** (55 bestätigte Befunde des Workflows `install-docs-verify` + 16 der Nachprüfung, Abschlussprüfung ohne Befund)
+- Reproduktion: commands of INSTALLATION.md, admin.md, cutover.md, upgrade.md, deployment.md checked against the code and roles.
+- Erwartet: every command, flag, path, variable and route as the code implements it.
+- Tatsächlich (Auswahl): Secure-Boot/MOK order impossible (also in the role's own message), web server name without the address (requests by IP hit Debian's default site), worker-token rotation without worker restart, `hermclaw-credential` called without its path/sudo, `curl -d` without JSON content type (422), `limit_except` in server context, `check-host.sh` without `--role`, `hermclaw-model-pull --dry-run` as go criterion (never fails), missing `-K`, non-existent `/api/events` route, artifact download route and UI tab name, `logging.yaml` keys that do not exist, `credstore_dirs` that the unit cannot read, a sandbox database on `.225` (localhost only), `idle_sleep_command` "remove" (only `null` works). All fixed in the documents and role messages.
+
 ## Template
 
 ### BUG-XXX – Titel
