@@ -510,14 +510,14 @@ Legende: `[x]` erledigt mit Evidence · `[~]` erledigt, Live-Verifikation auf Zi
 
 ## P39 – FULL BUG BASH / HARDENING
 
-- [x] 39.1 `BUGS.md` vollständig reviewen. — Evidence: BUGS.md reviewed 2026-10-14: 111 entries (BUG-001..BUG-111) + BLOCKER-001; every entry has phase, component, severity, repro/actual, fix and a regression-test reference
-- [x] 39.2 jeden offenen Bug reproduzieren. — Evidence: no open bugs: each fixed bug is reproduced by its regression test in the matrix (tests/*), which fails without the fix
-- [x] 39.3 stale Bugs schließen mit Beleg. — Evidence: no stale bugs: all 111 entries closed as behoben with the regression test as evidence; BLOCKER-001 stays external (live steps [~])
+- [x] 39.1 `BUGS.md` vollständig reviewen. — Evidence: BUGS.md reviewed 2026-10-15: 137 entries (BUG-001..BUG-137) + BLOCKER-001; every entry has phase, component, severity, repro/expected/actual, fix and a regression test or verification reference; 0 open
+- [x] 39.2 jeden offenen Bug reproduzieren. — Evidence: no open bugs: each fixed bug is reproduced by its regression test in the matrix (tests/*), which fails without the fix; documentation defects (BUG-136/137) re-checked against the code by two independent review passes
+- [x] 39.3 stale Bugs schließen mit Beleg. — Evidence: no stale bugs: all 137 entries closed as behoben with test or review evidence; BLOCKER-001 stays external (live steps [~])
 - [x] 39.4 P0 fixen. — Evidence: P0: 2/2 fixed – BUG-001 CommandRequest.workspace path traversal on the execution daemon (workers tests) and BUG-009 runtime git executing workspace-controlled config (gitops tests: hardened git runner env/config allow-list)
-- [x] 39.5 P1 fixen. — Evidence: P1: 19/19 fixed with regression tests (e.g. BUG-081 SSH approvals, BUG-082 scheduler start, BUG-084 sandbox env, BUG-085 PostgreSQL validation, BUG-108 sandbox image gate)
-- [x] 39.6 P2 fixen. — Evidence: P2: 47/47 fixed with regression tests (e.g. BUG-089 lexical phrases, BUG-090 doctor config files, BUG-093 secret scan, BUG-097 LiteLLM auth, BUG-111 PostgreSQL bootstrap)
-- [x] 39.7 P3 soweit reproduzierbar und sinnvoll fixen. — Evidence: P3: 40/40 fixed (and P4: 3/3) with regression tests
-- [x] 39.8 für jeden Fix Regressiontest. — Evidence: every fix has a named regression test (BUGS.md Status column); new in this round: test_sandbox_runtime_env, test_query_phrases_are_single_line_and_ignore_apostrophes, test_production_refuses_example_configuration_and_flags_placeholder_macs, test_images_that_defeat_the_sandbox_are_refused, test_pgdg_keyring_fingerprint_check, test_unavailable_grammar_is_not_retried_per_file
+- [x] 39.5 P1 fixen. — Evidence: P1: 25/25 fixed with regression tests (e.g. BUG-081 SSH approvals, BUG-108 sandbox image gate, BUG-118 deploy dry run, BUG-133 GitLab SSH options)
+- [x] 39.6 P2 fixen. — Evidence: P2: 59/59 fixed (e.g. BUG-120 schema decision before live changes, BUG-130 mounted backup target, BUG-134 inventory precedence, BUG-136 DR procedure)
+- [x] 39.7 P3 soweit reproduzierbar und sinnvoll fixen. — Evidence: P3: 48/48 fixed (and P4: 3/3), e.g. BUG-131 secret scan, BUG-132 proxy validator, BUG-135 RAM tolerance, BUG-137 doc commands
+- [x] 39.8 für jeden Fix Regressiontest. — Evidence: every code fix has a named regression test (BUGS.md Status column; latest: test_ssh_options_from_config, test_inventory_group_vars_take_effect_in_the_roles, test_check_host_ram_minimum_tolerates_kernel_reserved_memory, test_sse_probe_skips_redirect_servers_but_not_static_locations); documentation-only fixes (BUG-116, BUG-128, BUG-136, BUG-137) verified against the code by independent review passes
 - [ ] 39.9 komplette Testmatrix neu. — Evidence: –
 - [ ] 39.10 Failure Tests neu. — Evidence: –
 - [ ] 39.11 Recovery neu. — Evidence: –
@@ -539,11 +539,11 @@ Legende: `[x]` erledigt mit Evidence · `[~]` erledigt, Live-Verifikation auf Zi
 ## P41 – RELEASE CANDIDATE
 
 - [x] 41.1 Version. — Evidence: version 0.1.0rc1 (PEP 440) in pyproject.toml and hermclaw/__init__.py (hermclaw --version), protocol version 1
-- [x] 41.2 Changelog. — Evidence: CHANGELOG.md [0.1.0rc1] – added (core, operations, quality), changed (D-010/D-011/D-012), security, fixed (111 bugs), limitations
+- [x] 41.2 Changelog. — Evidence: CHANGELOG.md [0.1.0rc1] – added (core, operations, quality), changed (D-010/D-011/D-012), security, fixed (137 bugs), limitations
 - [x] 41.3 Architektur-Doku. — Evidence: docs/architecture/overview.md (processes/hosts, job lifecycle, model roles, safety boundaries, index of all 27 component documents) + docs/architecture/*.md
 - [x] 41.4 Admin Runbook. — Evidence: docs/runbooks/admin.md (daily/weekly checks, job/repository/token control, workers/models, logs, incidents)
 - [x] 41.5 Disaster Recovery. — Evidence: docs/runbooks/disaster-recovery.md (per host, credentials, backup target) + docs/operations/backup-restore.md (restore-full procedure, tested by tests/integration/test_backup_restore.py)
-- [ ] 41.6 Upgrade Path. — Evidence: –
+- [x] 41.6 Upgrade Path. — Evidence: upgrade/rollback path: docs/runbooks/upgrade.md (backup, dry run, deploy, verify, rollback incl. schema-downgrade opt-in); tested by tests/integration/test_deploy_converge.py::test_upgrade_switches_and_prunes_old_releases and ::test_rollback_needs_the_schema_downgrade_opt_in_and_reuses_the_installed_venv (0.1.0rc1 -> rc2 -> rc3 with a new Alembic revision, prune, refused + allowed rollback), test_deploy_release.py migrations up/down offline in python:3.13-slim-trixie
 - [x] 41.7 known limitations. — Evidence: docs/operations/known-limitations.md (live verification pending, GPU/model limits, functional and operational limits)
 - [ ] 41.8 all tests final. — Evidence: –
 - [ ] 41.9 release tag. — Evidence: –

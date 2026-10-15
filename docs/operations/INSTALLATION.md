@@ -4,7 +4,7 @@ Diese Anleitung führt von leeren Rechnern bis zum laufenden, abgenommenen Hermc
 Sie beschreibt jeden Host einzeln, alle Konfigurationsdateien, die Sie anpassen müssen, jeden Befehl
 und alle Modelle, die geladen werden.
 
-> **Stand:** Release Candidate `0.1.0rc1`, 2026-10-14. Alle Schritte sind automatisiert (Ansible, Skripte)
+> **Stand:** Release Candidate `0.1.0rc1`, 2026-10-15. Alle Schritte sind automatisiert (Ansible, Skripte)
 > und lokal getestet. Die Ziel-Hosts waren aus der Build-Umgebung nicht erreichbar (BLOCKER-001). Deshalb
 > endet die Installation mit der **Live-Abnahme** (Kapitel 12), die alle Prüfungen gegen die echten Hosts
 > nachholt.

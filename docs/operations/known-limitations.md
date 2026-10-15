@@ -1,6 +1,6 @@
 # Bekannte Einschränkungen – Hermclaw Next 0.1.0rc1
 
-Stand 2026-10-14. Jede Einschränkung nennt ihre Auswirkung und den Umgang damit. Offene Bugs gibt es nicht
+Stand 2026-10-15. Jede Einschränkung nennt ihre Auswirkung und den Umgang damit. Offene Bugs gibt es nicht
 (`BUGS.md`). Risiken mit Bewertung stehen in `RISK_REGISTER.md`.
 
 ## 1. Nicht live verifiziert (BLOCKER-001)

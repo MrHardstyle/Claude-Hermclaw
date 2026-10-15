@@ -2,7 +2,7 @@
 
 Format: [Keep a Changelog](https://keepachangelog.com/de/1.1.0/), Versionen nach PEP 440.
 
-## [0.1.0rc1] – Release Candidate (2026-10-14)
+## [0.1.0rc1] – Release Candidate (2026-10-15)
 
 Erster vollständiger Aufbau von Hermclaw Next (Greenfield, Bauplan v2, Phasen P00–P42). Lokal vollständig
 getestet; die Live-Abnahme auf den Ziel-Hosts steht aus (BLOCKER-001, `scripts/ops/live-acceptance.sh`).
@@ -86,8 +86,11 @@ getestet; die Live-Abnahme auf den Ziel-Hosts steht aus (BLOCKER-001, `scripts/o
 
 ### Behoben
 
-- 131 Fehler wurden während des Aufbaus gefunden und behoben, jeweils mit Regressionstest (`BUGS.md`, BUG-001 bis
-  BUG-131; P0: 2, P1: 24, P2: 57, P3: 45, P4: 3). Es gibt keine offenen Bugs.
+- 137 Fehler wurden während des Aufbaus gefunden und behoben, jeweils mit Regressionstest bzw. (bei reinen
+  Dokumentationsfehlern) einer Prüfung gegen den Code (`BUGS.md`, BUG-001 bis BUG-137; P0: 2, P1: 25, P2: 59,
+  P3: 48, P4: 3). Es gibt keine offenen Bugs.
+- Installationsanleitung und Runbooks wurden Befehl für Befehl gegen Code und Rollen geprüft (71 bestätigte Befunde,
+  alle behoben; BUG-133 bis BUG-137).
 
 ### Bekannte Einschränkungen
 
