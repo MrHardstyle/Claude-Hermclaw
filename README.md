@@ -4,6 +4,15 @@ Greenfield-Neuaufbau von Hermclaw als universelles Multi-Agent-System.
 
 Dieses Repository ist die neue Implementierungsbasis. Die bisherige Hermclaw-/Noob2Claw-Runtime dient nur als Read-only-Referenz für gelernte Fehler, Anforderungen und gewünschtes Verhalten.
 
+## Stand: Release Candidate 0.1.0rc1
+
+- **Installation (pro Host, Konfiguration, Befehle, Modelle):** `docs/operations/INSTALLATION.md`
+- **Abschlussbericht:** `docs/operations/FINAL_BUILD_REPORT.md` · Status: `STATUS.md` · Änderungen: `CHANGELOG.md`
+- **Betrieb:** `docs/runbooks/` (Admin, Upgrade, Disaster Recovery, Cutover), bekannte Einschränkungen:
+  `docs/operations/known-limitations.md`
+- Lokal vollständig getestet (`docs/testing/test-matrix-results.md`); die Live-Abnahme auf den Ziel-Hosts erfolgt mit
+  `scripts/ops/live-acceptance.sh` (INSTALLATION.md Kapitel 12).
+
 ## Verbindliche Startdokumente
 
 - `docs/Hermclaw_Next_Vollstaendiger_Bauplan_v2.md` – vollständige Zielarchitektur und Build-Phasen P00–P42

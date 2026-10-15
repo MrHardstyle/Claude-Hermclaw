@@ -14,7 +14,7 @@ mit `[~]` markiert. Die Live-Abnahme holt sie nach: `docs/operations/INSTALLATIO
 | | |
 |---|---|
 | Hermclaw | `0.1.0rc1` (PEP 440; `pyproject.toml`, `hermclaw/__init__.py`, `hermclaw --version`) |
-| Worker-Protokoll | Version 1 (Bearer-Token + HMAC-Signatur) |
+| Worker-Protokoll | Version 1 (HMAC-SHA256-Signatur mit dem Worker-Token, Zeitstempel + Nonce gegen Replay; `Authorization: Bearer` nur über HTTPS, im LAN über HTTP also nicht) |
 | Datenbankschema | Alembic-Head `0002` (`migrations/versions/`, im Wheel unter `share/hermclaw`) |
 | Laufzeit | CPython 3.13 (Debian 13), Release-Wheelhouse mit Hash-Lock (`scripts/deploy/build-release.sh`) |
 | LiteLLM | `litellm[proxy]==1.104.2` + `prisma==0.15.0` in eigener venv |
@@ -53,12 +53,14 @@ mit `[~]` markiert. Die Live-Abnahme holt sie nach: `docs/operations/INSTALLATIO
 | Planner / Replanner | `gemma4:26b` | 32K | fest (Gemma) |
 | Planner-Fallback (technisch) | `gemma4:12b` | 32K | nur bei Infrastrukturfehlern |
 | Implementation Worker | `qwen3-coder:30b` | 32K | fest |
-| Heavy Reviewer | `qwen3.8:27b` | 24–32K | fest |
+| Heavy Reviewer | `qwen3.8:27b` | 24K (24576; zulässig bis 32K) | fest |
 | Fast Router | `qwen3:8b` | 16K | fest, voll auf der GPU |
 | Embeddings | `embeddinggemma:300m` | 2K, 768 dim | D-010 (EmbeddingGemma 2 in Ollama nur MLX) |
 
-Download auf .224: `sudo -u ollama /opt/hermclaw/bin/hermclaw-model-pull` (INSTALLATION.md Kapitel 7; das Deployment
-lädt fehlende Tags automatisch).
+Download auf .224: das Deployment lädt fehlende Tags automatisch (`hermclaw_worker_pull_models`, mit angehaltenem
+`hermclaw-model-worker`). Von Hand nach INSTALLATION.md Kapitel 7: `sudo systemctl stop hermclaw-model-worker`, dann
+`sudo systemd-run --unit=hermclaw-model-pull --setenv=OLLAMA_HOST=http://127.0.0.1:11434 /opt/hermclaw/bin/hermclaw-model-pull --ollama /usr/local/bin/ollama`,
+zum Schluss `sudo systemctl start hermclaw-model-worker`.
 
 ## Worker status
 
@@ -121,15 +123,16 @@ lädt fehlende Tags automatisch).
 ## Research reports
 
 30 Research-Berichte unter `docs/research/`, Index `RESEARCH_INDEX.md` (R-001 bis R-030), jeweils mit
-Primärquellen, Gegenprüfung und Konsequenzen. Entscheidungen daraus: `DECISIONS.md` (u. a. D-010 Embedding-Modell,
+Quellen (bevorzugt Primärquellen) und Konsequenzen bzw. Entscheidung; R-025 bis R-029 (2026-10-13/14) prüfen
+Versionen, Modell-Tags und Sicherheitshinweise vor der Installation erneut, R-030 ergänzt die DB-Tools (P27). Entscheidungen daraus: `DECISIONS.md` (u. a. D-010 Embedding-Modell,
 D-011 NVIDIA-R580-Runfile, D-012 pgvector-Untergrenze).
 
 ## Test totals
 
 | Suite | Dateien | bestanden | fehlgeschlagen | Fehler | deselektiert (live) |
 |---|---|---|---|---|---|
-| Unit | 71 | 1956 | 0 | 0 | 0 |
-| Integration (inkl. Contract, Deployment, Bootstrap, UI-Backend) | 112 | 1042 | 0 | 0 | 24 |
+| Unit (inkl. Contract-Tests) | 71 | 1956 | 0 | 0 | 0 |
+| Integration (inkl. API, Deployment, Bootstrap) | 112 | 1042 | 0 | 0 | 24 |
 | Failure Injection + Recovery | 20 | 204 | 0 | 0 | 0 |
 | Security | 1 | 4 | 0 | 0 | 0 |
 | E2E (Generalisierung + UI) | 3 | 18 | 0 | 0 | 0 |
@@ -138,8 +141,8 @@ D-011 NVIDIA-R580-Runfile, D-012 pgvector-Untergrenze).
 
 Quelle: `docs/testing/test-matrix-results.{md,json}` (`scripts/dev/test_matrix.py`, eine pytest-Instanz pro Datei, Python
 3.12 auf dem Build-Host; zweiter vollständiger Lauf am 2026-10-15 plus Nachlauf der fünf danach geänderten Dateien).
-Zusätzlich innerhalb von `tests/e2e/test_ui_playwright.py`: **Vitest 48** und **Playwright 35** Tests (Desktop + Mobil)
-gegen das echte Backend. Weitere Prüfungen: `ansible-lint --profile=production` (0 Befunde), `shellcheck`, `ruff`,
+Zusätzlich innerhalb von `tests/e2e/test_ui_playwright.py`: **Vitest 48** UI-Unit-Tests sowie **Playwright 35** Tests
+(33 Desktop + 2 Mobil) gegen das echte Backend. Weitere Prüfungen: `ansible-lint --profile=production` (0 Befunde), `shellcheck`, `ruff`,
 `mypy`, `ansible-playbook --syntax-check`; Converge von `site.yml` + `deploy.yml` in Debian-13-Containern
 (`test_deploy_converge.py`, 30 min: zweiter Lauf und `--check` changed=0, Upgrade, Prune, Rollback).
 Die 24 deselektierten Tests sind die Live-Tests gegen die echten Hosts (`-m live`, BLOCKER-001); sie laufen mit
@@ -167,12 +170,15 @@ Die 24 deselektierten Tests sind die Live-Tests gegen die echten Hosts (`-m live
 | P31 | Web-UI (Vitest + Playwright gegen echtes Backend) | `tests/e2e/test_ui_playwright.py` | grün |
 
 Die E2E-Tests fahren die vollständige Runtime (Triage, Gemma-Plan, Scope, Qwen3-Coder-Werkzeugschleife, Verifier,
-Heavy Review, Commit/Push, Bericht) mit echten Werkzeugen; nur die Modellantworten sind skriptgesteuert (die
-Modelle laufen erst live auf .224).
+Heavy Review, Commit/Push, Bericht) mit echten Werkzeugen (Git, pytest, php, tsc/node, podman-compose, ffmpeg).
+Ersetzt sind: die Modellantworten (skriptgesteuert, die Modelle laufen erst live auf .224), GitLab durch ein lokales
+Bare-Repository (`file://`), das Web durch einen lokalen Fixture-Webserver, die Worker-Hosts durch Daemons im
+Testprozess (ASGI) und in 37.13 der WakeController durch einen Stellvertreter (Magic Packet live:
+`tests/integration/test_wol_live.py`). Befehle laufen im Test-Executor ohne Podman-Sandbox (die Sandbox testet P18).
 
 ## Failure injection results
 
-Alle 19 Szenarien aus P35 grün (`tests/failure/`, 22 Dateien), u. a.: Planner-Timeout und ungültiges Planner-JSON
+Alle 19 Szenarien aus P35 grün (`tests/failure/`, 20 Dateien, ergänzt um Integrations- und Unit-Tests laut `BUILD_PLAN.md` P35), u. a.: Planner-Timeout und ungültiges Planner-JSON
 (Reparatur, dann Fehler mit Code), Coder-Timeout, Worker offline (Offline-Sweep, Wecken), Ollama/LiteLLM nicht
 erreichbar (technischer Fallback, redigierte Fehler), GitLab nicht erreichbar, DB-Verbindungen mitten im Job
 getrennt (`pg_terminate_backend`, Job beendet), Prozessabsturz (SIGKILL), Plattenplatz-Warnung (Annahmestopp),
@@ -186,7 +192,7 @@ P34 grün (`tests/failure/test_recovery_process_kill.py`, echter SIGKILL des Sch
 Neustart mit stabiler Instanz-ID, Rückgewinnung der eigenen Step-Leases, verlorene Versuche als `WORKER_LOST`,
 Checkpoint-Wiederaufnahme des Coders, Freigabe der Modell-Lease, derselbe Workspace (unkommittierte Änderung
 erhalten), genau ein verifizierter Commit auf dem Job-Branch. Soak: Execution-Worker per SIGKILL beendet, nach
-2,2 s wieder bereit. Ergebnis im finalen Lauf: `test_recovery_process_kill.py` 2 und `test_resources_recovery.py` 9 bestanden, E2E 37.14 grün.
+51,5 s als offline erkannt (Heartbeat-Timeout) und 2,2 s nach dem Neustart wieder bereit. Ergebnis im finalen Lauf: `test_recovery_process_kill.py` 2 und `test_resources_recovery.py` 9 bestanden, E2E 37.14 grün.
 
 ## Security results
 
@@ -194,7 +200,7 @@ P36 grün: Secret-Scan des Repositorys und jedes Job-Diffs; API-Scopes; HMAC-sig
 Replay-Schutz; SSH-Allowlist mit gepinnten Host-Keys und Einmal-Freigaben; Befehlsklassen
 read/mutate/destructive/forbidden; Sandbox-Ausbruchsprüfungen (rootless, read-only, keine Capabilities, kein Netz
 ohne Capability, Image-Gate gegen Podman-CVEs, BUG-108); Netzwerkrichtlinie inkl. SSRF-Schutz der Research-Engine;
-Dependency-Audit vom 2026-10-15 ohne bekannte Schwachstellen (Laufzeit-venv 107, LiteLLM-venv 116 Pakete, UI `npm audit` 0, `docs/security/dependency-audit.md`). Härtung der Units (systemd), Geheimnisse nur als verschlüsselte systemd-Credentials,
+Dependency-Audit vom 2026-10-15 ohne bekannte Schwachstellen (Laufzeit-venv 107, LiteLLM-venv 116 Pakete, UI `npm audit` 0, `docs/security/dependency-audit.md`). Härtung der Units (systemd), Tokens und Schlüssel der Dienste als verschlüsselte systemd-Credentials (SSH-Schlüssel als 0600-Dateien unter `/etc/hermclaw/ssh`, SearXNG-Secret als Podman-Secret),
 keine Chain-of-Thought in Logs, Events oder UI. Ergebnis im finalen Lauf: `tests/security/` 4 bestanden, Sandbox-, SSH-, Befehls- und Worker-Auth-Suiten grün.
 
 ## Open bugs by severity
@@ -234,32 +240,35 @@ Lokal vollständig getestet (Live-Lauf gegen Terra .60: BLOCKER-001):
   Manifest, rsync über einen echten sshd mit `rrsync`-Forced-Command, Retention, Sperren, Restore-Test in eine
   Wegwerf-Datenbank als Nicht-Superuser über das pgvector-Template, `restore-full`, Fehlerfälle (abgebrochene
   Übertragung, manipulierte Archive, falsche Signatur, fehlendes Ziel).
-* Deployment richtet Backup-Units (täglich 02:30), Restore-Test (sonntags 04:30), Skripte, CREATEDB und
-  `hermclaw_restore_template` ein (`test_bootstrap_postgresql.py` 12, `test_deploy_converge.py`).
+* Der Bootstrap (Rolle `postgresql`) richtet CREATEDB und `hermclaw_restore_template` ein (`test_bootstrap_postgresql.py` 12).
+  Das Deployment installiert die Skripte `hermclaw-backup`/`hermclaw-restore-test` und startet die Timer für Backup
+  (täglich 02:30) und Restore-Test (sonntags 04:30) (`test_deploy_converge.py`).
 * Erster Live-Lauf: INSTALLATION.md Kapitel 11 und Live-Suite `backup` (`tests/integration/test_backup_live.py`).
 
 ## Release commit/tag
 
 * Commit: der Commit, den das Tag `v0.1.0rc1` markiert, auf `claude/hermclaw-next-build` (GitHub `MrHardstyle/Claude-Hermclaw`)
-* Tag: `v0.1.0rc1` (annotiert)
+* Tag: `v0.1.0rc1` (annotiert, nach GitHub gepusht; markiert den Commit, der diesen Bericht enthält)
 * Release-Artefakt: wird auf dem Admin-Rechner gebaut (`scripts/deploy/build-release.sh` → `dist/release-0.1.0rc1/`,
-  INSTALLATION.md Kapitel 8.3) – reproduzierbar aus dem Tag, Selbsttest inklusive.
+  INSTALLATION.md Kapitel 8.3) – aus dem Tag baubar (Linux x86_64, CPython 3.13), Selbsttest inklusive. Einen identischen Neubau gibt es nur mit `--constraints <constraints.txt des Release>` oder `--offline-from <Wheel-Cache aus --wheel-cache>`, denn die Laufzeit-Abhängigkeiten in `pyproject.toml` sind nur nach unten begrenzt.
 
 ## Cutover steps
 
 `docs/runbooks/cutover.md`:
 
-0. Go/No-Go: RC-Tests grün, Bootstrap idempotent, `/api/health?deep=true` ok, Modelle auf .224, Worker bereit,
-   Backup + Restore-Test ok, Live-Rauchtest-Job mit Merge Request, Portplan ohne Fremdbelegung
-   (`scripts/ops/live-acceptance.sh` deckt die technischen Punkte ab).
+0. Go/No-Go: RC-Tests grün, Bootstrap idempotent (`--check` changed=0), Portplan ohne Fremdbelegung (Preflight
+   `--tags preflight`), `/api/health?deep=true` ok, Modelle auf .224, Worker bereit, Live-Abnahme
+   (`scripts/ops/live-acceptance.sh` auf .225 und .222: jede Suite `PASS` oder `SKIP` mit Grund), Backup + Restore-Test ok,
+   Live-Rauchtest-Job `succeeded` mit gepushtem Job-Branch (Merge Request nur mit `git.create_merge_request: true`).
 1. Altsystem read-only einfrieren: alte UI nur GET/HEAD, Patch-Watcher stoppen und deaktivieren (nicht entfernen),
    altes GitLab-Projekt archivieren, Snapshot nach .60 – nichts wird gelöscht.
 2. Umschalten: die vom Deployment aktivierte Site `hermclaw-next.conf` bleibt, der Symlink der alten Site wird
    entfernt, `nginx -t`, Reload, `/api/health` über nginx.
 3. Stabilisierung beobachten: Liveness der Units, `/api/metrics` mit Alarmvorschlägen, Health, tägliche
    Backup-/wöchentliche Restore-Test-Kontrolle, Bug-Triage.
-4. Altkomponenten erst nach ≥ 14 Tagen ohne P0/P1, ≥ 20 erfolgreichen Jobs und zwei bestandenen Restore-Tests
-   stilllegen, einzeln und jeweils mit frischer Sicherung.
+4. Altkomponenten erst nach ≥ 14 Tagen ohne P0/P1-Bug, ≥ 20 erfolgreichen echten Jobs, zwei bestandenen Restore-Tests
+   und ohne Rollback stilllegen, einzeln und jeweils mit frischer Sicherung; das archivierte GitLab-Projekt bleibt
+   erhalten (`cutover.md` §5).
 
 ## Rollback steps
 
@@ -268,18 +277,24 @@ Lokal vollständig getestet (Live-Lauf gegen Terra .60: BLOCKER-001):
   wieder aktivieren, GitLab-Projekt de-archivieren, auf .225 `hermclaw-scheduler` und `hermclaw-api` stoppen
   (Zustand bleibt in PostgreSQL) – `docs/runbooks/cutover.md` §4.
 * **Release-Rollback**: `ansible-playbook -i inventory/hosts.yml playbooks/deploy.yml -e hermclaw_version=<alt> -K`;
-  die alte venv ist noch installiert, nur die Symlinks schalten zurück. Kennt die alte Version das Datenbankschema
-  nicht, stoppt der Lauf vor jeder Änderung; dann nach einem Backup mit
-  `-e hermclaw_orchestrator_allow_schema_downgrade=true` oder Backup von vor dem Upgrade zurückspielen –
-  `docs/runbooks/upgrade.md`.
+  venv, Payload und UI-Build der alten Version liegen noch auf den Hosts (`hermclaw_keep_releases`, Standard 3), und
+  `dist/release-<alt>/` muss auf dem Admin-Rechner noch vorhanden sein; .222/.224 vorher wecken, dann schalten nur die
+  Symlinks zurück. Kennt die alte Version das Datenbankschema nicht, stoppt der Lauf vor jeder Änderung; dann nach
+  einem Backup mit `-e hermclaw_orchestrator_allow_schema_downgrade=true` erneut ausführen (Downgrade mit den Migrationen
+  des neueren Release). Nur wenn eine Migration laut Release Notes nicht sicher umkehrbar ist: Scheduler, API und
+  Backup-Timer stoppen, Datenbank leer neu anlegen, das Backup von vor dem Upgrade mit `restore-full` einspielen, dann
+  `<alt>` deployen – `docs/runbooks/upgrade.md`.
 * **Host-Verlust**: `docs/runbooks/disaster-recovery.md` (pro Host, Credentials aus dem Passwortmanager,
   `restore-full` aus dem neuesten getesteten Backup-Satz).
 
 ## Fortsetzung (Live-Abnahme)
 
 1. Auf dem Admin-Rechner und den Hosts `docs/operations/INSTALLATION.md` Kapitel 2–11 abarbeiten.
-2. Live-Abnahme nach Kapitel 12: Checkout von `v0.1.0rc1` nach `/opt/hermclaw/src` auf .225 und .222,
+2. Live-Abnahme nach Kapitel 12: vorher den Leerlauf-Suspend von `exec-222` und `model-224` abschalten
+   (`hermclaw_config_host_overrides` mit `idle_sleep_command: null`, dann Deployment). Checkout von `v0.1.0rc1` mit
+   dev-venv (`pip install -e '.[dev]'`) nach `/opt/hermclaw/src` auf .225 und .222, einmalig auf .225
    `sudo scripts/ops/live-acceptance.sh --prepare-db`, dann `sudo scripts/ops/live-acceptance.sh` auf beiden Hosts
-   (GitLab- und volle WoL-Suite wie dort beschrieben), zum Schluss `--cleanup-db`. Jedes bestandene Ergebnis in
+   (GitLab- und volle WoL-Suite wie dort beschrieben), zum Schluss auf .225 `--cleanup-db`. Danach die Overrides wieder
+   entfernen und das Deployment für `orchestrator` erneut ausführen. Jedes bestandene Ergebnis in
    `BUILD_PLAN.md` von `[~]` auf `[x]` setzen und in `STATUS.md` eintragen.
 3. Erst wenn alle Suiten grün sind: Cutover nach `docs/runbooks/cutover.md`.
