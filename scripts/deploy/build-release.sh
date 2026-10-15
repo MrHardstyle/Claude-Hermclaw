@@ -25,7 +25,8 @@
 #   hermclaw-runtime-<v>.tar         wheelhouse/ (the hermclaw wheel incl. share/hermclaw/{alembic.ini,migrations}
 #                                    and every runtime dependency), requirements.lock (name==version --hash=sha256:…),
 #                                    constraints.txt, SHA256SUMS, release.json, sandbox-images/ (Containerfiles),
-#                                    tree-sitter/ (the grammars of hermclaw.repo_intelligence, research 027 Y6)
+#                                    tree-sitter/ (the grammars of hermclaw.repo_intelligence, research 027 Y6),
+#                                    backup/backup.example.yaml (reference for /etc/hermclaw/backup.yaml)
 #   hermclaw-litellm-<v>.tar         wheelhouse/ + requirements.lock + constraints.txt + SHA256SUMS for the proxy venv
 #   hermclaw-ui-<v>.tar.gz           static UI build (ui/: npm ci && npm run build)
 #   config/*.example.yaml            templates the deployment renders /etc/hermclaw/*.yaml from
@@ -136,6 +137,9 @@ else
     command -v npm >/dev/null 2>&1 || die "npm not found (Node.js >= 22.12 builds the UI; or pass --ui-dist)" 69
     node -e 'const [a,b]=process.versions.node.split(".").map(Number); process.exit(a>22||(a===22&&b>=12)?0:1)' \
         || die "Node.js $(node --version 2>/dev/null || echo '?') is older than 22.12 (ui/package.json engines)" 69
+    # security floor of the build toolchain (research 20261014-028): builds still work, but the operator is told
+    node -e 'const [a,b,c]=process.versions.node.split(".").map(Number); process.exit(a>22||(a===22&&(b>23||(b===23&&c>=2)))?0:1)' \
+        || log "WARNING: Node.js $(node --version) is older than 22.23.2 (security fixes, research 20261014-028) - update the build host"
 fi
 
 # --------------------------------------------------------------------------------------------- version
@@ -335,9 +339,9 @@ HERMCLAW_CONFIG_DIR="${STAGE}/config" "${ST}/hermclaw" config-check >/dev/null \
 # <install_dir>/current/tree-sitter (read-only for the services).
 TS_INFO=$("${ST}/python" -I -c '
 import importlib.metadata as md
-from hermclaw.repo_intelligence.symbols import _TS_LANGS
+from hermclaw.repo_intelligence.symbols import TREE_SITTER_GRAMMARS
 print(md.version("tree-sitter-language-pack"))
-print(" ".join(sorted(set(_TS_LANGS.values()))))') || die "cannot read the tree-sitter grammars of the release"
+print(" ".join(sorted(set(TREE_SITTER_GRAMMARS.values()))))') || die "cannot read the tree-sitter grammars of the release"
 TS_VERSION=$(sed -n 1p <<< "$TS_INFO")
 read -r -a TS_LANGS <<< "$(sed -n 2p <<< "$TS_INFO")"
 [[ "$TS_VERSION" =~ ^[0-9][0-9A-Za-z.]*$ && ${#TS_LANGS[@]} -gt 0 ]] || die "unexpected tree-sitter information: ${TS_INFO}"
@@ -415,6 +419,9 @@ for f in "${SOURCE}"/scripts/ops/*; do
 done
 mkdir -p "${RUNTIME}/sandbox-images"
 cp -a "${SOURCE}/infra/sandbox-images/." "${RUNTIME}/sandbox-images/"
+# reference configuration of the backup (copied to /etc/hermclaw/backup.yaml by the operator, backup-restore.md)
+mkdir -p "${RUNTIME}/backup"
+install -m 0644 "${SOURCE}/infra/backup/backup.example.yaml" "${RUNTIME}/backup/"
 mapfile -t TOOLCHAINS < <(find "${RUNTIME}/sandbox-images" -mindepth 2 -maxdepth 2 -name Containerfile -printf '%h\n' \
     | xargs -n1 basename | sort)
 

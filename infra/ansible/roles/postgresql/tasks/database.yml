@@ -87,3 +87,50 @@
   when:
     - "'vector' in postgresql_extensions"
     - not ansible_check_mode
+
+# Restore-test environment (P33 33.5): CREATEDB for the service role and the template database. The template accepts
+# no connections; it is opened only here (ALLOW_CONNECTIONS true for the duration of this task) to create and update
+# its extensions, so it follows pgvector updates like the Hermclaw database.
+- name: Prepare the restore-test environment (CREATEDB, template database with the extensions)
+  ansible.builtin.command:
+    argv:
+      - psql
+      - -X
+      - -q
+      - -tA
+      - -v
+      - ON_ERROR_STOP=1
+      - -v
+      - "role={{ postgresql_db_owner }}"
+      - -v
+      - "tpl={{ postgresql_restore_template }}"
+      - -v
+      - "exts={{ postgresql_extensions | join(',') }}"
+      - -p
+      - "{{ postgresql_port }}"
+      - -d
+      - postgres
+    stdin: |
+      SELECT 'CHANGED createdb' FROM pg_roles WHERE rolname = :'role' AND NOT rolcreatedb;
+      SELECT format('ALTER ROLE %I CREATEDB', :'role') FROM pg_roles WHERE rolname = :'role' AND NOT rolcreatedb \gexec
+      SELECT 'CHANGED template' WHERE NOT EXISTS (SELECT FROM pg_database WHERE datname = :'tpl');
+      SELECT 'CHANGED template flags' FROM pg_database WHERE datname = :'tpl' AND (NOT datistemplate OR datallowconn);
+      SELECT format('CREATE DATABASE %I OWNER postgres ENCODING %L TEMPLATE template0', :'tpl', 'UTF8')
+        WHERE NOT EXISTS (SELECT FROM pg_database WHERE datname = :'tpl') \gexec
+      SELECT format('ALTER DATABASE %I ALLOW_CONNECTIONS true', :'tpl') \gexec
+      \connect :tpl
+      SELECT 'CHANGED create ' || x FROM unnest(string_to_array(:'exts', ',')) x
+        WHERE NOT EXISTS (SELECT FROM pg_extension WHERE extname = x);
+      SELECT format('CREATE EXTENSION IF NOT EXISTS %I', x) FROM unnest(string_to_array(:'exts', ',')) x \gexec
+      SELECT 'CHANGED update ' || e.extname FROM pg_extension e JOIN pg_available_extensions a ON a.name = e.extname
+        WHERE e.extname = ANY (string_to_array(:'exts', ',')) AND e.extversion IS DISTINCT FROM a.default_version;
+      SELECT format('ALTER EXTENSION %I UPDATE', e.extname) FROM pg_extension e
+        JOIN pg_available_extensions a ON a.name = e.extname
+        WHERE e.extname = ANY (string_to_array(:'exts', ',')) AND e.extversion IS DISTINCT FROM a.default_version \gexec
+      \connect postgres
+      SELECT format('ALTER DATABASE %I IS_TEMPLATE true ALLOW_CONNECTIONS false', :'tpl') \gexec
+  become: true
+  become_user: postgres
+  register: postgresql_restore_env
+  changed_when: "'CHANGED' in postgresql_restore_env.stdout"
+  when: postgresql_restore_test_enabled | bool

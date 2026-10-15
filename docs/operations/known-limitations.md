@@ -66,5 +66,13 @@ wenn alle Suiten grün sind, ist das System abgenommen.
 * **LiteLLM:** Ohne Datenbank (unser Betrieb) meldet der Proxy Auth-Fehler als 400/500. Hermclaw behandelt sie als
   Authentifizierungsfehler (BUG-097). Jedes Versions-Update erst nach Advisory-Prüfung und den empirischen
   Proxy-Tests (`tests/integration/test_models_litellm_proxy.py`).
-* **tree-sitter-Grammatiken** werden beim ersten Gebrauch aus dem Internet geladen. Das Deployment lädt sie vorab;
-  fehlen sie offline, indiziert Hermclaw JS/TS/PHP ohne Symbolstruktur (BUG-109).
+* **tree-sitter-Grammatiken** lädt `tree-sitter-language-pack` ≥ 1.0 beim ersten Gebrauch aus dem Internet. Das
+  Release bringt die Grammatiken mit (`/opt/hermclaw/current/tree-sitter`, Prüfsummen in `SHA256SUMS`), die Dienste
+  laden nichts nach. Fehlen sie trotzdem, indiziert Hermclaw JS/TS/PHP ohne Symbolstruktur (BUG-109).
+* **Offline-Releases:** Abhängigkeiten werden beim Bauen des Release eingefroren (Hash-Lock). Sicherheitsupdates von
+  Python-Paketen erreichen die Hosts nur mit einem neuen Release: monatlich `scripts/dev/dependency-audit.sh`, bei
+  Befunden neu bauen und ausrollen (RISK R-032).
+* **Rollback über Schema-Migrationen** stoppt standardmäßig; ein Downgrade braucht ein Backup und
+  `-e hermclaw_orchestrator_allow_schema_downgrade=true` (RISK R-033, `docs/runbooks/upgrade.md`).
+* **Restore-Test:** Die Dienstrolle `hermclaw` hat `CREATEDB`, damit der wöchentliche Restore-Test seine Wegwerf-
+  Datenbank anlegen kann (RISK R-034).

@@ -675,6 +675,108 @@ Noch keine.
 ### BUG-114 – `hermclaw-build-sandbox-images` installed in /opt/hermclaw/bin looked for its Containerfiles in /opt/infra/sandbox-images
 - Phase: P32 · Komponente: scripts/ops · Severity: P3 · blockierend: nein · Status: **behoben** (fallback to the release payload `/opt/hermclaw/current/sandbox-images`; `HERMCLAW_SANDBOX_IMAGES_DIR` still wins; shellcheck clean)
 
+### BUG-115 – Exec worker unit implied NoNewPrivileges, breaking rootless podman
+- Phase: P32 · Komponente: deploy · Severity: P1 · blockierend: ja · Status: **behoben** (Regressionstest in den deploy-Tests)
+- Reproduktion: Deploy `.222` and run a sandbox command through the exec worker: rootless podman inside the unit fails at `newuidmap` (setuid helper blocked by NoNewPrivileges implied by `PrivateDevices=`/`ProtectKernel*=`/`RestrictNamespaces=` etc.).
+- Erwartet: No NNP-implying directives; ProtectSystem=full stays. Fixed in infra/systemd/hermclaw-exec-worker.service.j2, asserted by test_deploy_infra.py and test_bootstrap_infra.py.
+- Tatsächlich: Directives that imply NoNewPrivileges in hermclaw-exec-worker.service.j2 block the setuid newuidmap that rootless podman needs.
+
+### BUG-116 – Upgrade runbook rollback used the old release's Alembic for the downgrade
+- Phase: P32 · Komponente: deploy · Severity: P2 · blockierend: nein · Status: **behoben** (Regressionstest in den deploy-Tests)
+- Reproduktion: Upgrade to a release with a new Alembic revision, then follow the rollback section of `docs/runbooks/upgrade.md`.
+- Erwartet: Downgrade with the newer release (`hermclaw --venv /opt/hermclaw/venv-<new> --alembic downgrade <old-head>`). Fixed in the doc and implemented in hermclaw_orchestrator/tasks/database.yml.
+- Tatsächlich: docs/runbooks/upgrade.md ran the downgrade with venv-<old>, which does not contain the downgrade() of the newer revisions.
+
+### BUG-117 – Two diverging backup service units
+- Phase: P32 · Komponente: deploy · Severity: P3 · blockierend: nein · Status: **behoben** (Regressionstest in den deploy-Tests)
+- Reproduktion: diff infra/backup/hermclaw-backup.service infra/systemd/hermclaw-backup.service.j2
+- Erwartet: One source; the integrator reconciles them. The rendered unit now carries ConditionPathExists=/etc/hermclaw/backup.yaml so the timer is harmless until P33's config exists.
+- Tatsächlich: infra/backup/hermclaw-backup.service (P33: backup-manifest-key credential, 'create' argument) differs from infra/systemd/hermclaw-backup.service.j2, which the bootstrap/deploy renders.
+
+### BUG-118 – Dry run (deploy.yml --check --diff) of a first deployment or an upgrade aborts
+- Phase: P32 (Review) · Komponente: deploy-review · Severity: P1 · blockierend: ja · Status: **behoben** (Regressionstest in den deploy-review-Tests)
+- Reproduktion: Bootstrapped host, then: ansible-playbook playbooks/deploy.yml -e hermclaw_version=<new> --check --diff. This is step 2 of docs/runbooks/upgrade.md and the first command of deployment.md section 3.
+- Erwartet: The dry run lists what would change, and nothing on disk changes.
+- Tatsächlich: Failed at 'Copy and unpack the runtime payload' (dest must be an existing dir, because check mode never created it). Once that was guarded, the next failures were: sha256sum chdir into the missing dir; the symlink switch onto a target that is not installed ('src file does not exist'); the schema decision and the final doctor calling a venv/operator CLI that does not exist yet; the model check asserting tags that a dry run never pulls. All fixed: unarchive/sha256sum run only for real, links use force=ansible_check_mode, the database and verify steps are skipped until their inputs exist, and the model assert is skipped in check mode. Regression tests: test_dry_run_of_a_new_release_unpacks_and_
+
+### BUG-119 – Pruning deletes the previously active release after a rollback followed by an upgrade; keep=0 deletes it always
+- Phase: P32 (Review) · Komponente: deploy-review · Severity: P1 · blockierend: nein · Status: **behoben** (Regressionstest in den deploy-review-Tests)
+- Reproduktion: With hermclaw_keep_releases=1: install A, B, C; roll back to B; deploy D.
+- Erwartet: B (active before the last switch) is kept, so D can be rolled back.
+- Tatsächlich: Releases were ranked by install mtime, so B was deleted and C kept. hermclaw_keep_releases: 0 was accepted and removed the previous release. Any venv-* directory, such as a manual venv-backup, was also eligible for deletion. Fixed: every switch touches the release it leaves and the one it activates (venvs, UI markers, LiteLLM venvs). keep must be 1-99. Only directories matching hermclaw_version_pattern are pruned. Tests: test_switch_and_prune_keep_the_previously_active_release, test_ui_build_switch_rollback_pruning_and_dry_run, validation cases release-keep-0 and orch-litellm-keep-0.
+
+### BUG-120 – Live configuration and LiteLLM switched before the schema decision and the drain
+- Phase: P32 (Review) · Komponente: deploy-review · Severity: P1 · blockierend: nein · Status: **behoben** (Regressionstest in den deploy-review-Tests)
+- Reproduktion: Upgrade to v3 (new revision), then deploy.yml -e hermclaw_version=v2 together with a config change, without allow_schema_downgrade.
+- Erwartet: The run stops, and services, venvs, /etc/hermclaw and LiteLLM are unchanged.
+- Tatsächlich: hermclaw_config had already installed v2's /etc/hermclaw/*.yaml, and litellm.yml had switched /opt/litellm/venv and litellm.yaml. The newer release kept running with the older configuration while the message claimed nothing had been switched. Likewise, a failed migration restarted the old release with the new config (extra=forbid, so it may fail to start). Fixed: hermclaw_config only stages and validates (install.yml runs from the host role at its switch, hermclaw_config_install_at_switch); LiteLLM is split into install and activate; the schema decision, migrate and the post-migration check use the new release's staged config through the new CLI --config-dir. Tests: test_nothing_live_changes
+
+### BUG-121 – site.yml: unit/env changes made by the bootstrap part never restart the services
+- Phase: P32 (Review) · Komponente: deploy-review · Severity: P2 · blockierend: nein · Status: **behoben** (Regressionstest in den deploy-review-Tests)
+- Reproduktion: Change a unit template or hermclaw.env, then run playbooks/site.yml.
+- Erwartet: API, scheduler, LiteLLM and workers restart with the new unit/env.
+- Tatsächlich: systemd_skeleton runs again in the deploy plays and its registered results (unchanged) overwrote the bootstrap's, so no restart happened. Fixed: systemd_skeleton_units_changed and systemd_skeleton_env_changed accumulate across plays, and the restart decisions use them. Test: test_nothing_live_changes_before_the_schema_decision (no restart decision reads a registered systemd_skeleton result).
+
+### BUG-122 – API and scheduler started before LiteLLM was checked
+- Phase: P32 (Review) · Komponente: deploy-review · Severity: P2 · blockierend: nein · Status: **behoben** (Regressionstest in den deploy-review-Tests)
+- Reproduktion: LiteLLM without its master key, or failing to start, during a deployment.
+- Erwartet: The scheduler does not start against a broken or open model gateway.
+- Tatsächlich: Liveliness and the auth check ran only after API and scheduler were (re)started. Fixed: health_litellm.yml runs right after LiteLLM's restart, before SearXNG, API and scheduler. Test: ordering assertion in test_nothing_live_changes_before_the_schema_decision.
+
+### BUG-123 – Model tags of models.yaml outside hermclaw-model-pull's fixed set were never pulled
+- Phase: P32 (Review) · Komponente: deploy-review · Severity: P2 · blockierend: nein · Status: **behoben** (Regressionstest in den deploy-review-Tests)
+- Reproduktion: hermclaw_config_overrides.models changes the coder tag (documented in upgrade.md as a pure config change).
+- Erwartet: The deployment pulls the new tag.
+- Tatsächlich: hermclaw-model-pull pulls only its hard-coded role set, so the play failed 'still missing' after a potentially multi-hour pull. Tags were not validated before being passed to ollama pull. Fixed: pull_tag.yml pulls each remaining tag in its own transient unit (hermclaw-model-pull-tag); tags must be plain name[:tag]. Test: test_model_pull_follows_models_yaml_and_survives_a_dry_run (real script plus doubles).
+
+### BUG-124 – Deployed hermclaw-backup.service incomplete; backup runbook conflicts with the deployment; backup commands ran outside the services' context
+- Phase: P32 (Review) · Komponente: deploy-review · Severity: P2 · blockierend: nein · Status: **behoben** (Regressionstest in den deploy-review-Tests)
+- Reproduktion: Configure backup.yaml with manifest_signing_key_ref: cred:backup-manifest-key as docs/operations/backup-restore.md describes; or copy infra/backup/hermclaw-backup.{service,timer} over the deployed units as that runbook says.
+- Erwartet: The nightly backup loads its credential. Bootstrap and deploy keep working. upgrade.md's backup commands run with hermclaw.env and the credentials.
+- Tatsächlich: The deployed unit (enabled by the deployment) had no LoadCredentialEncrypted, no HERMCLAW_BACKUP_CONFIG and no SuccessExitStatus=75. The hand-copied units lack 'Managed by Hermclaw', so systemd_skeleton refuses every later run. The operator CLI lacked backup-manifest-key although the backup docs route 'sudo hermclaw backup ...' through it. upgrade.md used 'sudo -u hermclaw python -m hermclaw.backup' (no env, no credentials). Fixed: the unit is the deployed form of infra/backup's (credential only when present); the CLI loads optional backup credentials; upgrade.md and the doctor refusal message use 'sudo hermclaw backup create'. Doc conflict reported as a shared change. Tests: test_units_carr
+
+### BUG-125 – API does not trust nginx's X-Forwarded-For/-Proto (HERMCLAW_API_FORWARDED_ALLOW_IPS never set)
+- Phase: P32 (Review) · Komponente: deploy-review · Severity: P2 · blockierend: nein · Status: **behoben** (Regressionstest in den deploy-review-Tests)
+- Reproduktion: Deploy and open the UI through .223.
+- Erwartet: The API sees the real client address and scheme (settings: 'in production the nginx host .223 only').
+- Tatsächlich: The default of 127.0.0.1 applied, so every request was logged and audited as coming from .223 over http. Fixed: hermclaw.env sets it to the webui hosts' ansible_host (systemd_skeleton_api_forwarded_allow_ips, validated as IP addresses, never '*'). Tests: converge asserts HERMCLAW_API_FORWARDED_ALLOW_IPS=192.168.178.223; test_bootstrap_infra env test.
+
+### BUG-126 – Runs limited to workers or the UI could put them ahead of the orchestrator
+- Phase: P32 (Review) · Komponente: deploy-review · Severity: P2 · blockierend: nein · Status: **behoben** (Regressionstest in den deploy-review-Tests)
+- Reproduktion: ansible-playbook playbooks/deploy.yml -e hermclaw_version=<new> --limit execution_workers (or --tags hermclaw_ui).
+- Erwartet: Refused unless the orchestrator already runs <new>; the docs promise workers and UI never get ahead of it.
+- Tatsächlich: Deployed the newer worker or UI. Fixed: preflight includes orchestrator_first.yml, which reads the orchestrator's /api/health from the control node when the run does not deploy it (hosts or tags), with an explicit opt-out for disaster recovery. Test: test_workers_and_ui_never_get_ahead_of_the_orchestrator (stub API: same version passes; newer, --tags, --skip-tags and unreachable are refused; opt-out works).
+
+### BUG-127 – Preflight wrote the 'deployed' fact before the inventory checks ran
+- Phase: P32 (Review) · Komponente: deploy-review · Severity: P3 · blockierend: nein · Status: **behoben** (Regressionstest in den deploy-review-Tests)
+- Reproduktion: Placeholder wol_mac, then deploy.yml.
+- Erwartet: Nothing changes on any host.
+- Tatsächlich: hermclaw.fact (deployed=true) was already written on every host before hermclaw_config/data.yml failed, so the next bootstrap renders SearXNG's [Install]. Fixed: mark_deployed.yml is the last task of the preflight play. Test: test_deploy_playbook_structure (preflight files use read-only modules only; the fact is written last).
+
+### BUG-128 – Docs: wrong or missing operator commands
+- Phase: P32 (Review) · Komponente: deploy-review · Severity: P3 · blockierend: nein · Status: **behoben** (Regressionstest in den deploy-review-Tests)
+- Reproduktion: Follow deployment.md and upgrade.md.
+- Erwartet: Correct commands.
+- Tatsächlich: The manual sandbox rebuild lacked --version (the tag must match policies.yaml). The schema-rule wording named the wrong release. The order, dry-run and keep semantics were outdated, and the backup and CLI options (--config-dir, backup create) were missing. All fixed in deployment.md, the architecture deployment.md, upgrade.md, ui.md and hosts.example.yml.
+
+### BUG-129 – Weekly restore test not deployed; restore environment (CREATEDB, template database) only by hand
+- Phase: P32 (Review) · Komponente: deploy-review · Severity: P2 · blockierend: nein · Status: **behoben** (Regressionstest in den deploy-review-Tests)
+- Reproduktion: Deploy .225 with playbooks/deploy.yml and configure /etc/hermclaw/backup.yaml from backup.example.yaml (restore_test.template: hermclaw_restore_template).
+- Erwartet: Backup and weekly restore test both run by timer; the restore test finds a role with CREATEDB and the template database with vector (P33 33.5, Prompt 26: restore test is mandatory).
+- Tatsächlich: Only hermclaw-backup.service/.timer were deployed; hermclaw-restore-test units, ALTER ROLE ... CREATEDB and the template database had to be installed by hand (backup-restore.md), and a hand-copied unit without the 'Managed by Hermclaw' marker made every later deployment fail. Fixed: infra/systemd/hermclaw-restore-test.{service,timer}.j2 rendered by systemd_skeleton and enabled by deploy.yml; postgresql role grants CREATEDB and maintains hermclaw_restore_template (owner postgres, IS_TEMPLATE, no connections, extensions updated with pgvector); release ships backup/backup.example.yaml. Tests: test_bootstrap_postgresql (clone as the service role), test_bootstrap_infra (unit plan), test_deploy_co
+
+### BUG-130 – Mounted backup target (Unraid share variant B) not writable for the deployed backup units
+- Phase: P32/P33 (Integration) · Komponente: deploy · Severity: P2 · blockierend: nein · Status: **behoben** (Regressionstest in test_deploy_infra.py)
+- Reproduktion: Mount the Unraid share on `.225` as in `infra/backup/unraid-share-setup.md` variant B and set `target: {kind: local, path: /mnt/terra-backup/hermclaw, require_mount: true}` in `backup.yaml`; start `hermclaw-backup.service`.
+- Erwartet: The backup is written to the share.
+- Tatsächlich: `ProtectSystem=strict` with `ReadWritePaths=/var/lib/hermclaw /var/log/hermclaw` makes the mount read-only inside the unit, so every run failed with "Read-only file system"; only the hand-installed reference unit had a commented hint. Fixed: `systemd_skeleton_backup_write_paths` (validated absolute paths) adds `-<path>` to `ReadWritePaths=` of the backup and restore-test units; documented in INSTALLATION.md 11 and backup-restore.md.
+
+### BUG-131 – Repository secret scan red after P32 (doc/role comments, PGDG fingerprint)
+- Phase: P32 (Integration) · Komponente: security · Severity: P3 · blockierend: nein · Status: **behoben** (`tests/security/test_security_checks.py::test_repository_contains_no_secrets` grün)
+- Reproduktion: `pytest tests/security/test_security_checks.py` after the P32 merge.
+- Erwartet: no findings in tracked files.
+- Tatsächlich: `secret_assignment` for three comment lines of the form "admin token: …" (`docs/architecture/deployment.md`, `roles/hermclaw_orchestrator/defaults/main.yml`, `tasks/token.yml`) and `high_entropy` for the 40-hex PGDG fingerprint in `roles/postgresql/defaults/main.yml`. Fixed: comments reworded; the fingerprint is written in gpg's grouped form and normalised (`replace(' ', '') | upper`) before the comparison (fingerprint test still passes and refuses other/extra/missing keys).
+
 ## Template
 
 ### BUG-XXX – Titel

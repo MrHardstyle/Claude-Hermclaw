@@ -1,0 +1,13 @@
+# Managed by Hermclaw – schedule for hermclaw-restore-test.service (after the nightly backup; the backup lock
+# serialises both).
+[Unit]
+Description=Hermclaw Next weekly restore test schedule
+
+[Timer]
+OnCalendar={{ systemd_skeleton_restore_test_on_calendar }}
+RandomizedDelaySec=15min
+Persistent=true
+Unit=hermclaw-restore-test.service
+
+[Install]
+WantedBy=timers.target

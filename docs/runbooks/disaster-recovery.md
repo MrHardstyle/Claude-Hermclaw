@@ -40,6 +40,10 @@ Follow `docs/operations/backup-restore.md` → *Disaster recovery* step by step.
    Job branches that were pushed are on GitLab. Work that was not pushed is lost and the affected steps re-run.
 7. Fresh backup + restore test, then `scripts/ops/live-acceptance.sh`.
 
+Worker and UI runs (sections 2–4) check first that the orchestrator `.225` already runs `hermclaw_version`
+(`/api/health`). While `.225` itself is down or being rebuilt, add `-e hermclaw_release_require_orchestrator_first=false`
+to those `deploy.yml` runs.
+
 ## 2. Execution worker `.222`
 
 ```bash

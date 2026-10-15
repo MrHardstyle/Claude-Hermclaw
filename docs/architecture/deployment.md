@@ -151,7 +151,7 @@ hermclaw_orch.     CLI wrapper -> LiteLLM venv-<lock> installed (not active) -> 
                    restart LiteLLM (new venv/config/unit) -> LiteLLM /health/liveliness, /v1/models refuses without
                      a key -> SearXNG -> api + scheduler -> backup.timer
                    health: /api/health (ok, version)
-                   admin token: once, token-create -> hermclaw-credential set api-operator-token (no_log)
+                   admin API credential (once): token-create piped into hermclaw-credential set api-operator-token (no_log)
 ```
 
 Restart decisions read `hermclaw_release_switched`, `hermclaw_config_changed`, the migration and the flags

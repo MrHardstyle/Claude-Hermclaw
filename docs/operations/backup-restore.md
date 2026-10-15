@@ -34,34 +34,53 @@ logs or events.
 
 ## Install (once, on the orchestrator `.225`)
 
+The deployment (`playbooks/site.yml` + `playbooks/deploy.yml`, `docs/operations/deployment.md`) already provides
+everything that is not site-specific:
+
+* `/opt/hermclaw/bin/hermclaw-backup` and `/opt/hermclaw/bin/hermclaw-restore-test` (release scripts, role
+  `hermclaw_release`);
+* the units `hermclaw-backup.service/.timer` (daily 02:30) and `hermclaw-restore-test.service/.timer` (Sunday 04:30),
+  rendered by `systemd_skeleton` with the environment file, `HERMCLAW_BACKUP_CONFIG`, exit code 75 = locked counts as
+  success and the credential `backup-manifest-key` when it exists; both timers are enabled by `deploy.yml`. Until
+  `/etc/hermclaw/backup.yaml` exists, every run is skipped (`ConditionPathExists`);
+* the clean restore environment (role `postgresql`, `postgresql_restore_test_enabled: true`): `CREATEDB` for the
+  role `hermclaw` and the template database `hermclaw_restore_template` (owner `postgres`, extension `vector`,
+  `IS_TEMPLATE true`, `ALLOW_CONNECTIONS false`, updated together with pgvector).
+
+`infra/backup/hermclaw-{backup,restore-test}.{service,timer}` are the reference form of the same units for a host
+without the deployment. Do not copy them over the deployed units: the deployment refuses to overwrite unit files it
+does not manage (`… exists and is not managed by Hermclaw`).
+
+What remains is site-specific:
+
 ```bash
-# 1. configuration
-sudo install -m 0640 -o root -g hermclaw infra/backup/backup.example.yaml /etc/hermclaw/backup.yaml
-sudoedit /etc/hermclaw/backup.yaml          # target, retention, restore_test.template
+# 1. configuration (target, retention, restore_test.template = hermclaw_restore_template)
+sudo install -m 0640 -o root -g hermclaw /opt/hermclaw/current/backup/backup.example.yaml /etc/hermclaw/backup.yaml
+sudoedit /etc/hermclaw/backup.yaml
 
 # 2. target: rsync over SSH (preferred) or a mounted share – infra/backup/unraid-share-setup.md
-ssh-keyscan -t ed25519 192.168.178.60 | sudo tee -a /etc/hermclaw/ssh/known_hosts   # compare the fingerprint!
+#    Terra's host key comes from the inventory (common_known_hosts_extra, INSTALLATION.md 4.3) into
+#    /etc/hermclaw/ssh/known_hosts; a mounted share also needs systemd_skeleton_backup_write_paths (step 4)
 
 # 3. manifest signing key (optional, recommended): systemd credential, referenced as cred:backup-manifest-key
 openssl rand -hex 32 | sudo systemd-creds encrypt --name=backup-manifest-key - /etc/credstore.encrypted/hermclaw-backup-manifest-key
 #    keep a copy of the key in the password manager – without it signed sets cannot be verified on a new host
 
-# 4. clean restore environment: the hermclaw role may create databases, a template has the extensions
-sudo -u postgres psql -c 'ALTER ROLE hermclaw CREATEDB'
-sudo -u postgres createdb -O hermclaw -T template0 -E UTF8 hermclaw_restore_template
-sudo -u postgres psql -d hermclaw_restore_template -c 'CREATE EXTENSION vector'
-sudo -u postgres psql -c "ALTER DATABASE hermclaw_restore_template IS_TEMPLATE true ALLOW_CONNECTIONS false"
+# 4. re-run the deployment of the orchestrator, so the units load the new credential (and, for a mounted share,
+#    may write to it: systemd_skeleton_backup_write_paths: [/mnt/terra-backup/hermclaw] in the inventory)
+ansible-playbook playbooks/deploy.yml --limit orchestrator          # on the control node
 
-# 5. units + timers (daily 02:30 backup, Sunday 04:30 restore test)
-sudo install -m 0644 infra/backup/hermclaw-backup.{service,timer} infra/backup/hermclaw-restore-test.{service,timer} /etc/systemd/system/
-sudo install -m 0755 scripts/ops/hermclaw-backup scripts/ops/hermclaw-restore-test /opt/hermclaw/bin/
-sudo systemctl daemon-reload
-sudo systemctl enable --now hermclaw-backup.timer hermclaw-restore-test.timer
+# 5. first run by hand, then let the timers take over
+sudo systemctl start hermclaw-backup.service && journalctl -u hermclaw-backup -n 20 -o cat
+sudo systemctl start hermclaw-restore-test.service && journalctl -u hermclaw-restore-test -n 20 -o cat
+systemctl list-timers 'hermclaw-*'
 ```
 
-The deployment playbook's `systemd_skeleton` role already renders a `hermclaw-backup.service/.timer` that calls
-`/opt/hermclaw/bin/hermclaw-backup` (no arguments = `create`); the units in `infra/backup/` are the complete
-versions (credentials, exit code 75, restore test).
+Without the deployment (a hand-built host), additionally: `ALTER ROLE hermclaw CREATEDB`, the template database
+(`createdb -O postgres -T template0 -E UTF8 hermclaw_restore_template`, `CREATE EXTENSION vector` inside it,
+`ALTER DATABASE hermclaw_restore_template IS_TEMPLATE true ALLOW_CONNECTIONS false`), the two scripts in
+`/opt/hermclaw/bin/` and the four units of `infra/backup/` in `/etc/systemd/system/`
+(`systemctl enable --now hermclaw-backup.timer hermclaw-restore-test.timer`).
 
 ## Daily operation
 

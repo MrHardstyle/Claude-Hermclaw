@@ -8,6 +8,8 @@
       - postgresql_version | string is match('^[0-9]{2}$')
       - postgresql_cluster is match('^[a-z0-9_-]+$')
       - postgresql_extensions | select('match', '^[a-z_][a-z0-9_]*$') | list | length == postgresql_extensions | length
+      - postgresql_restore_template is match('^[a-z_][a-z0-9_]{0,62}$')
+      - postgresql_restore_template not in [postgresql_db_name, 'postgres', 'template0', 'template1']
       - postgresql_listen_addresses in ['localhost', '127.0.0.1', '::1', '127.0.0.1,::1']
       - postgresql_pgvector_min_version is version('0.8.2', '>=')
       - postgresql_pgvector_recommended_version is version('0.8.7', '>=')

@@ -416,16 +416,16 @@ Legende: `[x]` erledigt mit Evidence · `[~]` erledigt, Live-Verifikation auf Zi
 
 ## P32 – Deployment
 
-- [ ] 32.1 `.225` runtime systemd. — Evidence: –
-- [ ] 32.2 `.223` UI. — Evidence: –
-- [ ] 32.3 `.222` worker. — Evidence: –
-- [ ] 32.4 `.224` worker. — Evidence: –
-- [ ] 32.5 LiteLLM. — Evidence: –
-- [ ] 32.6 Ollama models. — Evidence: –
-- [ ] 32.7 Nginx. — Evidence: –
-- [ ] 32.8 secrets. — Evidence: –
-- [ ] 32.9 health checks. — Evidence: –
-- [ ] 32.10 Ansible idempotency. — Evidence: –
+- [~] 32.1 `.225` runtime systemd. — Evidence: scripts/deploy/build-release.sh (offline hash-locked CPython 3.13 wheelhouse, self-test, tree-sitter grammars); roles hermclaw_release/config/orchestrator: venv-<v> + atomic symlink, staged config-check, schema decision before any live change, drain, migrate once, LiteLLM gate, then SearXNG/API/scheduler/backup+restore-test timers; test_deploy_converge.py, test_deploy_release.py, test_deploy_infra.py; live: BLOCKER-001
+- [~] 32.2 `.223` UI. — Evidence: roles/hermclaw_ui: versioned builds /var/www/hermclaw-next-releases/<v>, atomic webroot symlink, prune by activation, nginx -t before reload; test_deploy_infra.py::test_ui_build_switch_rollback_pruning_and_dry_run, test_deploy_release.py CSP bundle checks, converge; live .223: BLOCKER-001
+- [~] 32.3 `.222` worker. — Evidence: roles/hermclaw_worker (execution): release venv, policies/capabilities, rootless sandbox image builds (missing tags only), /health gate (status + worker_version); exec unit without NNP-implying directives (BUG-115); converge exec-222 incl. dry runs, changed=0; live: BLOCKER-001
+- [~] 32.4 `.224` worker. — Evidence: roles/hermclaw_worker (model): ffmpeg, capabilities.yaml, unit, /health gate; test_deploy_converge.py::test_model_worker_converges_and_is_idempotent (site twice + deploy --check, changed=0); live GPU host: BLOCKER-001
+- [~] 32.5 LiteLLM. — Evidence: hermclaw_orchestrator litellm.yml/litellm_activate.yml/health_litellm.yml: lock-keyed venv /opt/litellm/venv-<ver>-<lock12>, activated after migrate, liveliness + 401 check of /v1/models before API/scheduler (BUG-122); converge checks venv, version, no litellm_init.pth, role aliases
+- [~] 32.6 Ollama models. — Evidence: hermclaw_worker models.yml + pull_tag.yml: wanted tags from models.yaml (fixed roles + embeddinggemma:300m), hermclaw-model-pull as transient unit, other tags pulled separately (BUG-123); test_deploy_infra.py::test_model_pull_follows_models_yaml_and_survives_a_dry_run; live pull on .224: BLOCKER-001
+- [~] 32.7 Nginx. — Evidence: one nginx template for bootstrap+deploy: SSE location, CSP/security headers, optional TLS + redirect, no query strings in logs; API trusts X-Forwarded-* only from the webui host (BUG-125); test_deploy_infra.py (nginx:1.28), test_bootstrap_nginx.py, converge nginx -t; live: BLOCKER-001
+- [~] 32.8 secrets. — Evidence: systemd credentials only: preflight checks/decrypts every LoadCredentialEncrypted entry, admin token piped into hermclaw-credential (no_log), operator CLI loads credentials, never argv; converge asserts no token in any Ansible output; real systemd-creds/TPM2 on the hosts: BLOCKER-001
+- [~] 32.9 health checks. — Evidence: gates: LiteLLM alive+authenticated, /api/health ok+version, worker /health ok+worker_version, UI via nginx, final hermclaw doctor in the services' context; orchestrator_first.yml (BUG-126); test_workers_and_ui_never_get_ahead_of_the_orchestrator; live health: BLOCKER-001
+- [~] 32.10 Ansible idempotency. — Evidence: converge twice green: second site.yml and deploy --check changed=0 on all groups, rollback changed=0, dry runs of first deploy/upgrade leave the disk snapshot unchanged (BUG-118); test_switch_and_prune_keep_the_previously_active_release; with managed services: live run (BLOCKER-001)
 
 ## P33 – Backup/Restore
 

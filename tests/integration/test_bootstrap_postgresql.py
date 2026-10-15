@@ -4,7 +4,8 @@ A throw-away cluster (the locally installed PostgreSQL major, run as the ``postg
 on a free port with a private socket directory) is configured with the role's *rendered*
 ``conf.d/hermclaw.conf`` and ``pg_hba.conf``. Then the role's real task files run against it:
 
-* ``database.yml`` creates the role, the database and the ``vector`` extension, a second run
+* ``database.yml`` creates the role (CREATEDB for the restore test), the database, the ``vector`` extension and the
+  restore-test template (cloned by the service role like the restore test does), a second run
   reports ``changed=0``, and the active pgvector version is asserted (the local pgvector is
   older than 0.8.2, so the pgvector minimum (0.8.7, floor 0.8.2) must make the role fail – negative control);
 * identifiers that need quoting are created verbatim (``format(%I)`` / psql variables, no
@@ -201,10 +202,22 @@ def test_database_tasks_create_role_db_extension_idempotently(tmp_path: Path, cl
         "SELECT rolcanlogin, rolsuper, rolcreatedb, rolcreaterole, rolreplication, rolpassword IS NULL "
         "FROM pg_authid WHERE rolname = 'hermclaw'"
     )
-    assert role == "t|f|f|f|f|t", "login role without privileges and without a password (peer only)"
+    assert role == "t|f|t|f|f|t", "login role with CREATEDB only (restore test) and without a password (peer only)"
     assert cluster.psql("SELECT pg_get_userbyid(datdba) || ' ' || pg_encoding_to_char(encoding) FROM pg_database "
                         "WHERE datname = 'hermclaw'") == "hermclaw UTF8"  # fmt: skip
     assert cluster.psql("SELECT extversion FROM pg_extension WHERE extname = 'vector'", db="hermclaw") == available
+    # restore-test template: owned by postgres, a template that accepts no connections
+    assert cluster.psql("SELECT pg_get_userbyid(datdba) || ' ' || datistemplate || ' ' || datallowconn FROM pg_database "
+                        "WHERE datname = 'hermclaw_restore_template'") == "postgres true false"  # fmt: skip
+    # what the restore test does as the service role: clone the template and find the extension in the clone
+    clone = _as_postgres("psql", "-X", "-q", "-v", "ON_ERROR_STOP=1", "-h", str(cluster.sock), "-p", str(cluster.port), "-d", "postgres",
+                         "-c", "SET ROLE hermclaw", "-c", "CREATE DATABASE hermclaw_restoretest_ci TEMPLATE hermclaw_restore_template")  # fmt: skip
+    assert clone.returncode == 0, clone.stderr
+    try:
+        assert cluster.psql("SELECT extversion FROM pg_extension WHERE extname = 'vector'", db="hermclaw_restoretest_ci") == available
+        assert cluster.psql("SELECT pg_get_userbyid(datdba) FROM pg_database WHERE datname = 'hermclaw_restoretest_ci'") == "hermclaw"
+    finally:
+        cluster.psql("DROP DATABASE IF EXISTS hermclaw_restoretest_ci")
 
     second = _database_play(tmp_path / "second", cluster, local)
     assert second.returncode == 0, second.stdout[-3000:]

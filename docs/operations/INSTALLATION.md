@@ -9,7 +9,22 @@ und alle Modelle, die geladen werden.
 > endet die Installation mit der **Live-Abnahme** (Kapitel 12), die alle Prüfungen gegen die echten Hosts
 > nachholt.
 
-<!-- INSTALL-TOC -->
+## Inhalt
+
+- [1. Überblick](#1-überblick)
+- [2. Hardware, BIOS und Netzwerk](#2-hardware-bios-und-netzwerk)
+- [3. Debian 13 installieren (.225, .223, .222, .224)](#3-debian-13-installieren-225-223-222-224)
+- [4. Admin-Rechner (Ansible-Steuerrechner)](#4-admin-rechner-ansible-steuerrechner)
+- [5. Bootstrap der Hosts (P01)](#5-bootstrap-der-hosts-p01)
+- [6. Zugangsdaten und Schlüssel](#6-zugangsdaten-und-schlüssel)
+- [7. Modelle laden (.224)](#7-modelle-laden-224)
+- [8. Release bauen und ausrollen (Deployment)](#8-release-bauen-und-ausrollen-deployment)
+- [9. Konfiguration](#9-konfiguration)
+- [10. Erste Inbetriebnahme](#10-erste-inbetriebnahme)
+- [11. Backup und Restore-Test (Terra .60)](#11-backup-und-restore-test-terra-60)
+- [12. Live-Abnahme](#12-live-abnahme)
+- [13. Betrieb](#13-betrieb)
+- [14. Fehlersuche](#14-fehlersuche)
 
 ---
 
@@ -422,7 +437,7 @@ Konfigurationsdatei, einer Umgebungsvariable, einem Log oder auf einer Kommandoz
 | `worker-token` | .222, .224 | Bootstrap (Kopie vom Orchestrator) | Worker-Daemons |
 | `gitlab-token` | .225 | **Sie** (Schritt 6.1) | Scheduler: Merge Requests, geschützte Branches |
 | `api-operator-token` | .225 | Deployment (einmalig) | Ihr erstes Admin-Token für die Oberfläche (Kapitel 8.6) |
-| `backup-manifest-key` | .225 | Sie oder das Deployment (Kapitel 11) | Signatur der Backup-Manifeste |
+| `backup-manifest-key` | .225 | **Sie** (Kapitel 11.3, optional, empfohlen) | Backup-Units: Signatur der Backup-Manifeste |
 
 ### 6.1 GitLab vorbereiten (.226)
 
@@ -577,11 +592,16 @@ Was dabei passiert:
 
 | Host | Schritte |
 |---|---|
-| .225 | Release-venv `/opt/hermclaw/venv-<v>` (offline, Hash-geprüft) → `/etc/hermclaw/*.yaml` rendern + mit `hermclaw config-check` prüfen → LiteLLM-venv + `litellm.yaml` → Units aktivieren → laufende Schritte sauber anhalten → `hermclaw migrate` (vor dem Neustart) → Symlink `/opt/hermclaw/venv` umschalten → LiteLLM, SearXNG, API, Scheduler, Backup-Timer starten → Health-Checks → Admin-API-Token anlegen (einmalig) |
-| .222 | Release-venv → `capabilities.yaml`, `policies.yaml` → Sandbox-Images bauen (rootless, nur fehlende) → `hermclaw-exec-worker` → `/health` |
+| .225 | Release-venv `/opt/hermclaw/venv-<v>` (offline, Hash-geprüft) → `/etc/hermclaw/*.yaml` in einer Staging-Kopie rendern + mit `hermclaw config-check` des neuen Release prüfen → LiteLLM-venv installieren (noch nicht aktiv) → Schema-Entscheidung (bis hier ist nichts Laufendes verändert) → Units aktivieren → laufende Schritte sauber anhalten → `hermclaw migrate` (einmal, vor dem Neustart) → `/etc/hermclaw/*.yaml` + `litellm.yaml` installieren → Symlinks `/opt/litellm/venv` und `/opt/hermclaw/venv` umschalten → `hermclaw-litellm` muss gesund sein und unauthentifizierte Anfragen ablehnen → SearXNG, API, Scheduler, Backup- und Restore-Test-Timer starten → Health-Checks → Admin-API-Token anlegen (einmalig) |
+| .222 | Release-venv → Sandbox-Images bauen (rootless, nur fehlende) → `capabilities.yaml`, `policies.yaml` unmittelbar vor dem Umschalten → `hermclaw-exec-worker` → `/health` |
 | .224 | Release-venv → `capabilities.yaml` → ffmpeg → `hermclaw-model-worker` → `/health` → fehlende Modelle laden (in einer eigenen Unit, übersteht SSH-Abbrüche, bis 6 h) |
 | .223 | nginx-Site (SSE, CSP, Sicherheits-Header, optional TLS) → UI nach `/var/www/hermclaw-next-releases/<v>/` → Symlink umschalten → `nginx -t` → Reload → Prüfung über nginx |
 | alle | zum Schluss `hermclaw doctor` auf .225 im Dienstkontext; jeder `fail` stoppt den Lauf |
+
+Worker und Oberfläche kommen dem Orchestrator nie zuvor: Ein Lauf mit `--limit execution_workers`, `--limit
+model_workers`, `--limit webui` oder `--tags hermclaw_ui` ohne den Orchestrator bricht ab, wenn .225 noch nicht
+`hermclaw_version` meldet (`/api/health`). Nur wenn der Orchestrator absichtlich nicht läuft (Wiederherstellung eines
+Hosts, `docs/runbooks/disaster-recovery.md`), mit `-e hermclaw_release_require_orchestrator_first=false` ausführen.
 
 Der erste Lauf ersetzt die leere venv des Bootstraps (sie bleibt als `/opt/hermclaw/venv.pre-release-<zeit>` erhalten;
 löschen Sie sie, wenn alles läuft).
@@ -603,7 +623,7 @@ HTTP leitet dann auf HTTPS um. `nginx_hsts_max_age` erst setzen, wenn alle Brows
 
 ```bash
 # .225
-systemctl status hermclaw-litellm hermclaw-api hermclaw-scheduler hermclaw-backup.timer
+systemctl status hermclaw-litellm hermclaw-api hermclaw-scheduler hermclaw-backup.timer hermclaw-restore-test.timer
 readlink /opt/hermclaw/venv /opt/litellm/venv
 curl -s http://127.0.0.1:4000/health/liveliness                              # "I'm alive!"
 curl -s -o /dev/null -w '%{http_code}\n' http://127.0.0.1:4000/v1/models    # 401 (200 hieße: kein Master-Key!)
@@ -801,7 +821,134 @@ Mit der GTX 1080 dauert ein solcher Job je nach Größe 10–60 Minuten: Die gro
 
 ---
 
-<!-- INSTALL-CH11: Backup – nach P32 -->
+## 11. Backup und Restore-Test (Terra .60)
+
+Hermclaw sichert jede Nacht um 02:30 seinen eigenen Zustand nach Terra/Unraid `.60` und beweist jeden Sonntag um
+04:30, dass sich das neueste Backup tatsächlich wiederherstellen lässt (Restore in eine Wegwerf-Datenbank, Vergleich
+aller Tabellen und Zeilenzahlen mit dem Manifest). Git-Repositories gehören nicht dazu, sie liegen in GitLab `.226`.
+Details: `docs/operations/backup-restore.md`, Architektur: `docs/architecture/backup.md`.
+
+| Inhalt eines Backup-Satzes | Herkunft |
+|---|---|
+| `db.dump`, `globals.sql` | PostgreSQL-Datenbank `hermclaw` (konsistenter Snapshot), Rollen ohne Passwörter |
+| `config.tar.gz` | `/etc/hermclaw` **ohne** Klartext-Geheimnisse (Schlüssel, Tokens, `secrets/` werden ausgelassen und im Manifest aufgeführt) |
+| `artifacts.tar.gz` | `/var/lib/hermclaw/artifacts` + Research- und Deployment-Datensätze |
+| `MANIFEST.json` (+ `.sig`) | Prüfsummen, Zeilenzahlen, Alembic-Revision, Versionen; optional HMAC-signiert |
+| `RESTORE_REPORT.json` | Ergebnis des letzten Restore-Tests dieses Satzes |
+
+### 11.1 Was das Deployment bereits eingerichtet hat
+
+* `/opt/hermclaw/bin/hermclaw-backup` und `/opt/hermclaw/bin/hermclaw-restore-test`;
+* die Units `hermclaw-backup.service/.timer` und `hermclaw-restore-test.service/.timer` (beide Timer aktiv). Solange
+  `/etc/hermclaw/backup.yaml` fehlt, wird jeder Lauf übersprungen – das ist kein Fehler;
+* die Restore-Umgebung in PostgreSQL: Recht `CREATEDB` für die Rolle `hermclaw` und die Vorlage-Datenbank
+  `hermclaw_restore_template` mit pgvector (gehört `postgres`, nimmt keine Verbindungen an);
+* den Backup-Schlüssel `/etc/hermclaw/ssh/backup_ed25519` (Bootstrap) und den Host-Eintrag `terra-60` in
+  `hosts.yaml`;
+* die Referenzkonfiguration `/opt/hermclaw/current/backup/backup.example.yaml`.
+
+Kopieren Sie die Units aus `infra/backup/` **nicht** nach `/etc/systemd/system/`: Das Deployment verwaltet diese Dateien
+und verweigert jeden weiteren Lauf, wenn dort eine fremde Unit liegt.
+
+### 11.2 Ziel auf Terra vorbereiten
+
+Variante A (empfohlen) ist rsync über SSH mit dem eingeschränkten Schlüssel aus Kapitel 6.2
+(`command="/usr/local/bin/rrsync /mnt/user/backups/hermclaw"`). Prüfen Sie den Zugang auf .225:
+
+```bash
+sudo -u hermclaw ssh -i /etc/hermclaw/ssh/backup_ed25519 -o UserKnownHostsFile=/etc/hermclaw/ssh/known_hosts \
+     -o IdentitiesOnly=yes root@192.168.178.60 true; echo "exit $?"
+# rrsync erlaubt nur rsync: eine Fehlermeldung von rrsync ("... is not rsync" o. Ä., exit ≠ 0) ist hier das ERWARTETE
+# Ergebnis – der Schlüssel wurde angenommen. "Permission denied" bzw. "Host key verification failed" heißt:
+# Kapitel 6.2 bzw. 4.3 wiederholen. Den eigentlichen rsync-Zugang prüft danach "sudo hermclaw backup list" (11.5).
+```
+
+Variante B ist die per NFS auf .225 eingebundene Freigabe (`infra/backup/unraid-share-setup.md`, Abschnitt 3). Dann
+muss die Unit dorthin schreiben dürfen – im Inventar beim Orchestrator:
+
+```yaml
+    orchestrator:
+      hosts:
+        hermclaw-orchestrator:
+          systemd_skeleton_backup_write_paths: [/mnt/terra-backup/hermclaw]
+```
+
+### 11.3 Schlüssel für die Manifest-Signatur (empfohlen)
+
+```bash
+# auf .225 – den ausgegebenen Wert zuerst im Passwortmanager ablegen ("Hermclaw backup-manifest-key")
+KEY=$(openssl rand -hex 32); echo "$KEY"
+printf '%s' "$KEY" | sudo systemd-creds encrypt --name=backup-manifest-key - /etc/credstore.encrypted/hermclaw-backup-manifest-key
+unset KEY
+```
+
+Danach auf dem Admin-Rechner das Deployment des Orchestrators erneut ausführen, damit beide Units den Schlüssel laden:
+
+```bash
+cd infra/ansible && ansible-playbook -i inventory/hosts.yml playbooks/deploy.yml --limit orchestrator -K
+```
+
+Ohne Schlüssel entfernen Sie in 11.4 die Zeile `manifest_signing_key_ref`. Bei der Wiederherstellung auf einem neuen
+Host brauchen Sie den Schlüssel, um signierte Sätze zu prüfen – deshalb der Passwortmanager.
+
+### 11.4 `backup.yaml` anlegen
+
+```bash
+sudo install -m 0640 -o root -g hermclaw /opt/hermclaw/current/backup/backup.example.yaml /etc/hermclaw/backup.yaml
+sudoedit /etc/hermclaw/backup.yaml
+```
+
+| Schlüssel | Wert für diese Installation | Hinweis |
+|---|---|---|
+| `target.kind` | `rsync` (Variante A) bzw. `local` (Variante B) | |
+| `target.host_id` | `terra-60` | Adresse, Benutzer und Schlüssel kommen aus `hosts.yaml` |
+| `target.path` | `.` (Variante A mit `rrsync`) | ohne `rrsync`: `/mnt/user/backups/hermclaw`; Variante B: `/mnt/terra-backup/hermclaw` und `require_mount: true` |
+| `target.remote_rsync_path` | Zeile löschen bei `rrsync` | sonst `/usr/bin/rsync` |
+| `target.bwlimit_kbps` | `60000` | ~60 MB/s, hält das LAN während des Laufs nutzbar |
+| `manifest_signing_key_ref` | `cred:backup-manifest-key` | Zeile löschen, wenn Sie 11.3 ausgelassen haben |
+| `credstore_dirs` | `[]` | verschlüsselte Credentials sind an diesen Host gebunden; nur für eine Wiederherstellung auf derselben Maschine sinnvoll (`[/etc/credstore.encrypted]`) |
+| `retention` | `keep_last: 2`, `keep_daily: 7`, `keep_weekly: 4`, `keep_monthly: 3` | nach Platz auf Terra anpassen |
+| `restore_test.template` | `hermclaw_restore_template` | von der Rolle `postgresql` angelegt |
+
+Variante B als vollständiger Block:
+
+```yaml
+backup:
+  target: {kind: local, path: /mnt/terra-backup/hermclaw, require_mount: true}
+```
+
+### 11.5 Erster Lauf
+
+```bash
+sudo hermclaw backup list                              # {"sets": []} – Ziel erreichbar, Konfiguration gültig
+sudo systemctl start hermclaw-backup.service           # dauert je nach Datenmenge Minuten
+journalctl -u hermclaw-backup -n 30 -o cat             # letzte Zeile: JSON mit "ok": true und der Set-ID
+sudo hermclaw backup verify --latest                   # Prüfsummen, Archive, Dump-Katalog
+sudo systemctl start hermclaw-restore-test.service
+journalctl -u hermclaw-restore-test -n 30 -o cat       # "ok": true; RESTORE_REPORT.json liegt neben dem Satz auf Terra
+systemctl list-timers 'hermclaw-*'                     # nächste Läufe: täglich 02:30, sonntags 04:30
+```
+
+Exit-Codes der Befehle: `0` ok, `1` Prüfung/Restore-Test fehlgeschlagen, `2` Konfigurationsfehler, `3` Operation
+fehlgeschlagen, `75` ein anderer Backup-Lauf hält die Sperre (zählt für die Timer als Erfolg, der nächste Lauf holt es
+nach).
+
+### 11.6 Überwachung
+
+* täglich: `journalctl -u hermclaw-backup --since -26h` – ein erfolgreicher Lauf; Alarm, wenn 26 Stunden lang kein
+  Event `backup.completed` kommt;
+* wöchentlich: `journalctl -u hermclaw-restore-test --since -8d` – `"ok": true`; Alarm, wenn 8 Tage lang kein
+  `backup.restore_test.passed` kommt;
+* die Events `backup.*` erscheinen auch im Event-Stream der Oberfläche (`/api/events`).
+
+### 11.7 Wiederherstellen
+
+Eine Wiederherstellung (Totalverlust von .225 oder eine beschädigte Datenbank) beschreibt
+`docs/runbooks/disaster-recovery.md` Schritt für Schritt: Host neu aufsetzen, Credentials aus dem Passwortmanager neu
+anlegen, Satz wählen und testen (`sudo hermclaw backup restore-test <set-id>`), `restore-full` in eine leere
+Datenbank, Konfiguration und Artefakte zurücklegen, `hermclaw migrate`, Dienste starten.
+
+---
 
 ## 12. Live-Abnahme
 

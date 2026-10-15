@@ -23,7 +23,8 @@ postgresql_pgdg_suite: "{{ hermclaw_debian_codename }}-pgdg"
 # PGDG signing key: the copy shipped by Debian's postgresql-common (signed via the Debian archive), checked against
 # the published fingerprint (research 20261014-027 P4) – no key download at deploy time.
 postgresql_pgdg_keyring: /usr/share/postgresql-common/pgdg/apt.postgresql.org.gpg
-postgresql_pgdg_key_fingerprint: B97B0AFCAA1A47F044F244A07FCC7D46ACCC4CF8
+# in gpg's grouped form (spaces are ignored by the comparison)
+postgresql_pgdg_key_fingerprint: "B97B 0AFC AA1A 47F0 44F2  44A0 7FCC 7D46 ACCC 4CF8"
 
 postgresql_packages:
   - "postgresql-{{ postgresql_version }}"
@@ -36,6 +37,12 @@ postgresql_db_name: hermclaw
 postgresql_db_owner: "{{ hermclaw_user }}"
 postgresql_extensions:
   - vector
+
+# Clean restore environment of the weekly restore test (P33 33.5, docs/operations/backup-restore.md): the service
+# role may create (and drop) its throw-away databases (CREATEDB), and a template owned by postgres already has the
+# extensions, which the service role could not create itself. backup.yaml: restore_test.template.
+postgresql_restore_test_enabled: true
+postgresql_restore_template: hermclaw_restore_template
 
 # Never published on the LAN (Bauplan §6: "lokal/privat").
 postgresql_listen_addresses: localhost

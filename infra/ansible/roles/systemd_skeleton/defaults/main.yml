@@ -12,13 +12,15 @@ systemd_skeleton_units:
     - hermclaw-litellm.service
     - hermclaw-backup.service
     - hermclaw-backup.timer
+    - hermclaw-restore-test.service
+    - hermclaw-restore-test.timer
   execution_workers:
     - hermclaw-exec-worker.service
   model_workers:
     - hermclaw-model-worker.service
 # Units started by the deployment phase when systemd_skeleton_enable_units is true.
 systemd_skeleton_enable_list:
-  orchestrator: [hermclaw-litellm.service, hermclaw-api.service, hermclaw-scheduler.service, hermclaw-backup.timer]
+  orchestrator: [hermclaw-litellm.service, hermclaw-api.service, hermclaw-scheduler.service, hermclaw-backup.timer, hermclaw-restore-test.timer]
   execution_workers: [hermclaw-exec-worker.service]
   model_workers: [hermclaw-model-worker.service]
 
@@ -49,12 +51,20 @@ systemd_skeleton_backup_command: "{{ hermclaw_bin_dir }}/hermclaw-backup"
 # docs/operations/backup-restore.md); a missing one is left out instead of failing every run.
 systemd_skeleton_backup_optional_credentials: [backup-manifest-key]
 systemd_skeleton_backup_on_calendar: "*-*-* 02:30:00"
+# Extra directories the backup and restore-test units may write (ProtectSystem=strict): the mount point of a mounted
+# target (backup.yaml target.kind: local, infra/backup/unraid-share-setup.md variant B), e.g. [/mnt/terra-backup/hermclaw].
+# Prefixed with "-" in the units, so an unmounted share never blocks the unit (require_mount then refuses the run).
+systemd_skeleton_backup_write_paths: []
+# weekly restore test of the newest set (P33 33.5/33.6)
+systemd_skeleton_restore_test_command: "{{ hermclaw_bin_dir }}/hermclaw-restore-test"
+systemd_skeleton_restore_test_on_calendar: "Sun *-*-* 04:30:00"
 
 # Worker env (per worker host): id from the inventory (hermclaw_worker_id), bind = LAN address.
 systemd_skeleton_worker_id: "{{ hermclaw_worker_id | default(inventory_hostname) }}"
 systemd_skeleton_worker_bind: "{{ ansible_host | default('127.0.0.1') }}"
 
-# SearXNG (orchestrator): rootless Quadlet user unit of hermclaw, pinned image tag.
+# SearXNG (orchestrator): rootless Quadlet user unit of hermclaw, image pinned by tag AND digest (the multi-arch
+# index digest, research 20261014-027 S2): a re-pushed tag can never change what runs.
 systemd_skeleton_searxng_enabled: true
-systemd_skeleton_searxng_image: docker.io/searxng/searxng:2026.10.9-f4822b3fc
+systemd_skeleton_searxng_image: docker.io/searxng/searxng:2026.10.9-f4822b3fc@sha256:85492ba800a861e3e8ff6014c430e81369fe6ca766a9990595f616d1ce95b272
 systemd_skeleton_searxng_secret_name: hermclaw-searxng-secret

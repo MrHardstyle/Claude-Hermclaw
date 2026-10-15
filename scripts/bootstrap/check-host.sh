@@ -53,6 +53,8 @@ orchestrator hermclaw-scheduler.service
 orchestrator hermclaw-litellm.service
 orchestrator hermclaw-backup.service
 orchestrator hermclaw-backup.timer
+orchestrator hermclaw-restore-test.service
+orchestrator hermclaw-restore-test.timer
 execution_workers hermclaw-exec-worker.service
 execution_workers hermclaw-wol@.service
 model_workers hermclaw-model-worker.service

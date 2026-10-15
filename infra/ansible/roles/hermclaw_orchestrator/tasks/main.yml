@@ -197,10 +197,11 @@
         state: "{{ 'restarted' if hermclaw_orchestrator_restart | bool else 'started' }}"
       loop: [hermclaw-api.service, hermclaw-scheduler.service]
 
-    - name: Start the backup timer
+    - name: Start the backup and restore-test timers
       ansible.builtin.systemd_service:
-        name: hermclaw-backup.timer
+        name: "{{ item }}"
         state: started
+      loop: [hermclaw-backup.timer, hermclaw-restore-test.timer]
 
 - name: Health checks of the orchestrator
   ansible.builtin.import_tasks: health.yml

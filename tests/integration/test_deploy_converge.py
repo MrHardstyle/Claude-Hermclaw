@@ -587,8 +587,8 @@ def test_site_converges_bootstrap_and_deployment(deployment: dict[str, Any]) -> 
     grammars = a.out(
         "set -e; ts=$(sed -n 's/^TREE_SITTER_LANGUAGE_PACK_CACHE_DIR=//p' /etc/hermclaw/hermclaw.env); echo \"dir $ts\"; "
         "runuser -u hermclaw -- env HOME=/nonexistent TREE_SITTER_LANGUAGE_PACK_CACHE_DIR=$ts /opt/hermclaw/venv/bin/python -I -c '"
-        "from hermclaw.repo_intelligence.symbols import _parser, _TS_LANGS\n"
-        "for lang in sorted(set(_TS_LANGS.values())):\n"
+        "from hermclaw.repo_intelligence.symbols import TREE_SITTER_GRAMMARS, _parser\n"
+        "for lang in sorted(set(TREE_SITTER_GRAMMARS.values())):\n"
         '    root = _parser(lang).parse(b"<?php function f() {}" if lang == "php" else b"function f() {}").root_node\n'
         "    print(lang, root.type, root.has_error)'"
     ).splitlines()
@@ -635,6 +635,7 @@ def test_site_converges_bootstrap_and_deployment(deployment: dict[str, Any]) -> 
         "hermclaw-litellm.service",
         "hermclaw-exec-worker.service",
         "hermclaw-backup.timer",
+        "hermclaw-restore-test.timer",
     ):
         assert unit in wants, unit
     assert _link(a, "/etc/systemd/system/multi-user.target.wants/hermclaw-api.service") == "/etc/systemd/system/hermclaw-api.service"
@@ -646,10 +647,13 @@ def test_site_converges_bootstrap_and_deployment(deployment: dict[str, Any]) -> 
     for path, mode in (
         ("/usr/local/sbin/hermclaw", "755"),
         ("/opt/hermclaw/bin/hermclaw-backup", "755"),
+        ("/opt/hermclaw/bin/hermclaw-restore-test", "755"),
         ("/opt/hermclaw/bin/hermclaw-build-sandbox-images", "755"),
         ("/usr/local/bin/hermclaw-ssh-gate", "755"),
     ):
         assert a.out(f"stat -c '%U %a' {path}").split() == ["root", mode], path
+    # reference configuration of the backup (copied to /etc/hermclaw/backup.yaml by the operator)
+    assert "restore_test:" in a.out("cat /opt/hermclaw/current/backup/backup.example.yaml")
 
     # 32.2 UI: versioned build + atomic webroot symlink (the bootstrap's placeholder page is gone); 32.7 TLS
     assert _link(a, "/var/www/hermclaw-next") == f"hermclaw-next-releases/{V1}"
@@ -726,6 +730,8 @@ def test_deployed_units_pass_systemd_analyze_verify_in_the_rootfs(deployment: di
             "hermclaw-litellm.service",
             "hermclaw-backup.service",
             "hermclaw-backup.timer",
+            "hermclaw-restore-test.service",
+            "hermclaw-restore-test.timer",
             "hermclaw-exec-worker.service",
         ]
         res = _run([analyze, "verify", f"--root={root}", *units], timeout=300)

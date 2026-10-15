@@ -14,7 +14,7 @@ hermclaw_orchestrator_run_database_tasks: "{{ hermclaw_manage_services | bool }}
 # still installed release's migrations (docs/runbooks/upgrade.md). Off: the play stops and explains the options.
 hermclaw_orchestrator_allow_schema_downgrade: false
 
-# 32.8 admin API token: created once with `hermclaw token-create` (admin scope) and stored only as the encrypted
+# 32.8 admin API token, created once with `hermclaw token-create` (admin scope) and stored only as the encrypted
 # credential <credstore>/hermclaw-<name>; read it with
 #   sudo systemd-creds decrypt --name=api-operator-token /etc/credstore.encrypted/hermclaw-api-operator-token -
 hermclaw_orchestrator_admin_token: true
@@ -26,7 +26,7 @@ hermclaw_orchestrator_admin_token_name: "operator-admin-{{ now(utc=true, fmt='%Y
 hermclaw_orchestrator_cli_optional_credentials: [backup-manifest-key]
 
 # Units of the orchestrator (enabled by the deployment; systemd_skeleton installs them).
-hermclaw_orchestrator_units: [hermclaw-litellm.service, hermclaw-api.service, hermclaw-scheduler.service, hermclaw-backup.timer]
+hermclaw_orchestrator_units: [hermclaw-litellm.service, hermclaw-api.service, hermclaw-scheduler.service, hermclaw-backup.timer, hermclaw-restore-test.timer]
 hermclaw_orchestrator_searxng: "{{ systemd_skeleton_searxng_enabled | default(true) }}"
 hermclaw_orchestrator_searxng_url: "http://127.0.0.1:{{ hermclaw_searxng_port }}"
 

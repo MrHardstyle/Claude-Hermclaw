@@ -13,7 +13,7 @@
       - postgresql_pgdg_key.rc == 0
       - >-
         postgresql_pgdg_key.stdout_lines | select('match', '^fpr:') | map('split', ':') | map(attribute=9)
-        | list == [postgresql_pgdg_key_fingerprint]
+        | list == [postgresql_pgdg_key_fingerprint | replace(' ', '') | upper]
     fail_msg: >-
       {{ postgresql_pgdg_keyring }} is missing or is not the PGDG signing key {{ postgresql_pgdg_key_fingerprint }}
       (install postgresql-common from Debian; never trust a key whose fingerprint does not match).

@@ -633,7 +633,10 @@ def test_rendered_podman_and_searxng(rendered: dict[str, Path]) -> None:
     assert 'default_rootless_network_cmd = "pasta"' in containers
     quadlet = rendered["systemd/hermclaw-searxng.container"].read_text(encoding="utf-8")
     assert "PublishPort=127.0.0.1:8888:8080" in quadlet
-    assert re.search(r"Image=docker.io/searxng/searxng:\d{4}\.\d+\.\d+-[0-9a-f]+", quadlet), "image must be pinned"
+    assert re.search(r"^Image=docker.io/searxng/searxng:\d{4}\.\d+\.\d+-[0-9a-f]+@sha256:[0-9a-f]{64}$", quadlet, re.M), (
+        "image must be pinned by tag and digest"
+    )
+    assert "Environment=GRANIAN_HOST=0.0.0.0" in quadlet, "no dependency on IPv6 in the container (research 027 S4)"
     assert "Secret=hermclaw-searxng-secret,type=env,target=SEARXNG_SECRET" in quadlet
     settings = yaml.safe_load(rendered["systemd_skeleton/searxng-settings.yml"].read_text(encoding="utf-8"))
     assert "json" in settings["search"]["formats"]
@@ -672,6 +675,7 @@ def _stub_paths(root: Path) -> dict[str, str]:
         "hermclaw_bin_dir": str(root / "opt/hermclaw/bin"),
         "systemd_skeleton_litellm_venv": str(root / "opt/litellm/venv"),
         "systemd_skeleton_backup_command": str(root / "opt/hermclaw/bin/hermclaw-backup"),
+        "systemd_skeleton_restore_test_command": str(root / "opt/hermclaw/bin/hermclaw-restore-test"),
         "ollama_install_root": str(root / "opt/ollama"),
         "nvidia_persistenced_bin": str(root / "usr/bin/nvidia-persistenced"),
         "ollama_firewall_nft_bin": str(root / "usr/sbin/nft"),
@@ -682,6 +686,7 @@ def _stub_paths(root: Path) -> dict[str, str]:
         "opt/hermclaw/venv/bin/hermclaw-model-worker",
         "opt/hermclaw/bin/hermclaw-cred-env",
         "opt/hermclaw/bin/hermclaw-backup",
+        "opt/hermclaw/bin/hermclaw-restore-test",
         "opt/litellm/venv/bin/litellm",
         "opt/ollama/current/bin/ollama",
         "usr/sbin/ethtool",
@@ -727,6 +732,8 @@ def test_rendered_units_pass_systemd_analyze_verify(tmp_path: Path) -> None:
         "hermclaw-litellm.service",
         "hermclaw-backup.service",
         "hermclaw-backup.timer",
+        "hermclaw-restore-test.service",
+        "hermclaw-restore-test.timer",
         "hermclaw-exec-worker.service",
         "hermclaw-model-worker.service",
         "ollama.service",

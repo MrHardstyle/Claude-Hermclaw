@@ -1,0 +1,42 @@
+# Managed by Hermclaw – weekly restore test (orchestrator .225, P33 33.5/33.6): newest backup set -> clean temporary
+# database -> tables, row counts, alembic revision and checksums compared with the manifest; RESTORE_REPORT.json next
+# to the set, event backup.restore_test.passed|failed. The temporary database is always dropped. Deployed form of
+# infra/backup/hermclaw-restore-test.service (same environment, credentials and exit codes).
+[Unit]
+Description=Hermclaw Next restore test (newest backup set)
+After=network-online.target postgresql.service hermclaw-backup.service
+Wants=network-online.target
+ConditionFileIsExecutable={{ systemd_skeleton_restore_test_command }}
+# skipped until backup.yaml is configured (P33, docs/operations/backup-restore.md)
+ConditionPathExists={{ hermclaw_config_dir }}/backup.yaml
+
+[Service]
+Type=oneshot
+User={{ hermclaw_user }}
+Group={{ hermclaw_group }}
+EnvironmentFile={{ hermclaw_config_dir }}/hermclaw.env
+Environment=HERMCLAW_BACKUP_CONFIG={{ hermclaw_config_dir }}/backup.yaml
+{% for cred in systemd_skeleton_backup_credentials | default([]) %}
+LoadCredentialEncrypted={{ cred }}:{{ hermclaw_credstore_dir }}/hermclaw-{{ cred }}
+{% endfor %}
+ExecStart={{ systemd_skeleton_restore_test_command }} --latest
+# 75 = another backup operation holds the lock (the next timer run retries)
+SuccessExitStatus=75
+Nice=10
+IOSchedulingClass=idle
+TimeoutStartSec=8h
+UMask=0077
+ReadWritePaths={{ hermclaw_data_dir }} {{ hermclaw_log_dir }}{% for path in systemd_skeleton_backup_write_paths | default([]) %} -{{ path }}{% endfor %}
+NoNewPrivileges=yes
+PrivateTmp=yes
+PrivateDevices=yes
+ProtectSystem=strict
+ProtectHome=yes
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectControlGroups=yes
+RestrictSUIDSGID=yes
+LockPersonality=yes
+SystemCallArchitectures=native
+RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6
+CapabilityBoundingSet=

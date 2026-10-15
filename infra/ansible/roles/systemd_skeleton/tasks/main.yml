@@ -40,13 +40,15 @@
       - systemd_skeleton_log_level in ['DEBUG', 'INFO', 'WARNING', 'ERROR']
       - systemd_skeleton_backup_command is match('^/[A-Za-z0-9._/-]+$')
       - systemd_skeleton_litellm_venv is match('^/[A-Za-z0-9._/-]+$')
-      - systemd_skeleton_searxng_image is match('^[a-z0-9.-]+(/[a-z0-9._-]+)+:[A-Za-z0-9._-]+$')
-      - systemd_skeleton_searxng_image is not match('.*:latest$')
+      - systemd_skeleton_restore_test_command is match('^/[A-Za-z0-9._/-]+$')
+      - systemd_skeleton_backup_write_paths | reject('match', '^/[A-Za-z0-9._/-]+$') | list | length == 0
+      - systemd_skeleton_searxng_image is match('^[a-z0-9.-]+(/[a-z0-9._-]+)+:[A-Za-z0-9._-]+@sha256:[0-9a-f]{64}$')
+      - systemd_skeleton_searxng_image is not match('.*:latest@')
       - systemd_skeleton_api_forwarded_allow_ips is match('^[0-9A-Fa-f.:]+(/[0-9]{1,3})?(,[0-9A-Fa-f.:]+(/[0-9]{1,3})?)*$')
       - (systemd_skeleton_credentials.values() | flatten + systemd_skeleton_backup_optional_credentials)
         | reject('match', '^[a-z0-9][a-z0-9-]*$') | list | length == 0
     fail_msg: >-
-      invalid worker id, instance id, db name, path, image (must be pinned), credential name or
+      invalid worker id, instance id, db name, path, image (must be pinned by tag@sha256 digest), credential name or
       systemd_skeleton_api_forwarded_allow_ips (comma-separated IP addresses/networks of the web UI hosts, no names,
       never "*"; set it in the inventory when ansible_host of a webui host is a DNS name)
     quiet: true

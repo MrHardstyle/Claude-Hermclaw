@@ -47,7 +47,7 @@ NODE_BIN = Path("/opt/node22/bin")
 V1, V2, V3 = "0.1.0rc1", "0.1.0rc2", "0.1.0rc3"
 CACHE_NAME = "hermclaw-deploy-releases"
 SOURCE_PARTS = ["pyproject.toml", "README.md", "alembic.ini", "migrations", "hermclaw", "worker", "config", "ui", "scripts/ops",
-                "infra/sandbox-images"]  # fmt: skip
+                "infra/sandbox-images", "infra/backup"]  # fmt: skip
 EXTRA_MIGRATION = '''"""deploy test revision: one more table (tests/integration/test_deploy_release.py)."""
 
 import sqlalchemy as sa
@@ -268,12 +268,12 @@ def test_release_layout_metadata_and_checksums(releases: Releases) -> None:
         assert os.access(rel / "scripts" / "ops" / script, os.X_OK), script
     assert (rel / "constraints.txt").is_file() and (rel / "litellm-constraints.txt").is_file()
     # tree-sitter grammars (research 027 Y6): the languages the runtime parses, for the locked language pack
-    from hermclaw.repo_intelligence.symbols import _TS_LANGS
+    from hermclaw.repo_intelligence.symbols import TREE_SITTER_GRAMMARS
 
     pins = dict(ln.split("==", 1) for ln in (rel / "constraints.txt").read_text(encoding="utf-8").splitlines())
     assert meta["tree_sitter"] == {
         "package_version": pins["tree-sitter-language-pack"],
-        "languages": sorted(set(_TS_LANGS.values())),
+        "languages": sorted(set(TREE_SITTER_GRAMMARS.values())),
         "cache_dir": "tree-sitter",
     }
 
@@ -322,6 +322,7 @@ def test_wheelhouse_payloads_are_hash_locked_for_cpython_313(releases: Releases,
             encoding="utf-8"
         )
         assert sorted(p.name for p in (tmp_path / "sandbox-images").iterdir() if p.is_dir()) == ["generic", "node", "php", "python"]
+        assert (tmp_path / "backup" / "backup.example.yaml").read_bytes() == (REPO / "infra/backup/backup.example.yaml").read_bytes()
         ts = meta["tree_sitter"]
         assert isinstance(ts, dict)
         grammars = tmp_path / str(ts["cache_dir"]) / "tree-sitter-language-pack" / f"v{ts['package_version']}"
@@ -390,8 +391,8 @@ python3 -c 'import json; d = json.load(open("/tmp/check.json")); print("config",
 chmod -R a-w /opt/payload/tree-sitter
 setpriv --reuid=65534 --regid=65534 --clear-groups env HOME=/nonexistent \
     TREE_SITTER_LANGUAGE_PACK_CACHE_DIR=/opt/payload/tree-sitter /opt/hermclaw/venv-{V1}/bin/python -I -c '
-from hermclaw.repo_intelligence.symbols import _parser, _TS_LANGS
-for lang in sorted(set(_TS_LANGS.values())):
+from hermclaw.repo_intelligence.symbols import TREE_SITTER_GRAMMARS, _parser
+for lang in sorted(set(TREE_SITTER_GRAMMARS.values())):
     root = _parser(lang).parse(b"<?php function f() {{}}" if lang == "php" else b"function f() {{}}").root_node
     print("grammar", lang, root.type, root.has_error)
 '

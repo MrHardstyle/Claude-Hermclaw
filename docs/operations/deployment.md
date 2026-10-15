@@ -11,7 +11,7 @@ operator scripts. It is built once on the control node and verified by checksum:
 
 | Host | What the deployment does (`infra/ansible/playbooks/deploy.yml`) |
 |---|---|
-| `.225` orchestrator | release venv `/opt/hermclaw/venv-<v>` (offline, hash-checked) → `/etc/hermclaw/*.yaml` rendered + validated in a staging copy → LiteLLM venv installed → schema decision (nothing live has changed yet) → units enabled → drain → `hermclaw migrate` (once, before the restart) → live configuration + `litellm.yaml` → atomic switch of `/opt/litellm/venv` and `/opt/hermclaw/venv` → `hermclaw-litellm` (healthy and authenticated before anything else starts) → SearXNG, `hermclaw-api`, `hermclaw-scheduler`, `hermclaw-backup.timer` → health → admin API token (once) |
+| `.225` orchestrator | release venv `/opt/hermclaw/venv-<v>` (offline, hash-checked) → `/etc/hermclaw/*.yaml` rendered + validated in a staging copy → LiteLLM venv installed → schema decision (nothing live has changed yet) → units enabled → drain → `hermclaw migrate` (once, before the restart) → live configuration + `litellm.yaml` → atomic switch of `/opt/litellm/venv` and `/opt/hermclaw/venv` → `hermclaw-litellm` (healthy and authenticated before anything else starts) → SearXNG, `hermclaw-api`, `hermclaw-scheduler`, `hermclaw-backup.timer`, `hermclaw-restore-test.timer` → health → admin API token (once) |
 | `.222` execution worker | release venv → `capabilities.yaml`, `policies.yaml` validated → sandbox images (rootless, missing tags only) → configuration installed → switch → `hermclaw-exec-worker` → `/health` |
 | `.224` model worker | release venv → `capabilities.yaml` validated → ffmpeg → configuration installed → switch → `hermclaw-model-worker` → `/health` → missing Ollama tags of `models.yaml` pulled (`hermclaw-model-pull`, then any other tag on its own) |
 | `.223` web UI | nginx site (headers, CSP, optional TLS) → UI build into `/var/www/hermclaw-next-releases/<v>/` → atomic switch of `/var/www/hermclaw-next` → `nginx -t` → reload → checks through nginx |
@@ -244,7 +244,7 @@ release is switched in. The alternative is the restore of the pre-upgrade backup
 **.225**
 
 ```bash
-systemctl status hermclaw-litellm hermclaw-api hermclaw-scheduler hermclaw-backup.timer
+systemctl status hermclaw-litellm hermclaw-api hermclaw-scheduler hermclaw-backup.timer hermclaw-restore-test.timer
 systemctl --user --machine=hermclaw@.host status hermclaw-searxng.service
 readlink /opt/hermclaw/venv /opt/hermclaw/current /opt/litellm/venv
 curl -s http://192.168.178.225:8000/api/health
@@ -255,14 +255,16 @@ sudo hermclaw doctor
 ```
 
 LiteLLM lives in `/opt/litellm/venv-<litellm version>-<lock sha>`; `/opt/litellm/venv` is the unit's path (symlink).
-The venv is shared by every hermclaw release with the same LiteLLM lock. The backup timer is enabled. Until
-`/etc/hermclaw/backup.yaml` exists (P33, `docs/operations/backup-restore.md`), each run is skipped
-(`ConditionPathExists`). The deployed `hermclaw-backup.service` is the complete unit of `infra/backup/` (environment
-`HERMCLAW_BACKUP_CONFIG`, exit code 75 = locked counts as success); it loads `backup-manifest-key` when that credential
-exists. After creating it (`… | sudo systemd-creds encrypt --name=backup-manifest-key - /etc/credstore.encrypted/
-hermclaw-backup-manifest-key`, backup runbook) re-run `ansible-playbook playbooks/deploy.yml --limit orchestrator`, so
-the unit loads it. Do not copy `infra/backup/hermclaw-backup.{service,timer}` over the deployed units; the restore-test
-units of `infra/backup/` are installed by hand as the backup runbook describes.
+The venv is shared by every hermclaw release with the same LiteLLM lock. The backup timer (daily 02:30) and the
+restore-test timer (Sunday 04:30) are enabled. Until `/etc/hermclaw/backup.yaml` exists (P33,
+`docs/operations/backup-restore.md`; reference: `/opt/hermclaw/current/backup/backup.example.yaml`), each run is
+skipped (`ConditionPathExists`). The deployed `hermclaw-backup.service` and `hermclaw-restore-test.service` are the
+complete units of `infra/backup/` (environment `HERMCLAW_BACKUP_CONFIG`, exit code 75 = locked counts as success); they
+load `backup-manifest-key` when that credential exists. After creating it (`… | sudo systemd-creds encrypt
+--name=backup-manifest-key - /etc/credstore.encrypted/hermclaw-backup-manifest-key`, backup runbook) re-run
+`ansible-playbook playbooks/deploy.yml --limit orchestrator`, so the units load it. The role `postgresql` prepares the
+restore environment (`CREATEDB` for `hermclaw`, template database `hermclaw_restore_template` with `vector`). Do not
+copy the units of `infra/backup/` over the deployed units.
 
 **.222**
 
@@ -328,7 +330,7 @@ images of `.222`, and SearXNG. Any failed check stops the play and prints the re
 | `The database is at schema revision …, which release … does not know` | Rollback below the schema: section 7 |
 | migration failed, old services started again | Fix the cause (`journalctl`, `sudo hermclaw --alembic current`), re-run |
 | `LiteLLM serves /v1/models without a key` | `sudo /opt/hermclaw/bin/hermclaw-credential check litellm-master-key`; the unit must load it. The API and the scheduler stay stopped until a re-run passes this check |
-| `/etc/systemd/system/hermclaw-backup.service exists and is not managed by Hermclaw` | the unit was copied from `infra/backup/` by hand. The deployed unit is the same (environment, `SuccessExitStatus=75`, `backup-manifest-key` when it exists): `sudo rm /etc/systemd/system/hermclaw-backup.{service,timer}`, re-run |
+| `/etc/systemd/system/hermclaw-backup.service exists and is not managed by Hermclaw` (or `hermclaw-restore-test.*`) | the unit was copied from `infra/backup/` by hand. The deployed units are the same (environment, `SuccessExitStatus=75`, `backup-manifest-key` when it exists): `sudo rm /etc/systemd/system/hermclaw-{backup,restore-test}.{service,timer}`, re-run |
 | `models.yaml names invalid Ollama tags` | a tag in `hermclaw_config_overrides.models` is not a plain `name[:tag]` |
 | `Workers and the UI must never run a newer release than the orchestrator` | deploy the orchestrator first (no `--limit`/`--tags`, or `--limit orchestrator`); disaster recovery with the orchestrator down: `-e hermclaw_release_require_orchestrator_first=false` |
 | `invalid … systemd_skeleton_api_forwarded_allow_ips` | `ansible_host` of a webui host is a DNS name: set `systemd_skeleton_api_forwarded_allow_ips` to its IP address in the inventory |

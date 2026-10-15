@@ -17,6 +17,8 @@ Volume={{ hermclaw_config_dir }}/searxng:/etc/searxng:ro
 Volume={{ hermclaw_data_dir }}/searxng-cache:/var/cache/searxng:rw
 Secret={{ systemd_skeleton_searxng_secret_name }},type=env,target=SEARXNG_SECRET
 Environment=SEARXNG_BASE_URL=http://127.0.0.1:{{ hermclaw_searxng_port }}/
+# granian binds "::" by default and exits without IPv6 in the network namespace (research 20261014-027 S4)
+Environment=GRANIAN_HOST=0.0.0.0
 DropCapability=ALL
 NoNewPrivileges=true
 

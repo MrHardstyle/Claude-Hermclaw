@@ -213,7 +213,7 @@ orchestrator to the backup user's `authorized_keys` on Terra, prefixed with
 * Rotating a worker token – run `sudo /opt/hermclaw/bin/hermclaw-credential generate worker-token-<id> --force`
   on the orchestrator, `sudo rm /etc/credstore.encrypted/hermclaw-worker-token` on the worker, rerun the worker play,
   then restart `hermclaw-api`/`hermclaw-scheduler` and the worker service (credentials are read at start).
-* Units stay disabled until the deployment phase (`systemd_skeleton_enable_units: true`).
+* Units stay disabled until the deployment phase: `playbooks/deploy.yml` enables and starts them (role `hermclaw_release`, `enable.yml`, and the host roles); it does not use `systemd_skeleton_enable_units`.
 
 ## Testing the automation without the hosts
 

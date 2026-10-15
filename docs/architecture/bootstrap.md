@@ -65,7 +65,8 @@ scripts/bootstrap/
   connection into `/etc/hermclaw/ssh/known_hosts` (no TOFU); GitLab/Terra keys come
   pre-verified from `common_known_hosts_extra`.
 * **1.5/1.6** python3 (Debian 13: 3.13, gate `>= 3.12`), venv, pip, pipx, build tooling, libpq-dev;
-  empty application venv `/opt/hermclaw/venv` (root-owned, filled by P32).
+  empty application venv `/opt/hermclaw/venv` (root-owned). The first deployment (P32) keeps it as
+  `/opt/hermclaw/venv.pre-release-<time>` and replaces it with the symlink to `venv-<version>`.
 * **1.9** Git (`>= 2.39`). Git mutations remain runtime-controlled; the bootstrap never touches repositories.
 
 ### postgresql (1.7, 1.8) – orchestrator

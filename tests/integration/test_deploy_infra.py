@@ -120,8 +120,17 @@ def test_deploy_playbook_structure() -> None:
     assert [t["ansible.builtin.include_role"]["tasks_from"] for t in pre["tasks"]] == ["preflight.yml", "data.yml", "mark_deployed.yml"], (
         "read-only checks first; the only write of the preflight play (the deployed fact) after every check passed"
     )
+    from tests.integration.test_bootstrap_infra import COMMAND_MODULES, _iter_tasks, _module_of
+
+    read_only = {"ansible.builtin.stat", "ansible.builtin.assert", "ansible.builtin.set_fact", "ansible.builtin.include_tasks",
+                 "ansible.builtin.import_tasks", "ansible.builtin.uri", "ansible.builtin.slurp", "ansible.builtin.fail",
+                 *COMMAND_MODULES}  # fmt: skip
+    for name in ("preflight.yml", "orchestrator_first.yml", "credentials.yml", "validate.yml"):
+        for task in _iter_tasks(yaml.safe_load((ROLES_DIR / "hermclaw_release" / "tasks" / name).read_text(encoding="utf-8"))):
+            module = _module_of(task)
+            assert module is None or module in read_only, f"{name}: {task.get('name')!r} ({module}) is not read-only"
+            assert module not in COMMAND_MODULES or task.get("changed_when") is False, f"{name}: {task.get('name')!r}"
     preflight = (ROLES_DIR / "hermclaw_release" / "tasks" / "preflight.yml").read_text(encoding="utf-8")
-    assert "ansible.builtin.copy" not in preflight and "ansible.builtin.file" not in preflight, "preflight.yml is read-only"
     assert "orchestrator_first.yml" in preflight, "workers and UI never get ahead of the orchestrator"
 
     by_hosts = {p["hosts"]: [r["role"] for r in p.get("roles", [])] for p in plays[1:]}
@@ -1185,6 +1194,15 @@ def test_units_carry_the_deployment_tweaks(tmp_path: Path) -> None:
     with_key = _render(tmp_path, tmp_path / "with-key", _render_vars({"systemd_skeleton_backup_credentials": ["backup-manifest-key"]}))
     backup = with_key["systemd/hermclaw-backup.service"].read_text(encoding="utf-8")
     assert "\nLoadCredentialEncrypted=backup-manifest-key:/etc/credstore.encrypted/hermclaw-backup-manifest-key\n" in backup
+    restore = with_key["systemd/hermclaw-restore-test.service"].read_text(encoding="utf-8")
+    assert "\nLoadCredentialEncrypted=backup-manifest-key:/etc/credstore.encrypted/hermclaw-backup-manifest-key\n" in restore
+    assert "ExecStart=/opt/hermclaw/bin/hermclaw-restore-test --latest" in restore and "SuccessExitStatus=75" in restore
+    assert "\nReadWritePaths=/var/lib/hermclaw /var/log/hermclaw\n" in restore
+    # a mounted target (unraid-share-setup.md variant B) is writable for both units, optional while unmounted
+    mounted = _render(tmp_path, tmp_path / "mounted", _render_vars({"systemd_skeleton_backup_write_paths": ["/mnt/terra-backup/hermclaw"]}))
+    for unit in ("hermclaw-backup.service", "hermclaw-restore-test.service"):
+        text = mounted[f"systemd/{unit}"].read_text(encoding="utf-8")
+        assert "\nReadWritePaths=/var/lib/hermclaw /var/log/hermclaw -/mnt/terra-backup/hermclaw\n" in text, unit
     reference = (REPO / "infra" / "backup" / "hermclaw-backup.service").read_text(encoding="utf-8")
     assert "LoadCredentialEncrypted=backup-manifest-key:/etc/credstore.encrypted/hermclaw-backup-manifest-key" in reference
     quadlet = out["systemd/hermclaw-searxng.container"].read_text(encoding="utf-8")

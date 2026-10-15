@@ -65,8 +65,10 @@ sudo systemctl daemon-reload && sudo mkdir -p /mnt/terra-backup/hermclaw && sudo
 
 `backup.yaml`: `target: {kind: local, path: /mnt/terra-backup/hermclaw, require_mount: true}` – with
 `require_mount` an unmounted share fails the run instead of filling the local disk; the target directory is
-never created implicitly. Add `ReadWritePaths=/mnt/terra-backup/hermclaw` to both units
-(`infra/backup/hermclaw-backup.service`, `hermclaw-restore-test.service`).
+never created implicitly. The units must be allowed to write there (`ProtectSystem=strict`): on a deployed host set
+`systemd_skeleton_backup_write_paths: [/mnt/terra-backup/hermclaw]` for the orchestrator in the inventory and re-run
+`playbooks/deploy.yml --limit orchestrator`; on a hand-built host add `ReadWritePaths=-/mnt/terra-backup/hermclaw` to
+both units of `infra/backup/`.
 
 ## 4. What lands on the share
 
