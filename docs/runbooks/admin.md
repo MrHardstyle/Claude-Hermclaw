@@ -79,7 +79,7 @@ as in [disaster-recovery.md](disaster-recovery.md) §7.
 | worker overview | `api /workers` (read) – state `starting`/`ready`/`busy`/`draining`/`sleeping`/`waking`/`offline`/`error`, protocol version, last heartbeat |
 | take a worker out of service (maintenance) | `api /workers/exec-222/drain -X POST -H 'Content-Type: application/json' -d '{"drain": true, "reason": "maintenance"}'` (admin) → running steps finish, no new work; the same call with `-d '{"drain": false}'` to return |
 | wake a sleeping worker by hand | the scheduler does this before every step anyway. By hand from `.225`: `sudo apt install wakeonlan` once (not installed by the deployment), then `wakeonlan -i 192.168.178.255 <mac>` (MAC: `wol_mac` of the host in the inventory) |
-| models on `.224` | `ollama list`, `ollama ps`; pull again: `sudo -u ollama /opt/hermclaw/bin/hermclaw-model-pull` |
+| models on `.224` | `ollama list`, `ollama ps`; pull missing tags: wake `.224`, then `ansible-playbook -i inventory/hosts.yml playbooks/deploy.yml --limit model_workers -K` (stops `hermclaw-model-worker` during the download, so the scheduler cannot suspend `.224`), or by hand as at the end of INSTALLATION.md chapter 7 |
 | model memory/residency | `api /models` and `api /resources` (leases: only one large model at a time) |
 | rebuild sandbox images (`.222`) | set a new tag in `inventory/hosts.yml`, `all.vars`: `hermclaw_sandbox_image_version: "2"` (an existing tag is never rebuilt), then `ansible-playbook -i inventory/hosts.yml playbooks/deploy.yml --limit orchestrator,execution_workers -K` – `.222` builds the images, `policies.yaml` on `.225` and `.222` gets the new tag |
 

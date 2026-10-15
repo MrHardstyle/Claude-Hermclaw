@@ -52,8 +52,9 @@ wenn alle Suiten grün sind, ist das System abgenommen.
   regelmäßigen Zähler-Abfragen bemerkt.
 * **Schlafende Worker und Ansible:** Nur der Scheduler weckt die Worker, und zwar vor Schritten. Ein erneuter
   Bootstrap- oder Deployment-Lauf, SSH- oder `curl`-Prüfungen gegen einen schlafenden Worker scheitern mit
-  „unreachable“; vorher wecken (INSTALLATION.md 13.1). Große Modell-Downloads auf .224 laufen deshalb vor dem
-  ersten Deployment oder mit abgeschaltetem Suspend (Kapitel 7).
+  „unreachable“; vorher wecken (INSTALLATION.md 13.1). Läufe, die länger als 30 Minuten auf einem Worker arbeiten
+  (Live-Abnahme, neue Sandbox-Images), brauchen einen abgeschalteten Suspend; Modell-Downloads durch das Deployment
+  halten den Worker-Daemon dafür selbst an.
 * **Wake-on-LAN:** Ein Idle-Suspend kann mit einem gleichzeitigen Weckvorgang kollidieren. Der Schritt scheitert dann
   mit `SSH_TIMEOUT` und wird vom Scheduler-Retry korrekt geweckt.
 

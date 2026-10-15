@@ -813,6 +813,18 @@ Noch keine.
 - Erwartet: every command, flag, path, variable and route as the code implements it.
 - Tatsächlich (Auswahl): Secure-Boot/MOK order impossible (also in the role's own message), web server name without the address (requests by IP hit Debian's default site), worker-token rotation without worker restart, `hermclaw-credential` called without its path/sudo, `curl -d` without JSON content type (422), `limit_except` in server context, `check-host.sh` without `--role`, `hermclaw-model-pull --dry-run` as go criterion (never fails), missing `-K`, non-existent `/api/events` route, artifact download route and UI tab name, `logging.yaml` keys that do not exist, `credstore_dirs` that the unit cannot read, a sandbox database on `.225` (localhost only), `idle_sleep_command` "remove" (only `null` works). All fixed in the documents and role messages.
 
+### BUG-138 – `hermclaw config-check` accepted a models.yaml that violates the fixed model architecture
+- Phase: P41 (Doku-Abgleich) · Komponente: cli/deploy · Severity: P2 · blockierend: nein · Status: **behoben** (`tests/integration/test_cli.py::test_config_check_refuses_a_violation_of_the_fixed_model_architecture`)
+- Reproduktion: inventory override that disables the profile `planner-gemma-fallback` (as the guide used to suggest), then `playbooks/deploy.yml`.
+- Erwartet: the deployment stops in its staging check (`hermclaw config-check` of the new release) before anything live changes.
+- Tatsächlich: config-check validated only the schema; `hermclaw litellm-config` refused the configuration (`MODEL_ARCHITECTURE_VIOLATION`) after the drain, the migration and the switch of the live configuration – `.225` was left without running services. Fixed: config-check runs `assert_architecture` (exit 2 with the violation on stderr, warnings in the JSON); docs say the fallback planner is mandatory.
+
+### BUG-139 – The scheduler could suspend `.224` in the middle of the deployment's model download
+- Phase: P41 (Doku-Abgleich) · Komponente: deploy/wol · Severity: P2 · blockierend: nein · Status: **behoben** (`tests/integration/test_deploy_infra.py::test_model_pull_follows_models_yaml_and_survives_a_dry_run`)
+- Reproduktion: `playbooks/deploy.yml` with the models missing on `.224` (≈ 70 GB, 1–3 h) while the scheduler runs on `.225`.
+- Erwartet: the download finishes.
+- Tatsächlich: the role started `hermclaw-model-worker` before the pulls; its heartbeats made `.224` `ready`, and after `idle_after_minutes` without steps the idle policy suspended the host over SSH – a download does not count as activity. Fixed: `models.yml` runs before the daemon start and stops a running daemon while tags are missing (an offline worker is never suspended); the daemon starts right after the pulls. Dry runs and runs without missing tags leave the daemon alone (asserted).
+
 ## Template
 
 ### BUG-XXX – Titel

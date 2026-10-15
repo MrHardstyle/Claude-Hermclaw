@@ -1026,13 +1026,22 @@ def test_model_pull_follows_models_yaml_and_survives_a_dry_run(model_host: dict[
     profiles = model_host["models"]["profiles"]
     wanted = sorted({p["model"] for p in profiles if p.get("enabled", True)})
     assert {"gemma4:26b", "qwen3-coder:30b", "qwen3.8:27b", "qwen3:8b", "embeddinggemma:300m"} <= set(wanted)
-    # dry run on a host without models: reports, pulls nothing
+    stops = model_host["log"].with_name(model_host["log"].name + ".systemctl")
+
+    def stopped() -> list[str]:
+        lines = stops.read_text(encoding="utf-8").splitlines() if stops.exists() else []
+        return [ln for ln in lines if ln.startswith("systemctl stop ")]
+
+    # dry run on a host without models: reports, pulls nothing, leaves the daemon alone
     res = _pull(model_host, "--check")
     assert res.returncode == 0, res.stdout[-3000:]
     assert not [c for c in _log(model_host) if c[0] == "systemd-run" or c[1] == "pull"], _log(model_host)
-    # the real run
+    assert stopped() == []
+    # the real run: the worker daemon is stopped for the download (no heartbeat - the scheduler cannot suspend the
+    # host mid-download; main.yml starts it again after the pulls)
     res = _pull(model_host)
     assert res.returncode == 0, res.stdout[-3000:]
+    assert stopped() == ["systemctl stop hermclaw-model-worker.service"]
     runs = [c for c in _log(model_host) if c[0] == "systemd-run"]
     assert len(runs) == 1 and "--unit=hermclaw-model-pull" in runs[0] and f"{model_host['tmp']}/bin/hermclaw-model-pull" in runs[0]
     assert "--setenv=OLLAMA_HOST=http://127.0.0.1:11434" in runs[0]
@@ -1043,6 +1052,7 @@ def test_model_pull_follows_models_yaml_and_survives_a_dry_run(model_host: dict[
     again = _pull(model_host)
     assert again.returncode == 0 and _changed(again) == 0
     assert [c for c in _log(model_host)[before:] if c[0] == "systemd-run" or c[1] == "pull"] == []
+    assert len(stopped()) == 1, "nothing to download: the daemon keeps running"
     # a changed tag (hermclaw_config_overrides.models): pulled by its own transient unit
     changed = json.loads(json.dumps(model_host["models"]))
     for p in changed["profiles"]:

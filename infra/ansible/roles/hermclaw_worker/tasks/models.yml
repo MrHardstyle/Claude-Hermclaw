@@ -1,6 +1,7 @@
 # 32.6 – the Ollama tags of the enabled models.yaml profiles on this model host (roles fixed: Gemma planner,
 # Qwen3-Coder 30B coder, Qwen3.8 27B heavy reviewer, Qwen3 8B fast router, EmbeddingGemma). Missing tags are pulled
-# by the release's hermclaw-model-pull in a transient unit (hermclaw-model-pull.service) that Ansible polls.
+# by the release's hermclaw-model-pull in a transient unit (hermclaw-model-pull.service) that Ansible polls, with the
+# worker daemon stopped (main.yml runs this before it starts the daemon).
 - name: Decide the model tags of this host
   ansible.builtin.set_fact:
     hermclaw_worker_profiles: >-
@@ -78,6 +79,15 @@
           {%- set total = namespace(gb=hermclaw_worker_model_disk_headroom_gb | float) -%}{%- for tag in hermclaw_worker_missing_models
           -%}{%- set total.gb = total.gb + (hermclaw_worker_model_sizes_gb[tag] | default(hermclaw_worker_model_default_size_gb) | float)
           -%}{%- endfor -%}{{ total.gb | round(1) }}
+
+    # Downloads take hours. A running daemon heartbeats "ready", and the scheduler suspends an idle ready worker after
+    # wake_on_lan.idle_after_minutes - in the middle of the download. Without heartbeats the worker goes offline and is
+    # never suspended; main.yml starts the daemon again right after the pulls.
+    - name: Stop the worker daemon during the download (the scheduler never suspends an offline worker)
+      ansible.builtin.command:  # noqa: command-instead-of-module
+        argv: [systemctl, stop, "{{ hermclaw_worker_unit }}"]
+      changed_when: true
+      when: not ansible_check_mode
 
     - name: Check for a model pull that is still running
       ansible.builtin.command:

@@ -68,10 +68,19 @@ def cmd_doctor(ns: argparse.Namespace) -> int:
 
 def cmd_config_check(_: argparse.Namespace) -> int:
     from hermclaw.core.config import load_config
+    from hermclaw.core.errors import ConfigError
     from hermclaw.core.settings import get_settings
+    from hermclaw.models.profiles import assert_architecture
 
     settings = get_settings()
     cfg = load_config()
+    # the fixed model architecture (Gemma planner + fallback, Qwen3-Coder, Qwen3.8 reviewer, Qwen3 router, embedding):
+    # `hermclaw litellm-config` and the scheduler's gateway refuse a violation, so the deployment's staging check must too
+    try:
+        warnings = assert_architecture(cfg.models)
+    except ConfigError as exc:
+        print(f"Error: {exc}", file=sys.stderr)
+        return 2
     out = {
         "version": __version__,
         "config_dir": str(settings.config_dir),
@@ -82,6 +91,7 @@ def cmd_config_check(_: argparse.Namespace) -> int:
         "capabilities": sorted(c.name for c in cfg.capabilities.capabilities),
         "coder_max_turns": cfg.policies.coder.max_turns,
         "max_replans_per_job": cfg.policies.correction.max_replans_per_job,
+        "model_architecture_warnings": [w.as_dict() for w in warnings],
     }
     _print(out)
     return 0

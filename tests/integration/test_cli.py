@@ -29,6 +29,33 @@ async def test_config_check_and_schema_export(capsys: Any, tmp_path: Path) -> No
     assert len(list((tmp_path / "schemas").glob("*.json"))) >= 10
 
 
+async def test_config_check_refuses_a_violation_of_the_fixed_model_architecture(tmp_path: Path) -> None:
+    """The deployment's staging check (config-check) stops a models.yaml that litellm-config and the scheduler's
+    gateway would refuse - before the drain, the migration or any live change (BUG-138)."""
+    import os
+    import shutil
+    import subprocess
+    import sys
+
+    import yaml
+
+    root = Path(__file__).resolve().parents[2]
+    for example in (root / "config").glob("*.example.yaml"):
+        shutil.copy(example, tmp_path / example.name.replace(".example", ""))
+    models = yaml.safe_load((tmp_path / "models.yaml").read_text(encoding="utf-8"))
+    env = {**os.environ, "HERMCLAW_CONFIG_DIR": str(tmp_path)}
+    hermclaw = [sys.executable, "-m", "hermclaw.cli", "config-check"]
+    ok = subprocess.run(hermclaw, env=env, capture_output=True, text=True, check=False)
+    assert ok.returncode == 0, ok.stderr
+    assert json.loads(ok.stdout)["model_architecture_warnings"] == []
+    for profile in models["profiles"]:
+        if profile["role"] == "planner_fallback":
+            profile["enabled"] = False
+    (tmp_path / "models.yaml").write_text(yaml.safe_dump(models), encoding="utf-8")
+    bad = subprocess.run(hermclaw, env=env, capture_output=True, text=True, check=False)
+    assert bad.returncode == 2 and "planner_fallback" in bad.stderr and bad.stdout == "", bad.stderr
+
+
 async def test_litellm_config_generation(capsys: Any, tmp_path: Path) -> None:
     out = tmp_path / "litellm.yaml"
     assert main(["litellm-config", str(out)]) == 0

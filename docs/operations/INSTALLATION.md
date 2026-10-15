@@ -338,7 +338,7 @@ Konfiguration. Prüfen:
 ```bash
 node --version                                   # v22.x (>= 22.23.2, letztes Sicherheitsrelease)
 sudo nginx -t
-curl -sI http://127.0.0.1/ -H 'Host: hermclaw.lan' | head -1    # HTTP/1.1 200
+curl -sI http://127.0.0.1/ -H 'Host: 192.168.178.223' | head -1    # HTTP/1.1 200 (die Adresse steht in jeder Variante von hermclaw_web_server_name, Kapitel 2.3)
 ```
 
 **Node.js-Mindestversion 22.23.2** (letztes Sicherheitsrelease der 22er-Linie). NodeSource hinkt Sicherheitsreleases
@@ -647,15 +647,15 @@ Der Model Worker braucht diese sechs Modelle (≈ 70 GB). Die Modellrollen sind 
 | `qwen3:8b` | Fast Router | 5,2 GB | – |
 | `embeddinggemma:300m` | Embedding (768 Dim., 2048 Token Kontext) | ≈ 0,6 GB | 0.11.10 |
 
-**Laden Sie die Modelle vor dem ersten Deployment (Kapitel 8), nicht durch das Deployment.** Sobald das Deployment auf
-.225 den Scheduler gestartet hat und `hermclaw-model-worker` auf .224 seinen ersten Heartbeat sendet, gilt .224 als
-`ready`. Nach 30 Minuten ohne Schritt, Lease oder Ressourcenanfrage legt der Scheduler ihn per SSH schlafen
-(`policies.wake_on_lan.idle_after_minutes`, `idle_sleep_command` in `hosts.yaml`). Ein Modell-Download zählt dabei
-nicht als Aktivität. Bei ≈ 70 GB (1–3 h) würde .224 mitten im Download suspendiert. Ansible verlöre die Verbindung,
-und der Lauf scheiterte für .224. Vor dem Deployment läuft noch kein Scheduler, deshalb stört dort nichts.
+**Das Deployment lädt fehlende Modelle selbst** (Kapitel 8, `hermclaw_worker_pull_models: true`): in einer eigenen
+Unit, die SSH-Abbrüche übersteht, nach einer Prüfung des freien Platzes, und mit **angehaltenem**
+`hermclaw-model-worker`. Ohne Heartbeat gilt .224 für den Scheduler als offline und wird nicht schlafen gelegt (sonst
+legte der Scheduler einen bereiten, 30 Minuten untätigen Worker mitten im Download schlafen). Der Daemon startet direkt
+nach den Downloads. Bei ≈ 70 GB dauert der erste Lauf für .224 deshalb 1–3 h.
 
-`/opt/hermclaw/bin/hermclaw-model-pull` gibt es erst nach dem Deployment. Kopieren Sie das Skript deshalb aus dem
-Checkout und starten Sie es als eigene Unit, die SSH-Abbrüche übersteht:
+Sie können die Modelle auch **vorher** laden, z. B. während Sie Kapitel 8.1–8.3 vorbereiten. Das Deployment findet
+dann nichts Fehlendes und lädt nichts. `/opt/hermclaw/bin/hermclaw-model-pull` gibt es erst nach dem Deployment.
+Kopieren Sie das Skript deshalb aus dem Checkout und starten Sie es als eigene Unit, die SSH-Abbrüche übersteht:
 
 ```bash
 # Admin-Rechner, im Checkout
@@ -664,26 +664,39 @@ scp scripts/ops/hermclaw-model-pull admin@192.168.178.224:/tmp/
 df -h /var/lib/ollama                                   # >= 80 GB frei
 sudo systemd-run --unit=hermclaw-model-pull --setenv=OLLAMA_HOST=http://127.0.0.1:11434 \
      /bin/bash /tmp/hermclaw-model-pull --ollama /usr/local/bin/ollama
-#   ohne Planner-Fallback: --skip-fallback-planner anhängen (und planner-gemma-fallback: enabled: false, Kapitel 9.3)
 sudo journalctl -fu hermclaw-model-pull                 # warten bis "all models present (embedding: embeddinggemma:300m)"
 ollama list                                             # sechs Modelle
 ```
 
 Das Skript prüft jedes Modell mit `ollama show`. Fehlt ein Rollenmodell, endet es mit Exit 1. `--dry-run` zeigt nur,
-was es laden würde. Beginnen Sie Kapitel 8 erst, wenn die Unit beendet ist. Das Deployment findet dann keine fehlenden
-Modelle und lädt nichts.
+was es laden würde. Lassen Sie die Unit vor Kapitel 8.4 zu Ende laufen.
+
+Endet die Unit mit einem Fehler (`journalctl -u hermclaw-model-pull`), geben Sie den Namen frei und starten Sie
+denselben Aufruf erneut: `sudo systemctl reset-failed hermclaw-model-pull`. Ohne diesen Schritt meldet `systemd-run`
+„Unit hermclaw-model-pull.service was already loaded“. Vollständig geladene Modelle lädt `ollama pull` nicht noch
+einmal.
 
 Gleichwertig ohne Skript: `ollama pull gemma4:26b`, `ollama pull gemma4:12b`, `ollama pull qwen3-coder:30b`,
 `ollama pull qwen3.8:27b`, `ollama pull qwen3:8b`, `ollama pull embeddinggemma:300m`.
 
-Ohne Planner-Fallback (spart 7,6 GB): `--skip-fallback-planner` an den Aufruf oben anhängen und **vor dem Deployment**
-das Profil `planner-gemma-fallback` im Inventar abschalten (Kapitel 9.3, „Ein Modellprofil abschalten oder ändern“).
-Ändern Sie dafür nicht `models.yaml` auf .225: Die Datei gehört dem Deployment.
+Der Planner-Fallback `gemma4:12b` ist Pflicht. `hermclaw config-check`, `hermclaw litellm-config` und das Model
+Gateway des Schedulers verweigern eine Konfiguration ohne aktives Profil der Rolle `planner_fallback`
+(`MODEL_ARCHITECTURE_VIOLATION`); das Deployment bricht dann schon in der Prüfung der Staging-Kopie ab, bevor sich auf
+.225 etwas ändert. Hängen Sie `--skip-fallback-planner` deshalb nicht an, und schalten Sie das Profil
+`planner-gemma-fallback` nicht ab.
 
-Wollen Sie später ein Modell nachladen (neues Tag, EmbeddingGemma 2), schalten Sie vorher den Leerlauf-Suspend von .224
-ab (`hermclaw_config_host_overrides: {model-224: {idle_sleep_command: null}}`, Deployment, Kapitel 13.1) und danach
-wieder ein. Nach dem Deployment liegt das Skript unter `/opt/hermclaw/bin/hermclaw-model-pull`. Starten Sie es genauso
-mit `systemd-run`, nur mit diesem Pfad statt `/bin/bash /tmp/hermclaw-model-pull`.
+Wollen Sie später ein Modell nachladen (neues Tag im Inventar, Kapitel 9.3): .224 wecken (Kapitel 13.1) und das
+Deployment ausführen. Es hält `hermclaw-model-worker` während des Downloads an wie beim ersten Lauf. Von Hand auf .224
+geht es so (der Daemon muss dabei stehen, sonst legt der Scheduler .224 nach 30 Minuten schlafen):
+
+```bash
+sudo systemctl stop hermclaw-model-worker
+sudo systemctl reset-failed hermclaw-model-pull 2>/dev/null || true
+sudo systemd-run --unit=hermclaw-model-pull --setenv=OLLAMA_HOST=http://127.0.0.1:11434 \
+     /opt/hermclaw/bin/hermclaw-model-pull --ollama /usr/local/bin/ollama
+sudo journalctl -fu hermclaw-model-pull                 # bis "all models present"
+sudo systemctl start hermclaw-model-worker
+```
 
 Später auf EmbeddingGemma 2 wechseln (sobald Ollama es unter Linux/CUDA ausführt): `--embedding embeddinggemma-2:740m`
 anhängen. Das Skript fällt automatisch auf `embeddinggemma:300m` zurück und nennt die nötige Änderung des Profils
@@ -915,7 +928,7 @@ Deployment erneut ausführen (Kapitel 8.4, schlafende Worker vorher wecken, Kapi
 | `policies` → `git.workspace_retention_hours` | 72 | Aufbewahrung der Job-Workspaces |
 | `models` → `model_host_capacity_gb` | 34 | RAM + VRAM von .224 abzüglich Reserve (32 GB RAM + 8 GB VRAM → 34) |
 | `models` → `profiles[*].model` | feste Tags (Kapitel 1.2) | nur ein anderer Build desselben Modells, nie eine andere Rolle |
-| `models` → Profil `planner-gemma-fallback` | aktiv | `enabled: false`, wenn `gemma4:12b` nicht geladen ist (vollständige Profilliste im Inventar, siehe unten) |
+| `models` → Profil `planner-gemma-fallback` | aktiv | nicht abschalten: Die Rolle `planner_fallback` ist Pflicht. Mit `enabled: false` stoppt `hermclaw config-check` das Deployment vor jeder Änderung (`MODEL_ARCHITECTURE_VIOLATION`) |
 | `models` → Profil `embedding` | `embeddinggemma:300m` | `embeddinggemma-2:740m`, sobald Ollama es unter Linux/CUDA ausführt (vollständige Profilliste im Inventar, siehe unten) |
 | `hosts` → je Worker `idle_sleep_command` | `sudo /usr/bin/systemctl suspend` | auf `null` setzen, wenn ein Worker nie schlafen soll: `hermclaw_config_host_overrides: {exec-222: {idle_sleep_command: null}}`. Löschen auf dem Host macht das nächste Deployment rückgängig |
 | `databases` → `targets`, `sandbox` | keine | Projekt-Datenbanken für die DB-Tools (siehe 9.4) |
@@ -923,27 +936,29 @@ Deployment erneut ausführen (Kapitel 8.4, schlafende Worker vorher wecken, Kapi
 Die Modellrollen sind fest (Gemma = Planner, Qwen3-Coder 30B = Implementation Worker, Qwen3.8 27B = Heavy Reviewer,
 Qwen3 8B = Fast Router, EmbeddingGemma). `hermclaw doctor` meldet einen Fehler, wenn einer Rolle ein aktives Profil fehlt.
 
-**Ein Modellprofil abschalten oder ändern.** `/etc/hermclaw/models.yaml` gehört dem Deployment, und `profiles` ist eine
-Liste: Ein Override ersetzt sie **vollständig**. Übernehmen Sie deshalb alle sechs Profile ins Inventar und setzen Sie
-nur beim Fallback `enabled: false`. Den Block erzeugen Sie auf dem Admin-Rechner im Wurzelverzeichnis des Checkouts
-der installierten Version:
+**Ein Modellprofil ändern.** `/etc/hermclaw/models.yaml` gehört dem Deployment, und `profiles` ist eine Liste: Ein
+Override ersetzt sie **vollständig**. Übernehmen Sie deshalb alle sechs Profile ins Inventar und ändern Sie nur das
+Nötige, z. B. `model` des Profils `embedding`. Alle sechs Profile bleiben aktiv (kein `enabled: false`):
+`hermclaw config-check` (und damit das Deployment) verweigert eine Konfiguration, in der einer Rolle ein aktives Profil fehlt, auch der Rolle
+`planner_fallback`. Den Block erzeugen Sie auf dem Admin-Rechner im Wurzelverzeichnis des Checkouts der installierten
+Version:
 
 ```bash
 ~/.local/share/hermclaw/ansible-venv/bin/python - <<'PY' | sed 's/^/    /'
 import yaml
 d = yaml.safe_load(open("config/models.example.yaml"))
 for p in d["profiles"]:
-    if p["alias"] == "planner-gemma-fallback":
-        p["enabled"] = False
+    if p["alias"] == "embedding":
+        p["model"] = "embeddinggemma-2:740m"
 print(yaml.safe_dump({"hermclaw_config_overrides": {"models": {"profiles": d["profiles"]}}}, sort_keys=False))
 PY
 ```
 
 Die Ausgabe ist schon für `all.vars` eingerückt und gehört dort in `infra/ansible/inventory/hosts.yml`. Ein vorhandenes
-`hermclaw_config_overrides` führen Sie damit zusammen. Danach das Deployment ausführen (Kapitel 8.4): LiteLLM bedient
-den Alias nicht mehr, und `hermclaw-model-pull` lädt `gemma4:12b` nicht (`--skip-fallback-planner`). Für den Wechsel des
-Embedding-Profils gehen Sie genauso vor und ändern `model` des Profils `embedding`. Nach jedem Upgrade erzeugen Sie den
-Block aus dem `config/models.example.yaml` der neuen Version neu.
+`hermclaw_config_overrides` führen Sie damit zusammen. Danach das Deployment ausführen (Kapitel 8.4; .224 vorher wecken
+und dessen Suspend für diesen Lauf abschalten, Kapitel 13.1): LiteLLM bedient den Alias `embedding` dann mit dem neuen
+Modell, und das Deployment lädt das neue Tag auf .224. Nach jedem Upgrade erzeugen Sie den Block aus dem
+`config/models.example.yaml` der neuen Version neu.
 
 Ändern Sie die Datei nicht direkt auf .225, das nächste Deployment überschreibt sie. Verwenden Sie auch nicht
 `hermclaw_config_unmanaged: [models]`: Die Downloads auf .224 richten sich nach dem Inventar, nicht nach der Datei auf
@@ -1228,7 +1243,14 @@ frisches Backup mit Restore-Test. Ist nur die Datenbank beschädigt: Dienste und
 
 Die Build-Umgebung konnte die Hosts nicht erreichen (BLOCKER-001). Diese Abnahme holt alle Prüfungen gegen die echte
 Hardware nach. Sie braucht einen Quellcode-Checkout der installierten Version mit Test-Abhängigkeiten auf .225
-(und für die Sandbox-Suite auf .222). Wecken Sie .222 und .224 vorher (Kapitel 13.1).
+(und für die Sandbox-Suite auf .222). Die Abnahme dauert 30–60 Minuten. Ihre Aufrufe an Worker, LiteLLM, Ollama und
+per SSH zählen für den Scheduler nicht als Aktivität. Er legt .222 und .224 deshalb 30 Minuten nach dem Wecken mitten
+in der Abnahme schlafen. Schalten Sie den Leerlauf-Suspend beider Worker für die Abnahme ab: Worker wecken
+(Kapitel 13.1), unter `all.vars`
+`hermclaw_config_host_overrides: {exec-222: {idle_sleep_command: null}, model-224: {idle_sleep_command: null}}`
+eintragen (ein vorhandenes `hermclaw_config_host_overrides` führen Sie damit zusammen) und das Deployment ausführen
+(Kapitel 8.4). Nach der Abnahme entfernen Sie die beiden Einträge und führen das Deployment für `orchestrator` erneut
+aus.
 
 Vor der GitLab-Suite legen Sie in GitLab die Gruppe `hermclaw` an und darin das Wegwerf-Projekt `sandbox` mit
 „Initialize repository with a README“ (Default-Branch `main`, von GitLab geschützt). Aktivieren Sie dort den
@@ -1237,7 +1259,9 @@ dieses Projekt zugreifen dürfen: ein Group Access Token dieser Gruppe, oder der
 Project Access Token eines anderen Projekts reicht nicht. Liegen Ihre Projekte und Ihr Group Access Token in einer
 anderen Gruppe, legen Sie `sandbox` dort an und passen `HERMCLAW_LIVE_GITLAB_PROJECT` und
 `HERMCLAW_LIVE_GITLAB_REPO_URL` an. Haben Sie in 6.1 `labels.api_url` gesetzt, setzen Sie `HERMCLAW_LIVE_GITLAB_API`
-auf denselben Wert. Die Suite pusht einen Job-Branch, öffnet einen Merge Request und löscht den Branch wieder. Den
+auf denselben Wert. Ist das GitLab-Zertifikat selbst signiert oder von Ihrer eigenen CA (Drop-in aus 6.1), scheitert
+die Suite an der Zertifikatsprüfung, denn der Drop-in gilt nur für den Scheduler. Setzen Sie `HERMCLAW_LIVE_GITLAB_API`
+dann auf eine Adresse, unter der die API ohne Umleitung per HTTP erreichbar ist (6.1, „Alternativ …“). Die Suite pusht einen Job-Branch, öffnet einen Merge Request und löscht den Branch wieder. Den
 offenen Merge Request schließen Sie danach in GitLab.
 
 ```bash
@@ -1310,11 +1334,12 @@ until ping -c1 -W2 192.168.178.224 >/dev/null; do sleep 2; done
 ```
 
 Danach melden sich die Worker per Heartbeat wieder `ready`, und bis zum nächsten Suspend bleiben 30 Minuten. Dauert ein
-Lauf auf einem Worker länger, schalten Sie dessen Suspend für diesen Lauf ab. Das betrifft Modell-Downloads und neue
-Sandbox-Images nach einer Erhöhung von `hermclaw_sandbox_image_version`. Setzen Sie dafür
+Lauf auf einem Worker länger, schalten Sie dessen Suspend für diesen Lauf ab. Das betrifft die Live-Abnahme (Kapitel 12)
+und neue Sandbox-Images nach einer Erhöhung von `hermclaw_sandbox_image_version`. Setzen Sie dafür
 `hermclaw_config_host_overrides: {exec-222: {idle_sleep_command: null}}` (bzw. `model-224`, Kapitel 9.3) und führen Sie
-das Deployment aus. Es stellt den Orchestrator zuerst um. Danach entfernen Sie den Eintrag und führen das Deployment für
-`orchestrator` erneut aus.
+das Deployment aus. Es stellt den Orchestrator zuerst um. Danach entfernen Sie den Eintrag und führen das Deployment
+für `orchestrator` erneut aus. Modell-Downloads durch das Deployment brauchen das nicht: Es hält
+`hermclaw-model-worker` währenddessen an (Kapitel 7).
 
 **Wake-on-LAN einmal vor dem ersten Deployment testen** (es läuft noch kein Scheduler): Auf dem Worker
 `sudo systemctl suspend` ausführen, dann vom Admin-Rechner wie oben wecken. Der Host muss innerhalb von 90 s wieder auf
@@ -1331,7 +1356,7 @@ ping antworten (`ping_timeout_seconds` in `hosts.yaml`). Sonst prüfen Sie BIOS 
 | `doctor`: `config:files` fail | `/etc/hermclaw/*.yaml` fehlen, nur `.example.yaml` vorhanden | Deployment erneut ausführen (Kapitel 8) |
 | `doctor`: `config:wake_on_lan` warn | Platzhalter-MAC im Inventar | `wol_mac` setzen (Kapitel 4.2), Deployment erneut |
 | `doctor`: `litellm` fail, Gateway meldet `MODEL_AUTH_FAILED` | Master-Key fehlt/falsch | `sudo /opt/hermclaw/bin/hermclaw-credential check litellm-master-key`; `sudo systemctl restart hermclaw-litellm hermclaw-scheduler` |
-| `doctor`: `models:model-224` fail | Modell nicht geladen | `sudo -u ollama /opt/hermclaw/bin/hermclaw-model-pull` auf .224 (Kapitel 7) |
+| `doctor`: `models:model-224` fail | Modell nicht geladen | .224 wecken (Kapitel 13.1) und `playbooks/deploy.yml --limit model_workers -K` ausführen (lädt fehlende Tags mit angehaltenem Worker-Daemon), oder von Hand wie am Ende von Kapitel 7 (Daemon stoppen, `systemd-run … hermclaw-model-pull`, Daemon starten) |
 | Modelle laufen auf der CPU (`ollama ps`: `100% CPU`) | Treiber zu alt / nicht geladen, nach Suspend GPU verloren | `nvidia-smi`; `sudo journalctl -u ollama -b \| grep 'inference compute'`; nach Suspend: `sudo rmmod nvidia_uvm && sudo modprobe nvidia_uvm`, `sudo systemctl restart ollama` |
 | `nvidia-smi`: „couldn't communicate with the NVIDIA driver“ nach Kernel-Update | DKMS-Modul fehlt | `dkms status`; `sudo dkms autoinstall`; Neustart |
 | Schritte scheitern mit `WORKER_UNREACHABLE` | Worker schläft und wacht nicht auf | WoL im BIOS/`ethtool … \| grep Wake-on: g`, MAC in `hosts.yaml`, `sudo hermclaw doctor` |

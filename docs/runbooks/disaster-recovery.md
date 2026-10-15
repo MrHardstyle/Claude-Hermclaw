@@ -87,7 +87,7 @@ the scheduler.
 ssh-keygen -R 192.168.178.224       # admin machine: the reinstalled host has a new host key
 ssh-copy-id admin@192.168.178.224   # compare the new fingerprint (INSTALLATION.md chapter 3, step 4)
 ansible-playbook -i inventory/hosts.yml playbooks/bootstrap.yml --limit model_workers -K -e nvidia_allow_reboot=true
-ansible-playbook -i inventory/hosts.yml playbooks/deploy.yml --limit model_workers -K    # also pulls the models
+ansible-playbook -i inventory/hosts.yml playbooks/deploy.yml --limit model_workers -K    # also pulls the models (worker daemon stopped meanwhile, 1-3 h)
 nvidia-smi --query-gpu=driver_version,name,compute_cap --format=csv,noheader             # 580.x, GTX 1080, 6.1
 ```
 

@@ -52,6 +52,14 @@
     name: hermclaw_release
     tasks_from: switch.yml
 
+# before the daemon starts: models.yml stops a running daemon while it downloads (no heartbeat, no idle suspend)
+- name: Ollama models
+  ansible.builtin.import_tasks: models.yml
+  when:
+    - hermclaw_worker_kind == 'model'
+    - hermclaw_worker_pull_models | bool
+    - hermclaw_manage_services | bool
+
 # systemd_skeleton_*_changed accumulate over every play of the run (bootstrap part of playbooks/site.yml included)
 - name: Start the worker daemon (restart on a new release, configuration, unit or environment file)
   ansible.builtin.systemd_service:
@@ -78,10 +86,3 @@
   when:
     - hermclaw_manage_services | bool
     - not ansible_check_mode
-
-- name: Ollama models
-  ansible.builtin.import_tasks: models.yml
-  when:
-    - hermclaw_worker_kind == 'model'
-    - hermclaw_worker_pull_models | bool
-    - hermclaw_manage_services | bool
