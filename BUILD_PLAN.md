@@ -546,7 +546,7 @@ Legende: `[x]` erledigt mit Evidence · `[~]` erledigt, Live-Verifikation auf Zi
 - [x] 41.6 Upgrade Path. — Evidence: upgrade/rollback path: docs/runbooks/upgrade.md (backup, dry run, deploy, verify, rollback incl. schema-downgrade opt-in); tested by tests/integration/test_deploy_converge.py::test_upgrade_switches_and_prunes_old_releases and ::test_rollback_needs_the_schema_downgrade_opt_in_and_reuses_the_installed_venv (0.1.0rc1 -> rc2 -> rc3 with a new Alembic revision, prune, refused + allowed rollback), test_deploy_release.py migrations up/down offline in python:3.13-slim-trixie
 - [x] 41.7 known limitations. — Evidence: docs/operations/known-limitations.md (live verification pending, GPU/model limits, functional and operational limits)
 - [x] 41.8 all tests final. — Evidence: final matrix 2026-10-15 (docs/testing/test-matrix-results.md): 208 files, 3232 passed, 0 failed; plus deploy/bootstrap converge in Debian 13 containers, ansible-lint production profile, shellcheck, ruff/mypy on changed code; live suites prepared in scripts/ops/live-acceptance.sh (BLOCKER-001)
-- [x] 41.9 release tag. — Evidence: annotated tag v0.1.0rc1 on the release candidate commit of claude/hermclaw-next-build (pushed to GitHub MrHardstyle/Claude-Hermclaw); release artifact reproducible from the tag with scripts/deploy/build-release.sh
+- [~] 41.9 release tag. — Evidence: annotated tag v0.1.0rc1 created on the release candidate commit; the push to GitHub was refused by the build environment's git access (HTTP 403, only the working branch may be pushed) - BLOCKER-002 in BUGS.md with the exact command to set it (docs/operations/FINAL_BUILD_REPORT.md, Release commit/tag)
 
 ## P42 – CUTOVER PLAN
 

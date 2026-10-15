@@ -2,10 +2,11 @@
 
 ## Aktueller Zustand (2026-10-15)
 - Projekt: Hermclaw Next · Modus: Greenfield Build · Branch: `claude/hermclaw-next-build` · Version `0.1.0rc1`
-- **Release Candidate gebaut und getestet:** P00–P42 vollständig bearbeitet; 348 Schritte erledigt, 76 lokal erledigt mit
-  offener Live-Verifikation (`[~]`, BLOCKER-001), 0 offen.
-- Tag: `v0.1.0rc1` (annotiert) · Abschlussbericht: `docs/operations/FINAL_BUILD_REPORT.md`
-- Blocker: BLOCKER-001 (Zielhosts aus der Build-Umgebung nicht erreichbar) – alle Live-Schritte sind automatisiert und
+- **Release Candidate gebaut und getestet:** P00–P42 vollständig bearbeitet; 347 Schritte erledigt, 77 erledigt mit
+  offenem externem Teil (`[~]`: 76 Live-Verifikation BLOCKER-001, 41.9 Tag-Push BLOCKER-002), 0 offen.
+- Abschlussbericht: `docs/operations/FINAL_BUILD_REPORT.md` · Tag `v0.1.0rc1`: Push aus der Build-Umgebung verweigert
+  (HTTP 403, BLOCKER-002) – Befehl zum Setzen im Bericht, Abschnitt *Release commit/tag*
+- Blocker: BLOCKER-001 (Zielhosts aus der Build-Umgebung nicht erreichbar), BLOCKER-002 (Tag-Push verweigert) – alle Live-Schritte sind automatisiert und
   in `docs/operations/INSTALLATION.md` beschrieben; Abnahme mit `scripts/ops/live-acceptance.sh` (Kapitel 12)
 - Release-Status: **RC – lokal abgenommen, Live-Abnahme ausstehend**
 
@@ -53,9 +54,9 @@
 | P38 – Performance / Load | 8 | 0 | 0 |
 | P39 – FULL BUG BASH / HARDENING | 13 | 0 | 0 |
 | P40 – SOAK TEST | 6 | 3 | 0 |
-| P41 – RELEASE CANDIDATE | 9 | 0 | 0 |
+| P41 – RELEASE CANDIDATE | 8 | 1 | 0 |
 | P42 – CUTOVER PLAN | 2 | 4 | 0 |
-| **Summe** | **348** | **76** | **0** |
+| **Summe** | **347** | **77** | **0** |
 
 ## Deploymentstatus pro Host
 | Host | Rolle | Status |

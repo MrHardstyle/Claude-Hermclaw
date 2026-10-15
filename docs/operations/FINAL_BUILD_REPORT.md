@@ -1,6 +1,6 @@
 # FINAL BUILD REPORT – Hermclaw Next 0.1.0rc1
 
-Stand: 2026-10-15 · Branch `claude/hermclaw-next-build` · Tag `v0.1.0rc1` · Commit: der mit `v0.1.0rc1` getaggte Commit
+Stand: 2026-10-15 · Branch `claude/hermclaw-next-build` · Release-Candidate-Commit: der letzte Commit, der diesen Bericht ändert (Tag `v0.1.0rc1`, siehe *Release commit/tag*)
 
 Hermclaw Next ist nach Bauplan v2 vollständig gebaut (P00–P42) und lokal gegen echte Dienste getestet
 (PostgreSQL, Podman, podman-compose, nginx, Git, LiteLLM, ffmpeg, sshd/rsync, Ansible-Converge in Debian-13-Containern,
@@ -114,11 +114,11 @@ zum Schluss `sudo systemctl start hermclaw-model-worker`.
 | P38 – Performance / Load | 8 | 0 | 0 |
 | P39 – FULL BUG BASH / HARDENING | 13 | 0 | 0 |
 | P40 – SOAK TEST | 6 | 3 | 0 |
-| P41 – RELEASE CANDIDATE | 9 | 0 | 0 |
+| P41 – RELEASE CANDIDATE | 8 | 1 | 0 |
 | P42 – CUTOVER PLAN | 2 | 4 | 0 |
-| **Summe** | **348** | **76** | **0** |
+| **Summe** | **347** | **77** | **0** |
 
-`[~]` = lokal vollständig umgesetzt und getestet, Live-Verifikation auf den Ziel-Hosts offen (BLOCKER-001).
+`[~]` = lokal vollständig umgesetzt und getestet, Live-Verifikation auf den Ziel-Hosts offen (BLOCKER-001); bei 41.9 ist der Tag-Push offen (BLOCKER-002).
 
 ## Research reports
 
@@ -247,8 +247,15 @@ Lokal vollständig getestet (Live-Lauf gegen Terra .60: BLOCKER-001):
 
 ## Release commit/tag
 
-* Commit: der Commit, den das Tag `v0.1.0rc1` markiert, auf `claude/hermclaw-next-build` (GitHub `MrHardstyle/Claude-Hermclaw`)
-* Tag: `v0.1.0rc1` (annotiert, nach GitHub gepusht; markiert den Commit, der diesen Bericht enthält)
+* Commit: der letzte Commit auf `claude/hermclaw-next-build` (GitHub `MrHardstyle/Claude-Hermclaw`), der diesen Bericht
+  ändert: `git log -1 --format=%H origin/claude/hermclaw-next-build -- docs/operations/FINAL_BUILD_REPORT.md`.
+* Tag: `v0.1.0rc1` (annotiert) – in der Build-Umgebung angelegt, der Push nach GitHub wurde dort aber mit HTTP 403
+  abgelehnt (nur der Arbeits-Branch darf gepusht werden; `BUGS.md` BLOCKER-002). Einmalig in einem Checkout mit
+  Schreibrecht setzen:
+
+  ```bash
+  git fetch origin claude/hermclaw-next-build && git tag -a v0.1.0rc1 -m "Hermclaw Next 0.1.0rc1 – Release Candidate" $(git log -1 --format=%H origin/claude/hermclaw-next-build -- docs/operations/FINAL_BUILD_REPORT.md) && git push origin v0.1.0rc1
+  ```
 * Release-Artefakt: wird auf dem Admin-Rechner gebaut (`scripts/deploy/build-release.sh` → `dist/release-0.1.0rc1/`,
   INSTALLATION.md Kapitel 8.3) – aus dem Tag baubar (Linux x86_64, CPython 3.13), Selbsttest inklusive. Einen identischen Neubau gibt es nur mit `--constraints <constraints.txt des Release>` oder `--offline-from <Wheel-Cache aus --wheel-cache>`, denn die Laufzeit-Abhängigkeiten in `pyproject.toml` sind nur nach unten begrenzt.
 

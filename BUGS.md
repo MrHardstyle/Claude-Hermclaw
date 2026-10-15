@@ -21,6 +21,14 @@ P0/P1-Blocker werden sofort behoben. Nicht-blockierende Bugs werden reproduziert
 - Workaround: Alle Schritte als Skripte/Ansible-Playbooks + Installationsanleitung; lokale Integrationstests mit echten Diensten (PostgreSQL, Podman, Git, LiteLLM) wo möglich, sonst klar gekennzeichnete Fakes ausschließlich im Testcode.
 - Fortsetzung: Auf dem Orchestrator `docs/operations/INSTALLATION.md` abarbeiten, danach `scripts/ops/live-acceptance.sh` ausführen.
 
+### BLOCKER-002 – Tag-Push aus der Build-Umgebung verweigert
+- Zeit: 2026-10-15T05:40Z · Phase: P41 (41.9) · Severity: extern
+- Reproduktion: `git push origin v0.1.0rc1` → `error: RPC failed; HTTP 403` (die Git-Anbindung der Build-Sitzung erlaubt nur
+  Pushes auf den Arbeits-Branch `claude/hermclaw-next-build`).
+- Auswirkung: Das annotierte Tag `v0.1.0rc1` lässt sich lokal anlegen, aber nicht nach GitHub übertragen.
+- Fortsetzung (einmalig, in einem Checkout mit Schreibrecht): `git fetch origin claude/hermclaw-next-build && git tag -a v0.1.0rc1 -m "Hermclaw Next 0.1.0rc1 – Release Candidate" $(git log -1 --format=%H origin/claude/hermclaw-next-build -- docs/operations/FINAL_BUILD_REPORT.md) && git push origin v0.1.0rc1`. Das Tag markiert den Commit, in dem
+  `docs/operations/FINAL_BUILD_REPORT.md` zuletzt geändert wurde (der Release-Candidate-Stand).
+
 ## Offene Bugs
 Noch keine.
 
