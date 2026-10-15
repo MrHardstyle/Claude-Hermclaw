@@ -143,6 +143,16 @@ Mit 16 GB RAM passen die 26–30B-Modelle nicht. 32 GB sind die sinnvolle Größ
 4. Die Hosts brauchen Internetzugang (apt, PGDG, NVIDIA-Treiber, Ollama-Release, Modelle, PyPI, npm, Container-
    Images). Nach der Installation brauchen nur noch die Research Engine (über SearXNG) und neue Modell-Downloads das
    Internet.
+5. **Name der Oberfläche (DNS).** Legen Sie ihn vor dem Bootstrap von .223 fest. `hermclaw.lan` ist nur ein Beispiel.
+   Er funktioniert nur, wenn Ihr DNS ihn auf 192.168.178.223 auflöst. Eine Fritz!Box tut das nicht. Möglichkeiten:
+
+   | DNS | Eintrag | `hermclaw_web_server_name` (Kapitel 4.2) |
+   |---|---|---|
+   | Fritz!Box | Gerät .223 unter *Heimnetz → Netzwerk* `hermclaw` nennen, erreichbar als `hermclaw.fritz.box` | `"hermclaw.fritz.box 192.168.178.223"` |
+   | eigener DNS (Pi-hole, dnsmasq, Unbound) | A-Record `hermclaw.lan → 192.168.178.223` | `"hermclaw.lan 192.168.178.223"` |
+   | ohne DNS | – | `"192.168.178.223"` |
+
+   Prüfen Sie vom Arbeitsplatz: `getent hosts <name>` (Windows: `nslookup <name>`) muss 192.168.178.223 liefern.
 
 ---
 
@@ -151,9 +161,16 @@ Mit 16 GB RAM passen die 26–30B-Modelle nicht. 32 GB sind die sinnvolle Größ
 Auf jedem der vier Hermclaw-Hosts:
 
 1. Debian 13 „trixie“ amd64 installieren (netinst-Image genügt). In der Softwareauswahl **nur** „SSH server“
-   und „Standard-Systemwerkzeuge“ wählen (keine Desktop-Umgebung).
-2. Einen persönlichen Admin-Benutzer mit sudo-Recht anlegen, im Beispiel `admin`. **Nicht** `hermclaw-admin`
-   nennen: Diesen Benutzer legt der Bootstrap als eingeschränktes Runtime-Konto an.
+   und „Standard-Systemwerkzeuge“ wählen (keine Desktop-Umgebung). Partitionierung: „Geführt – vollständige
+   Festplatte verwenden“ → **„Alle Dateien auf eine Partition“**. Hermclaw legt alles Große unter `/var/lib` ab:
+   PostgreSQL unter `/var/lib/postgresql`, Workspaces, Artefakte und rootless-Podman-Images unter `/var/lib/hermclaw`,
+   die Ollama-Modelle unter `/var/lib/ollama`. Der Preflight misst den freien Platz unter `/var/lib` (Tabelle 2.1: .224 80 GB, .222 30 GB).
+   Mit einer eigenen `/home`- oder `/var`-Partition bekäme `/var/lib` zu wenig, und der Preflight bräche mit `disk` ab.
+2. **Root-Passwort im Installer leer lassen.** Dann installiert der Installer `sudo` und nimmt den Benutzer, den Sie
+   anlegen (im Beispiel `admin`), in die Gruppe `sudo` auf. Haben Sie ein root-Passwort gesetzt, holen Sie das als
+   root nach: `su - -c 'apt install -y sudo && usermod -aG sudo admin'` (mit `su -`, sonst fehlt `/usr/sbin` im
+   PATH). Danach ab- und wieder anmelden. Den Benutzer **nicht** `hermclaw-admin` nennen: Diesen Benutzer legt der
+   Bootstrap als eingeschränktes Runtime-Konto an.
 3. Nach dem ersten Start auf der Konsole:
 
    ```bash
@@ -174,10 +191,15 @@ Auf jedem der vier Hermclaw-Hosts:
    Host einen neuen Host-Schlüssel: Entfernen Sie vorher den alten auf dem Admin-Rechner
    (`ssh-keygen -R 192.168.178.225`, ebenso für die anderen Adressen).
 
-5. Optional, wenn sudo ein Passwort verlangt: Ansible fragt es mit `-K` ab (alle Befehle unten).
+5. Verlangt sudo ein Passwort, geben Sie dem Benutzer `admin` auf .225, .223, .222 und .224 **dasselbe** Passwort.
+   Ansible fragt es mit `-K` ab (alle Befehle unten), einmal, und verwendet es für alle Hosts eines Laufs. Die Plays
+   der Worker und der Web-UI führen zudem Schritte auf .225 aus (Host-Schlüssel in `/etc/hermclaw/ssh/known_hosts`,
+   Runtime-Schlüssel lesen, Worker-Token entschlüsseln). Mit unterschiedlichen Passwörtern scheitert schon der
+   Verbindungstest in 4.4 mit „Incorrect sudo password“. Auch ein Lauf mit `--limit webui` oder
+   `--limit execution_workers` scheitert dann an diesen Schritten auf .225.
 
-GitLab (.226) und Terra (.60) werden **nicht** neu installiert. Sie brauchen nur ihre SSH-Host-Schlüssel
-(Kapitel 4.3).
+GitLab (.226) und Terra (.60) werden **nicht** neu installiert. Auf Terra schalten Sie vorher SSH und den Autostart
+des Arrays ein (Kapitel 6.2, „Terra vorbereiten“). Erst dann liefert Kapitel 4.3 Terras SSH-Host-Schlüssel.
 
 ---
 
@@ -185,6 +207,11 @@ GitLab (.226) und Terra (.60) werden **nicht** neu installiert. Sie brauchen nur
 
 Ein beliebiger Linux- oder macOS-Rechner mit `git`, `ssh` und Python 3.12–3.14 (ansible-core 2.21, Research R-029). Sie können
 dafür auch den Orchestrator .225 selbst verwenden.
+
+**Release-Bau nur unter Linux x86_64.** Ansible läuft auch auf macOS. Das Release (Kapitel 8.3) baut
+`scripts/deploy/build-release.sh` aber nur unter Linux x86_64. Mit einem macOS- oder ARM-Rechner bauen Sie es auf
+.225 oder in einem amd64-Container (Kapitel 8.1). Auf macOS brauchen Sie außerdem GNU coreutils für den Deploy-Preflight
+(Kapitel 8.1).
 
 ### 4.1 Repository holen und Ansible einrichten
 
@@ -209,7 +236,7 @@ export PATH=$HOME/.local/share/hermclaw/ansible-venv/bin:$PATH
 | `hermclaw_orchestrator_ip` | `all.vars` | `192.168.178.225` | IP des Orchestrators |
 | `hermclaw_lan_broadcast` | `all.vars` | `192.168.178.255` | Broadcast für Wake-on-LAN |
 | `ansible_host` | je Host | IPs aus Tabelle 1.1 | |
-| `hermclaw_web_server_name` | `hermclaw-webui` | `hermclaw.lan 192.168.178.223` | nginx `server_name` (Namen und/oder Adressen). Die Adresse drinlassen, sonst landen Aufrufe per IP auf Debians Default-Site. `_` = Catch-all, nur wenn sonst keine Default-Site existiert |
+| `hermclaw_web_server_name` | `hermclaw-webui` | `hermclaw.lan 192.168.178.223` | nginx `server_name` (Namen und/oder Adressen). Nur Namen, die Ihr DNS auflöst (Kapitel 2.3, Schritt 5). Die Adresse drinlassen, sonst landen Aufrufe per IP auf Debians Default-Site. `_` = Catch-all, nur wenn sonst keine Default-Site existiert. Mit TLS auch die SANs des Zertifikats (Kapitel 8.5) |
 | `hermclaw_worker_id` | Worker-Hosts | `exec-222`, `model-224` | Worker-IDs, müssen zu `hosts.yaml` passen |
 | `wol_mac` | `.222`, `.224` | `3c:7c:3f:12:34:56` | **echte MAC** aus Schritt 2.3 (der Platzhalter `00:00:00:00:00:00` wird von `hermclaw doctor` gemeldet) |
 | `wol_interface` | `.222`, `.224` | leer oder `enp3s0` | leer = Schnittstelle der Default-Route |
@@ -218,13 +245,16 @@ export PATH=$HOME/.local/share/hermclaw/ansible-venv/bin:$PATH
 
 ### 4.3 SSH-Host-Schlüssel von GitLab und Terra
 
-Holen Sie die Schlüssel und vergleichen Sie den Fingerabdruck mit der Konsole des jeweiligen Systems
+Terra antwortet erst, wenn SSH eingeschaltet ist (Kapitel 6.2, „Terra vorbereiten“, Schritte 1 und 2). Holen Sie
+die Schlüssel und vergleichen Sie den Fingerabdruck mit der Konsole des jeweiligen Systems
 (`ssh-keygen -lf /etc/ssh/ssh_host_ed25519_key.pub`):
 
 ```bash
 ssh-keyscan -t ed25519 192.168.178.226 192.168.178.60 2>/dev/null > keyscan.txt   # Zeilen zum Eintragen
 ssh-keygen -lf keyscan.txt                                                        # Fingerabdrücke zum Vergleich
 ```
+
+Fehlt in `keyscan.txt` die Zeile für .60, ist SSH auf Terra aus.
 
 Stimmen die Fingerabdrücke, tragen Sie die Zeilen aus `keyscan.txt` beim Orchestrator ein:
 
@@ -436,6 +466,10 @@ sudo -u hermclaw ssh -i /etc/hermclaw/ssh/id_ed25519 -o UserKnownHostsFile=/etc/
   -o StrictHostKeyChecking=yes hermclaw-admin@192.168.178.222 true && echo OK      # ebenso .223, .224
 ```
 
+Testen Sie jetzt Wake-on-LAN von .222 und .224 von Hand (Kapitel 13.1, letzter Absatz). Noch läuft kein Scheduler, der
+die Worker schlafen legt. Nach dem ersten Deployment ändert sich das: Wecken Sie die Worker dann vor jedem weiteren
+Bootstrap-Lauf (Kapitel 13.1).
+
 ---
 
 ## 6. Zugangsdaten und Schlüssel
@@ -486,7 +520,81 @@ Werkzeug auf .225, .222 und .224 (nicht auf .223, dort liegen keine Credentials)
    sudo /opt/hermclaw/bin/hermclaw-credential check gitlab-token      # OK gitlab-token
    ```
 
+5. **API-Adresse prüfen.** Hermclaw ruft die GitLab-API (Merge Requests) unter `http://<Adresse von gitlab-226>/api/v4`
+   auf und folgt **keinen** Weiterleitungen. Auf .225:
+
+   ```bash
+   curl -s -o /dev/null -w '%{http_code}\n' http://192.168.178.226/api/v4/version
+   #   401 = erreichbar (ohne Token), nichts zu tun
+   #   301/302/308 = GitLab leitet auf HTTPS bzw. seine external_url um; 000 = anderer Port (z. B. GitLab im Container)
+   ```
+
+   Bei 30x oder einem anderen Port tragen Sie die Basis-URL (ohne `/api/v4`) im Inventar ein. Ein vorhandenes
+   `hermclaw_config_host_overrides` (Kapitel 9.2) führen Sie damit zusammen. Das Deployment (Kapitel 8) übernimmt den
+   Eintrag. Ist es schon gelaufen, führen Sie es erneut aus (Kapitel 8.4):
+
+   ```yaml
+   all:
+     vars:
+       hermclaw_config_host_overrides:
+         gitlab-226: {labels: {api_url: "https://gitlab.lan"}}      # oder z. B. "http://192.168.178.226:8929"
+   ```
+
+   Bei HTTPS prüft der Scheduler das Zertifikat gegen das mitgelieferte certifi-Bündel, nicht gegen `/etc/ssl/certs`.
+   Ein Zertifikat einer öffentlichen CA funktioniert ohne Weiteres. Ist es selbst signiert oder von Ihrer eigenen CA,
+   spielen Sie die CA auf .225 ein (`sudo cp ca.crt /usr/local/share/ca-certificates/ && sudo update-ca-certificates`)
+   und legen den Drop-in `/etc/systemd/system/hermclaw-scheduler.service.d/ca.conf` an:
+
+   ```ini
+   [Service]
+   Environment=SSL_CERT_FILE=/etc/ssl/certs/ca-certificates.crt
+   ```
+
+   Danach `sudo systemctl daemon-reload`. Läuft der Scheduler schon (nach Kapitel 8), zusätzlich
+   `sudo systemctl restart hermclaw-scheduler`. Alternativ lassen Sie die API zusätzlich ohne Umleitung per HTTP
+   erreichbar.
+
+   Token prüfen (es wird nicht angezeigt; URL ggf. an `api_url` anpassen):
+
+   ```bash
+   sudo systemd-creds decrypt --name=gitlab-token /etc/credstore.encrypted/hermclaw-gitlab-token - \
+     | sed 's/^/PRIVATE-TOKEN: /' | curl -s -o /dev/null -w '%{http_code}\n' -H @- \
+       http://192.168.178.226/api/v4/projects/gruppe%2Fmein-projekt        # 200
+   ```
+
 ### 6.2 Backup-Schlüssel auf Terra (.60)
+
+**Terra vorbereiten (einmalig)**
+
+Die Schritte 1 und 2 erledigen Sie **vor Kapitel 4.3**, in der Unraid-Weboberfläche:
+
+1. *Settings → Management Access*: „Use SSH“ = **Yes**, Port 22. Ohne SSH liefert `ssh-keyscan` in Kapitel 4.3 keine
+   Zeile für .60, und das Backup erreicht Terra nie.
+2. *Settings → Disk Settings*: „Enable auto start“ = **Yes**. Ist das Array nicht gestartet, gibt es `/mnt/user` nicht,
+   und jeder Backup-Lauf scheitert.
+
+Die Schritte 3 bis 5 erledigen Sie hier, vor dem Eintrag in `authorized_keys`:
+
+3. *Shares → Add Share*: Name `backups` (Cache „No“ oder mit Mover; für Variante A keinen SMB/NFS-Export).
+4. Python 3 prüfen, im Terminal der Weboberfläche (Symbol „>_“): `python3 --version`. Fehlt es, installieren Sie es
+   über *Apps* (NerdTools bzw. das Python-3-Plugin Ihrer Unraid-Version) und prüfen erneut. `rrsync` ist ein
+   Python-3-Skript.
+5. `rrsync` nach `/usr/local/bin` bringen. Dort liegt ab Werk kein `rrsync`. `/usr/local/bin` liegt auf Unraid im
+   Arbeitsspeicher und ist nach jedem Neustart leer. Legen Sie das Skript deshalb auf den USB-Stick und installieren Sie
+   es bei jedem Start über `/boot/config/go`. Als Vorlage dient `/usr/bin/rrsync` aus dem Debian-Paket `rsync` auf .225
+   (vom Bootstrap installiert; prüfen mit `dpkg -L rsync | grep bin/rrsync`):
+
+   ```bash
+   # auf dem Admin-Rechner (nach dem Bootstrap von .225, Kapitel 5.2)
+   scp admin@192.168.178.225:/usr/bin/rrsync ./rrsync
+   scp ./rrsync root@192.168.178.60:/boot/config/hermclaw-rrsync
+   # auf Terra (als root)
+   install -D -m 0755 /boot/config/hermclaw-rrsync /usr/local/bin/rrsync
+   grep -q hermclaw-rrsync /boot/config/go || echo 'install -D -m 0755 /boot/config/hermclaw-rrsync /usr/local/bin/rrsync' >> /boot/config/go
+   /usr/local/bin/rrsync -h | head -1     # "usage: rrsync …" = Python 3 und Skript in Ordnung
+   ```
+
+**Backup-Schlüssel eintragen**
 
 Hängen Sie den öffentlichen Backup-Schlüssel des Orchestrators an die `authorized_keys` von root auf Terra an
 (Unraid bietet SSH nur für root an). Der Schlüssel wird auf den Orchestrator und auf rsync in das Hermclaw-
@@ -500,16 +608,18 @@ echo 'restrict,from="192.168.178.225",command="/usr/local/bin/rrsync /mnt/user/b
 chmod 600 /root/.ssh/authorized_keys
 ```
 
-* Unraid ≥ 6.9 legt `/root/.ssh` dauerhaft auf dem Flash-Laufwerk ab. Prüfen Sie nach einem Neustart, dass der
-  Eintrag noch da ist.
-* `rrsync` braucht Python 3 auf Unraid (Plugin „NerdTools“). Ohne Python: denselben Eintrag ohne `command=…`, aber
-  mit `restrict,from=…` (schwächer), oder die Freigabe als NFS-Mount (Variante B in
+* Unraid ≥ 6.9 legt `/root/.ssh` dauerhaft auf dem Flash-Laufwerk ab. Prüfen Sie nach dem nächsten Neustart von
+  Terra, dass Eintrag und Skript noch da sind: `ls -l /usr/local/bin/rrsync /root/.ssh/authorized_keys`.
+* `rrsync` braucht Python 3 auf Unraid (Schritt 4). Lässt sich Python nicht installieren: denselben Eintrag ohne
+  `command=…`, aber mit `restrict,from=…` (schwächer), oder die Freigabe als NFS-Mount (Variante B in
   `infra/backup/unraid-share-setup.md`).
 * Terras Host-Schlüssel steht nach Kapitel 4.3 bereits in `/etc/hermclaw/ssh/known_hosts`.
 
 Das Backup selbst richten Sie in Kapitel 11 ein.
 
 ### 6.3 Token rotieren
+
+Wecken Sie .222 vorher (Kapitel 13.1). Ein schlafender Worker lässt `ssh` und den Bootstrap-Lauf hängen bzw. scheitern.
 
 ```bash
 # Worker-Token (auf .225), danach Worker-Play erneut, dann Dienste auf .225 und .222 neu starten
@@ -537,27 +647,47 @@ Der Model Worker braucht diese sechs Modelle (≈ 70 GB). Die Modellrollen sind 
 | `qwen3:8b` | Fast Router | 5,2 GB | – |
 | `embeddinggemma:300m` | Embedding (768 Dim., 2048 Token Kontext) | ≈ 0,6 GB | 0.11.10 |
 
-Das Deployment (Kapitel 8) lädt sie automatisch mit `hermclaw-model-pull`. Manuell, z. B. vorab, während Sie
-Kapitel 8 vorbereiten:
+**Laden Sie die Modelle vor dem ersten Deployment (Kapitel 8), nicht durch das Deployment.** Sobald das Deployment auf
+.225 den Scheduler gestartet hat und `hermclaw-model-worker` auf .224 seinen ersten Heartbeat sendet, gilt .224 als
+`ready`. Nach 30 Minuten ohne Schritt, Lease oder Ressourcenanfrage legt der Scheduler ihn per SSH schlafen
+(`policies.wake_on_lan.idle_after_minutes`, `idle_sleep_command` in `hosts.yaml`). Ein Modell-Download zählt dabei
+nicht als Aktivität. Bei ≈ 70 GB (1–3 h) würde .224 mitten im Download suspendiert. Ansible verlöre die Verbindung,
+und der Lauf scheiterte für .224. Vor dem Deployment läuft noch kein Scheduler, deshalb stört dort nichts.
+
+`/opt/hermclaw/bin/hermclaw-model-pull` gibt es erst nach dem Deployment. Kopieren Sie das Skript deshalb aus dem
+Checkout und starten Sie es als eigene Unit, die SSH-Abbrüche übersteht:
 
 ```bash
-# auf .224 (aus dem Repository: scripts/ops/hermclaw-model-pull; nach dem Deployment unter /opt/hermclaw/bin)
-df -h /var/lib/ollama                              # >= 80 GB frei
-sudo -u ollama /opt/hermclaw/bin/hermclaw-model-pull --dry-run
-sudo -u ollama /opt/hermclaw/bin/hermclaw-model-pull
-#   prüft jedes Modell mit `ollama show`; fehlt ein Rollenmodell: Exit 1
-/opt/ollama/current/bin/ollama list
+# Admin-Rechner, im Checkout
+scp scripts/ops/hermclaw-model-pull admin@192.168.178.224:/tmp/
+# auf .224 (nach dem Bootstrap, Kapitel 5.5/5.6)
+df -h /var/lib/ollama                                   # >= 80 GB frei
+sudo systemd-run --unit=hermclaw-model-pull --setenv=OLLAMA_HOST=http://127.0.0.1:11434 \
+     /bin/bash /tmp/hermclaw-model-pull --ollama /usr/local/bin/ollama
+#   ohne Planner-Fallback: --skip-fallback-planner anhängen (und planner-gemma-fallback: enabled: false, Kapitel 9.3)
+sudo journalctl -fu hermclaw-model-pull                 # warten bis "all models present (embedding: embeddinggemma:300m)"
+ollama list                                             # sechs Modelle
 ```
+
+Das Skript prüft jedes Modell mit `ollama show`. Fehlt ein Rollenmodell, endet es mit Exit 1. `--dry-run` zeigt nur,
+was es laden würde. Beginnen Sie Kapitel 8 erst, wenn die Unit beendet ist. Das Deployment findet dann keine fehlenden
+Modelle und lädt nichts.
 
 Gleichwertig ohne Skript: `ollama pull gemma4:26b`, `ollama pull gemma4:12b`, `ollama pull qwen3-coder:30b`,
 `ollama pull qwen3.8:27b`, `ollama pull qwen3:8b`, `ollama pull embeddinggemma:300m`.
 
-Ohne Planner-Fallback (spart 7,6 GB): `sudo -u ollama /opt/hermclaw/bin/hermclaw-model-pull --skip-fallback-planner`
-und in `models.yaml` das Profil `planner-gemma-fallback` auf `enabled: false` setzen.
+Ohne Planner-Fallback (spart 7,6 GB): `--skip-fallback-planner` an den Aufruf oben anhängen und **vor dem Deployment**
+das Profil `planner-gemma-fallback` im Inventar abschalten (Kapitel 9.3, „Ein Modellprofil abschalten oder ändern“).
+Ändern Sie dafür nicht `models.yaml` auf .225: Die Datei gehört dem Deployment.
 
-Später auf EmbeddingGemma 2 wechseln (sobald Ollama es unter Linux/CUDA ausführt): `sudo -u ollama
-/opt/hermclaw/bin/hermclaw-model-pull --embedding embeddinggemma-2:740m`. Das Skript fällt automatisch auf
-`embeddinggemma:300m` zurück und nennt die nötige Änderung in `models.yaml` (Kapitel 9.2).
+Wollen Sie später ein Modell nachladen (neues Tag, EmbeddingGemma 2), schalten Sie vorher den Leerlauf-Suspend von .224
+ab (`hermclaw_config_host_overrides: {model-224: {idle_sleep_command: null}}`, Deployment, Kapitel 13.1) und danach
+wieder ein. Nach dem Deployment liegt das Skript unter `/opt/hermclaw/bin/hermclaw-model-pull`. Starten Sie es genauso
+mit `systemd-run`, nur mit diesem Pfad statt `/bin/bash /tmp/hermclaw-model-pull`.
+
+Später auf EmbeddingGemma 2 wechseln (sobald Ollama es unter Linux/CUDA ausführt): `--embedding embeddinggemma-2:740m`
+anhängen. Das Skript fällt automatisch auf `embeddinggemma:300m` zurück und nennt die nötige Änderung des Profils
+`embedding`. Diese tragen Sie wie in Kapitel 9.3 beschrieben ins Inventar ein.
 
 ---
 
@@ -574,6 +704,25 @@ einmal auf dem Admin-Rechner gebaut, per SHA-256 geprüft und offline auf allen 
 * **CPython 3.13** mit `venv` (auf Debian 13: `sudo apt install python3 python3-venv`; sonst `--python /pfad/python3.13`).
   Das Release muss zur Python-Version der Hosts passen; der Preflight vergleicht das.
 * **Node.js ≥ 22.23.2** mit npm (für den UI-Build), `tar`, `gzip`, `sha256sum`, Zugang zu PyPI, npm und GitHub.
+* **Release-Bau nur unter Linux x86_64.** `scripts/deploy/build-release.sh` installiert im Selbsttest die
+  manylinux-x86_64-Wheels (Debian 13, CPython 3.13) in eine lokale venv, lädt dort die tree-sitter-Grammatiken und nutzt
+  GNU-Werkzeuge (`mapfile`, `find -printf`, `xargs -d`, `tar --sort=name`). Auf macOS (auch mit Python 3.13 aus
+  Homebrew) und auf ARM-Rechnern (Apple Silicon, Raspberry Pi) bricht der Bau deshalb ab. Mit einem solchen
+  Admin-Rechner bauen Sie das Release auf .225 oder in einem amd64-Container `debian:trixie` aus demselben Checkout, so
+  wie im nächsten Punkt für Rechner ohne Python 3.13 beschrieben (auf Apple Silicon mit `--platform linux/amd64`, per
+  Emulation, langsam). Die UI bauen Sie vorher auf dem Admin-Rechner (`cd ui && npm ci && npm run build`) und übergeben
+  `--ui-dist ui/dist`:
+
+  ```bash
+  # im Checkout auf dem Admin-Rechner
+  podman run --rm -it --platform linux/amd64 -v "$PWD":/src -w /src docker.io/library/debian:trixie bash -c \
+    'apt-get update && apt-get install -y --no-install-recommends python3 python3-venv ca-certificates && scripts/deploy/build-release.sh --ui-dist ui/dist'
+  #   docker run … gleichwertig; mit Docker gehört dist/ danach root: sudo chown -R "$(id -u):$(id -g)" dist
+  ```
+
+  Ansible selbst (Kapitel 4) läuft auch auf macOS. Der Deploy-Preflight prüft das Release aber lokal mit GNU
+  `sha256sum --check --strict`. Installieren Sie dafür auf macOS `brew install coreutils` und setzen Sie
+  `$(brew --prefix)/opt/coreutils/libexec/gnubin` vorn in den `PATH`.
 * Hat Ihr Admin-Rechner kein Python 3.13, bauen Sie das Release auf dem Orchestrator .225 (Debian 13) oder in einem
   `debian:trixie`-Container aus demselben Checkout. Dort fehlt Node.js ≥ 22.12: Debian 13 liefert Node 20, und die
   Rolle `nodejs` richtet Node 22 nur auf .223 ein. Bauen Sie die UI deshalb vorher auf einem Rechner mit Node.js
@@ -593,7 +742,7 @@ Zusätzlich zu Kapitel 4.2 in `infra/ansible/inventory/hosts.yml`:
 | `nginx_tls_enabled` (.223) | `true` / `false` | HTTPS für die Oberfläche (siehe 8.5) |
 | `hermclaw_config_overrides` | siehe Kapitel 9 | Ihre Anpassungen der Konfiguration |
 | `hermclaw_keep_releases` | `3` | ältere Releases je Host (1–99, zusätzlich zum aktiven) für ein Rollback ohne Netz; unter `all.vars` gilt der Wert für alle Hosts |
-| `hermclaw_worker_pull_models` (.224) | `true` | Modelle automatisch laden (Kapitel 7) |
+| `hermclaw_worker_pull_models` (.224) | `true` | fehlende Modelle automatisch laden. Laden Sie die Modelle trotzdem vorher (Kapitel 7), sonst legt der Scheduler .224 mitten im Download schlafen |
 
 ### 8.3 Release bauen
 
@@ -612,8 +761,11 @@ schon, hängen Sie `--force` an.
 
 ### 8.4 Ausrollen
 
-Vorher muss das GitLab-Token gespeichert sein (Kapitel 6.1). Der Preflight prüft jedes Credential, das die Units
-laden, und bricht vor jeder Änderung ab, wenn eines fehlt.
+Vorher muss das GitLab-Token gespeichert sein (Kapitel 6.1), und die Modelle müssen geladen sein (Kapitel 7). Der
+Preflight prüft jedes Credential, das die Units laden, und bricht vor jeder Änderung ab, wenn eines fehlt.
+
+Ab dem ersten Lauf legt der Scheduler die Worker nach 30 Minuten Leerlauf schlafen. Vor jedem späteren Lauf, auch vor
+dem zweiten Lauf unten, wecken Sie .222 und .224 (Kapitel 13.1). Sonst bricht schon der Preflight den ganzen Lauf ab.
 
 ```bash
 cd infra/ansible
@@ -628,7 +780,7 @@ Was dabei passiert:
 |---|---|
 | .225 | Release-venv `/opt/hermclaw/venv-<v>` (offline, Hash-geprüft) → `/etc/hermclaw/*.yaml` in einer Staging-Kopie rendern + mit `hermclaw config-check` des neuen Release prüfen → LiteLLM-venv installieren (noch nicht aktiv) → Schema-Entscheidung (bis hier ist nichts Laufendes verändert) → Units aktivieren → laufende Schritte sauber anhalten → `hermclaw migrate` (einmal, vor dem Neustart) → `/etc/hermclaw/*.yaml` + `litellm.yaml` installieren → Symlinks `/opt/litellm/venv` und `/opt/hermclaw/venv` umschalten → `hermclaw-litellm` muss gesund sein und unauthentifizierte Anfragen ablehnen → SearXNG, API, Scheduler, Backup- und Restore-Test-Timer starten → Health-Checks → Admin-API-Token anlegen (einmalig) |
 | .222 | Release-venv → Sandbox-Images bauen (rootless, nur fehlende) → `capabilities.yaml`, `policies.yaml` unmittelbar vor dem Umschalten → `hermclaw-exec-worker` → `/health` |
-| .224 | Release-venv → `capabilities.yaml` → ffmpeg → `hermclaw-model-worker` → `/health` → fehlende Modelle laden (in einer eigenen Unit, übersteht SSH-Abbrüche, bis 6 h) |
+| .224 | Release-venv → `capabilities.yaml` → ffmpeg → `hermclaw-model-worker` → `/health` → fehlende Modelle laden (in einer eigenen Unit, übersteht SSH-Abbrüche, bis 6 h; nach Kapitel 7 fehlt keines) |
 | .223 | nginx-Site (SSE, CSP, Sicherheits-Header, optional TLS) → UI nach `/var/www/hermclaw-next-releases/<v>/` → Symlink umschalten → `nginx -t` → Reload → Prüfung über nginx |
 | alle | zum Schluss `hermclaw doctor` auf .225 im Dienstkontext; jeder `fail` stoppt den Lauf |
 
@@ -653,6 +805,16 @@ löschen Sie sie, wenn alles läuft).
 
 HTTP leitet dann auf HTTPS um. `nginx_hsts_max_age` erst setzen, wenn alle Browser dem Zertifikat vertrauen.
 
+* Die Namen und die Adresse aus `hermclaw_web_server_name` werden die SANs des selbstsignierten Zertifikats. Die Rolle
+  erzeugt es nur, wenn es fehlt oder in 30 Tagen abläuft. Ändern Sie den Namen später, löschen Sie auf .223
+  `sudo rm /etc/nginx/tls/hermclaw-web.crt` und führen Sie das Deployment für `webui` erneut aus.
+* Den Browser-Hinweis beim ersten Aufruf bestätigen Sie, oder Sie importieren `/etc/nginx/tls/hermclaw-web.crt` von
+  .223 in Browser bzw. Betriebssystem als vertrauenswürdig.
+* Bei `nginx_tls_source: provided` geben Sie für `nginx_tls_cert_src` und `nginx_tls_key_src` **absolute** Pfade auf
+  dem Admin-Rechner an.
+* Port 80 antwortet dann nur noch auf `/healthz` und sonst mit `301`, ohne Sicherheits-Header. Die Prüfungen in 8.6
+  und 10.1 laufen deshalb über `https://`.
+
 ### 8.6 Prüfen
 
 ```bash
@@ -663,10 +825,12 @@ curl -s http://127.0.0.1:4000/health/liveliness                              # "
 curl -s -o /dev/null -w '%{http_code}\n' http://127.0.0.1:4000/v1/models    # 401 (200 hieße: kein Master-Key!)
 curl -s http://127.0.0.1:8888/healthz                                         # OK (SearXNG)
 sudo hermclaw doctor
-# .222 / .224
+# .222 / .224 (schlafende Worker vorher wecken, Kapitel 13.1)
 curl -s http://192.168.178.222:8787/health; curl -s http://192.168.178.224:8787/health
 # .223
 curl -s http://192.168.178.223/healthz; curl -sI http://192.168.178.223/ | grep -i content-security-policy
+#   mit TLS (8.5) zeigt Port 80 nur den 301 ohne Header, stattdessen:
+curl -skI https://192.168.178.223/ | grep -i content-security-policy
 ```
 
 Das Admin-API-Token für die erste Anmeldung in der Oberfläche (es wird nie ausgegeben):
@@ -676,6 +840,8 @@ sudo systemd-creds decrypt --name=api-operator-token /etc/credstore.encrypted/he
 ```
 
 ### 8.7 Upgrade und Rollback
+
+Wecken Sie vor Upgrade und Rollback .222 und .224 (Kapitel 13.1).
 
 * **Upgrade:** neues Release bauen, Backup (Kapitel 11), dann
   `ansible-playbook -i inventory/hosts.yml playbooks/deploy.yml -e hermclaw_version=<neu> -K`. Die neue venv wird neben der
@@ -727,13 +893,13 @@ all:
 ```
 
 Mappings werden Schlüssel für Schlüssel gemischt, Listen ersetzen die Liste des Beispiels vollständig. Danach das
-Deployment erneut ausführen (Kapitel 8.4).
+Deployment erneut ausführen (Kapitel 8.4, schlafende Worker vorher wecken, Kapitel 13.1).
 
 ### 9.3 Einstellungen, die Sie prüfen sollten
 
 | Datei → Schlüssel | Standard | Wann ändern |
 |---|---|---|
-| `policies` → `git.create_merge_request` | `false` | `true`, wenn Hermclaw für jeden Job einen Merge Request öffnen soll |
+| `policies` → `git.create_merge_request` | `false` | `true`, wenn Hermclaw für jeden Job einen Merge Request öffnen soll. Vorher die API-Adresse prüfen (Kapitel 6.1, Schritt 5), sonst entsteht bei einer Weiterleitung nie ein Merge Request |
 | `policies` → `git.protected_branches` | `[main, master, "release/*"]` | weitere geschützte Branches |
 | `policies` → `git.author_name` / `author_email` | `Hermclaw Runtime` / `hermclaw@localhost` | Commit-Autor in GitLab |
 | `policies` → `ssh.require_approval_for_mutations` | `true` | nur ausschalten, wenn Host-Änderungen ohne Freigabe laufen dürfen (nicht empfohlen) |
@@ -749,13 +915,39 @@ Deployment erneut ausführen (Kapitel 8.4).
 | `policies` → `git.workspace_retention_hours` | 72 | Aufbewahrung der Job-Workspaces |
 | `models` → `model_host_capacity_gb` | 34 | RAM + VRAM von .224 abzüglich Reserve (32 GB RAM + 8 GB VRAM → 34) |
 | `models` → `profiles[*].model` | feste Tags (Kapitel 1.2) | nur ein anderer Build desselben Modells, nie eine andere Rolle |
-| `models` → Profil `planner-gemma-fallback` | aktiv | `enabled: false`, wenn `gemma4:12b` nicht geladen ist |
-| `models` → Profil `embedding` | `embeddinggemma:300m` | `embeddinggemma-2:740m`, sobald Ollama es unter Linux/CUDA ausführt |
+| `models` → Profil `planner-gemma-fallback` | aktiv | `enabled: false`, wenn `gemma4:12b` nicht geladen ist (vollständige Profilliste im Inventar, siehe unten) |
+| `models` → Profil `embedding` | `embeddinggemma:300m` | `embeddinggemma-2:740m`, sobald Ollama es unter Linux/CUDA ausführt (vollständige Profilliste im Inventar, siehe unten) |
 | `hosts` → je Worker `idle_sleep_command` | `sudo /usr/bin/systemctl suspend` | auf `null` setzen, wenn ein Worker nie schlafen soll: `hermclaw_config_host_overrides: {exec-222: {idle_sleep_command: null}}`. Löschen auf dem Host macht das nächste Deployment rückgängig |
 | `databases` → `targets`, `sandbox` | keine | Projekt-Datenbanken für die DB-Tools (siehe 9.4) |
 
 Die Modellrollen sind fest (Gemma = Planner, Qwen3-Coder 30B = Implementation Worker, Qwen3.8 27B = Heavy Reviewer,
 Qwen3 8B = Fast Router, EmbeddingGemma). `hermclaw doctor` meldet einen Fehler, wenn einer Rolle ein aktives Profil fehlt.
+
+**Ein Modellprofil abschalten oder ändern.** `/etc/hermclaw/models.yaml` gehört dem Deployment, und `profiles` ist eine
+Liste: Ein Override ersetzt sie **vollständig**. Übernehmen Sie deshalb alle sechs Profile ins Inventar und setzen Sie
+nur beim Fallback `enabled: false`. Den Block erzeugen Sie auf dem Admin-Rechner im Wurzelverzeichnis des Checkouts
+der installierten Version:
+
+```bash
+~/.local/share/hermclaw/ansible-venv/bin/python - <<'PY' | sed 's/^/    /'
+import yaml
+d = yaml.safe_load(open("config/models.example.yaml"))
+for p in d["profiles"]:
+    if p["alias"] == "planner-gemma-fallback":
+        p["enabled"] = False
+print(yaml.safe_dump({"hermclaw_config_overrides": {"models": {"profiles": d["profiles"]}}}, sort_keys=False))
+PY
+```
+
+Die Ausgabe ist schon für `all.vars` eingerückt und gehört dort in `infra/ansible/inventory/hosts.yml`. Ein vorhandenes
+`hermclaw_config_overrides` führen Sie damit zusammen. Danach das Deployment ausführen (Kapitel 8.4): LiteLLM bedient
+den Alias nicht mehr, und `hermclaw-model-pull` lädt `gemma4:12b` nicht (`--skip-fallback-planner`). Für den Wechsel des
+Embedding-Profils gehen Sie genauso vor und ändern `model` des Profils `embedding`. Nach jedem Upgrade erzeugen Sie den
+Block aus dem `config/models.example.yaml` der neuen Version neu.
+
+Ändern Sie die Datei nicht direkt auf .225, das nächste Deployment überschreibt sie. Verwenden Sie auch nicht
+`hermclaw_config_unmanaged: [models]`: Die Downloads auf .224 richten sich nach dem Inventar, nicht nach der Datei auf
+.225.
 
 ### 9.4 Projekt-Datenbanken (optional)
 
@@ -805,6 +997,7 @@ Datenbank-URL noch die Geheimnisse.
 sudo hermclaw doctor                  # jede Zeile ok/warn; Exit 1 bei einem fail
 curl -s http://192.168.178.225:8000/api/health
 curl -s http://192.168.178.223/api/health          # über nginx
+curl -sk https://192.168.178.223/api/health        # über nginx mit TLS (8.5): Port 80 liefert dann nur den 301
 ```
 
 `hermclaw doctor` prüft: Modellrollen, `hosts.yaml` (echte Dateien, keine Platzhalter-MACs), SSH-Hosts,
@@ -825,8 +1018,8 @@ sudo hermclaw token-create viewer-<name> --scopes read                    # nur 
 | `control` | Jobs anlegen, abbrechen, wiederholen, Repositories (remote) registrieren |
 | `admin` | SSH-Mutationen freigeben, Worker-Details/Drain, lokale Repositories, Token-Verwaltung |
 
-Öffnen Sie `http://hermclaw.lan/` bzw. `http://192.168.178.223/` und melden Sie sich mit dem Token an. Das Token
-liegt nur im `sessionStorage` des Tabs.
+Öffnen Sie `http://<Name aus Kapitel 2.3>/` bzw. `http://192.168.178.223/` (mit TLS: `https://…`) und melden Sie sich
+mit dem Token an. Das Token liegt nur im `sessionStorage` des Tabs.
 
 ### 10.3 Repository registrieren
 
@@ -837,6 +1030,40 @@ sudo hermclaw repo-list
 ```
 
 Optional `--sandbox-image node` (bzw. `python`, `php`, `generic`), wenn das Projekt eine bestimmte Toolchain braucht.
+
+**Projekte mit Abhängigkeiten (vor dem ersten Job):** Die Sandbox auf .222 läuft ohne Netz
+(`policies.sandbox.network_default: none`). Die Toolchain-Images enthalten nur Python 3.12 + pytest/ruff/mypy,
+Node 22 + TypeScript, PHP 8.3 + Composer bzw. Basiswerkzeuge, aber keine Abhängigkeiten Ihres Projekts. Tests, die
+Fremdpakete importieren, scheitern deshalb, und `pip install`/`npm ci` geht im Job nicht. Backen Sie die Abhängigkeiten
+in ein Projekt-Image (Basis `python` oder `node`). Wecken Sie .222 vorher (Kapitel 13.1), kopieren Sie die
+`requirements.txt` des Projekts auf .222 und bauen Sie das Image dort als `hermclaw`:
+
+```bash
+# auf .222
+sudo install -m 0644 requirements.txt /tmp/mein-projekt-requirements.txt      # für hermclaw lesbar ablegen
+cd / && sudo -u hermclaw XDG_RUNTIME_DIR=/run/user/$(id -u hermclaw) /opt/hermclaw/bin/hermclaw-build-sandbox-images \
+     --project mein-projekt --base python --requirements /tmp/mein-projekt-requirements.txt --version 1
+#   Node: --base node --package-dir <Verzeichnis mit package.json und package-lock.json, lesbar für hermclaw>
+#   --version = hermclaw_sandbox_image_version (Standard 1), sonst fehlt das Basis-Image
+```
+
+Geben Sie das Image im Inventar unter `all.vars` frei (ein vorhandenes `hermclaw_config_overrides` führen Sie damit
+zusammen). Es gilt dann für .225 und .222. Danach führen Sie das Deployment erneut aus (Kapitel 8.4):
+
+```yaml
+    hermclaw_config_overrides:
+      policies:
+        sandbox: {images: {mein-projekt: localhost/hermclaw-sbx-mein-projekt:1}}
+```
+
+Binden Sie das Image beim Registrieren an das Repository (oder nachträglich mit `--update` und denselben Angaben):
+
+```bash
+sudo hermclaw repo-add mein-projekt git@192.168.178.226:gruppe/mein-projekt.git \
+     --provider gitlab --project-id gruppe/mein-projekt --default-branch main --protected 'release/*' --sandbox-image mein-projekt
+```
+
+PHP-Projekte (Composer) haben keine Projekt-Image-Variante: Ihre Tests müssen mit dem Toolchain-Image `php` auskommen.
 
 ### 10.4 Erster Job (Rauchtest)
 
@@ -892,9 +1119,12 @@ Variante A (empfohlen) ist rsync über SSH mit dem eingeschränkten Schlüssel a
 ```bash
 sudo -u hermclaw ssh -i /etc/hermclaw/ssh/backup_ed25519 -o UserKnownHostsFile=/etc/hermclaw/ssh/known_hosts \
      -o IdentitiesOnly=yes root@192.168.178.60 true; echo "exit $?"
-# rrsync erlaubt nur rsync: eine Fehlermeldung von rrsync ("... is not rsync" o. Ä., exit ≠ 0) ist hier das ERWARTETE
-# Ergebnis – der Schlüssel wurde angenommen. "Permission denied" bzw. "Host key verification failed" heißt:
-# Kapitel 6.2 bzw. 4.3 wiederholen. Den eigentlichen rsync-Zugang prüft danach "sudo hermclaw backup list" (11.5).
+# Erwartet (Schlüssel angenommen, rrsync läuft): "/usr/local/bin/rrsync error: SSH_ORIGINAL_COMMAND does not run rsync", exit 1.
+# exit 127 mit "No such file or directory" (rrsync bzw. python3) = rrsync oder Python fehlen auf Terra. Das ist KEIN Erfolg:
+#   Kapitel 6.2 wiederholen; nach einem Neustart von Terra die Zeile in /boot/config/go prüfen.
+# Python-Traceback mit "FileNotFoundError: … '/mnt/user/backups/hermclaw'" (exit 1) = das Verzeichnis fehlt oder das Array ist nicht gestartet.
+# "Permission denied (publickey)" = authorized_keys-Eintrag fehlt oder ist falsch (6.2); "Host key verification failed" = 4.3.
+# Den eigentlichen rsync-Zugang prüft danach "sudo hermclaw backup list" (11.5).
 ```
 
 Variante B ist die per NFS auf .225 eingebundene Freigabe (`infra/backup/unraid-share-setup.md`, Abschnitt 3). Dann
@@ -987,7 +1217,7 @@ alten Host-Schlüssel auf dem Admin-Rechner entfernen, Kapitel 3) und bootstrapp
 neu anlegen (`gitlab-token` vor dem Deployment), dasselbe Release deployen und Dienste und Timer wieder stoppen, Satz
 wählen und testen (`sudo hermclaw backup restore-test <set-id>`), die Datenbank neu anlegen und
 `sudo hermclaw backup restore-full` hineinspielen, Konfiguration und Artefakte zurücklegen, `sudo hermclaw migrate`,
-den neuen Runtime-SSH-Schlüssel per Bootstrap auf .222, .223 und .224 (schlafende Worker vorher wecken, den alten
+den neuen Runtime-SSH-Schlüssel per Bootstrap auf .222, .223 und .224 (schlafende Worker vorher wecken, Kapitel 13.1, den alten
 Schlüssel entfernen) und als Deploy-Key in GitLab hinterlegen, Dienste starten, ein neues Admin-Token anlegen,
 frisches Backup mit Restore-Test. Ist nur die Datenbank beschädigt: Dienste und Timer stoppen, dann dort die Schritte
 5, 6, 8 und 10.
@@ -998,7 +1228,17 @@ frisches Backup mit Restore-Test. Ist nur die Datenbank beschädigt: Dienste und
 
 Die Build-Umgebung konnte die Hosts nicht erreichen (BLOCKER-001). Diese Abnahme holt alle Prüfungen gegen die echte
 Hardware nach. Sie braucht einen Quellcode-Checkout der installierten Version mit Test-Abhängigkeiten auf .225
-(und für die Sandbox-Suite auf .222):
+(und für die Sandbox-Suite auf .222). Wecken Sie .222 und .224 vorher (Kapitel 13.1).
+
+Vor der GitLab-Suite legen Sie in GitLab die Gruppe `hermclaw` an und darin das Wegwerf-Projekt `sandbox` mit
+„Initialize repository with a README“ (Default-Branch `main`, von GitLab geschützt). Aktivieren Sie dort den
+Deploy-Key des Orchestrators mit „Grant write permissions to this key“ (6.1). Das gespeicherte `gitlab-token` muss auf
+dieses Projekt zugreifen dürfen: ein Group Access Token dieser Gruppe, oder der Bot-Benutzer ist dort Developer. Ein
+Project Access Token eines anderen Projekts reicht nicht. Liegen Ihre Projekte und Ihr Group Access Token in einer
+anderen Gruppe, legen Sie `sandbox` dort an und passen `HERMCLAW_LIVE_GITLAB_PROJECT` und
+`HERMCLAW_LIVE_GITLAB_REPO_URL` an. Haben Sie in 6.1 `labels.api_url` gesetzt, setzen Sie `HERMCLAW_LIVE_GITLAB_API`
+auf denselben Wert. Die Suite pusht einen Job-Branch, öffnet einen Merge Request und löscht den Branch wieder. Den
+offenen Merge Request schließen Sie danach in GitLab.
 
 ```bash
 # auf .225 (und .222) als root
@@ -1012,7 +1252,7 @@ sudo scripts/ops/live-acceptance.sh --prepare-db
 
 # alle Suiten dieses Hosts (Orchestrator: workers models repo_intelligence research sshtools infratools wol gitops backup)
 sudo scripts/ops/live-acceptance.sh
-#   GitLab-Suite nur mit einem Wegwerf-Projekt:
+#   GitLab-Suite nur mit einem Wegwerf-Projekt (vorher anlegen, siehe oben):
 sudo HERMCLAW_LIVE_GITLAB_PROJECT=hermclaw/sandbox HERMCLAW_LIVE_GITLAB_API=http://192.168.178.226 \
      HERMCLAW_LIVE_GITLAB_REPO_URL=git@192.168.178.226:hermclaw/sandbox.git scripts/ops/live-acceptance.sh --suite gitops
 #   Wake-on-LAN vollständig (legt .224 schlafen und weckt ihn; kein Job darf laufen):
@@ -1049,7 +1289,37 @@ Log der Suite lesen und Kapitel 14 prüfen.
 | Bekannte Einschränkungen | `docs/operations/known-limitations.md` |
 
 Die Worker legen sich bei Leerlauf schlafen (`systemctl suspend`, Hosts mit `idle_sleep_command` in `hosts.yaml`).
-Der Scheduler weckt sie vor jedem Schritt per Wake-on-LAN. Ein schlafender Worker ist also normal.
+Der Scheduler weckt sie vor jedem Schritt per Wake-on-LAN. Ein schlafender Worker ist also normal. Für Ihre eigenen
+Arbeiten wecken Sie ihn selbst (13.1).
+
+### 13.1 Schlafende Worker vor Ansible- und SSH-Arbeiten wecken
+
+Ab dem ersten Deployment legt der Scheduler .222 und .224 nach 30 Minuten Leerlauf schlafen. Er weckt sie nur vor
+Schritten, nicht für Ihre Admin-Arbeiten. Für Ansible ist ein schlafender Worker `UNREACHABLE`. Der Preflight von
+`playbooks/deploy.yml` läuft mit `any_errors_fatal: true` und bricht dann den **ganzen** Lauf ab, auch für .225 und
+.223. Ebenso hängen `ssh admin@192.168.178.222 …` (Kapitel 6.3) und `curl …:8787/health` (8.6). Wecken Sie die Worker
+deshalb vor jedem Lauf, der sie einschließt (alle Läufe ohne `--limit orchestrator` bzw. `--limit webui`). Das betrifft
+Kapitel 6.3, den zweiten Lauf in 8.4 sowie 8.5, 8.7, 9.2, 10.3, 11.7 und 12:
+
+```bash
+sudo apt install wakeonlan                       # einmalig, Admin-Rechner oder .225 (nicht Teil des Deployments)
+wakeonlan -i 192.168.178.255 <wol_mac von .222>  # MAC aus dem Inventar
+wakeonlan -i 192.168.178.255 <wol_mac von .224>
+until ping -c1 -W2 192.168.178.222 >/dev/null; do sleep 2; done
+until ping -c1 -W2 192.168.178.224 >/dev/null; do sleep 2; done
+```
+
+Danach melden sich die Worker per Heartbeat wieder `ready`, und bis zum nächsten Suspend bleiben 30 Minuten. Dauert ein
+Lauf auf einem Worker länger, schalten Sie dessen Suspend für diesen Lauf ab. Das betrifft Modell-Downloads und neue
+Sandbox-Images nach einer Erhöhung von `hermclaw_sandbox_image_version`. Setzen Sie dafür
+`hermclaw_config_host_overrides: {exec-222: {idle_sleep_command: null}}` (bzw. `model-224`, Kapitel 9.3) und führen Sie
+das Deployment aus. Es stellt den Orchestrator zuerst um. Danach entfernen Sie den Eintrag und führen das Deployment für
+`orchestrator` erneut aus.
+
+**Wake-on-LAN einmal vor dem ersten Deployment testen** (es läuft noch kein Scheduler): Auf dem Worker
+`sudo systemctl suspend` ausführen, dann vom Admin-Rechner wie oben wecken. Der Host muss innerhalb von 90 s wieder auf
+ping antworten (`ping_timeout_seconds` in `hosts.yaml`). Sonst prüfen Sie BIOS (Kapitel 2.2),
+`sudo ethtool <if> | grep Wake-on` und die MAC im Inventar.
 
 ---
 
