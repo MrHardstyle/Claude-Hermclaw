@@ -32,6 +32,13 @@
 - [x] Worker Failure / Recovery (37.14, `tests/e2e/`)
 - [x] Planner Replan after Failure (37.15, `tests/e2e/`)
 
+## Finale Testmatrix (P39.9 / P41.8, 2026-10-15)
+
+`scripts/dev/test_matrix.py` (eine pytest-Instanz pro Datei) → `docs/testing/test-matrix-results.{md,json}`:
+**208 Dateien, 3232 bestanden, 0 fehlgeschlagen, 0 Fehler**, 24 Live-Tests deselektiert (BLOCKER-001) – unit 1956,
+integration 1042, failure 204, security 4, e2e 18, load 8; UI innerhalb von `tests/e2e/test_ui_playwright.py`: Vitest 48,
+Playwright 35. Live-Suiten: `scripts/ops/live-acceptance.sh` (INSTALLATION.md Kapitel 12).
+
 ## Komponenten-Testläufe (Build-Umgebung)
 
 | Phase | Komponente | Befehl | Ergebnis | Live-Test |

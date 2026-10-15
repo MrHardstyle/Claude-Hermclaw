@@ -12,7 +12,7 @@
     },
     "integration": {
       "files": 112,
-      "passed": 1041,
+      "passed": 1042,
       "failed": 0,
       "skipped": 0,
       "deselected": 24,
@@ -1188,13 +1188,14 @@
       "suite": "integration",
       "ok": true,
       "rc": 0,
-      "summary": "3 passed in 3.08s",
-      "seconds": 4.4,
-      "passed": 3,
+      "summary": "4 passed in 5.38s",
+      "seconds": 6.8,
+      "passed": 4,
       "failed": 0,
       "skipped": 0,
       "deselected": 0,
-      "errors": 0
+      "errors": 0,
+      "rerun_at": "2026-10-15T05:01:15.373289+00:00"
     },
     {
       "file": "tests/integration/test_coder_handler.py",
@@ -1305,39 +1306,42 @@
       "suite": "integration",
       "ok": true,
       "rc": 0,
-      "summary": "8 passed in 1809.48s (0:30:09)",
-      "seconds": 1810.2,
+      "summary": "8 passed in 1821.17s (0:30:21)",
+      "seconds": 1821.8,
       "passed": 8,
       "failed": 0,
       "skipped": 0,
       "deselected": 0,
-      "errors": 0
+      "errors": 0,
+      "rerun_at": "2026-10-15T05:01:15.373289+00:00"
     },
     {
       "file": "tests/integration/test_deploy_infra.py",
       "suite": "integration",
       "ok": true,
       "rc": 0,
-      "summary": "38 passed in 406.96s (0:06:46)",
-      "seconds": 407.8,
+      "summary": "38 passed in 392.52s (0:06:32)",
+      "seconds": 393.2,
       "passed": 38,
       "failed": 0,
       "skipped": 0,
       "deselected": 0,
-      "errors": 0
+      "errors": 0,
+      "rerun_at": "2026-10-15T05:01:15.373289+00:00"
     },
     {
       "file": "tests/integration/test_deploy_release.py",
       "suite": "integration",
       "ok": true,
       "rc": 0,
-      "summary": "22 passed in 246.40s (0:04:06)",
-      "seconds": 247.6,
+      "summary": "22 passed in 242.52s (0:04:02)",
+      "seconds": 243.6,
       "passed": 22,
       "failed": 0,
       "skipped": 0,
       "deselected": 0,
-      "errors": 0
+      "errors": 0,
+      "rerun_at": "2026-10-15T05:01:15.373289+00:00"
     },
     {
       "file": "tests/integration/test_doctor.py",
@@ -2696,13 +2700,14 @@
       "suite": "security",
       "ok": true,
       "rc": 0,
-      "summary": "4 passed in 7.08s",
-      "seconds": 8.4,
+      "summary": "4 passed in 8.04s",
+      "seconds": 9.5,
       "passed": 4,
       "failed": 0,
       "skipped": 0,
       "deselected": 0,
-      "errors": 0
+      "errors": 0,
+      "rerun_at": "2026-10-15T05:01:15.373289+00:00"
     },
     {
       "file": "tests/e2e/test_e2e_code_tasks.py",
@@ -2756,5 +2761,13 @@
       "deselected": 0,
       "errors": 0
     }
+  ],
+  "merged_at": "2026-10-15T05:01:55.504945+00:00",
+  "reruns": [
+    "tests/integration/test_cli.py",
+    "tests/integration/test_deploy_converge.py",
+    "tests/integration/test_deploy_infra.py",
+    "tests/integration/test_deploy_release.py",
+    "tests/security/test_security_checks.py"
   ]
 }

@@ -510,19 +510,19 @@ Legende: `[x]` erledigt mit Evidence · `[~]` erledigt, Live-Verifikation auf Zi
 
 ## P39 – FULL BUG BASH / HARDENING
 
-- [x] 39.1 `BUGS.md` vollständig reviewen. — Evidence: BUGS.md reviewed 2026-10-15: 137 entries (BUG-001..BUG-137) + BLOCKER-001; every entry has phase, component, severity, repro/expected/actual, fix and a regression test or verification reference; 0 open
+- [x] 39.1 `BUGS.md` vollständig reviewen. — Evidence: BUGS.md reviewed 2026-10-15: 139 entries (BUG-001..BUG-139) + BLOCKER-001; every entry has phase, component, severity, repro/expected/actual, fix and a regression test or verification reference; 0 open
 - [x] 39.2 jeden offenen Bug reproduzieren. — Evidence: no open bugs: each fixed bug is reproduced by its regression test in the matrix (tests/*), which fails without the fix; documentation defects (BUG-136/137) re-checked against the code by two independent review passes
-- [x] 39.3 stale Bugs schließen mit Beleg. — Evidence: no stale bugs: all 137 entries closed as behoben with test or review evidence; BLOCKER-001 stays external (live steps [~])
+- [x] 39.3 stale Bugs schließen mit Beleg. — Evidence: no stale bugs: all 139 entries closed as behoben with test or review evidence; BLOCKER-001 stays external (live steps [~])
 - [x] 39.4 P0 fixen. — Evidence: P0: 2/2 fixed – BUG-001 CommandRequest.workspace path traversal on the execution daemon (workers tests) and BUG-009 runtime git executing workspace-controlled config (gitops tests: hardened git runner env/config allow-list)
 - [x] 39.5 P1 fixen. — Evidence: P1: 25/25 fixed with regression tests (e.g. BUG-081 SSH approvals, BUG-108 sandbox image gate, BUG-118 deploy dry run, BUG-133 GitLab SSH options)
-- [x] 39.6 P2 fixen. — Evidence: P2: 59/59 fixed (e.g. BUG-120 schema decision before live changes, BUG-130 mounted backup target, BUG-134 inventory precedence, BUG-136 DR procedure)
+- [x] 39.6 P2 fixen. — Evidence: P2: 61/61 fixed (e.g. BUG-120 schema decision before live changes, BUG-130 mounted backup target, BUG-134 inventory precedence, BUG-136 DR procedure, BUG-138 config-check architecture, BUG-139 model download vs. idle suspend)
 - [x] 39.7 P3 soweit reproduzierbar und sinnvoll fixen. — Evidence: P3: 48/48 fixed (and P4: 3/3), e.g. BUG-131 secret scan, BUG-132 proxy validator, BUG-135 RAM tolerance, BUG-137 doc commands
 - [x] 39.8 für jeden Fix Regressiontest. — Evidence: every code fix has a named regression test (BUGS.md Status column; latest: test_ssh_options_from_config, test_inventory_group_vars_take_effect_in_the_roles, test_check_host_ram_minimum_tolerates_kernel_reserved_memory, test_sse_probe_skips_redirect_servers_but_not_static_locations); documentation-only fixes (BUG-116, BUG-128, BUG-136, BUG-137) verified against the code by independent review passes
-- [ ] 39.9 komplette Testmatrix neu. — Evidence: –
-- [ ] 39.10 Failure Tests neu. — Evidence: –
-- [ ] 39.11 Recovery neu. — Evidence: –
-- [ ] 39.12 Security neu. — Evidence: –
-- [ ] 39.13 E2E neu. — Evidence: –
+- [x] 39.9 komplette Testmatrix neu. — Evidence: docs/testing/test-matrix-results.{md,json} (scripts/dev/test_matrix.py, one pytest process per file): second full run 2026-10-15 + re-run of the 5 files changed afterwards - 208 files, 3232 passed, 0 failed, 0 errors, 24 live tests deselected (BLOCKER-001); UI inside tests/e2e/test_ui_playwright.py: vitest 48, Playwright 35
+- [x] 39.10 Failure Tests neu. — Evidence: tests/failure/ 20 files, 204 passed, 0 failed (final matrix 2026-10-15): planner/coder/reviewer timeouts, worker offline, Ollama/LiteLLM/GitLab down, DB reconnect, disk, scope, secrets, merge conflict, stale base, verifier crash, WoL, research, network, backup/infratools/sshtools/dbtools failures
+- [x] 39.11 Recovery neu. — Evidence: final matrix 2026-10-15: tests/failure/test_recovery_process_kill.py 2 passed (SIGKILL of the scheduler, checkpoint resume, one commit), tests/failure/test_resources_recovery.py 9 passed, tests/e2e/test_e2e_platform.py::test_37_14 (worker restart + connection loss) passed
+- [x] 39.12 Security neu. — Evidence: final matrix 2026-10-15: tests/security/test_security_checks.py 4 passed (repository secret scan, scopes, worker auth); sandbox/SSH/command-policy suites green; dependency audit 2026-10-15 without known vulnerabilities (runtime 107, LiteLLM 116 packages, UI npm 0)
+- [x] 39.13 E2E neu. — Evidence: final matrix 2026-10-15: tests/e2e 3 files, 18 passed - all 15 generalization scenarios 37.1-37.15 + UI (vitest 48, Playwright 35 against the real backend)
 
 ## P40 – SOAK TEST
 
@@ -539,14 +539,14 @@ Legende: `[x]` erledigt mit Evidence · `[~]` erledigt, Live-Verifikation auf Zi
 ## P41 – RELEASE CANDIDATE
 
 - [x] 41.1 Version. — Evidence: version 0.1.0rc1 (PEP 440) in pyproject.toml and hermclaw/__init__.py (hermclaw --version), protocol version 1
-- [x] 41.2 Changelog. — Evidence: CHANGELOG.md [0.1.0rc1] – added (core, operations, quality), changed (D-010/D-011/D-012), security, fixed (137 bugs), limitations
+- [x] 41.2 Changelog. — Evidence: CHANGELOG.md [0.1.0rc1] – added (core, operations, quality), changed (D-010/D-011/D-012), security, fixed (139 bugs), limitations
 - [x] 41.3 Architektur-Doku. — Evidence: docs/architecture/overview.md (processes/hosts, job lifecycle, model roles, safety boundaries, index of all 27 component documents) + docs/architecture/*.md
 - [x] 41.4 Admin Runbook. — Evidence: docs/runbooks/admin.md (daily/weekly checks, job/repository/token control, workers/models, logs, incidents)
 - [x] 41.5 Disaster Recovery. — Evidence: docs/runbooks/disaster-recovery.md (per host, credentials, backup target) + docs/operations/backup-restore.md (restore-full procedure, tested by tests/integration/test_backup_restore.py)
 - [x] 41.6 Upgrade Path. — Evidence: upgrade/rollback path: docs/runbooks/upgrade.md (backup, dry run, deploy, verify, rollback incl. schema-downgrade opt-in); tested by tests/integration/test_deploy_converge.py::test_upgrade_switches_and_prunes_old_releases and ::test_rollback_needs_the_schema_downgrade_opt_in_and_reuses_the_installed_venv (0.1.0rc1 -> rc2 -> rc3 with a new Alembic revision, prune, refused + allowed rollback), test_deploy_release.py migrations up/down offline in python:3.13-slim-trixie
 - [x] 41.7 known limitations. — Evidence: docs/operations/known-limitations.md (live verification pending, GPU/model limits, functional and operational limits)
-- [ ] 41.8 all tests final. — Evidence: –
-- [ ] 41.9 release tag. — Evidence: –
+- [x] 41.8 all tests final. — Evidence: final matrix 2026-10-15 (docs/testing/test-matrix-results.md): 208 files, 3232 passed, 0 failed; plus deploy/bootstrap converge in Debian 13 containers, ansible-lint production profile, shellcheck, ruff/mypy on changed code; live suites prepared in scripts/ops/live-acceptance.sh (BLOCKER-001)
+- [x] 41.9 release tag. — Evidence: annotated tag v0.1.0rc1 on the release candidate commit of claude/hermclaw-next-build (pushed to GitHub MrHardstyle/Claude-Hermclaw); release artifact reproducible from the tag with scripts/deploy/build-release.sh
 
 ## P42 – CUTOVER PLAN
 

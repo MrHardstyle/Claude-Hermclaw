@@ -1,12 +1,13 @@
 # STATUS
 
-## Aktueller Zustand (2026-10-14)
-- Projekt: Hermclaw Next · Modus: Greenfield Build · Branch: `claude/hermclaw-next-build`
-- Abgeschlossen: P01 Bootstrap, P02–P31, P33, P34–P38, P40, P42 (Live-Schritte `[~]`, BLOCKER-001) · Runtime-Integration aller Ops-Provider (SSH, DB, Container/Proxy)
-- In Arbeit: P32 Deployment (Workflow: Build + adversariales Review) · P39 Bug-Bash (früher Matrix-Lauf) · INSTALLATION.md
-- Danach: P39 komplette Testmatrix, P41 Release Candidate (Changelog, Runbooks, Known Limitations, Tag), Final Build Report
-- Blocker: BLOCKER-001 (Zielhosts aus der Build-Umgebung nicht erreichbar) – Live-Schritte `[~]`
-- Release-Status: NOT READY (RC erst nach P39–P41)
+## Aktueller Zustand (2026-10-15)
+- Projekt: Hermclaw Next · Modus: Greenfield Build · Branch: `claude/hermclaw-next-build` · Version `0.1.0rc1`
+- **Release Candidate gebaut und getestet:** P00–P42 vollständig bearbeitet; 348 Schritte erledigt, 76 lokal erledigt mit
+  offener Live-Verifikation (`[~]`, BLOCKER-001), 0 offen.
+- Tag: `v0.1.0rc1` (annotiert) · Abschlussbericht: `docs/operations/FINAL_BUILD_REPORT.md`
+- Blocker: BLOCKER-001 (Zielhosts aus der Build-Umgebung nicht erreichbar) – alle Live-Schritte sind automatisiert und
+  in `docs/operations/INSTALLATION.md` beschrieben; Abnahme mit `scripts/ops/live-acceptance.sh` (Kapitel 12)
+- Release-Status: **RC – lokal abgenommen, Live-Abnahme ausstehend**
 
 ## Fortschritt BUILD_PLAN (automatisch: `python scripts/dev/plan_progress.py --markdown`)
 | Phase | erledigt | erledigt, live offen (BLOCKER-001) | offen |
@@ -43,40 +44,45 @@
 | P29 – Media | 7 | 0 | 0 |
 | P30 – API | 9 | 0 | 0 |
 | P31 – UI | 15 | 0 | 0 |
-| P32 – Deployment | 0 | 0 | 10 |
+| P32 – Deployment | 0 | 10 | 0 |
 | P33 – Backup/Restore | 5 | 1 | 0 |
 | P34 – Recovery | 7 | 0 | 0 |
 | P35 – Failure Injection | 19 | 0 | 0 |
 | P36 – Security Hardening | 8 | 0 | 0 |
 | P37 – Generalization E2E | 15 | 0 | 0 |
 | P38 – Performance / Load | 8 | 0 | 0 |
-| P39 – FULL BUG BASH / HARDENING | 8 | 0 | 5 |
+| P39 – FULL BUG BASH / HARDENING | 13 | 0 | 0 |
 | P40 – SOAK TEST | 6 | 3 | 0 |
-| P41 – RELEASE CANDIDATE | 0 | 0 | 9 |
+| P41 – RELEASE CANDIDATE | 9 | 0 | 0 |
 | P42 – CUTOVER PLAN | 2 | 4 | 0 |
-| **Summe** | **334** | **66** | **24** |
+| **Summe** | **348** | **76** | **0** |
 
 ## Deploymentstatus pro Host
 | Host | Rolle | Status |
 |---|---|---|
-| 192.168.178.223 | WebUI / Nginx | nicht deployt (BLOCKER-001) |
-| 192.168.178.222 | Coding / Execution Worker | nicht deployt (BLOCKER-001) |
-| 192.168.178.224 | Model / Media Worker | nicht deployt (BLOCKER-001) |
-| 192.168.178.225 | Orchestrator | nicht deployt (BLOCKER-001) |
-| 192.168.178.226 | GitLab | nicht inventarisiert (BLOCKER-001) |
-| 192.168.178.60 | Terra / Unraid Backup | nicht inventarisiert (BLOCKER-001) |
+| 192.168.178.225 | Orchestrator | nicht deployt (BLOCKER-001); Bootstrap + Deployment im Debian-13-Container verifiziert |
+| 192.168.178.222 | Coding / Execution Worker | nicht deployt (BLOCKER-001); Converge im Container, echte Podman-Sandbox-Tests |
+| 192.168.178.224 | Model / Media Worker | nicht deployt (BLOCKER-001); Converge im Container (GPU-Pfad nur live) |
+| 192.168.178.223 | WebUI / Nginx | nicht deployt (BLOCKER-001); nginx 1.28 im Container, Playwright gegen echtes Backend |
+| 192.168.178.226 | GitLab | bestehend, unverändert; Vorbereitung INSTALLATION.md 6.1 |
+| 192.168.178.60 | Terra / Unraid Backup | bestehend, unverändert; Vorbereitung INSTALLATION.md 6.2 / 11 |
 
-## Modellrollen (Ollama-Tags laut Research)
-- Fast Router: `qwen3:8b` (16K) · Planner: `gemma4:26b` (32K) · Planner-Fallback: `gemma4:12b`
-- Main Coder: `qwen3-coder:30b` (32K) · Heavy Reviewer: `qwen3.8:27b` (24–32K) · Embeddings: `embeddinggemma-2:740m` (768 dim; Fallback `embeddinggemma:300m`, R-025)
+## Modellrollen (fest, `config/models.example.yaml`)
+- Planner/Replanner: `gemma4:26b` (32K) · Planner-Fallback (technisch): `gemma4:12b`
+- Implementation Worker: `qwen3-coder:30b` (32K) · Heavy Reviewer: `qwen3.8:27b` · Fast Router: `qwen3:8b` (16K)
+- Embeddings: `embeddinggemma:300m` (768 dim; EmbeddingGemma 2 erst, wenn Ollama es unter Linux/CUDA ausführt, D-010)
 
-## Aktive Bugs
-keine offenen P0/P1; P3-Nacharbeiten in P39 (BUG-030 u. a.), Register: BUGS.md (BUG-001 … BUG-042)
+## Bugs
+- 139 gefunden, **139 behoben**, 0 offen (P0 2, P1 25, P2 61, P3 48, P4 3) – `BUGS.md`
+- Externer Blocker: BLOCKER-001
 
-## Letzte Testresultate (2026-10-13, Build-Host, jeweils einzeln ausgeführt)
-- Runtime/Integration: test_runtime_services (3), test_runtime_dispatch (2), test_research_step (3), test_coder_handler (9), test_runtime_driver (9) – grün
-- Recovery P34: tests/failure/test_recovery_process_kill.py (2, echter SIGKILL des Scheduler-Prozesses) – grün
-- Failure P35: tests/failure/test_runtime_failures.py (4) + Komponenten-Failure-Suites – grün
-- Security P36: tests/security/test_security_checks.py (4), Dependency-Audit (pip-audit, 0 Befunde) – grün
-- E2E P37: tests/e2e/test_e2e_code_tasks.py (8), tests/e2e/test_e2e_platform.py (5) – grün
-- Last P38: tests/load/test_load.py (8) – Baseline docs/operations/performance-baseline.md
+## Letzte Testresultate (2026-10-15, Build-Host)
+- Finale Testmatrix `docs/testing/test-matrix-results.md`: **208 Dateien, 3232 bestanden, 0 fehlgeschlagen**, 24 Live-Tests
+  deselektiert (unit 1956, integration 1042, failure 204, security 4, e2e 18, load 8); UI: vitest 48, Playwright 35
+- Deployment: `test_deploy_release` 22, `test_deploy_infra` 38, `test_deploy_converge` 8 (30 min, Debian 13), Bootstrap-Suiten grün,
+  ansible-lint (production) sauber
+- Dependency-Audit 2026-10-15: keine bekannten Schwachstellen (runtime 107, LiteLLM 116 Pakete, UI 0)
+
+## Nächster Schritt
+Installation auf den Zielhosts nach `docs/operations/INSTALLATION.md`, danach Live-Abnahme (Kapitel 12) und Cutover
+nach `docs/runbooks/cutover.md`.
