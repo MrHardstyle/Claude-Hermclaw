@@ -59,7 +59,7 @@ operator scripts. It is built once on the control node and verified by checksum:
 | `nginx_tls_enabled` / `nginx_tls_source` | `.223` | `false` / `self-signed` | HTTPS; `provided` + `nginx_tls_cert_src` / `nginx_tls_key_src` (files on the control node) |
 | `nginx_hsts_max_age` | `.223` | `0` | send Strict-Transport-Security only once every client trusts the certificate |
 | `hermclaw_keep_releases` | `all.vars` | `3` | previous releases kept for a fast rollback (venvs, payloads, UI builds), 1–99: the most recently **active** ones, so the release active before the last switch is always kept |
-| `hermclaw_release_root` | `all.vars` | `<repo>/dist` | where the release directories are on the control node |
+| `hermclaw_release_root` | `-e` | `<repo>/dist` | where the release directories are on the control node; a playbook group_var (`playbooks/group_vars/all.yml`), so `all.vars` has no effect: pass `-e hermclaw_release_root=<dir>` |
 | `hermclaw_config_overrides` | `all.vars` | `{}` | `{<file>: mapping}` deep-merged into `config/<file>.example.yaml` (section 5) |
 | `hermclaw_config_host_overrides` | `all.vars` | `{}` | `{<hosts.yaml id>: mapping}` merged into that host entry; unknown ids are appended |
 | `hermclaw_config_unmanaged` | `all.vars` | `[]` | files that are created once and never overwritten |
@@ -319,11 +319,11 @@ images of `.222`, and SearXNG. Any failed check stops the play and prints the re
 
 | Symptom | Cause / action |
 |---|---|
-| `release.json does not exist` | Build the release (section 2) or set `hermclaw_release_root` |
+| `release.json does not exist` | Build the release (section 2) or pass `-e hermclaw_release_root=<dir>` |
 | `sha256sum: WARNING: … did NOT match` | The release directory was modified or copied incompletely: rebuild it |
 | `hermclaw_version '0.1.0-rc1' is not a canonical PEP 440 version` | Use the name the build printed (`0.1.0rc1`), quoted |
 | `runs Python 3.12, the release was built for CPython 3.13` | Build with the hosts' interpreter (`--python`) |
-| `credential(s) missing - nothing has been deployed` | Create the named credentials as the message says (`hermclaw-credential set/generate`) |
+| `credential(s) missing - nothing has been deployed` | Create the named credentials as the message says (`sudo /opt/hermclaw/bin/hermclaw-credential set/generate`) |
 | `Wake-on-LAN is enabled for … placeholder MAC` | Put the real `wol_mac` into the inventory |
 | `hermclaw config-check rejects the configuration` | An override does not match the schema (`hermclaw/core/config.py`); live files are unchanged |
 | `console entry point … cannot be loaded` | The release is broken (the build's self-test should have caught it): fix `pyproject.toml` `[project.scripts]` and rebuild |
@@ -334,7 +334,7 @@ images of `.222`, and SearXNG. Any failed check stops the play and prints the re
 | `models.yaml names invalid Ollama tags` | a tag in `hermclaw_config_overrides.models` is not a plain `name[:tag]` |
 | `Workers and the UI must never run a newer release than the orchestrator` | deploy the orchestrator first (no `--limit`/`--tags`, or `--limit orchestrator`); disaster recovery with the orchestrator down: `-e hermclaw_release_require_orchestrator_first=false` |
 | `invalid … systemd_skeleton_api_forwarded_allow_ips` | `ansible_host` of a webui host is a DNS name: set `systemd_skeleton_api_forwarded_allow_ips` to its IP address in the inventory |
-| worker `/health` never `ok` | `journalctl -u hermclaw-exec-worker` / `-model-worker`; worker token (`hermclaw-credential check worker-token`), podman (`.222`), Ollama (`.224`) |
+| worker `/health` never `ok` | `journalctl -u hermclaw-exec-worker` / `-model-worker`; worker token (`sudo /opt/hermclaw/bin/hermclaw-credential check worker-token`), podman (`.222`), Ollama (`.224`) |
 | `need about … GB … are free` | Free disk space on the models file system or move `OLLAMA_MODELS` (`ollama_models_dir`) |
 | UI checks fail with `Debian default page` | The address is not in `hermclaw_web_server_name` |
 | doctor fails `models:model-224` with `hermclaw_worker_pull_models: false` | Pull the models (`/opt/hermclaw/bin/hermclaw-model-pull`) or tolerate the check |

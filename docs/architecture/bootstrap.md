@@ -182,10 +182,11 @@ Tags (`ansible-playbook playbooks/bootstrap.yml --list-tags`): `preflight`, `com
 ports (`hermclaw_api_port` 8000, `_litellm_port` 4000, `_postgres_port` 5432, `_metrics_port` 9100,
 `_worker_port` 8787, `_ollama_port` 11434, `_searxng_port` 8888), `hermclaw_port_plan` (kept in
 sync with the table in `check-host.sh` by a test), `hermclaw_install_packages`,
-`hermclaw_manage_services` (false only for image/chroot builds), `hermclaw_timezone`.
+`hermclaw_manage_services` (false only for image/chroot builds).
 Inventory: `ansible_host`, `ansible_user` (own sudo admin, not `hermclaw-admin`),
 `hermclaw_orchestrator_ip`, `hermclaw_lan_broadcast`, `hermclaw_web_server_name`,
-`hermclaw_worker_id`, `wol_mac`, `wol_interface`. Role keys are documented in each
+`hermclaw_worker_id`, `wol_mac`, `wol_interface`, `hermclaw_timezone` (default `Europe/Berlin`,
+a default of the role `common`, so `all.vars` takes effect). Role keys are documented in each
 `roles/<role>/defaults/main.yml` and validated in `roles/<role>/tasks/validate.yml`
 (identifiers, URLs https-only, no newline/field injection into unit, nginx, pg_hba or sudoers files).
 

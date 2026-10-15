@@ -21,7 +21,7 @@ targets: []
 # sandbox:
 #   admin_dsn_ref: cred:sandbox-pg-admin
 #   name_prefix: hermclaw_sbx_
-#   client_host: 192.168.178.225          # how the execution worker (.222) reaches that server
+#   client_host: sandbox-db.lan           # how the execution worker (.222) reaches that server; not .225 (its PostgreSQL listens only on localhost)
 #   orphan_max_age_hours: 6               # sandboxes of crashed runs are dropped at scheduler start
 
 # Interpreter that runs a project's Alembic migrations inside the execution sandbox image (needs alembic + the

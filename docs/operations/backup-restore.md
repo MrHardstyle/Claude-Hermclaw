@@ -121,9 +121,9 @@ backup, prune, verify and restore tests, so a prune never deletes a set that is 
 
 Monitoring: events `backup.started|completed|failed|pruned`, `backup.restore_test.passed|failed`,
 `backup.restore.completed|failed` (global event stream of the API, `/api/events/stream`, token with scope `read`;
-the UI itself does not show them), the journal of both units, and
-`RESTORE_REPORT.json` next to each tested set. **Alert when there is no `backup.completed` within 26 h or no
-`backup.restore_test.passed` within 8 days.**
+the UI shows only the failed ones, `*.failed` and a `backup.pruned` with errors, on the dashboard under "Letzte
+Fehler" while the page is open), the journal of both units, and `RESTORE_REPORT.json` next to each tested set.
+**Alert when there is no `backup.completed` within 26 h or no `backup.restore_test.passed` within 8 days.**
 
 Retention (`retention:`): the newest `keep_last` sets always stay; additionally the newest set of each of the last
 `keep_daily` days, `keep_weekly` ISO weeks and `keep_monthly` months that have a backup (UTC dates). Incomplete
@@ -168,7 +168,9 @@ Only the database is damaged and the host is intact: stop the services and the t
 3), then follow steps 5, 6, 8 and 10. Credentials, keys and configuration are still in place, and the admin token in
 the backup still matches its credential.
 
-1. **Rebuild the host**: reinstall Debian 13 with the same IP (INSTALLATION.md, chapter 3), then
+1. **Rebuild the host**: reinstall Debian 13 with the same IP (INSTALLATION.md, chapter 3). The new installation has
+   a new SSH host key: on the admin machine remove the old one first (`ssh-keygen -R 192.168.178.225`), then compare
+   the new fingerprint at the first connection (chapter 3, step 4). Then
 
    ```bash
    ansible-playbook -i inventory/hosts.yml playbooks/bootstrap.yml --limit orchestrator -K
@@ -273,18 +275,24 @@ the backup still matches its credential.
    ```
 
    The deployment renders `hosts.yaml`, `models.yaml`, `policies.yaml`, `capabilities.yaml`, `logging.yaml`,
-   `databases.yaml`, `litellm.yaml` and `hermclaw.env` from the inventory on every run. A difference there means the
-   inventory changed since the backup: fix the inventory, not the file. Plaintext secret files
-   (`/etc/hermclaw/secrets/*`, if you used any) were never backed up: put them back from the password manager
-   (`sudo install -m 0600 -o hermclaw -g hermclaw <file> /etc/hermclaw/secrets/<name>`). Encrypted credentials do not
-   come from the set either (`credstore_dirs: []`, INSTALLATION.md 11.4; blobs of the old installation would not
-   decrypt here): step 2 re-created them. Delete `/var/lib/hermclaw/restore-files` (`sudo rm -rf`) once the system
-   runs.
+   `databases.yaml`, `litellm.yaml` and `hermclaw.env` from the inventory on every run, except files listed in
+   `hermclaw_config_unmanaged` (for example `databases`, INSTALLATION.md 9.4): for those, keep the copy from the set.
+   For the others a difference means the inventory changed since the backup: fix the inventory, not the file.
+   Plaintext secret files (`/etc/hermclaw/secrets/*`, if you used any) were never backed up: put them back from the
+   password manager (`sudo install -m 0600 -o hermclaw -g hermclaw <file> /etc/hermclaw/secrets/<name>`). Encrypted
+   credentials do not come from the set either (`credstore_dirs: []`, INSTALLATION.md 11.4; blobs of the old
+   installation would not decrypt here): step 2 re-created them. Delete `/var/lib/hermclaw/restore-files`
+   (`sudo rm -rf`) once the system runs.
 8. **Schema** of the installed release: `sudo hermclaw migrate` – a no-op when the backup's alembic revision is the
    release head, upgrades an older backup. The operator CLI runs it with `hermclaw.env` (Unix socket, peer
    authentication); in a plain `sudo -u hermclaw` shell it would connect over TCP without a password and fail.
 9. **The other hosts and GitLab.** The bootstrap of step 1 generated a new runtime SSH key. Authorise it on `.222`,
-   `.223` and `.224` (the run also registers their host keys in `/etc/hermclaw/ssh/known_hosts`):
+   `.223` and `.224`. The workers must be awake: a worker that slept when the old `.225` failed stays asleep,
+   because only the scheduler wakes it. Wake it from `.225` (`sudo apt install wakeonlan`, then
+   `wakeonlan -i 192.168.178.255 <wol_mac>`) or with its power button. Remove the old host's runtime key first,
+   from the admin machine for each of `.222`, `.223` and `.224`:
+   `ssh -t admin@<address> sudo rm /home/hermclaw-admin/.ssh/authorized_keys`. The run below writes the file again
+   with the new key only (and registers their host keys in `/etc/hermclaw/ssh/known_hosts`):
 
    ```bash
    ansible-playbook -i inventory/hosts.yml playbooks/bootstrap.yml --limit webui,execution_workers,model_workers -K

@@ -170,7 +170,9 @@ Auf jedem der vier Hermclaw-Hosts:
    ```
 
    Vergleichen Sie beim ersten Verbinden den angezeigten Fingerabdruck mit dem auf der Konsole notierten.
-   `ansible.cfg` arbeitet mit `StrictHostKeyChecking=yes`.
+   `ansible.cfg` arbeitet mit `StrictHostKeyChecking=yes`. Bei einer Neuinstallation (Disaster Recovery) hat der
+   Host einen neuen Host-Schlüssel: Entfernen Sie vorher den alten auf dem Admin-Rechner
+   (`ssh-keygen -R 192.168.178.225`, ebenso für die anderen Adressen).
 
 5. Optional, wenn sudo ein Passwort verlangt: Ansible fragt es mit `-K` ab (alle Befehle unten).
 
@@ -972,15 +974,23 @@ nach).
   Event `backup.completed` kommt;
 * wöchentlich: `sudo journalctl -u hermclaw-restore-test --since -8d` – `"ok": true`; Alarm, wenn 8 Tage lang kein
   `backup.restore_test.passed` kommt;
-* die Events `backup.*` stehen auch im globalen SSE-Stream der API (`/api/events/stream`, Token mit Scope `read`);
-  die Oberfläche selbst zeigt sie nicht an.
+* die Events `backup.*` stehen auch im globalen SSE-Stream der API (`/api/events/stream`, Token mit Scope `read`).
+  Die Oberfläche zeigt davon nur die fehlgeschlagenen (`backup.failed`, `backup.restore_test.failed`,
+  `backup.restore.failed`, dazu ein `backup.pruned` mit Fehlern) im Dashboard unter „Letzte Fehler“, und nur solange
+  die Seite offen ist.
 
 ### 11.7 Wiederherstellen
 
-Eine Wiederherstellung (Totalverlust von .225 oder eine beschädigte Datenbank) beschreibt
-`docs/runbooks/disaster-recovery.md` Schritt für Schritt: Host neu aufsetzen, Credentials aus dem Passwortmanager neu
-anlegen, Satz wählen und testen (`sudo hermclaw backup restore-test <set-id>`), `restore-full` in eine leere
-Datenbank, Konfiguration und Artefakte zurücklegen, `hermclaw migrate`, Dienste starten.
+Eine Wiederherstellung beschreibt `docs/operations/backup-restore.md` → *Disaster recovery* Schritt für Schritt
+(Kurzfassung: `docs/runbooks/disaster-recovery.md` §1). Bei Totalverlust von .225: Host neu aufsetzen (vorher den
+alten Host-Schlüssel auf dem Admin-Rechner entfernen, Kapitel 3) und bootstrappen, Credentials aus dem Passwortmanager
+neu anlegen (`gitlab-token` vor dem Deployment), dasselbe Release deployen und Dienste und Timer wieder stoppen, Satz
+wählen und testen (`sudo hermclaw backup restore-test <set-id>`), die Datenbank neu anlegen und
+`sudo hermclaw backup restore-full` hineinspielen, Konfiguration und Artefakte zurücklegen, `sudo hermclaw migrate`,
+den neuen Runtime-SSH-Schlüssel per Bootstrap auf .222, .223 und .224 (schlafende Worker vorher wecken, den alten
+Schlüssel entfernen) und als Deploy-Key in GitLab hinterlegen, Dienste starten, ein neues Admin-Token anlegen,
+frisches Backup mit Restore-Test. Ist nur die Datenbank beschädigt: Dienste und Timer stoppen, dann dort die Schritte
+5, 6, 8 und 10.
 
 ---
 

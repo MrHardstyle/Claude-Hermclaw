@@ -28,7 +28,7 @@ sudo hermclaw backup restore-test --latest
 # 2. dry run: what the deployment would change (venv switch, config, units). Nothing is unpacked or installed; the
 #    schema decision and `hermclaw config-check` of the new release need its venv and therefore run in step 3
 cd ~/hermclaw-next/infra/ansible
-ansible-playbook -i inventory/hosts.yml playbooks/deploy.yml -e hermclaw_version=<new> --check --diff
+ansible-playbook -i inventory/hosts.yml playbooks/deploy.yml -e hermclaw_version=<new> --check --diff -K
 
 # 3. roll out with the deployment playbook (idempotent). Per host it installs the release offline into a fresh venv
 #    /opt/hermclaw/venv-<new> (hash-checked wheelhouse), renders and validates /etc/hermclaw/*.yaml with the new
@@ -37,7 +37,7 @@ ansible-playbook -i inventory/hosts.yml playbooks/deploy.yml -e hermclaw_version
 #    with the production environment, installs the new configuration and litellm.yaml, switches the LiteLLM and
 #    /opt/hermclaw/venv symlinks atomically and restarts the services (LiteLLM first, healthy and authenticated, then
 #    SearXNG, API and scheduler), then the workers and the UI. It ends with `hermclaw doctor`.
-ansible-playbook -i inventory/hosts.yml playbooks/deploy.yml -e hermclaw_version=<new>
+ansible-playbook -i inventory/hosts.yml playbooks/deploy.yml -e hermclaw_version=<new> -K
 
 # 4. verify
 curl -s 'http://192.168.178.225:8000/api/health?deep=true'    # status ok, version = <new>
@@ -60,7 +60,7 @@ before the last switch is always kept), so nothing is reinstalled or rebuilt. `d
 on the control node (the preflight verifies it). The switch back is the same atomic symlink rename:
 
 ```bash
-ansible-playbook -i inventory/hosts.yml playbooks/deploy.yml -e hermclaw_version=<old>
+ansible-playbook -i inventory/hosts.yml playbooks/deploy.yml -e hermclaw_version=<old> -K
 ```
 
 **Schema rule.** If the newer release added Alembic revisions, the database is ahead of `<old>`. The deployment
@@ -71,12 +71,12 @@ go down with the **newer** release's migrations, because only they contain the `
 ```bash
 # after a backup (step 1 above): let the deployment downgrade with the still-installed newer release, then switch
 ansible-playbook -i inventory/hosts.yml playbooks/deploy.yml -e hermclaw_version=<old> \
-    -e hermclaw_orchestrator_allow_schema_downgrade=true
+    -e hermclaw_orchestrator_allow_schema_downgrade=true -K
 # the same by hand on .225 (alembic in the services' context: hermclaw, hermclaw.env, credentials)
 sudo systemctl stop hermclaw-scheduler hermclaw-api
 sudo hermclaw --venv /opt/hermclaw/venv-<new> --alembic downgrade <old-head>      # <old-head>: release.json alembic_head
 sudo hermclaw --venv /opt/hermclaw/venv-<new> --alembic current
-ansible-playbook -i inventory/hosts.yml playbooks/deploy.yml -e hermclaw_version=<old>
+ansible-playbook -i inventory/hosts.yml playbooks/deploy.yml -e hermclaw_version=<old> -K
 ```
 
 If a migration cannot be downgraded safely (data transformation), the release notes say so and the rollback is a

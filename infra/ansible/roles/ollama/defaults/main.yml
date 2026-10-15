@@ -1,5 +1,6 @@
 # ollama – Ollama server on the model worker .224 (research 20261008-007, recheck 20261014-026).
-# Pinned release; upgrade only after the GPU smoke test (`hermclaw-model-worker selftest`).
+# Pinned release; upgrade only after the GPU smoke test (INSTALLATION.md 5.6: a short generate,
+# `ollama ps` must show 100% GPU).
 # 0.40.4 = latest release on 2026-10-14 (2026-10-12; archive sha256 verified in research 026).
 # 0.40.3 is the tested fallback (same CUDA runners and driver rule). Before every bump read the
 # release notes for "cuda_v12" / "compute capability": Pascal runs on the cuda_v12 runner only.

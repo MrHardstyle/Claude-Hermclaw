@@ -18,6 +18,7 @@
       or nvidia_secureboot_mok_enrolled | bool
     fail_msg: >-
       Secure Boot is enabled on {{ inventory_hostname }}: the DKMS-built NVIDIA modules would not load.
-      Disable Secure Boot in the firmware setup, or enrol the DKMS key (mokutil --import /var/lib/dkms/mok.pub,
-      reboot, confirm in MokManager) and set nvidia_secureboot_mok_enrolled: true.
+      Disable Secure Boot in the firmware setup, or create and enrol a DKMS signing key first (apt install dkms
+      mokutil; dkms generate_mok; mokutil --import /var/lib/dkms/mok.pub; reboot, "Enroll MOK" in MokManager) and
+      set nvidia_secureboot_mok_enrolled: true (docs/operations/INSTALLATION.md 5.5).
     quiet: true

@@ -30,9 +30,11 @@ WebUI and workers. Every step can be repeated; a rerun reports `changed=0`.
 4. `.222` / `.224`: enable Wake-on-LAN in the firmware (often "Power On By PCI-E").
    Note the MAC address of the wired interface: `ip -br link`.
 5. `.224`: Secure Boot **disabled** in the firmware (the DKMS-built NVIDIA modules are unsigned),
-   or enrol the DKMS key after step 6 (`mokutil --import /var/lib/dkms/mok.pub`, reboot,
-   confirm in MokManager) and set `nvidia_secureboot_mok_enrolled: true`. The role refuses an
-   enabled Secure Boot otherwise.
+   or, before the first bootstrap of `.224`, create and enrol a DKMS signing key:
+   `sudo apt install dkms mokutil`, `sudo dkms generate_mok` (creates `/var/lib/dkms/mok.key`
+   and `mok.pub`), `sudo mokutil --import /var/lib/dkms/mok.pub`, reboot and choose
+   "Enroll MOK" in MokManager, then set `nvidia_secureboot_mok_enrolled: true`
+   (INSTALLATION.md 5.5). The role refuses an enabled Secure Boot otherwise.
 6. GitLab `.226` / Terra `.60`: collect their SSH host keys (verified out of band) as
    known_hosts lines, e.g. `ssh-keyscan -t ed25519 192.168.178.226` **and** compare
    `ssh-keygen -lf` with the console output before trusting it.

@@ -48,7 +48,7 @@ targets:
 sandbox:
   admin_dsn_ref: cred:sandbox-pg-admin   # role with CREATEDB + CREATEROLE on a NON-production server
   name_prefix: hermclaw_sbx_
-  client_host: 192.168.178.225           # how the sandbox executor (.222) reaches the server (optional)
+  client_host: sandbox-db.lan            # how the sandbox executor (.222) reaches the server (optional); not .225 (its PostgreSQL listens only on localhost)
   orphan_max_age_hours: 6
 limits:                                  # all optional
   default_row_limit: 100

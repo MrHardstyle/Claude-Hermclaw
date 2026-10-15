@@ -26,7 +26,8 @@ All Ansible commands run on the admin machine in `infra/ansible` (INSTALLATION.m
 Follow `docs/operations/backup-restore.md` → *Disaster recovery* step by step; the step numbers below are its steps.
 In short:
 
-1. Reinstall Debian 13 (INSTALLATION.md, chapter 3), keep the IP. Bootstrap:
+1. Reinstall Debian 13 (INSTALLATION.md, chapter 3), keep the IP. On the admin machine remove the old host key
+   (`ssh-keygen -R 192.168.178.225`) and compare the new fingerprint at the first connection. Bootstrap:
    `ansible-playbook -i inventory/hosts.yml playbooks/bootstrap.yml --limit orchestrator -K` (step 1). It generates
    new random credentials and a new runtime SSH key, but never `gitlab-token` or `backup-manifest-key`.
 2. Re-create the credentials from the password manager **before** the deployment – its preflight stops without
@@ -43,7 +44,8 @@ In short:
 5. Drop and re-create the database that the deployment migrated (`sudo -u postgres dropdb --force hermclaw`, then
    `createdb` and the extension `vector`), and `sudo hermclaw backup restore-full` the set into it (step 6).
 6. Put config and artifacts into place (step 7), `sudo hermclaw migrate` (step 8).
-7. Authorise the new runtime SSH key: re-run the bootstrap of `.222`, `.223` and `.224`
+7. Authorise the new runtime SSH key: wake sleeping workers (only the scheduler wakes them), remove the old key
+   (`sudo rm /home/hermclaw-admin/.ssh/authorized_keys` on `.222`, `.223` and `.224`), re-run their bootstrap
    (`--limit webui,execution_workers,model_workers`) and replace the GitLab deploy key (step 9).
 8. Start the services and the timers, check `http://192.168.178.225:8000/api/health?deep=true` and run
    `sudo hermclaw doctor` (step 10). The scheduler recovers the jobs that were in flight at backup time.
@@ -63,7 +65,9 @@ leave it out. `bootstrap.yml` does not check it.
 ## 2. Execution worker `.222`
 
 ```bash
-# Debian 13 reinstalled (same IP, Wake-on-LAN in the firmware), then:
+# Debian 13 reinstalled (INSTALLATION.md chapter 3, steps 1-3; same IP, Wake-on-LAN in the firmware), then:
+ssh-keygen -R 192.168.178.222       # admin machine: the reinstalled host has a new host key
+ssh-copy-id admin@192.168.178.222   # compare the new fingerprint (INSTALLATION.md chapter 3, step 4)
 ansible-playbook -i inventory/hosts.yml playbooks/bootstrap.yml --limit execution_workers -K
 ansible-playbook -i inventory/hosts.yml playbooks/deploy.yml --limit execution_workers -K
 ```
@@ -78,7 +82,10 @@ the scheduler.
 ## 3. Model worker `.224`
 
 ```bash
-# Debian 13 reinstalled, Secure Boot off (or MOK, INSTALLATION.md 5.6), then (two reboots for the driver):
+# Debian 13 reinstalled (INSTALLATION.md chapter 3, steps 1-3), Secure Boot off (or a new DKMS key enrolled
+# before this run, INSTALLATION.md 5.5), then (two reboots for the driver):
+ssh-keygen -R 192.168.178.224       # admin machine: the reinstalled host has a new host key
+ssh-copy-id admin@192.168.178.224   # compare the new fingerprint (INSTALLATION.md chapter 3, step 4)
 ansible-playbook -i inventory/hosts.yml playbooks/bootstrap.yml --limit model_workers -K -e nvidia_allow_reboot=true
 ansible-playbook -i inventory/hosts.yml playbooks/deploy.yml --limit model_workers -K    # also pulls the models
 nvidia-smi --query-gpu=driver_version,name,compute_cap --format=csv,noheader             # 580.x, GTX 1080, 6.1
@@ -91,6 +98,9 @@ supported by the R580 driver (or, for a newer card, a newer branch: then reconsi
 ## 4. Web UI `.223`
 
 ```bash
+# Debian 13 reinstalled (INSTALLATION.md chapter 3, steps 1-3), then:
+ssh-keygen -R 192.168.178.223       # admin machine: the reinstalled host has a new host key
+ssh-copy-id admin@192.168.178.223   # compare the new fingerprint (INSTALLATION.md chapter 3, step 4)
 ansible-playbook -i inventory/hosts.yml playbooks/bootstrap.yml --limit webui -K
 ansible-playbook -i inventory/hosts.yml playbooks/deploy.yml --limit webui -K
 ```
@@ -124,11 +134,11 @@ first.
 
 | Credential | Rotate with |
 |---|---|
-| worker token | `hermclaw-credential generate worker-token-<id> --force` on `.225`, delete `hermclaw-worker-token` on the worker, re-run the worker bootstrap, restart `hermclaw-api hermclaw-scheduler` and the worker service |
-| GitLab token | new token in GitLab → `hermclaw-credential set gitlab-token --force` → restart `hermclaw-scheduler` |
-| LiteLLM master key | `hermclaw-credential generate litellm-master-key --force` → restart `hermclaw-litellm hermclaw-scheduler` |
-| API admin token | `hermclaw-credential generate api-admin-token --force` → restart `hermclaw-api`; API tokens created with `hermclaw token-create` are revoked with `hermclaw token-revoke` |
-| backup manifest key | new key into the password manager → `hermclaw-credential set backup-manifest-key --force`; sets signed with the old key verify only with the old key (keep it in the password manager) |
-| SSH runtime key | `ssh-keygen` a new `/etc/hermclaw/ssh/id_ed25519` (or delete it and re-run the orchestrator bootstrap), re-run the bootstrap of `.222/.223/.224` (distributes the public key) and update the GitLab deploy key |
+| worker token | on `.225`: `sudo /opt/hermclaw/bin/hermclaw-credential generate worker-token-<id> --force`; on the worker: `sudo rm /etc/credstore.encrypted/hermclaw-worker-token`; re-run the worker bootstrap (`playbooks/bootstrap.yml --limit <group> -K`); `sudo systemctl restart hermclaw-api hermclaw-scheduler` on `.225` and the worker service (`hermclaw-exec-worker` / `hermclaw-model-worker`) |
+| GitLab token | new token in GitLab → `sudo /opt/hermclaw/bin/hermclaw-credential set gitlab-token --force` → `sudo systemctl restart hermclaw-scheduler` |
+| LiteLLM master key | `sudo /opt/hermclaw/bin/hermclaw-credential generate litellm-master-key --force` → `sudo systemctl restart hermclaw-litellm hermclaw-scheduler` |
+| API admin token | `sudo /opt/hermclaw/bin/hermclaw-credential generate api-admin-token --force` → `sudo systemctl restart hermclaw-api`; tokens created with `sudo hermclaw token-create` are revoked with `sudo hermclaw token-revoke <name>` |
+| backup manifest key | new key into the password manager → `sudo /opt/hermclaw/bin/hermclaw-credential set backup-manifest-key --force`; sets signed with the old key verify only with the old key (keep it in the password manager) |
+| SSH runtime key | `sudo rm /etc/hermclaw/ssh/id_ed25519 /etc/hermclaw/ssh/id_ed25519.pub`, re-run the orchestrator bootstrap (generates the key, owner `hermclaw`, `0600`); on each of `.222/.223/.224` remove the old key (`sudo rm /home/hermclaw-admin/.ssh/authorized_keys`), then re-run their bootstrap (writes the file again with the new public key only) and update the GitLab deploy key |
 
 Update the password manager entry after every rotation.

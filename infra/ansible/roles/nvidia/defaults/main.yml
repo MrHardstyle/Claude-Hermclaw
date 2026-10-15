@@ -24,7 +24,7 @@ nvidia_source: runfile
 
 # --- runfile ------------------------------------------------------------------------------
 # Latest 580 release on 2026-10-14 ("NVIDIA Certified", 2026-06-25). Upgrade only after the
-# GPU smoke test (`hermclaw-model-worker selftest`).
+# GPU smoke test (INSTALLATION.md 5.6).
 nvidia_runfile_version: "580.173.02"
 nvidia_runfile_base: https://download.nvidia.com/XFree86/Linux-x86_64
 nvidia_runfile_name: "NVIDIA-Linux-x86_64-{{ nvidia_runfile_version }}.run"
