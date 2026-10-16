@@ -410,8 +410,9 @@ def _base_rules(kind_capability: dict[str, str], capability_names: Sequence[str]
         "something the implementing step's own acceptance does not; a small job usually needs one implement step.",
         "Choose the simplest solution that fully meets the job. Use the language's standard library and the tools the "
         "repository or the sandbox already has (e.g. its test runner) unless the job explicitly asks for a framework or "
-        "library, or the repository already uses one. Every external dependency is an extra failure source: add one "
-        "only when the job cannot reasonably be done without it, and state the reason under assumptions.",
+        "library, or the repository already uses one. Every external dependency is an extra failure source: a "
+        "repository without a dependency manifest gets third-party packages only when the job names them (the runtime "
+        "refuses to install others), so plan the standard-library solution unless the job asks for a package.",
         f"Every mutating step (kinds: {MUTATING_KINDS_TEXT}) MUST have machine-checkable acceptance criteria. "
         f"Use only these evidence types: {', '.join(EVIDENCE_TYPES)}. Examples:\n{_evidence_examples()}",
         "Test evidence uses the repository's own test command as given in repository_inventory/existing_tests. "

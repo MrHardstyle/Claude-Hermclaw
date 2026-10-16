@@ -592,3 +592,50 @@ async def test_identical_command_on_unchanged_files_is_not_rerun(sessionmaker: S
     assert (await h.call("write_file", path="src/gen_new.py", content="X = 1\n")).ok
     assert (await h.call("run_test", command="python -m unittest")).ok  # after a file change it runs again
     assert len(rec.requests) == 3
+
+
+async def test_a_successful_install_allows_rerunning_the_same_command(sessionmaker: SM, repo: Path) -> None:
+    """Live job d50dc59e (J1, rc11): after install_dependencies succeeded, the same test command was refused as a
+    repeat – the install changed the environment (/deps), not a workspace file. A successful install resets it."""
+    (repo / "requirements.txt").write_text("httpx\n", encoding="utf-8")
+    rec = InstallRecorder("httpx==0.28.1\n")
+    perms = ToolPermissions.for_step(kind="implement", dependency_install=True)
+    h = await make_harness(sessionmaker, repo, contract=scope(**SCOPE), permissions=perms, executor=rec)
+    assert (await h.call("run_test", command="python -m pytest -q")).ok
+    assert (await h.call("run_test", command="python -m pytest -q")).error_code == E.COMMAND_REPEATED
+    assert (await h.call("install_dependencies", ecosystem="python")).ok
+    assert (await h.call("run_test", command="python -m pytest -q")).ok  # runs again after the install
+    assert len(rec.requests) == 3
+
+
+async def test_new_dependencies_only_when_the_job_names_them(sessionmaker: SM, repo: Path) -> None:
+    """Analysis 2026-10-16 (U2), live job d50dc59e: for "Erstelle einen funktionierenden Health-Endpunkt mit Test" the
+    coder created requirements.txt with fastapi/uvicorn – the source of the dependency failures of earlier jobs. In a
+    repository without a manifest, an install happens only when the job names one of the packages."""
+    (repo / "requirements.txt").write_text("fastapi==0.104.1\nuvicorn\nhttpx\n", encoding="utf-8")  # new, uncommitted
+    plain_job = "Erstelle einen funktionierenden Health-Endpunkt mit Test."
+    rec = InstallRecorder("fastapi==0.104.1\n")
+    perms = ToolPermissions.for_step(kind="implement", dependency_install=True, job_text=plain_job)
+    h = await make_harness(sessionmaker, repo, contract=scope(**SCOPE), permissions=perms, executor=rec)
+    res = await h.call("install_dependencies", ecosystem="python")
+    assert res.error_code == E.DEPENDENCY_NOT_REQUESTED and "standard library" in res.output and rec.requests == []
+    named = ToolPermissions.for_step(kind="implement", dependency_install=True, job_text="Baue den Endpunkt mit FastAPI.")
+    h2 = await make_harness(sessionmaker, repo, contract=scope(**SCOPE), permissions=named, executor=rec)
+    assert (await h2.call("install_dependencies", ecosystem="python")).ok  # fastapi named: its helpers come along
+    commit_all(repo)  # the repository already declares dependencies: the job may extend them freely
+    h3 = await make_harness(sessionmaker, repo, contract=scope(**SCOPE), permissions=perms, executor=rec)
+    assert (await h3.call("install_dependencies", ecosystem="python")).ok
+
+
+def test_manifest_packages_and_mentions() -> None:
+    from hermclaw.tools.engine import manifest_packages, package_mentioned
+
+    req = "# comment\nFastAPI[all]>=0.100 ; python_version>'3.8'\n-r base.txt\nhttpx==0.28\nzope.interface\n\n"
+    assert manifest_packages("python", req) == {"fastapi", "httpx", "zope.interface"}
+    pkg = '{"dependencies": {"express": "^4"}, "devDependencies": {"@nestjs/core": "1", "left-pad": "1"}}'
+    assert manifest_packages("node", pkg) == {"express", "@nestjs/core", "left-pad"}
+    assert package_mentioned("fastapi", "Baue es mit FastAPI, bitte")
+    assert package_mentioned("hermclaw-nonexistent-sdk-zz9", 'Binde "hermclaw_nonexistent_sdk_zz9" ein')
+    assert package_mentioned("@nestjs/core", "use NestJS")
+    assert not package_mentioned("express", "expressly simple endpoint")
+    assert not package_mentioned("httpx", "Erstelle einen Health-Endpunkt mit Test.")

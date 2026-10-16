@@ -41,6 +41,9 @@ class ToolPermissions:
     max_turns: int | None = None
     max_research_requests: int = 3
     max_scope_requests: int = 3
+    # text of the job (title, prompt, constraints). When set, a repository without a dependency manifest gets new
+    # third-party packages only if the job names one of them (analysis 2026-10-16, U2); ``None`` = unrestricted
+    job_text: str | None = None
 
     def allows(self, tool: ToolName) -> bool:
         return self.allowed_tools is None or tool in self.allowed_tools
@@ -60,6 +63,7 @@ class ToolPermissions:
         image: str | None = None,
         allow_destructive_commands: bool | None = None,
         dependency_install: bool = False,
+        job_text: str | None = None,
     ) -> ToolPermissions:
         """Permissions for a step: non-mutating step kinds never get write tools; operations tools are granted per
         capability (``OPS_TOOLS_BY_CAPABILITY``).
@@ -81,6 +85,7 @@ class ToolPermissions:
             network=bool(network or (capability.network if capability is not None else False)),
             image=image,
             max_turns=turn_budget,
+            job_text=job_text,
         )
 
 

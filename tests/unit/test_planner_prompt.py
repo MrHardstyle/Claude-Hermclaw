@@ -202,6 +202,7 @@ def test_research_is_for_external_facts_not_the_repository_itself() -> None:
         # U2 / U3: simplest sufficient solution, code and its tests in one step
         assert "Choose the simplest solution that fully meets the job" in system and "standard library" in system
         assert "never split code and its tests into separate steps" in system
+        assert "gets third-party packages only when the job names them" in system
 
 
 def test_replanner_system_prompt_adds_rerun_rules() -> None:
@@ -244,3 +245,4 @@ def test_prompts_explain_how_dependencies_get_into_the_sandbox() -> None:
     assert (
         "Prefer the simplest solution" in DEFAULT_SYSTEM_CONTRACT and "never\n  for facts about this repository" in DEFAULT_SYSTEM_CONTRACT
     )
+    assert "gets third-party packages only when the job names them" in DEFAULT_SYSTEM_CONTRACT

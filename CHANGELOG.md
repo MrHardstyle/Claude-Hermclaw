@@ -2,6 +2,20 @@
 
 Format: [Keep a Changelog](https://keepachangelog.com/de/1.1.0/), Versionen nach PEP 440.
 
+## [0.1.0rc12] – Release Candidate (2026-10-17)
+
+Erster erfolgreicher Auftrag der Batterie (J1 auf 0.1.0rc11 mit AVX2-fähigen VMs: `succeeded` in 10,3 min, 2 Steps, kein
+Replan). Fixes der verbleibenden Kriterien (BUG-173, BUG-174); DNS-Verwaltung in der Rolle common (BUG-172).
+
+### Behoben
+- **Wiederholungssperre (BUG-173):** nach erfolgreicher Installation laufen Befehle wieder.
+- **Unverlangte Abhängigkeiten (BUG-174):** in einem Repository ohne Manifest werden nur Pakete installiert, die der
+  Auftrag nennt; sonst Standardbibliothek.
+
+### Betrieb
+- VM 102 (.222) und 104 (.224) auf CPU-Typ `x86-64-v3` (AVX2/FMA): Generierung auf .224 bis ~9× schneller.
+- Merge Requests: `policies.git.create_merge_request: true` über das Inventar (`hermclaw_config_overrides`).
+
 ## [0.1.0rc11] – Release Candidate (2026-10-16)
 
 Fix aus J2 des ersten Batterie-Laufs (BUG-171); enthält 0.1.0rc10 (nicht separat ausgerollt).

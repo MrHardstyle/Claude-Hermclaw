@@ -36,7 +36,7 @@ from hermclaw.core.logging import get_logger
 from hermclaw.core.redaction import DEFAULT_REDACTOR
 from hermclaw.events.store import append_event
 from hermclaw.models.protocols import ChatModel
-from hermclaw.persistence.models import Step, StepAttempt
+from hermclaw.persistence.models import Job, JobInput, Step, StepAttempt
 from hermclaw.research.findings import research_findings
 from hermclaw.runtime.transitions import emit_status
 from hermclaw.scheduler.handlers import StepOutcome, StepRunContext
@@ -230,6 +230,15 @@ class ImplementStepHandler:
         async with self.sm() as s:
             return (await s.execute(select(Step).where(Step.id == step_id))).scalar_one()
 
+    async def _job_text(self, job_id: uuid.UUID) -> str:
+        """Title, prompt and constraints of the job: which third-party packages the job itself asks for."""
+        async with self.sm() as s:
+            job = await s.get(Job, job_id)
+            inputs = (await s.execute(select(JobInput.content).where(JobInput.job_id == job_id))).scalars().all()
+        if job is None:
+            return ""
+        return "\n".join([job.title, job.prompt, *(str(i) for i in inputs)])
+
     async def _workspace(self, job_id: uuid.UUID) -> tuple[Any, WorkspaceHandle] | None:
         for ws in await self.deps.git.list_workspaces(job_id):
             if ws.status not in ("archived", "cleaned", "removed", "failed"):
@@ -335,6 +344,7 @@ class ImplementStepHandler:
                 turn_budget=row.turn_budget,
                 capability=capability,
                 dependency_install=self.config.policies.sandbox.egress.enabled,  # D-014
+                job_text=await self._job_text(ctx.job_id),
             ),
             ops=self.deps.ops,
             capability=row.capability,

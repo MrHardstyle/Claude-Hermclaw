@@ -1,7 +1,7 @@
 # STATUS
 
 ## Aktueller Zustand (2026-10-16)
-- Projekt: Hermclaw Next · Branch: `claude/hermclaw-next-build` · Version `0.1.0rc11` (gebaut); **deployt: 0.1.0rc9** auf .222–.225 (Deployment jetzt durch Claude, Become-Passwort per systemd-creds)
+- Projekt: Hermclaw Next · Branch: `claude/hermclaw-next-build` · Version `0.1.0rc12` (gebaut); **deployt: 0.1.0rc11** auf .222–.225 (Deployment jetzt durch Claude, Become-Passwort per systemd-creds)
 - **Live-Abnahme nach Kapitel 12 durchgeführt** (2026-10-16): 396 Schritte erledigt, 34 mit offenem Live-Teil (`[~]`), 0 offen.
 - 0.1.0rc2 deployt (vom Betreiber, alle Hosts inkl. .224): doctor 19 ok, models 6/6 (Fallback, BUG-150 wirksam), workers 3/3.
 - Erster Testauftrag erneut eingereicht (Job `eadf1b6f…`): Die Erstplanung ist jetzt gültig (BUG-143 wirkt, Steps mit Scope),
@@ -28,7 +28,10 @@
 - Batterie-Lauf 1 auf 0.1.0rc9, J1 (Job `04820ff9…`): Erstplan 2 Steps, keine Recherche, Code+Test in einem Step; Coder
   fertig mit grünen Tests im ersten Versuch – Verifier lehnte wegen fehlendem Test-Kriterium ab (BUG-170). Lauf nach J2
   abgebrochen; Fix in 0.1.0rc10. J2 (Job `50784df5…`): Coder ohne Gedächtnis über Züge (liest dieselben Dateien,
-  wiederholt grüne Testläufe, BUG-171); Fix in **0.1.0rc11** (enthält rc10).
+  wiederholt grüne Testläufe, BUG-171); Fix in 0.1.0rc11 (enthält rc10, deployt).
+- **Batterie auf 0.1.0rc11 mit AVX2: J1 erstmals `succeeded`** (Job `d50dc59e…`, 10,3 min, 2 Steps, kein Replan, Verifier
+  bestanden). Offen laut Kriterien: kein MR (Policy aus → im Inventar eingeschaltet), neue Abhängigkeit FastAPI (BUG-174),
+  Wiederholungssperre nach Installation (BUG-173). Fixes in **0.1.0rc12**.
 - **Hardware (2026-10-17):** Alle VMs liefen mit CPU-Typ `x86-64-v2-AES` (kein AVX/AVX2/FMA); die 18-GB-Modelle rechnen
   größtenteils auf der CPU. Mit Freigabe des Betreibers VM 102 (.222) und VM 104 (.224) über die Proxmox-API auf
   `x86-64-v3` umgestellt (VM 105/.225 folgt später). Messung auf .224 (Generierung): qwen3-coder:30b 2 → 18,9 Token/s,
@@ -125,8 +128,8 @@ Lint, mypy, ShellCheck, ansible-lint (production) sauber.
 - Embeddings: `embeddinggemma:300m` (768 dim; EmbeddingGemma 2 erst, wenn Ollama es unter Linux/CUDA ausführt, D-010)
 
 ## Bugs
-- 172 gefunden, **172 behoben** (P0 2, P1 38, P2 68, P3 54, P4 3) – `BUGS.md`. Live-Abnahme: BUG-143 bis BUG-172.
-  BUG-143–169 sind produktiv (0.1.0rc9); BUG-170/171 wirken nach dem Deployment von 0.1.0rc11.
+- 174 gefunden, **174 behoben** (P0 2, P1 38, P2 69, P3 55, P4 3) – `BUGS.md`. Live-Abnahme: BUG-143 bis BUG-174.
+  BUG-143–172 sind produktiv (0.1.0rc11); BUG-173/174 wirken nach dem Deployment von 0.1.0rc12.
 - Externe Blocker: BLOCKER-002 (Tag-Push)
 
 ## Letzte Testresultate (2026-10-15, Build-Host)
@@ -151,7 +154,7 @@ Tests 2026-10-15, einzeln ausgeführt: `test_bootstrap_infra` 63, `test_bootstra
 bestanden; ansible-lint (production) sauber. `test_deploy_converge` ist angepasst; ihn führt der Integrator aus.
 
 ## Nächster Schritt
-1. 0.1.0rc11 ausrollen (`hermclaw_version: "0.1.0rc11"` im Inventar, `ansible-playbook … deploy.yml`), Fixtures pushen
+1. 0.1.0rc12 ausrollen (`hermclaw_version: "0.1.0rc12"` im Inventar, `ansible-playbook … deploy.yml`), Fixtures pushen
    (`scripts/ops/acceptance-fixtures.sh`) und die Auftragsbatterie `hermclaw acceptance-jobs` J1–J6 laufen lassen; danach Abbruch,
    parallele Jobs und Worker-Neustart prüfen.
 2. Wake-on-LAN einrichten (MACs, BIOS, Kapitel 13.1), danach `--suite wol --full-wol` und erst dann den Leerlauf-Suspend einschalten.

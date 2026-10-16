@@ -46,6 +46,18 @@ Noch keine.
 
 ## Behobene Bugs
 
+### BUG-174 – Modelle führen Frameworks und Pakete ein, die der Auftrag nicht verlangt (Durchsetzung)
+- Phase: Batterie-Lauf auf 0.1.0rc11 mit AVX2 (J1) · Komponente: tools/engine (`install_dependencies`), coder/handler, Planner-Prompt, Coder-Vertrag · Severity: P2 · blockierend: nein (behoben) · Status: **behoben** (`tests/integration/test_tools_engine_exec.py::test_new_dependencies_only_when_the_job_names_them`, `tests/integration/test_tools_engine_exec.py::test_manifest_packages_and_mentions`)
+- Reproduktion: Job `d50dc59e-c88e-4d66-876f-71323f4c5081` (J1 „Erstelle einen funktionierenden Health-Endpunkt mit Test“, erstmals `succeeded`, 10,3 min): Der Coder legte `requirements.txt` mit fastapi/uvicorn an – trotz Planner-Regel „simplest solution“ (BUG-169). Frühere Jobs scheiterten genau an solchen Abhängigkeiten (fehlendes httpx, pytest-Pins, Installationsschleifen).
+- Ursache: Die Einfachheitsregel war nur ein Prompt; nichts hinderte die Modelle an unnötigen Abhängigkeiten.
+- Fix: `install_dependencies` installiert in einem Repository, das zu Schrittbeginn kein Manifest hatte, nur, wenn der Auftrag (Titel, Prompt, Constraints) mindestens eines der Pakete nennt; sonst `DEPENDENCY_NOT_REQUESTED` mit Verweis auf Standardbibliothek und vorhandene Test-Runner. Planner-Prompt und Coder-Vertrag nennen die Regel. Bestehende Manifeste bleiben frei erweiterbar.
+
+### BUG-173 – Wiederholungssperre verweigerte Tests nach erfolgreicher Installation
+- Phase: Batterie-Lauf auf 0.1.0rc11 (J1) · Komponente: tools/engine · Severity: P3 · blockierend: nein (behoben) · Status: **behoben** (`tests/integration/test_tools_engine_exec.py::test_a_successful_install_allows_rerunning_the_same_command`)
+- Reproduktion: Job `d50dc59e…`, Zug 11 `install_dependencies` erfolgreich, Zug 12 `run_test python -m pytest -q` → `COMMAND_REPEATED` (Fix BUG-171), obwohl sich die Umgebung (`/deps`) geändert hatte; der Coder wich auf `-v` aus.
+- Ursache: Die Sperre zählte nur Workspace-Dateiänderungen.
+- Fix: Eine erfolgreiche Installation verwirft die gemerkten Befehlsergebnisse.
+
 ### BUG-172 – DNS nach Neustart weg: statische IPv4 ohne Nameserver, DNS nur aus IPv6-Router-Advertisements
 - Phase: Betrieb, Neustart von .222/.224 für die CPU-Umstellung (2026-10-17) · Komponente: infra/ansible (Rolle common) · Severity: P1 · blockierend: ja (behoben) · Status: **behoben** (Rolle `common`, `tasks/dns.yml`; live: Sandbox-Suite auf .222 nach dem Fix 29/29)
 - Reproduktion: Nach dem Neustart von VM 102 (.222) schrieb dhcpcd eine `/etc/resolv.conf` ohne Nameserver (IPv4 statisch in `/etc/network/interfaces`, DNS kam bisher nur per IPv6-RA). Folge: Image-Pulls und der Egress-Proxy scheiterten, die Sandbox-Suite übersprang alle 29 Tests („no non-loopback nameserver“); doctor meldete trotzdem 19 ok.

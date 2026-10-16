@@ -21,6 +21,7 @@ import asyncio
 import functools
 import hashlib
 import json
+import re
 import shlex
 import stat
 import time
@@ -98,6 +99,42 @@ TIMEOUT_HINT = (
 )
 IMAGE_CONSTRAINTS = "/tmp/hermclaw-image-constraints.txt"  # noqa: S108 - path inside the sandbox
 PYTHON_DEPS_DIR = "/deps/python"
+
+
+_REQ_NAME = re.compile(r"^\s*([A-Za-z0-9][A-Za-z0-9._-]*)")
+
+
+def manifest_packages(ecosystem: str, text: str) -> set[str]:
+    """Top-level package names declared in a requirements.txt or package.json (best effort, no resolution)."""
+    names: set[str] = set()
+    if ecosystem == "python":
+        for raw in text.splitlines():
+            line = raw.split("#", 1)[0].strip()
+            if not line or line.startswith(("-", "git+", "http://", "https://")):
+                continue
+            m = _REQ_NAME.match(line)
+            if m:
+                names.add(m.group(1).lower())
+        return names
+    try:
+        doc = json.loads(text)
+    except ValueError:
+        return names
+    for key in ("dependencies", "devDependencies", "optionalDependencies", "peerDependencies"):
+        section = doc.get(key) if isinstance(doc, dict) else None
+        if isinstance(section, dict):
+            names.update(str(n).lower() for n in section)
+    return names
+
+
+def package_mentioned(package: str, job_text: str) -> bool:
+    """Whether the job text names ``package`` (case-insensitive; '-', '_' and '.' interchangeable; a scope like
+    '@nestjs/core' also matches 'nestjs')."""
+    norm = re.sub(r"[-_.]+", "-", job_text.lower())
+    candidates = {re.sub(r"[-_.]+", "-", package.lower())}
+    if package.startswith("@") and "/" in package:
+        candidates.add(package[1:].split("/", 1)[0].lower())
+    return any(re.search(rf"(?<![a-z0-9]){re.escape(c)}(?![a-z0-9])", norm) for c in candidates if c)
 
 
 def python_install_command(manifest: str) -> str:
@@ -1218,6 +1255,26 @@ class ToolEngine:
             },
         )
 
+    def _check_requested_packages(self, ecosystem: str, manifest: str) -> None:
+        """A repository that had no dependency manifest gets third-party packages only when the job asks for one of
+        them by name. Live jobs reached for frameworks (FastAPI, Express) for jobs the standard library solves; every
+        dependency added install, pin and test-client failures unrelated to the job (analysis 2026-10-16, U2)."""
+        job = self.permissions.job_text
+        if job is None or (self._base_files is not None and manifest in self._base_files):
+            return
+        text = self.fs.read_text(manifest, max_bytes=1_000_000).text
+        packages = manifest_packages(ecosystem, text)
+        if not packages or any(package_mentioned(p, job) for p in packages):
+            return
+        raise ToolError(
+            E.DEPENDENCY_NOT_REQUESTED,
+            f"install refused: the job does not ask for any of {', '.join(sorted(packages)[:8])}, and the repository had "
+            f"no {manifest}. Solve it with the standard library and the tools the sandbox already has (e.g. http.server, "
+            "unittest/pytest, node:http, node --test); remove the manifest and the imports. Only a job that names a "
+            "package gets it installed.",
+            data={"packages": sorted(packages)[:50], "manifest": manifest},
+        )
+
     def _missing_module_hint(self, output: str) -> str | None:
         """A run that failed on an import of a third-party module: say how it gets into the sandbox (BUG-165)."""
         local = {name.removesuffix(".py") for name in self._local_roots()}
@@ -1260,6 +1317,8 @@ class ToolEngine:
 
     async def _install_dependencies(self, args: InstallDependenciesArgs, ctx: CallContext, events: list[PendingEvent]) -> ToolResult:
         manifest, command, digest = await asyncio.to_thread(self._install_command, args)
+        await self._load_base()
+        self._check_requested_packages(args.ecosystem, manifest)
         if self._installed.get((args.ecosystem, manifest)) == digest:
             raise ToolError(
                 E.INSTALL_UNCHANGED,
@@ -1294,6 +1353,9 @@ class ToolEngine:
         installed = installed_packages(args.ecosystem, res.stdout if res else "") if error_code is None else []
         if error_code is None:
             self._installed[(args.ecosystem, manifest)] = digest
+            # new packages change what commands can do although no workspace file changed: earlier results are stale
+            self._ran.clear()
+            self._timed_out.clear()
             text += f"\n[dependencies] {len(installed)} package(s) available to later commands and tests of this job"
         elif error_code == E.COMMAND_FAILED and args.ecosystem == "python":
             text += (
