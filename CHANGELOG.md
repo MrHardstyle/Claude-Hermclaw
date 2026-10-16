@@ -2,6 +2,16 @@
 
 Format: [Keep a Changelog](https://keepachangelog.com/de/1.1.0/), Versionen nach PEP 440.
 
+## [0.1.0rc10] – Release Candidate (2026-10-16)
+
+Fix aus dem ersten Lauf der Live-Auftragsbatterie (J1 auf 0.1.0rc9: Plan und Umsetzung korrekt, Verifier-Ablehnung
+wegen fehlendem Test-Kriterium, BUG-170).
+
+### Behoben
+- **Test-Kriterium (BUG-170):** Umsetzungs-Steps, die Tests schreiben oder in einem Repository mit Tests arbeiten,
+  erhalten automatisch ein Test-Kriterium; Plan-Defekte gehen ohne Korrekturversuch an den Replanner; doppelte
+  Akzeptanzkriterien werden zusammengefasst.
+
 ## [0.1.0rc9] – Release Candidate (2026-10-16)
 
 Ursachenanalyse aller Live-Jobs (Ursachenanalyse `docs/analysis/live-job-root-causes-2026-10-16.md`) und allgemeine Fixes der Ursachen (BUG-166 bis BUG-169) statt weiterer

@@ -177,7 +177,7 @@ Ein Release gilt erst als abgenommen, wenn die Suite die Kriterien in **zwei auf
 | A3 | umgesetzt (BUG-169) | Validierung „only writes tests for the code of step …“; Replans mit abgeschlossenem Code-Step ausgenommen |
 | A4 | umgesetzt (BUG-166) | `acceptance_glob_matches` (gitignore-Konvention für Dateinamen-Globs); `must_change`-Prüfung im Plan |
 | A5 | umgesetzt (BUG-167) | `PYTHONPATH=/workspace[:/deps/python]`; live auf .222 (`test_live_project_package_is_importable_with_plain_pytest`) |
-| A6 | zurückgestellt | Nach A4 gibt es keinen bekannten Fall mehr. Die Batterie misst Verifier-Ablehnungen (`verifier_failures`); tritt ein unbehebbarer Fall auf, wird A6 umgesetzt. |
+| A6 | umgesetzt in 0.1.0rc10 (BUG-170) | Batterie-Lauf 1, J1 (Job `04820ff9`): Plan und Code korrekt, Tests grün, `complete_step` im ersten Versuch – Verifier lehnte wegen fehlendem Test-Kriterium ab, drei Korrekturen liefen ins Leere. Jetzt: Anreicherung ergänzt das Test-Kriterium; Plan-Defekte gehen direkt an den Replanner (`ACCEPTANCE_DEFECT`). |
 | A7 | umgesetzt | `test_planner_loop.py::test_live_first_plan_is_repaired_into_one_step_without_web_research` (Plan v1 aus rc6), Validierungstests mit den aufgezeichneten Fragen |
 | A8 | umgesetzt | `hermclaw job-metrics`, `hermclaw acceptance-jobs`, `config/acceptance-jobs.example.yaml`, `tests/live/fixtures/`, `scripts/ops/acceptance-fixtures.sh` |
 

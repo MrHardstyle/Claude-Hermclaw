@@ -68,6 +68,19 @@ _BLOCK_REASONS = {
 }
 
 
+def acceptance_defects(report: VerificationReport) -> list[str]:
+    """Blocking verifier failures that no change of the code can fix, only a change of the plan: an implementing step
+    in a repository with tests whose acceptance has no test criterion at all."""
+    out: list[str] = []
+    for check in report.failures:
+        if check.check_type == "test_evidence" and check.evidence.get("test_evidence_count") == 0:
+            out.append(
+                f"{check.message} – the plan gave this step no test criterion; give it test evidence that runs the tests "
+                "of the files it changes"
+            )
+    return out
+
+
 # ----------------------------------------------------------------------------- ports (adapters wrap P21/P22/P12)
 @dataclass
 class VerificationOutcome:
@@ -455,6 +468,19 @@ class ImplementStepHandler:
         await self._status(ctx, f"Verifier prüft {row.step_key}")
         outcome = await self.deps.verifier.verify(step, handle, job_id=ctx.job_id, step_id=ctx.step_id, attempt_id=ctx.attempt_id)
         if not outcome.report.passed:
+            defects = acceptance_defects(outcome.report)
+            if defects and len(defects) == len(outcome.report.failures):
+                # the code may be right; only the plan can change the step's acceptance: a correction attempt could
+                # never pass (live job 04820ff9, analysis 2026-10-16, A6)
+                detail = "; ".join(defects)
+                return StepOutcome(
+                    "blocked",
+                    summary="acceptance criteria of the step are incomplete",
+                    error_code="ACCEPTANCE_DEFECT",
+                    error_message=DEFAULT_REDACTOR.text(detail)[:2000],
+                    replan_reason="repeated_verifier_failure",
+                    replan_evidence={"source": "verifier", "acceptance_defect": True, "detail": DEFAULT_REDACTOR.text(detail)[:2000]},
+                )
             items = CorrectionItem.from_verification(outcome.report)
             return await self._correction(
                 ctx, row, "verifier", list(items), "VERIFIER_FAILED", outcome.report.summary or "verification failed"

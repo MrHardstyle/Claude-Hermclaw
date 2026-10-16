@@ -171,7 +171,8 @@ async def test_react_directory_hint_and_new_paths(sessionmaker: object) -> None:
     await Planner(chat, sm, get_config()).create_plan(job_id, REACT.inputs)
     rows = await _steps(sm, job_id)
     assert rows["S002"].allowed_new_paths == ["src/components/FilterToggle.tsx"]
-    assert _acc(rows["S002"]) == ["presence", "scope", "security"]
+    # the repository has tests (npm test -- --run): the step gets the test criterion the verifier requires (A6)
+    assert _acc(rows["S002"]) == ["presence", "test", "scope", "security"]
     assert chat.user_payload()["repository_inventory"]["test_command"] == "npm test -- --run"
 
 

@@ -60,7 +60,8 @@ def test_mutating_step_without_acceptance_gets_diff_test_scope_security() -> Non
 def test_substantive_acceptance_is_kept_and_only_scope_security_added() -> None:
     s = _step(repo_hints=["app/routers/users.py"], acceptance=[{"type": "presence", "path_glob": "app/routers/users.py", "pattern": "x"}])
     acceptance, added = generate_acceptance(s, _ctx())
-    assert added == ["scope", "security"] and [a.type for a in acceptance] == ["presence", "scope", "security"]
+    # the repository has tests: the verifier requires a passing test run, so the plan gets the test criterion (A6)
+    assert added == ["test", "scope", "security"] and [a.type for a in acceptance] == ["presence", "test", "scope", "security"]
 
 
 def test_existing_scope_and_security_are_not_duplicated() -> None:
@@ -230,3 +231,27 @@ def test_preserved_steps_are_not_enriched() -> None:
     s001, s002 = result.plan.steps
     assert s001.acceptance == [] and s001.risk == Risk.low
     assert s002.risk == Risk.medium and result.risk_raised == {"S002": ("low", "medium")}
+
+
+def test_steps_that_write_tests_get_test_evidence_even_with_substantive_acceptance() -> None:
+    """Live job 04820ff9 (analysis 2026-10-16, A6): the plan had diff evidence only. The coder wrote main.py and
+    test_main.py, ran the tests green and completed – the verifier then failed the step ("implement step in a
+    repository with tests has no test evidence"), and no correction could change the plan's acceptance."""
+    ctx = _ctx(YAML_CONFIG.inputs)  # no test command detected, no tests in the repository
+    diff = [{"type": "diff", "must_change": ["main.py", "test_main.py"]}]
+    py = _step(allowed_new_paths=["main.py", "test_main.py"], acceptance=diff)
+    acceptance, added = generate_acceptance(py, ctx)
+    test = next(a for a in acceptance if a.type == "test")
+    assert "test" in added and test.command == "python -m pytest -q" and test.framework == "pytest"
+    js = _step(allowed_new_paths=["src/slugify.js", "test/slugify.test.js"], acceptance=diff)
+    assert next(a for a in generate_acceptance(js, ctx)[0] if a.type == "test").command == "node --test"
+    no_tests = _step(allowed_new_paths=["config/new.yaml"], acceptance=[{"type": "diff", "must_change": ["config/new.yaml"]}])
+    assert "test" not in generate_acceptance(no_tests, ctx)[1]
+
+
+def test_identical_acceptance_criteria_are_dropped() -> None:
+    """Live job 50784df5: Gemma repeated an empty diff criterion 28 times in a verify step."""
+    empty = {"type": "diff", "allow_empty": True, "must_change": [], "must_not_change": []}
+    verify = step("S002", "verify", "testing", "Verify it.", depends_on=["S001"], acceptance=[empty, {"type": "scope"}, *[empty] * 27])
+    acceptance, _ = generate_acceptance(PlanStep.model_validate(verify), _ctx())
+    assert [a.type for a in acceptance] == ["diff", "scope"]

@@ -254,6 +254,44 @@ async def test_exhausted_corrections_escalate_to_replan(world: World, tmp_path: 
     assert _remote_value(world) == "VALUE = 2"
 
 
+async def test_missing_test_criterion_goes_to_the_replanner_not_to_a_correction(world: World, tmp_path: Path) -> None:
+    """Live job 04820ff9 (analysis 2026-10-16, A6): the code and its tests were right and green, but the plan gave the
+    step no test criterion; the verifier failed it ("no test evidence") and three correction attempts re-ran green
+    tests until stagnation. Such a failure is a plan defect: the step goes straight to the replanner."""
+
+    class NoTestCriterion(ScriptedVerifier):
+        async def verify(self, step: StepContract, workspace: WorkspaceHandle, **kw: Any) -> VerificationOutcome:
+            if not self.results or not self.results[0]:
+                self.calls += 1
+                if self.results:
+                    self.results.pop(0)
+                check = VerificationCheck(
+                    check_type="test_evidence",
+                    name="test_evidence",
+                    status="fail",
+                    message="implement step in a repository with tests has no test evidence: add a test criterion",
+                    evidence={"test_files_sample": ["tests/test_module.py"], "test_evidence_count": 0},
+                )
+                report = VerificationReport(passed=False, checks=[check], summary="1 blocking failure")
+                async with self.world.sessionmaker() as s:
+                    vr = VerificationRun(job_id=kw["job_id"], step_id=kw["step_id"], passed=False, status="failed", summary=report.summary)
+                    s.add(vr)
+                    await s.commit()
+                return VerificationOutcome(report=report, run_id=vr.id)
+            return await super().verify(step, workspace, **kw)
+
+    models = Models([_plan(), _replan()], [EDIT, DONE, EDIT, DONE])
+    verifier = NoTestCriterion(world, [False, True])
+    jid = await _job(world)
+    jobs = await _run(world, _driver(world, models, tmp_path), [_handler(world, models, verifier, None), ReviewHandler()], [jid])
+    assert jobs[jid].status == "succeeded", (jobs[jid].error_code, jobs[jid].error_message)
+    assert jobs[jid].replan_count == 1
+    async with world.sessionmaker() as s:
+        old = (await s.execute(select(Step).where(Step.job_id == jid, Step.step_key == "S001"))).scalar_one()
+    assert old.correction_count == 0 and old.error_code == "ACCEPTANCE_DEFECT"  # no correction attempt was spent
+    assert "no test criterion" in json.dumps(models.user_payload(1))
+
+
 async def test_stagnation_research_recommendation_feeds_research_into_correction(world: World, tmp_path: Path) -> None:
     from hermclaw.coder import StagnationDirective
 

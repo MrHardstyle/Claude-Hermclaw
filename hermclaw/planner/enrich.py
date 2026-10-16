@@ -34,10 +34,11 @@ from hermclaw.contracts.plan import PlanContract, PlanStep
 from hermclaw.contracts.scope import normalise_path
 from hermclaw.core.errors import ValidationFailed
 from hermclaw.planner.errors import PlanInvalid
-from hermclaw.planner.inputs import GLOB_CHARS, PlannerSettings
+from hermclaw.planner.inputs import GLOB_CHARS, PlannerSettings, TestFramework
 from hermclaw.planner.parsing import format_validation_errors
 from hermclaw.planner.validation import (
     INFO_KINDS,
+    TEST_PATH_RE,
     WORKSPACE_MUTATING_KINDS,
     ValidationContext,
     find_research_step,
@@ -180,7 +181,14 @@ def add_research_steps(
 # --------------------------------------------------------------------------------------------- acceptance (14.8)
 def generate_acceptance(step: PlanStep, ctx: ValidationContext) -> tuple[list[AcceptanceCriterion], list[str]]:
     """Deterministic acceptance for a workspace-mutating step. Returns (acceptance, labels of added criteria)."""
-    acceptance: list[AcceptanceCriterion] = list(step.acceptance)
+    # identical criteria are dropped: models sometimes repeat one criterion until the list limit (live job 50784df5)
+    acceptance: list[AcceptanceCriterion] = []
+    seen: set[str] = set()
+    for item in step.acceptance:
+        key = item.model_dump_json()
+        if key not in seen:
+            seen.add(key)
+            acceptance.append(item)
     if step.kind.value not in WORKSPACE_MUTATING_KINDS:
         return acceptance, []
     added: list[str] = []
@@ -212,11 +220,58 @@ def generate_acceptance(step: PlanStep, ctx: ValidationContext) -> tuple[list[Ac
                 ),
                 "test",
             )
+    if not any(isinstance(a, TestEvidence) for a in acceptance):
+        derived = test_evidence_for(step, ctx)
+        if derived is not None:
+            add(derived, "test")
     if not any(a.type == "scope" for a in acceptance):
         add(ScopeEvidence(description="generated: all changes stay inside the runtime scope"), "scope")
     if not any(a.type == "security" for a in acceptance):
         add(SecurityEvidence(description="generated: no secrets and no conflict markers"), "security")
     return acceptance, added
+
+
+_PY_TEST: tuple[str, TestFramework] = ("python -m pytest -q", "pytest")
+_NODE_TEST: tuple[str, TestFramework] = ("node --test", "generic")
+_GO_TEST: tuple[str, TestFramework] = ("go test ./...", "go")
+
+
+def _test_runner_for(paths: Sequence[str]) -> tuple[str, TestFramework] | None:
+    """The standard test runner of the language of ``paths`` (the toolchain images ship them)."""
+    exts = {p.rsplit(".", 1)[-1].lower() for p in paths if "." in p.rsplit("/", 1)[-1]}
+    if exts & {"py"}:
+        return _PY_TEST
+    if exts & {"go"}:
+        return _GO_TEST
+    if exts & {"js", "mjs", "cjs"}:
+        return _NODE_TEST
+    return None
+
+
+def test_evidence_for(step: PlanStep, ctx: ValidationContext) -> TestEvidence | None:
+    """Test evidence for an implementing step that writes tests or works in a repository with tests.
+
+    The verifier requires a passing test run from such a step (21.12). Without a test criterion in the plan the
+    coder could finish correctly and still fail verification – a defect no correction can fix (live job 04820ff9,
+    analysis 2026-10-16, A6). The repository's own test command wins; else the language's standard runner for the
+    step's files (pytest also runs unittest tests).
+    """
+    if step.kind.value != StepKind.implement.value:
+        return None
+    paths = [*path_like_hints(step, ctx), *_normalised(step.allowed_new_paths)]
+    writes_tests = any(TEST_PATH_RE.search(p) for p in paths)
+    repo_tests = [p for p in ctx.known_paths if TEST_PATH_RE.search(p)]
+    if not writes_tests and not repo_tests:
+        return None
+    if ctx.test_command:
+        return TestEvidence(
+            description="generated: repository test suite must pass", command=ctx.test_command, framework=ctx.test_framework
+        )
+    runner = _test_runner_for(paths) or _test_runner_for(repo_tests)
+    if runner is None:
+        return None
+    command, framework = runner
+    return TestEvidence(description="generated: the step's tests must pass", command=command, framework=framework)
 
 
 def _normalised(paths: Sequence[str]) -> list[str]:
