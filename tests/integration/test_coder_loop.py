@@ -152,6 +152,26 @@ async def test_full_turn_sequence_completes_step(sessionmaker: Any, tmp_repo: Pa
     assert types.count("context.built") == 7 and "status" in types
 
 
+async def test_refused_repeat_keeps_the_real_failure_in_the_next_prompt(sessionmaker: Any, tmp_repo: Path) -> None:
+    """Live job 137c9c41 (J2 of the rc11 battery): after a failing test run the coder repeated the command, the repeat
+    guard refused it and its refusal replaced the test output as LATEST FAILURE – the traceback was gone, so the model
+    kept re-running the tests to see it until stagnation stopped the step. A refused no-op repeat is shown above the
+    real latest failure instead of replacing it."""
+    cmd = f"{PY} -m pytest -q -p no:cacheprovider tests/test_app.py"
+    actions = [
+        act("write_file", "Test anlegen", path="tests/test_app.py", content=TEST_FILE),
+        act("run_test", "Test (rot)", command=cmd),
+        act("run_test", "nochmal", command=cmd),
+        act("read_file", path="app.py"),
+    ]
+    h, loop, chat = await _setup(sessionmaker, tmp_repo, actions, max_turns=4)
+    res = await _run(h, loop)
+    assert res.history[2].error_code == "COMMAND_REPEATED"
+    after_refusal = "\n".join(m.content for m in chat.prompts[3])
+    assert "command refused" in after_refusal and "test_add3" in after_refusal
+    assert res.last_failure and "test_add3" in res.last_failure and "command refused" not in res.last_failure
+
+
 async def test_out_of_scope_write_is_refused_and_reported_to_the_model(sessionmaker: Any, tmp_repo: Path) -> None:
     actions = [
         act("write_file", path="secrets.txt", content="nope"),

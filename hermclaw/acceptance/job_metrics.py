@@ -50,6 +50,8 @@ REPEAT_TOOLS = frozenset({ToolName.run_test, ToolName.run_command, ToolName.inst
 WRITE_TOOL_NAMES = frozenset(t.value for t in MUTATING_TOOLS)
 IMPLEMENTING_KINDS = frozenset({"implement", "test", "documentation", "docker", "database"})
 TERMINAL = frozenset({"succeeded", "failed", "cancelled", "blocked", "waiting_for_user"})
+#: errors of the infrastructure, not of the job: a job ending with one proves nothing, even an expected failure
+INFRASTRUCTURE_ERRORS = frozenset({"MODEL_UNAVAILABLE", "MODEL_TIMEOUT", "MODEL_LOAD_FAILED", "MODEL_NOT_FOUND", "WORKER_ERROR"})
 
 
 @dataclass
@@ -173,6 +175,8 @@ async def collect(sm: async_sessionmaker[AsyncSession], job_id: uuid.UUID) -> Jo
 def evaluate(m: JobMetrics, exp: Expectation) -> list[Criterion]:
     expected = "/".join(exp.status)
     out = [Criterion("status", m.status in exp.status, f"{m.status} (expected {expected}; error {m.error_code or '-'})")]
+    infra = m.error_code in INFRASTRUCTURE_ERRORS
+    out.append(Criterion("infrastructure", not infra, f"job ended on {m.error_code}" if infra else "no infrastructure error"))
     if exp.require_merge_request and m.status == "succeeded":
         out.append(Criterion("merge_request", m.merge_request, "merge request created" if m.merge_request else "no merge request"))
     if exp.max_minutes is not None:

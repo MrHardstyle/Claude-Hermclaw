@@ -39,6 +39,20 @@ from hermclaw.scheduler.handlers import CancelToken
 
 log = get_logger(__name__)
 
+# tools that only look at the workspace: a successful call leaves the latest failure current
+_READ_ONLY = frozenset(
+    {
+        ToolName.list_files,
+        ToolName.read_file,
+        ToolName.read_range,
+        ToolName.find_text,
+        ToolName.search_repo,
+        ToolName.search_symbol,
+        ToolName.git_status,
+        ToolName.git_diff,
+    }
+)
+
 CoderOutcome = Literal["completed", "blocked", "replan", "budget_exhausted", "stagnated", "cancelled", "checkpointed", "model_failed"]
 
 COMPLETION_CONTRACT = (
@@ -300,8 +314,13 @@ class CoderLoop:
             records.append(self._record(turn, action, result))
             await self._persist(attempt_id, turn, records)
             await self._status(job_id=job_id, step_id=step_id, attempt_id=attempt_id, turn=turn, action=action, result=result)
-            last_failure = None if result.ok else result.output
-            notice = None
+            # a guard refusing a no-op repeat (same command or install, nothing changed) is not a new failure, and reading
+            # or searching changes nothing either: the real latest failure stays authoritative (the refusal is shown above
+            # it), so the model never re-runs a command only to see an error output it lost (BUG-175)
+            repeated = not result.ok and bool(result.data.get("repeated"))
+            if not repeated and not (result.ok and action.tool in _READ_ONLY):
+                last_failure = None if result.ok else result.output
+            notice = result.output if repeated else None
             if result.terminal and result.ok:
                 if action.tool == ToolName.complete_step:
                     return CoderResult("completed", turn, records, completion=dict(result.data), last_failure=None)
@@ -323,7 +342,7 @@ class CoderLoop:
                         detail="; ".join(directive.reasons) or directive.message,
                     )
                 if directive.level in ("warning", "diagnose") and directive.message:
-                    notice = directive.message
+                    notice = "\n\n".join(x for x in (directive.message, notice) if x)
         return CoderResult(
             "budget_exhausted",
             turn,

@@ -520,6 +520,59 @@ async def test_transient_db_errors_in_prepare_and_finalize_rerun_the_phase(sessi
     assert transient_db_error(dropped()) and not transient_db_error(ValueError("x"))
 
 
+async def test_model_outage_defers_planning_and_replanning_instead_of_failing(sessionmaker: Any, clean_jobs: None) -> None:
+    """BUG-176 (rc11 job battery): the model host stopped (VM paused on a full storage pool); one replan and four
+    preparations failed within seconds and their jobs failed for good. A model outage keeps the job in its phase and
+    runs the phase again after a backoff; only an outage longer than the bounded wait fails the job."""
+    sm = sessionmaker
+
+    class OutageDriver(FakeDriver):
+        prepare_outages = 2
+        replan_outages = 1
+
+        async def prepare(self, job_id: uuid.UUID, token: CancelToken) -> JobPhaseResult:
+            if self.prepare_outages:
+                self.prepare_outages -= 1
+                return JobPhaseResult(ok=False, error_code="MODEL_UNAVAILABLE", error_message="connect call failed")
+            return await super().prepare(job_id, token)
+
+        async def replan(self, job_id: uuid.UUID, reason: str, evidence: dict[str, Any], token: CancelToken) -> JobPhaseResult:
+            if self.replan_outages:
+                self.replan_outages -= 1
+                return JobPhaseResult(ok=False, error_code="MODEL_TIMEOUT", error_message="timed out")
+            return await super().replan(job_id, reason, evidence, token)
+
+    driver = OutageDriver(sm)
+    j1 = await _new_job(sm)
+    driver.plans[j1] = [StepSpec("S1")]
+    driver.replans[j1] = [[StepSpec("S2")]]
+    handler = FakeHandler({"test"}, {"S1": ["blocked"]})
+    settings = _settings(model_outage_retry_seconds=(0,))
+    jobs = await _run_until(Scheduler(sm, get_config(), [handler], driver, settings=settings), sm, [j1])
+    assert jobs[j1].status == "succeeded", (jobs[j1].error_code, jobs[j1].error_message)
+    assert driver.prepare_outages == 0 and driver.replan_outages == 0 and len(driver.replan_calls) == 1  # after the outage
+    async with sm() as s:
+        lines = [e.payload.get("text", "") for e in (await s.execute(select(Event).where(Event.job_id == j1))).scalars()]
+    assert sum("Modell nicht erreichbar" in t for t in lines) == 3
+
+    class DownDriver(FakeDriver):
+        async def prepare(self, job_id: uuid.UUID, token: CancelToken) -> JobPhaseResult:
+            return JobPhaseResult(ok=False, error_code="MODEL_UNAVAILABLE", error_message="connect call failed")
+
+    j2 = await _new_job(sm)
+    settings = _settings(model_outage_retry_seconds=(0,), model_outage_max_wait_seconds=0)
+    jobs = await _run_until(Scheduler(sm, get_config(), [], DownDriver(sm), settings=settings), sm, [j2])
+    assert jobs[j2].status == "failed" and jobs[j2].error_code == "MODEL_UNAVAILABLE", "bounded wait"
+
+    class BadPlanDriver(FakeDriver):
+        async def prepare(self, job_id: uuid.UUID, token: CancelToken) -> JobPhaseResult:
+            return JobPhaseResult(ok=False, error_code="PLAN_INVALID", error_message="no valid plan")
+
+    j3 = await _new_job(sm)
+    jobs = await _run_until(Scheduler(sm, get_config(), [], BadPlanDriver(sm), settings=_settings()), sm, [j3])
+    assert jobs[j3].status == "failed" and jobs[j3].error_code == "PLAN_INVALID", "other failures are not deferred"
+
+
 async def test_priority_and_concurrency_limit(sessionmaker: Any, clean_jobs: None) -> None:
     sm = sessionmaker
     driver = FakeDriver(sm)

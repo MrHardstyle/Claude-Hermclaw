@@ -18,6 +18,7 @@ from __future__ import annotations
 import asyncio
 import contextlib
 import os
+import time
 import uuid
 from dataclasses import dataclass, field
 from datetime import UTC, datetime, timedelta
@@ -34,6 +35,7 @@ from hermclaw.core.config import HermclawConfig
 from hermclaw.core.errors import InvalidTransition
 from hermclaw.core.logging import get_logger
 from hermclaw.events.store import append_event
+from hermclaw.models.gateway import MODEL_LOAD_FAILED, MODEL_TIMEOUT, MODEL_UNAVAILABLE
 from hermclaw.persistence.models import Job, Step, StepAttempt, StepDependency
 from hermclaw.runtime.state_machines import (
     JOB_TERMINAL,
@@ -104,6 +106,14 @@ class SchedulerSettings:
     # finalize): run the phase again instead of failing the job; bounded per job, exponential backoff
     prepare_transient_retries: int = 5
     prepare_retry_backoff_seconds: float = 1.0
+    # the model host is down or hangs (connection refused, timeout, load failure) while a job plans or replans: the
+    # job keeps its phase and the phase runs again after a backoff instead of failing the job; bounded per job
+    model_outage_retry_seconds: tuple[int, ...] = (60, 120, 300, 600)
+    model_outage_max_wait_seconds: int = 4 * 3600
+
+
+#: model failures that say nothing about the job – the host is unreachable, hangs or cannot load the model
+MODEL_OUTAGE_CODES = frozenset({MODEL_UNAVAILABLE, MODEL_TIMEOUT, MODEL_LOAD_FAILED})
 
 
 def transient_db_error(exc: BaseException) -> bool:
@@ -119,6 +129,13 @@ class _Running:
     token: CancelToken
     job_id: uuid.UUID
     kind: str
+
+
+@dataclass
+class _Outage:
+    first: float  # monotonic time of the first outage failure of this job
+    retries: int = 0
+    until: float = 0.0  # the phase does not run again before this monotonic time
 
 
 @dataclass
@@ -167,6 +184,7 @@ class Scheduler:
         self._running: dict[uuid.UUID, _Running] = {}
         self._job_tasks: dict[uuid.UUID, _JobTask] = {}
         self._prepare_retries: dict[uuid.UUID, int] = {}
+        self._outages: dict[uuid.UUID, _Outage] = {}
         self._stop = asyncio.Event()
         self._admission_reason: str | None = None
 
@@ -405,7 +423,7 @@ class Scheduler:
             )
             to_start: list[uuid.UUID] = []
             for job in jobs:
-                if job.id in self._job_tasks or not await self._lock_job(s, job):
+                if job.id in self._job_tasks or self._deferred(job.id) or not await self._lock_job(s, job):
                     continue
                 to_start.append(job.id)
             await s.commit()
@@ -427,6 +445,36 @@ class Scheduler:
             extra={"job_id": str(job_id), "phase": phase, "attempt": attempt + 1, "delay_s": delay, "error": type(exc).__name__},
         )
         await asyncio.sleep(delay)
+        return True
+
+    def _deferred(self, job_id: uuid.UUID) -> bool:
+        outage = self._outages.get(job_id)
+        return outage is not None and time.monotonic() < outage.until
+
+    async def _defer_on_model_outage(self, s: AsyncSession, job: Job, phase: str, code: str | None) -> bool:
+        """True when the phase failed only because the model host is unavailable: the job keeps its state and the
+        phase runs again after a backoff (BUG-176). After ``model_outage_max_wait_seconds`` the job fails as before."""
+        if code not in MODEL_OUTAGE_CODES:
+            return False
+        now = time.monotonic()
+        outage = self._outages.setdefault(job.id, _Outage(first=now))
+        if now - outage.first >= self.settings.model_outage_max_wait_seconds:
+            self._outages.pop(job.id, None)
+            return False
+        delays = self.settings.model_outage_retry_seconds
+        delay = delays[min(outage.retries, len(delays) - 1)]
+        outage.retries += 1
+        outage.until = now + delay
+        log.warning(
+            "model host unavailable; the job phase runs again later",
+            extra={"job_id": str(job.id), "phase": phase, "error_code": code, "retry": outage.retries, "delay_s": delay},
+        )
+        await emit_status(
+            s,
+            job.id,
+            f"Modell nicht erreichbar ({code}) – {phase} wird in {delay} s erneut versucht",
+            severity=Severity.warning,
+        )
         return True
 
     async def _run_prepare(self, job_id: uuid.UUID, token: CancelToken) -> None:
@@ -454,6 +502,7 @@ class Scheduler:
             if token.cancelled:
                 pass  # _apply_controls finalises cancellation
             elif res_ok:
+                self._outages.pop(job_id, None)
                 target = JobStatus(nxt) if nxt else JobStatus.running
                 try:
                     await transition_job(s, job, target, reason="preparation finished", actor=self.instance_id)
@@ -468,6 +517,8 @@ class Scheduler:
                         error_code="PREPARE_INVALID_STATE",
                         error_message=str(exc),
                     )
+            elif await self._defer_on_model_outage(s, job, "Vorbereitung", code):
+                pass  # the job keeps its preparation state; _start_queued_jobs prepares it again after the backoff
             else:
                 await transition_job(
                     s,
@@ -949,7 +1000,7 @@ class Scheduler:
                 .all()
             )
             for job in jobs:
-                if job.id in self._job_tasks or not await self._lock_job(s, job):
+                if job.id in self._job_tasks or self._deferred(job.id) or not await self._lock_job(s, job):
                     continue
                 phase = "replan" if job.status == JobStatus.replanning.value else "finalize"
                 reason = str((job.metadata_ or {}).get(job_metadata.REPLAN_REASON) or "resumed after restart")
@@ -1049,9 +1100,12 @@ class Scheduler:
             job.lock_expires_at = None
             if job.status == JobStatus.replanning.value:
                 if ok:
+                    self._outages.pop(job_id, None)
                     await transition_job(
                         s, job, JobStatus(nxt) if nxt else JobStatus.running, reason="replan created", actor=self.instance_id
                     )
+                elif await self._defer_on_model_outage(s, job, "Neuplanung", code):
+                    pass  # the job stays in replanning; _resume_job_phases runs the replan again after the backoff
                 else:
                     await transition_job(
                         s,

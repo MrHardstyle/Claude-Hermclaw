@@ -87,6 +87,10 @@ async def test_metrics_of_a_live_like_failed_job_fail_the_criteria(sessionmaker:
     failed = {c.name for c in evaluate(m, Expectation()) if not c.passed}
     assert failed == {"status", "duration", "replans", "first_plan_steps", "research_answerable", "no_new_dependencies", "repeats"}
     assert "no_new_dependencies" not in {c.name for c in evaluate(m, Expectation(allow_dependencies=True)) if not c.passed}
+    # rc11 battery: J4 expects a failure and was counted as passed although the model host was down (BUG-176)
+    m.status, m.error_code = "failed", "MODEL_UNAVAILABLE"
+    outage = {c.name: c for c in evaluate(m, Expectation(status=("failed",), allow_dependencies=True))}
+    assert outage["status"].passed and not outage["infrastructure"].passed
 
 
 async def test_metrics_of_a_good_job_pass(sessionmaker: SM) -> None:

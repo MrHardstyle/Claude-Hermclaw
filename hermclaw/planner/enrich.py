@@ -355,6 +355,7 @@ def enrich_plan(
         if added:
             result.generated_acceptance[step.id] = added
             result.notes.append(f"step {step.id}: generated acceptance {', '.join(added)}")
+        if acceptance != step.acceptance:  # generated criteria or dropped duplicates (any step kind, BUG-175)
             step = step.model_copy(update={"acceptance": acceptance})
         risk, why = assign_risk(step, ctx, policy)
         if why is not None:

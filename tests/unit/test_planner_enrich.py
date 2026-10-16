@@ -255,3 +255,20 @@ def test_identical_acceptance_criteria_are_dropped() -> None:
     verify = step("S002", "verify", "testing", "Verify it.", depends_on=["S001"], acceptance=[empty, {"type": "scope"}, *[empty] * 27])
     acceptance, _ = generate_acceptance(PlanStep.model_validate(verify), _ctx())
     assert [a.type for a in acceptance] == ["diff", "scope"]
+
+
+def test_duplicate_criteria_are_dropped_from_the_enriched_plan_of_a_verify_step() -> None:
+    """Live job 137c9c41 (J2, rc11): the verify step of both plan versions kept 29 identical empty diff criteria –
+    the deduplicated list was only applied when acceptance had also been generated, which never happens for a
+    verify step."""
+    empty = {"type": "diff", "allow_empty": True, "must_change": [], "must_not_change": []}
+    data = plan(
+        "Add the endpoint.",
+        [
+            step("S001", "implement", "coding", "Add the endpoint.", repo_hints=["app/main.py"]),
+            step("S002", "verify", "testing", "Verify it.", depends_on=["S001"], acceptance=[empty, {"type": "scope"}, *[empty] * 27]),
+        ],
+    )
+    result = enrich_plan(PlanContract.model_validate(data), _ctx(), RiskPolicy.effective({}, SETTINGS))
+    verify = next(s for s in result.plan.steps if s.id == "S002")
+    assert [a.type for a in verify.acceptance] == ["diff", "scope"]

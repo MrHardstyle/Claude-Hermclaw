@@ -1015,11 +1015,17 @@ class ToolEngine:
             )
         previous = self._ran.get(repeat_key) if not egress else None
         if previous is not None and previous[0] == self._writes:
+            passed = previous[2] == "exit code 0"
+            follow_up = (
+                "It succeeded: if the STEP GOAL or ACCEPTANCE still needs a change (for example new tests), make that "
+                "change now; otherwise call complete_step."
+                if passed
+                else "Its exact output is in LATEST FAILURE: fix the code or the tests it names, then run it again."
+            )
             raise ToolError(
                 E.COMMAND_REPEATED,
                 f"command refused: it already ran in turn {previous[1]} and no file changed since ({previous[2]}); running it "
-                "again gives the same result. Change the code or the tests first, run a different command, or call "
-                "complete_step when the STEP GOAL and its acceptance are met.",
+                f"again gives the same result. {follow_up}",
                 data={"previous_turn": previous[1], "repeated": True},
             )
         req = ExecutionRequest(
@@ -1325,7 +1331,7 @@ class ToolEngine:
                 f"install refused: {manifest} is unchanged since its last successful install in this attempt, so all its "
                 "packages are already available and installing again changes nothing. If a module is still missing, add "
                 f"the package that provides it to {manifest} first; any other failure is in the code or the tests.",
-                data={"manifest": manifest},
+                data={"manifest": manifest, "repeated": True},
             )
         run = await self._sandbox_run(
             ToolName.install_dependencies,
