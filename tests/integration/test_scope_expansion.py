@@ -216,3 +216,18 @@ async def test_justification_secrets_are_redacted(sessionmaker: SM, repo: Path) 
     rows = await scope_rows(sessionmaker, step.id)
     ev = await events_for(sessionmaker, step.id, EventType.SCOPE_EXPANSION_REQUESTED)
     assert "supersecretvalue123" not in str(rows[0].evidence) and "supersecretvalue123" not in str(ev[0].payload)
+
+
+async def test_untracked_leftover_file_is_granted_as_creation(sessionmaker: SM, repo: Path) -> None:
+    """BUG-163 (live job e3cab55e, S007): the coder asked to create src/app.test.js, which a cancelled step had left
+    uncommitted. The expansion saw an existing file and granted only "modify"; the guard judges against HEAD, where
+    the file does not exist – every write stayed refused as "create". An untracked file is granted as creation."""
+    from hermclaw.scope.guard import ScopeGuard
+
+    (repo / "src" / "app" / "leftover.py").write_text("X = 1\n", encoding="utf-8")  # untracked
+    step, ws, _d = await _scoped_step(sessionmaker, repo)
+    handler = ScopeExpansionHandler(sessionmaker, make_config(), FakeRepo())
+    decision = await handler.handle(step.id, _req("src/app/leftover.py", ops=["create"]), ws, attempt_id=uuid.uuid4())
+    assert decision.granted and decision.changed and decision.contract is not None
+    assert decision.contract.allowed_new_paths == ["src/app/leftover.py"] and "create" in decision.contract.allowed_operations
+    assert ScopeGuard(decision.contract).allowed("src/app/leftover.py", "create")

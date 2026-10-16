@@ -59,7 +59,7 @@ http {
     gzip on;
     gzip_min_length 1;
     gzip_types text/event-stream application/json text/plain;
-    include /etc/nginx/conf.d/*.conf;
+    # not the image's conf.d: its default.conf listens on 80, which a rootless container may not bind
     include /etc/nginx/sites-enabled/*;
 }
 """

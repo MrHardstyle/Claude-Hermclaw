@@ -144,6 +144,9 @@ class WorkspaceFiles:
     files: frozenset[str]
     dirs: frozenset[str]
     source: Literal["git", "walk"]
+    # files git does not track (left uncommitted in the work tree): absent at the step baseline (HEAD), so writing
+    # them is a creation for the tool guard and the verifier (BUG-163)
+    untracked: frozenset[str] = frozenset()
 
     def exists(self, path: str) -> bool:
         return path in self.files
@@ -177,8 +180,8 @@ def _git_env() -> dict[str, str]:
     return env
 
 
-async def _git_ls_files(root: Path, limit_seconds: float) -> list[str] | None:
-    """Tracked + untracked (non-ignored) paths, or ``None`` when ``root`` is no git work tree."""
+async def _git_ls_files(root: Path, limit_seconds: float) -> list[tuple[str, bool]] | None:
+    """Tracked + untracked (non-ignored) paths as ``(path, untracked)``, or ``None`` when ``root`` is no git work tree."""
     try:
         proc = await asyncio.create_subprocess_exec(
             "git",
@@ -189,6 +192,7 @@ async def _git_ls_files(root: Path, limit_seconds: float) -> list[str] | None:
             "core.fsmonitor=false",
             "ls-files",
             "-z",
+            "-t",
             "--cached",
             "--others",
             "--exclude-standard",
@@ -207,7 +211,9 @@ async def _git_ls_files(root: Path, limit_seconds: float) -> list[str] | None:
         raise ScopeEngineError(f"listing workspace files timed out after {limit_seconds:.0f}s", code="scope_listing_timeout") from exc
     if proc.returncode != 0:
         return None
-    return [p for p in out.decode("utf-8", errors="surrogateescape").split("\0") if p]
+    # ``-t`` prefixes every entry with a status tag and a space; ``?`` marks an untracked file
+    entries = [e for e in out.decode("utf-8", errors="surrogateescape").split("\0") if len(e) > 2 and e[1] == " "]
+    return [(e[2:], e[0] == "?") for e in entries]
 
 
 def _walk_files(root: Path) -> list[str]:
@@ -265,15 +271,19 @@ def _filter_existing(root: Path, raw: Iterable[str]) -> tuple[frozenset[str], fr
 
 async def list_workspace_files(root: Path, *, limit_seconds: float = 30.0) -> WorkspaceFiles:
     """List regular files of a workspace: ``git ls-files`` (+ untracked) when it is a git work tree, else a walk."""
-    raw = await _git_ls_files(root, limit_seconds)
+    listed = await _git_ls_files(root, limit_seconds)
     source: Literal["git", "walk"] = "git"
-    if raw is None:
+    untracked: frozenset[str] = frozenset()
+    if listed is None:
         if not await asyncio.to_thread(root.is_dir):
             raise ScopeEngineError(f"workspace path does not exist: {root}", code="scope_workspace_missing")
         raw = await asyncio.to_thread(_walk_files, root)
         source = "walk"
+    else:
+        raw = [p for p, _ in listed]
+        untracked = frozenset(p for p, other in listed if other)
     files, dirs = await asyncio.to_thread(_filter_existing, root, raw)
-    return WorkspaceFiles(root=root, files=files, dirs=dirs, source=source)
+    return WorkspaceFiles(root=root, files=files, dirs=dirs, source=source, untracked=untracked & files)
 
 
 # ============================================================================================= literal paths
@@ -875,7 +885,9 @@ class ScopeEngine:
         # attempt) are promoted to targets, but the tool guard and the verifier judge operations against the step
         # baseline (HEAD), where they do not exist: writing them is a creation, so "create" must stay allowed. The
         # guard allows creating only files the contract lists explicitly (BUG-158).
-        promoted_new = [p for p in targets if any(src.endswith("(existing)") for src in draft.targets.get(p, []))]
+        # The same holds for any other target git does not track yet, e.g. a file an earlier, cancelled step of the
+        # job created and left uncommitted, which a replanned step names as a repo hint (BUG-163).
+        promoted_new = [p for p in targets if p in files.untracked or any(src.endswith("(existing)") for src in draft.targets.get(p, []))]
         operations: list[Operation] = []
         if new_paths or promoted_new:
             operations.append("create")
@@ -884,7 +896,7 @@ class ScopeEngine:
         if delete_paths:
             operations.append("delete")
         evidence["operations"] = {
-            "create": "allowed new paths present" if new_paths else "declared new files already in the work tree" if promoted_new else None,
+            "create": "allowed new paths present" if new_paths else "uncommitted target files in the work tree" if promoted_new else None,
             "modify": "resolved target paths present" if targets else None,
             "delete": "acceptance absence evidence / explicit delete constraint" if delete_paths else None,
         }

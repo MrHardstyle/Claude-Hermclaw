@@ -498,3 +498,34 @@ async def test_package_installs_in_commands_are_refused_without_running(sessionm
     h = await make_harness(sessionmaker, repo, contract=scope(**SCOPE), permissions=net, executor=networked)
     assert (await h.call("run_command", command="pip install httpx")).error_code != E.PACKAGE_INSTALL_REFUSED
     assert len(networked.requests) == 1  # a step with network may install directly
+
+
+class TimeoutRecorder:
+    """Executor double: every command runs into its timeout, like a server started in the foreground."""
+
+    def __init__(self) -> None:
+        self.requests: list[Any] = []
+
+    async def run(self, workspace: Any, req: Any) -> Any:
+        from hermclaw.contracts.worker import CommandResult
+
+        self.requests.append(req)
+        return CommandResult(request_id="r", exit_code=None, timed_out=True, stdout="Server running on port 3000\n", sandbox="podman")
+
+
+async def test_a_command_that_timed_out_is_not_rerun_on_an_unchanged_workspace(sessionmaker: SM, repo: Path) -> None:
+    """BUG-164 (live job e3cab55e): the coder started `node src/app.js` (a server) and a test that never closed the
+    server more than 15 times with run_test – each run blocked for the full 600 s timeout. A timeout now explains
+    why, and the identical command is refused until a file changed or another timeout is requested."""
+    rec = TimeoutRecorder()
+    h = await make_harness(sessionmaker, repo, contract=scope(**SCOPE), executor=rec)
+    res = await h.call("run_test", command="node src/app.js")
+    assert not res.ok and "timed out" in res.output and "[hint] Commands must exit on their own" in res.output
+    again = await h.call("run_test", command="node src/app.js ")
+    assert again.error_code == E.COMMAND_TIMEOUT and "no file changed since" in again.output
+    assert len(rec.requests) == 1  # the repeat never reached the sandbox
+    await h.call("run_command", command="node src/app.js", timeout_seconds=30)
+    assert len(rec.requests) == 2  # another timeout is another command
+    assert (await h.call("write_file", path="src/gen_fix.py", content="FIXED = 1\n")).ok
+    await h.call("run_test", command="node src/app.js")
+    assert len(rec.requests) == 3  # after a file change the command may succeed now

@@ -91,6 +91,10 @@ from hermclaw.tools.workspace import (
 log = get_logger(__name__)
 
 #: install target of Python dependencies inside the sandbox (``worker.execution.sandbox.PYTHON_DEPS_DIR``)
+TIMEOUT_HINT = (
+    "Commands must exit on their own: a server, watcher or REPL never does. Do not start one in the foreground or "
+    "in the background; a test starts the app in-process (port 0) and closes it, or calls the handler directly."
+)
 IMAGE_CONSTRAINTS = "/tmp/hermclaw-image-constraints.txt"  # noqa: S108 - path inside the sandbox
 PYTHON_DEPS_DIR = "/deps/python"
 
@@ -230,6 +234,10 @@ class ToolEngine:
         self._base_files: set[str] | None = None
         self._base_loaded = False
         self._created: set[str] = set()
+        # commands that ran into their timeout, with the file-change count at that time: the same command on an
+        # unchanged workspace would only block for the full timeout again (BUG-164)
+        self._writes = 0
+        self._timed_out: dict[tuple[str, str, int], int] = {}
         self._handlers: dict[ToolName, Handler] = {
             ToolName.list_files: self._list_files,
             ToolName.read_file: self._read_file,
@@ -576,6 +584,7 @@ class ToolEngine:
 
     def _file_changed(self, tool: ToolName, changes: list[dict[str, Any]], events: list[PendingEvent]) -> None:
         if changes:
+            self._writes += 1
             events.append(PendingEvent(EventType.FILE_CHANGED, {"tool": tool.value, "changes": changes[:200], "count": len(changes)}))
 
     # ============================================================================================ 17.1 read tools
@@ -952,9 +961,18 @@ class ToolEngine:
         classification = self._classify(command, install=egress)
         cwd = self._resolve_cwd(cwd_raw)
         full = command if cwd == "." else f"cd -- {shlex.quote(cwd)} || exit 97\n{command}"
+        effective_timeout = timeout_seconds if egress and timeout_seconds else self._timeout(timeout_seconds)
+        repeat_key = (cwd, command.strip(), effective_timeout)
+        if self._timed_out.get(repeat_key) == self._writes:
+            raise ToolError(
+                E.COMMAND_TIMEOUT,
+                f"command refused: it already ran into its {effective_timeout}s timeout and no file changed since, so it "
+                f"would block for {effective_timeout}s again. {TIMEOUT_HINT}",
+                data={"timeout_seconds": effective_timeout, "repeated": True},
+            )
         req = ExecutionRequest(
             command=full,
-            timeout_seconds=timeout_seconds if egress and timeout_seconds else self._timeout(timeout_seconds),
+            timeout_seconds=effective_timeout,
             network=False if egress else self.permissions.network,
             egress=egress,
             image=image or self.permissions.image,
@@ -988,6 +1006,8 @@ class ToolEngine:
             stderr = f"{stderr}\n[sandbox] {error}" if stderr else f"[sandbox] {error}"
         exit_code = result.exit_code if result else None
         timed_out = bool(result and result.timed_out)
+        if timed_out:
+            self._timed_out[repeat_key] = self._writes
         await self.recorder.command_run(
             ctx,
             command=command,
@@ -1061,6 +1081,8 @@ class ToolEngine:
             parts += ["--- stderr ---", err_txt.rstrip("\n")]
         if not out_txt and not err_txt and res is not None:
             parts.append("(no output)")
+        if res is not None and res.timed_out:
+            footer.append(f"[hint] {TIMEOUT_HINT}")
         parts += footer
         return "\n".join(parts), truncated or t1 or t2
 

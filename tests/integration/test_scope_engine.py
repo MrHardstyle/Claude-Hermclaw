@@ -159,6 +159,30 @@ async def test_declared_new_file_left_in_the_work_tree_stays_creatable(sessionma
     assert not guard.allowed("src/app/other.py", "create")
 
 
+async def test_uncommitted_repo_hint_target_stays_creatable(sessionmaker: SM, repo: Path) -> None:
+    """BUG-163 (live job e3cab55e): a cancelled step left src/app.js uncommitted; the replanned step named it as a
+    repo hint (not in allowed_new_paths). It became a target with only "modify", while the guard judges against
+    HEAD, where it does not exist – every replace_text was refused as "create" until the step stagnated."""
+    from hermclaw.scope.engine import list_workspace_files
+    from hermclaw.scope.guard import ScopeGuard
+
+    (repo / "src" / "app" / "leftover.py").write_text("print('half done')\n", encoding="utf-8")  # untracked
+    listed = await list_workspace_files(repo)
+    assert "src/app/leftover.py" in listed.untracked and "src/app/core.py" not in listed.untracked
+    step = await make_step(sessionmaker, repo_hints=["src/app/leftover.py", "src/app/core.py"])
+    decision = await ScopeEngine(sessionmaker, make_config(), FakeRepo()).create_scope(step.id, workspace_for(step.job_id, repo))
+    assert decision.contract is not None
+    assert decision.contract.target_paths == ["src/app/leftover.py", "src/app/core.py"]
+    assert decision.contract.allowed_new_paths == [] and decision.contract.allowed_operations == ["create", "modify"]
+    guard = ScopeGuard(decision.contract)
+    assert guard.allowed("src/app/leftover.py", "create") and guard.allowed("src/app/leftover.py", "modify")
+    assert not guard.allowed("src/app/other.py", "create")
+
+    tracked_only = await make_step(sessionmaker, repo_hints=["src/app/core.py"])
+    d2 = await ScopeEngine(sessionmaker, make_config(), FakeRepo()).create_scope(tracked_only.id, workspace_for(tracked_only.job_id, repo))
+    assert d2.contract is not None and d2.contract.allowed_operations == ["modify"]
+
+
 async def test_bare_file_name_resolves_unique_basename(sessionmaker: SM, repo: Path) -> None:
     step = await make_step(sessionmaker, repo_hints=["helpers.py", "test_core.py"])
     decision = await ScopeEngine(sessionmaker, make_config(), FakeRepo()).create_scope(step.id, workspace_for(step.job_id, repo))

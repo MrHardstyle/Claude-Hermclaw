@@ -427,6 +427,9 @@ class ScopeExpansionHandler:
 
     @staticmethod
     def _operations_for(path: str, requested: Sequence[Operation], files: WorkspaceFiles, on_disk: set[str]) -> tuple[list[Operation], str]:
+        if files.exists(path) and path in files.untracked:
+            # left uncommitted in the work tree: absent at the step baseline (HEAD), so every write is a creation (BUG-163)
+            return ["create"], "" if "create" in requested else "file is not tracked by git yet: treated as create"
         if files.exists(path):
             ops: list[Operation] = [o for o in requested if o != "create"]
             note = "create requested for an existing file: treated as modify" if not ops else ""

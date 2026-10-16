@@ -1,7 +1,7 @@
 # STATUS
 
 ## Aktueller Zustand (2026-10-16)
-- Projekt: Hermclaw Next · Branch: `claude/hermclaw-next-build` · Version `0.1.0rc6` (gebaut); **deployt: 0.1.0rc5** auf .222–.225 (Deployment jetzt durch Claude, Become-Passwort per systemd-creds)
+- Projekt: Hermclaw Next · Branch: `claude/hermclaw-next-build` · Version `0.1.0rc7` (gebaut); **deployt: 0.1.0rc6** auf .222–.225 (Deployment jetzt durch Claude, Become-Passwort per systemd-creds)
 - **Live-Abnahme nach Kapitel 12 durchgeführt** (2026-10-16): 396 Schritte erledigt, 34 mit offenem Live-Teil (`[~]`), 0 offen.
 - 0.1.0rc2 deployt (vom Betreiber, alle Hosts inkl. .224): doctor 19 ok, models 6/6 (Fallback, BUG-150 wirksam), workers 3/3.
 - Erster Testauftrag erneut eingereicht (Job `eadf1b6f…`): Die Erstplanung ist jetzt gültig (BUG-143 wirkt, Steps mit Scope),
@@ -13,11 +13,14 @@
   scheiterte (`REPLAN_LIMIT`) am ersten Proxy-Start (300-s-Timeout, BUG-160) und an einem `pytest==7.4.3`-Pin, der die
   Test-Toolchain des Images überdeckte (BUG-161). Behoben in 0.1.0rc5 (deployt).
 - Testauftrag auf 0.1.0rc5 (Job `b0080372…`): Proxy-Start und Installation fehlerfrei; nach dem Replan wiederholte der Coder
-  `pip install` in `run_command` statt `install_dependencies` (Stagnation, BUG-162). Behoben in **0.1.0rc6**.
+  `pip install` in `run_command` statt `install_dependencies` (Stagnation, BUG-162). Behoben in 0.1.0rc6 (deployt, doctor 19 ok).
+- Testauftrag auf 0.1.0rc6 (Job `e3cab55e…`): keine `pip install`-Schleife mehr; der Planner wählte Node. Eine von einem
+  abgebrochenen Step liegengebliebene Datei war als Repo-Hinweis nicht beschreibbar (BUG-163), und Server/Tests ohne
+  `close()` blockierten `run_test` je 600 s (BUG-164). Behoben in **0.1.0rc7**.
 - **D-014 (Betreiberentscheidung 2026-10-16): Abhängigkeits-Installation** über einen Registry-Proxy auf .222 (P43). Live auf .222
   verifiziert (pip und npm durch den Proxy, alles andere blockiert); in 0.1.0rc4, eingeschaltet mit `hermclaw_config_dependency_installs: true`.
 - Blocker: BLOCKER-001 und BLOCKER-003 aufgehoben (GitLab-Suite PASS); BLOCKER-002 (Tag-Push) unverändert.
-- Release-Status: **RC – live abgenommen bis auf** End-to-End-Testauftrag (nach Deployment rc6 wiederholen),
+- Release-Status: **RC – live abgenommen bis auf** End-to-End-Testauftrag (nach Deployment rc7 wiederholen),
   Wake-on-LAN (nicht eingerichtet), Backup nach Terra (nicht eingerichtet), Soak-Test, Cutover.
 
 ## Fortschritt BUILD_PLAN (automatisch: `python scripts/dev/plan_progress.py --markdown`)
@@ -106,8 +109,8 @@ Lint, mypy, ShellCheck, ansible-lint (production) sauber.
 - Embeddings: `embeddinggemma:300m` (768 dim; EmbeddingGemma 2 erst, wenn Ollama es unter Linux/CUDA ausführt, D-010)
 
 ## Bugs
-- 162 gefunden, **162 behoben** (P0 2, P1 30, P2 66, P3 54, P4 3) – `BUGS.md`. Live-Abnahme: BUG-143 bis BUG-162.
-  BUG-143–161 sind produktiv (0.1.0rc5); BUG-162 wirkt nach dem Deployment von 0.1.0rc6.
+- 164 gefunden, **164 behoben** (P0 2, P1 31, P2 67, P3 54, P4 3) – `BUGS.md`. Live-Abnahme: BUG-143 bis BUG-164.
+  BUG-143–162 sind produktiv (0.1.0rc6); BUG-163/164 wirken nach dem Deployment von 0.1.0rc7.
 - Externe Blocker: BLOCKER-002 (Tag-Push)
 
 ## Letzte Testresultate (2026-10-15, Build-Host)
@@ -132,8 +135,8 @@ Tests 2026-10-15, einzeln ausgeführt: `test_bootstrap_infra` 63, `test_bootstra
 bestanden; ansible-lint (production) sauber. `test_deploy_converge` ist angepasst; ihn führt der Integrator aus.
 
 ## Nächster Schritt
-1. 0.1.0rc6 ausrollen (`hermclaw_version: "0.1.0rc6"` im Inventar, `ansible-playbook … deploy.yml -K`), dann den ersten
-   Testauftrag erneut einreichen.
+1. 0.1.0rc7 ausrollen (`hermclaw_version: "0.1.0rc7"` im Inventar, `ansible-playbook … deploy.yml`), dann den ersten
+   Testauftrag erneut einreichen und mit schwierigeren Aufträgen fortfahren (Validierung, Refactoring, Node, Abbruch, parallele Jobs).
 2. Wake-on-LAN einrichten (MACs, BIOS, Kapitel 13.1), danach `--suite wol --full-wol` und erst dann den Leerlauf-Suspend einschalten.
 3. Backup nach Terra einrichten (Kapitel 11), Backup-Suite; danach Soak-Test und Cutover (`docs/runbooks/cutover.md`).
 4. Drittabhängigkeiten eines Projekts installiert der Coder über `install_dependencies` (D-014); ein Projekt-Sandbox-Image

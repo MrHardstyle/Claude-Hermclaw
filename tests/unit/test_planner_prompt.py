@@ -231,3 +231,5 @@ def test_prompts_explain_how_dependencies_get_into_the_sandbox() -> None:
     assert "block_step" in DEFAULT_SYSTEM_CONTRACT
     # BUG-161 (live job bec4c5e9): reinstalled without adding the missing module, then pinned an older pytest
     assert "add\n  it to the manifest first" in DEFAULT_SYSTEM_CONTRACT and "pin the test tools" in DEFAULT_SYSTEM_CONTRACT
+    # BUG-164 (live job e3cab55e): servers started with run_test blocked for the full timeout again and again
+    assert "never run a server, watcher or REPL" in DEFAULT_SYSTEM_CONTRACT and "port 0" in DEFAULT_SYSTEM_CONTRACT

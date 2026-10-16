@@ -2,6 +2,17 @@
 
 Format: [Keep a Changelog](https://keepachangelog.com/de/1.1.0/), Versionen nach PEP 440.
 
+## [0.1.0rc7] – Release Candidate (2026-10-16)
+
+Fixes aus dem Testauftrag nach dem Deployment von 0.1.0rc6 (BUG-163, BUG-164).
+
+### Behoben
+- **Liegengebliebene Datei als Repo-Hinweis (BUG-163):** Ein Step, dessen Ziel eine uncommittete Datei eines
+  abgebrochenen Vorgängers ist, darf sie wieder schreiben; bisher wurde jede Änderung als „create“ abgelehnt.
+- **Server blockieren Tests (BUG-164):** Ein Timeout erklärt, dass Befehle von selbst enden müssen; derselbe Befehl
+  wird auf unverändertem Arbeitsbaum nicht erneut für den vollen Timeout gestartet. Coder-Vertrag: keine Server,
+  Watcher oder REPLs; Tests starten die App im Prozess und schließen sie.
+
 ## [0.1.0rc6] – Release Candidate (2026-10-16)
 
 Fix aus dem Testauftrag nach dem Deployment von 0.1.0rc5 (BUG-162).
