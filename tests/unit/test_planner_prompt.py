@@ -233,3 +233,5 @@ def test_prompts_explain_how_dependencies_get_into_the_sandbox() -> None:
     assert "add\n  it to the manifest first" in DEFAULT_SYSTEM_CONTRACT and "pin the test tools" in DEFAULT_SYSTEM_CONTRACT
     # BUG-164 (live job e3cab55e): servers started with run_test blocked for the full timeout again and again
     assert "never run a server, watcher or REPL" in DEFAULT_SYSTEM_CONTRACT and "port 0" in DEFAULT_SYSTEM_CONTRACT
+    # BUG-165 (live job 837dcd50): goal met (dependencies installed), but the coder kept waiting for tests a later step owned
+    assert "Call complete_step as soon as the STEP GOAL" in DEFAULT_SYSTEM_CONTRACT and "a later step owns them" in DEFAULT_SYSTEM_CONTRACT

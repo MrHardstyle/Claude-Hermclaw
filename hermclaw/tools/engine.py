@@ -50,7 +50,7 @@ from hermclaw.tools.context import CallContext, NullCallbacks, ScopeExpansionOut
 from hermclaw.tools.errors import ToolError, ToolProtocolError
 from hermclaw.tools.gitlocal import LocalGit
 from hermclaw.tools.ops import OpsCall, OpsResult, OpsToolProvider
-from hermclaw.tools.output import clip_head, clip_middle, strip_ansi
+from hermclaw.tools.output import clip_head, clip_middle, missing_modules, strip_ansi
 from hermclaw.tools.patch import diff_section_path, parse_numstat, parse_patch
 from hermclaw.tools.recorder import PendingEvent, ToolRecorder
 from hermclaw.tools.registry import (
@@ -238,6 +238,8 @@ class ToolEngine:
         # unchanged workspace would only block for the full timeout again (BUG-164)
         self._writes = 0
         self._timed_out: dict[tuple[str, str, int], int] = {}
+        # manifest digest of the last successful install per (ecosystem, manifest): reinstalling it changes nothing
+        self._installed: dict[tuple[str, str], str] = {}
         self._handlers: dict[ToolName, Handler] = {
             ToolName.list_files: self._list_files,
             ToolName.read_file: self._read_file,
@@ -1083,6 +1085,9 @@ class ToolEngine:
             parts.append("(no output)")
         if res is not None and res.timed_out:
             footer.append(f"[hint] {TIMEOUT_HINT}")
+        missing = self._missing_module_hint(f"{res.stdout}\n{res.stderr}") if res is not None else None
+        if missing:
+            footer.append(missing)
         parts += footer
         return "\n".join(parts), truncated or t1 or t2
 
@@ -1197,23 +1202,56 @@ class ToolEngine:
             },
         )
 
-    def _install_command(self, args: InstallDependenciesArgs) -> tuple[str, str]:
-        """``(manifest, command)`` of a dependency install; the runtime builds the command, never the model (D-014)."""
+    def _missing_module_hint(self, output: str) -> str | None:
+        """A run that failed on an import of a third-party module: say how it gets into the sandbox (BUG-165)."""
+        local = {name.removesuffix(".py") for name in self._local_roots()}
+        mods = [m for m in missing_modules(output) if m not in local]
+        if not mods:
+            return None
+        names = ", ".join(f"'{m}'" for m in mods)
+        if ToolName.install_dependencies in (self.permissions.allowed_tools or set()):
+            return (
+                f"[hint] not installed: {names}. Add the package that provides it to requirements.txt / package.json, "
+                "then call install_dependencies – reinstalling an unchanged manifest does not add it."
+            )
+        return f"[hint] not installed: {names}. Without install_dependencies use the standard library, or block_step naming it."
+
+    def _local_roots(self) -> set[str]:
+        """Entries at the repository root and under ``src/``: a missing module with such a name is the project's own."""
+        names: set[str] = set()
+        for base in (self.fs.root, self.fs.root / "src"):
+            try:
+                names.update(p.name for p in base.iterdir())
+            except OSError:
+                continue
+        return names
+
+    def _install_command(self, args: InstallDependenciesArgs) -> tuple[str, str, str]:
+        """``(manifest, command, digest)`` of a dependency install; the runtime builds the command, never the model (D-014)."""
         default = "requirements.txt" if args.ecosystem == "python" else "package.json"
         tf = self.fs.read_text(args.manifest or default, max_bytes=1_000_000)
         manifest = tf.rel
+        digest = hashlib.sha256(tf.text.encode("utf-8")).hexdigest()
         if args.ecosystem == "python":
             command = python_install_command(manifest)
-            return manifest, command
+            return manifest, command, digest
         if manifest != "package.json":
             raise ToolError(E.ARGS_INVALID, "node dependencies are installed from the package.json at the repository root")
         command = (
             "npm install --ignore-scripts --no-audit --no-fund --no-save --package-lock=false --cache /tmp/npm-cache && npm ls --depth=0"
         )
-        return manifest, command
+        return manifest, command, digest
 
     async def _install_dependencies(self, args: InstallDependenciesArgs, ctx: CallContext, events: list[PendingEvent]) -> ToolResult:
-        manifest, command = await asyncio.to_thread(self._install_command, args)
+        manifest, command, digest = await asyncio.to_thread(self._install_command, args)
+        if self._installed.get((args.ecosystem, manifest)) == digest:
+            raise ToolError(
+                E.INSTALL_UNCHANGED,
+                f"install refused: {manifest} is unchanged since its last successful install in this attempt, so all its "
+                "packages are already available and installing again changes nothing. If a module is still missing, add "
+                f"the package that provides it to {manifest} first; any other failure is in the code or the tests.",
+                data={"manifest": manifest},
+            )
         run = await self._sandbox_run(
             ToolName.install_dependencies,
             command=command,
@@ -1239,6 +1277,7 @@ class ToolEngine:
             error_code = E.COMMAND_FAILED
         installed = installed_packages(args.ecosystem, res.stdout if res else "") if error_code is None else []
         if error_code is None:
+            self._installed[(args.ecosystem, manifest)] = digest
             text += f"\n[dependencies] {len(installed)} package(s) available to later commands and tests of this job"
         elif error_code == E.COMMAND_FAILED and args.ecosystem == "python":
             text += (

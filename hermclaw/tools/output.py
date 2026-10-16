@@ -41,3 +41,17 @@ def clip_middle(text: str, limit: int, *, head_ratio: float = 0.3) -> tuple[str,
 def excerpt(text: str, limit: int = 8000) -> str:
     """Bounded excerpt for persistence (command_runs / test_runs)."""
     return clip_middle(text, limit)[0]
+
+
+_PY_MISSING = re.compile(r"(?:ModuleNotFoundError|ImportError): No module named '([A-Za-z0-9_.]+)'")
+_NODE_MISSING = re.compile(r"Cannot find (?:module|package) '((?:@[\w.-]+/)?[\w][\w.-]*)[^']*'")
+
+
+def missing_modules(output: str, limit: int = 5) -> list[str]:
+    """Top-level third-party modules a Python or Node run could not import (``No module named 'x.y'`` -> ``x``)."""
+    found: dict[str, None] = {}
+    for m in _PY_MISSING.finditer(output):
+        found.setdefault(m.group(1).split(".")[0], None)
+    for m in _NODE_MISSING.finditer(output):
+        found.setdefault(m.group(1), None)
+    return list(found)[:limit]

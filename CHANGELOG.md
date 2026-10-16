@@ -2,6 +2,15 @@
 
 Format: [Keep a Changelog](https://keepachangelog.com/de/1.1.0/), Versionen nach PEP 440.
 
+## [0.1.0rc8] – Release Candidate (2026-10-16)
+
+Fix aus dem Testauftrag nach dem Deployment von 0.1.0rc7 (BUG-165).
+
+### Behoben
+- **Leerlauf-Installationen (BUG-165):** `install_dependencies` lehnt ein unverändertes Manifest ab (`INSTALL_UNCHANGED`);
+  scheitert ein Lauf an einem fehlenden Modul, nennt die Ausgabe es mit dem Weg ins Manifest. Coder-Vertrag: Step
+  abschließen, sobald sein Ziel erreicht ist, auch wenn Tests außerhalb des Scopes noch scheitern.
+
 ## [0.1.0rc7] – Release Candidate (2026-10-16)
 
 Fixes aus dem Testauftrag nach dem Deployment von 0.1.0rc6 (BUG-163, BUG-164).

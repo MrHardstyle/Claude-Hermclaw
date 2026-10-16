@@ -529,3 +529,38 @@ async def test_a_command_that_timed_out_is_not_rerun_on_an_unchanged_workspace(s
     assert (await h.call("write_file", path="src/gen_fix.py", content="FIXED = 1\n")).ok
     await h.call("run_test", command="node src/app.js")
     assert len(rec.requests) == 3  # after a file change the command may succeed now
+
+
+async def test_reinstalling_an_unchanged_manifest_is_refused_and_missing_modules_are_named(sessionmaker: SM, repo: Path) -> None:
+    """BUG-165 (live job 837dcd50): the test failed on `ModuleNotFoundError: No module named 'httpx'` (needed by
+    fastapi.testclient); the coder called install_dependencies again and again with the unchanged requirements.txt
+    (fastapi, uvicorn) instead of adding httpx. The run names the missing module and how it gets installed; an
+    install of an unchanged manifest is refused until the manifest changes."""
+    (repo / "requirements.txt").write_text("fastapi\n", encoding="utf-8")
+    pip = InstallRecorder("fastapi==0.115.0\n")
+    perms = ToolPermissions.for_step(kind="implement", dependency_install=True)
+    h = await make_harness(sessionmaker, repo, contract=scope(**SCOPE), permissions=perms, executor=pip)
+    assert (await h.call("install_dependencies", ecosystem="python")).ok
+    again = await h.call("install_dependencies", ecosystem="python")
+    assert again.error_code == E.INSTALL_UNCHANGED and "add the package" in again.output
+    assert len(pip.requests) == 1
+    pip.stdout = "E   ModuleNotFoundError: No module named 'httpx.client'\nE   ModuleNotFoundError: No module named 'src'\n"
+    pip.exit_code = 2
+    res = await h.call("run_test", command="python -m pytest -q")
+    assert "[hint] not installed: 'httpx'." in res.output and "install_dependencies" in res.output
+    assert "'src'" not in res.output.split("[hint]")[1]  # the project's own package is no third-party module
+    (repo / "requirements.txt").write_text("fastapi\nhttpx\n", encoding="utf-8")
+    pip.stdout, pip.exit_code = "fastapi==0.115.0\nhttpx==0.28.1\n", 0
+    assert (await h.call("install_dependencies", ecosystem="python")).ok  # changed manifest: installs again
+
+
+def test_missing_modules_from_python_and_node_output() -> None:
+    from hermclaw.tools.output import missing_modules
+
+    out = (
+        "ModuleNotFoundError: No module named 'yaml'\nImportError: No module named 'a.b.c'\n"
+        "Error: Cannot find module 'express'\nError: Cannot find module './local'\n"
+        "Error: Cannot find package '@scope/pkg' imported from /w/x.js\nModuleNotFoundError: No module named 'yaml'\n"
+    )
+    assert missing_modules(out) == ["yaml", "a", "express", "@scope/pkg"]
+    assert missing_modules("all good") == []
