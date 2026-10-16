@@ -14,6 +14,7 @@ import pytest
 
 from hermclaw.contracts.worker import CommandRequest
 from hermclaw.core.config import EgressPolicy, SandboxPolicy
+from hermclaw.tools.engine import python_install_command
 from worker.execution.egress import host_nameservers
 from worker.execution.sandbox import PodmanSandbox
 
@@ -74,12 +75,7 @@ async def test_live_install_through_the_proxy_and_nothing_else(box: PodmanSandbo
     ws.mkdir(parents=True)
     (ws / "requirements.txt").write_text("idna==3.10\n", encoding="utf-8")
     install = await box.run(
-        _req(
-            "python3 -m pip install --disable-pip-version-check --no-input --no-cache-dir --target /deps/python -r requirements.txt"
-            " && python3 -m pip list --disable-pip-version-check --path /deps/python --format=freeze",
-            egress=True,
-            timeout_seconds=600,
-        ),
+        _req(python_install_command("requirements.txt"), egress=True, timeout_seconds=600),
         ws,
     )
     assert install.exit_code == 0, (install.error, install.stderr[-2000:])
@@ -127,3 +123,20 @@ async def test_live_npm_install_lands_in_the_mounted_node_modules(box: PodmanSan
     assert not (ws / "package-lock.json").exists()
     leftovers = [p for p in (ws / "node_modules").rglob("*")] if (ws / "node_modules").exists() else []
     assert leftovers == []  # only the (empty) mount point exists in the workspace itself
+
+
+async def test_live_install_keeps_the_image_test_toolchain(box: PodmanSandbox, tmp_path: Path) -> None:
+    """BUG-161 (live job bec4c5e9): a requirements pin of an older pytest landed in /deps/python, which comes first on
+    PYTHONPATH, and broke the image's pytest plugins. The image's packages are constraints: the conflicting pin fails
+    with pip's resolution error, nothing of it stays in /deps, and after relaxing it the image's pytest still runs."""
+    ws = tmp_path / "workspaces" / "ws1"
+    ws.mkdir(parents=True)
+    (ws / "requirements.txt").write_text("idna==3.10\npytest==7.4.3\n", encoding="utf-8")
+    pinned = await box.run(_req(python_install_command("requirements.txt"), egress=True, timeout_seconds=600), ws)
+    assert pinned.exit_code == 1 and "ResolutionImpossible" in pinned.stderr, (pinned.error, pinned.stderr[-2000:])
+    (ws / "requirements.txt").write_text("idna==3.10\n", encoding="utf-8")
+    install = await box.run(_req(python_install_command("requirements.txt"), egress=True, timeout_seconds=600), ws)
+    assert install.exit_code == 0 and "idna==3.10" in install.stdout and "pytest" not in install.stdout, install.stderr[-2000:]
+    (ws / "test_idna.py").write_text("import idna\n\n\ndef test_idna():\n    assert idna.encode('bücher.de') == b'xn--bcher-kva.de'\n")
+    tests = await box.run(_req("python3 -m pytest -q -p no:cacheprovider"), ws)
+    assert tests.exit_code == 0 and "1 passed" in tests.stdout, tests.stdout[-2000:]

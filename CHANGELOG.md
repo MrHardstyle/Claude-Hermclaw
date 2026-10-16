@@ -2,6 +2,19 @@
 
 Format: [Keep a Changelog](https://keepachangelog.com/de/1.1.0/), Versionen nach PEP 440.
 
+## [0.1.0rc5] – Release Candidate (2026-10-16)
+
+Fixes aus dem Testauftrag nach dem Deployment von 0.1.0rc4 mit eingeschalteter Abhängigkeits-Installation (BUG-160, BUG-161).
+
+### Behoben
+- **Egress-Proxy-Start (BUG-160):** Der erste Start des Proxy-Containers lief in den 300-s-Timeout, obwohl der
+  Container lief (ein Podman-Hintergrundprozess hielt die Ausgabe-Pipes offen). Engine-Hilfsbefehle kehren jetzt
+  zurück, sobald der Engine-Prozess beendet ist.
+- **Installation und Test-Toolchain (BUG-161):** `install_dependencies` (Python) beginnt mit leerem `/deps/python`
+  und hält die Pakete des Sandbox-Images auf deren Versionen (pip-Constraints). Ein Pin wie `pytest==7.4.3` scheitert
+  jetzt verständlich, statt pytest und seine Plugins zu brechen. Coder-Vertrag: fehlendes Modul zuerst ins Manifest,
+  Test-Werkzeuge des Images nicht pinnen.
+
 ## [0.1.0rc4] – Release Candidate (2026-10-16)
 
 Fixes aus dem ersten Testauftrag nach dem Deployment von 0.1.0rc3 (BUG-158, BUG-159) und Abhängigkeits-Installation (D-014).

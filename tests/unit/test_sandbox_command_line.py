@@ -487,3 +487,15 @@ def test_secret_env_values() -> None:
 def test_module_has_no_host_env_passthrough() -> None:
     """Regression guard: the container env is built only from BASE_CONTAINER_ENV and the request."""
     assert dict(sb.BASE_CONTAINER_ENV) == {"HOME": "/tmp", "TMPDIR": "/tmp"}
+
+
+async def test_engine_exec_returns_when_the_engine_exits_even_if_a_daemon_keeps_the_pipes(tmp_path: Path) -> None:
+    """BUG-160: rootless ``podman run -d`` may leave pasta/conmon holding stdout; that is not a timeout."""
+    started = asyncio.get_running_loop().time()
+    rc, out, err = await sb.engine_exec(["sh", "-c", "sleep 30 & echo cid; echo warn >&2"], timeout_seconds=20)
+    assert (rc, out.strip(), err.strip()) == (0, "cid", "warn")
+    assert asyncio.get_running_loop().time() - started < 10
+    assert (await sb.engine_exec(["sh", "-c", "exit 3"]))[0] == 3
+    rc, _out, err = await sb.engine_exec(["sleep", "5"], timeout_seconds=0.3)
+    assert rc == -9 and "timed out" in err
+    assert (await sb.engine_exec([str(tmp_path / "missing-engine")]))[0] == 127

@@ -91,7 +91,25 @@ from hermclaw.tools.workspace import (
 log = get_logger(__name__)
 
 #: install target of Python dependencies inside the sandbox (``worker.execution.sandbox.PYTHON_DEPS_DIR``)
+IMAGE_CONSTRAINTS = "/tmp/hermclaw-image-constraints.txt"  # noqa: S108 - path inside the sandbox
 PYTHON_DEPS_DIR = "/deps/python"
+
+
+def python_install_command(manifest: str) -> str:
+    """The Python install command of ``install_dependencies`` (D-014), run with registry-only egress and ``/deps`` writable.
+
+    BUG-161: ``/deps/python`` comes first on ``PYTHONPATH``, so a package the image already provides (its test
+    toolchain: pytest and its plugins) must stay at the image's version, or the toolchain breaks. The image's packages
+    (listed without ``PYTHONPATH``) are pip constraints; every install starts from an empty directory, so a removed or
+    changed requirement does not linger."""
+    return (
+        f"find {PYTHON_DEPS_DIR} -mindepth 1 -delete"
+        f" && PYTHONPATH= python3 -m pip list --disable-pip-version-check --format=freeze > {IMAGE_CONSTRAINTS}.all"
+        f" && {{ grep -viE '^(pip|setuptools|wheel)==' {IMAGE_CONSTRAINTS}.all > {IMAGE_CONSTRAINTS} || true; }}"
+        f" && python3 -m pip install --disable-pip-version-check --no-input --no-cache-dir --target {PYTHON_DEPS_DIR}"
+        f" -c {IMAGE_CONSTRAINTS} -r {shlex.quote(manifest)}"
+        f" && python3 -m pip list --disable-pip-version-check --path {PYTHON_DEPS_DIR} --format=freeze"
+    )
 
 
 def installed_packages(ecosystem: str, stdout: str) -> list[str]:
@@ -1151,10 +1169,7 @@ class ToolEngine:
         tf = self.fs.read_text(args.manifest or default, max_bytes=1_000_000)
         manifest = tf.rel
         if args.ecosystem == "python":
-            command = (
-                f"python3 -m pip install --disable-pip-version-check --no-input --no-cache-dir --upgrade --target {PYTHON_DEPS_DIR} "
-                f"-r {shlex.quote(manifest)} && python3 -m pip list --disable-pip-version-check --path {PYTHON_DEPS_DIR} --format=freeze"
-            )
+            command = python_install_command(manifest)
             return manifest, command
         if manifest != "package.json":
             raise ToolError(E.ARGS_INVALID, "node dependencies are installed from the package.json at the repository root")
@@ -1191,6 +1206,11 @@ class ToolEngine:
         installed = installed_packages(args.ecosystem, res.stdout if res else "") if error_code is None else []
         if error_code is None:
             text += f"\n[dependencies] {len(installed)} package(s) available to later commands and tests of this job"
+        elif error_code == E.COMMAND_FAILED and args.ecosystem == "python":
+            text += (
+                "\n[dependencies] packages the sandbox image already provides (its test toolchain, e.g. pytest and its plugins) "
+                "are fixed to the image's versions: relax or remove a conflicting pin in the manifest, then install again"
+            )
         return ToolResult(
             tool=ToolName.install_dependencies,
             ok=error_code is None,

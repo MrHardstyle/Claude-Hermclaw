@@ -1,18 +1,21 @@
 # STATUS
 
 ## Aktueller Zustand (2026-10-16)
-- Projekt: Hermclaw Next · Branch: `claude/hermclaw-next-build` · Version `0.1.0rc4` (gebaut); **deployt: 0.1.0rc3** auf .222–.225
+- Projekt: Hermclaw Next · Branch: `claude/hermclaw-next-build` · Version `0.1.0rc5` (gebaut); **deployt: 0.1.0rc4** auf .222–.225
 - **Live-Abnahme nach Kapitel 12 durchgeführt** (2026-10-16): 396 Schritte erledigt, 34 mit offenem Live-Teil (`[~]`), 0 offen.
 - 0.1.0rc2 deployt (vom Betreiber, alle Hosts inkl. .224): doctor 19 ok, models 6/6 (Fallback, BUG-150 wirksam), workers 3/3.
 - Erster Testauftrag erneut eingereicht (Job `eadf1b6f…`): Die Erstplanung ist jetzt gültig (BUG-143 wirkt, Steps mit Scope),
   der Job scheiterte aber im Replan → BUG-153 bis BUG-157 (Replan-Fehler stufenweise gemeldet, falscher failed_step,
   generisches Sandbox-Image im leeren Repository, Coder versuchte `pip install`). Behoben in 0.1.0rc3 (deployt).
 - Testauftrag auf 0.1.0rc3 (Job `c04f9fb8…`): erster Replan gültig (BUG-153/156 wirken), dann Stagnation durch eine liegengebliebene
-  Datei (BUG-158) und ein zweiter Replan ohne Scope-Felder (BUG-159, Ollama-Grammatik). Behoben in **0.1.0rc4**, Deployment ausstehend.
+  Datei (BUG-158) und ein zweiter Replan ohne Scope-Felder (BUG-159, Ollama-Grammatik). Behoben in 0.1.0rc4 (deployt, doctor 19 ok, `egress.enabled: true` auf .225/.222).
+- Testauftrag auf 0.1.0rc4 (Job `bec4c5e9…`): Erstplanung und Replans gültig, Installationen über den Proxy gelangen; der Job
+  scheiterte (`REPLAN_LIMIT`) am ersten Proxy-Start (300-s-Timeout, BUG-160) und an einem `pytest==7.4.3`-Pin, der die
+  Test-Toolchain des Images überdeckte (BUG-161). Behoben in **0.1.0rc5**, Deployment ausstehend.
 - **D-014 (Betreiberentscheidung 2026-10-16): Abhängigkeits-Installation** über einen Registry-Proxy auf .222 (P43). Live auf .222
   verifiziert (pip und npm durch den Proxy, alles andere blockiert); in 0.1.0rc4, eingeschaltet mit `hermclaw_config_dependency_installs: true`.
 - Blocker: BLOCKER-001 und BLOCKER-003 aufgehoben (GitLab-Suite PASS); BLOCKER-002 (Tag-Push) unverändert.
-- Release-Status: **RC – live abgenommen bis auf** End-to-End-Testauftrag (nach Deployment rc4 wiederholen),
+- Release-Status: **RC – live abgenommen bis auf** End-to-End-Testauftrag (nach Deployment rc5 wiederholen),
   Wake-on-LAN (nicht eingerichtet), Backup nach Terra (nicht eingerichtet), Soak-Test, Cutover.
 
 ## Fortschritt BUILD_PLAN (automatisch: `python scripts/dev/plan_progress.py --markdown`)
@@ -89,7 +92,7 @@ Abnahme so deployt. Einschalten erst mit funktionierendem WoL (R-042).
 | infratools | .225 | PASS 3 + 1 Skip (`nginx -t` ohne Sudo auf .223, gewollt R-038) (nach BUG-149) |
 | wol (ohne `--full-wol`) | .225 | PASS `test_live_probes`; Magic Packet Skip (WoL deaktiviert), DB-Pipeline nicht ausgeführt |
 | gitops (`local-ai/hermclaw-test`) | .225 | PASS 1/1 nach Vergabe des Schreibrechts (vorher BLOCKER-003); offener Test-MR in `hermclaw-test` kann geschlossen werden |
-| sandbox | .222 | PASS 25/25 (nach BUG-146/147); mit D-014-Live-Test 27/27 (Stand rc4-Quellen) |
+| sandbox | .222 | PASS 25/25 (nach BUG-146/147); mit D-014-Live-Tests 28/28 (Stand rc5-Quellen, inkl. BUG-161) |
 | backup, `--full-wol` | – | nicht ausgeführt (nicht eingerichtet, Auftrag) |
 
 Lokale Gesamtsuite auf .225: 3137 passed, 146 skipped; 57 vorbestehende Umgebungsfehler (identisch am Ausgangsstand, s. TEST_MATRIX).
@@ -101,8 +104,8 @@ Lint, mypy, ShellCheck, ansible-lint (production) sauber.
 - Embeddings: `embeddinggemma:300m` (768 dim; EmbeddingGemma 2 erst, wenn Ollama es unter Linux/CUDA ausführt, D-010)
 
 ## Bugs
-- 159 gefunden, **159 behoben** (P0 2, P1 27, P2 66, P3 54, P4 3) – `BUGS.md`. Live-Abnahme: BUG-143 bis BUG-159.
-  BUG-143–157 sind produktiv (0.1.0rc3); BUG-158/159 wirken nach dem Deployment von 0.1.0rc4.
+- 161 gefunden, **161 behoben** (P0 2, P1 29, P2 66, P3 54, P4 3) – `BUGS.md`. Live-Abnahme: BUG-143 bis BUG-161.
+  BUG-143–159 sind produktiv (0.1.0rc4); BUG-160/161 wirken nach dem Deployment von 0.1.0rc5.
 - Externe Blocker: BLOCKER-002 (Tag-Push)
 
 ## Letzte Testresultate (2026-10-15, Build-Host)
@@ -127,8 +130,9 @@ Tests 2026-10-15, einzeln ausgeführt: `test_bootstrap_infra` 63, `test_bootstra
 bestanden; ansible-lint (production) sauber. `test_deploy_converge` ist angepasst; ihn führt der Integrator aus.
 
 ## Nächster Schritt
-1. 0.1.0rc4 ausrollen (`hermclaw_version: "0.1.0rc4"` im Inventar, `ansible-playbook … deploy.yml -K`), dann den ersten
+1. 0.1.0rc5 ausrollen (`hermclaw_version: "0.1.0rc5"` im Inventar, `ansible-playbook … deploy.yml -K`), dann den ersten
    Testauftrag erneut einreichen.
 2. Wake-on-LAN einrichten (MACs, BIOS, Kapitel 13.1), danach `--suite wol --full-wol` und erst dann den Leerlauf-Suspend einschalten.
 3. Backup nach Terra einrichten (Kapitel 11), Backup-Suite; danach Soak-Test und Cutover (`docs/runbooks/cutover.md`).
-4. Neue Drittabhängigkeiten eines Projekts (z. B. FastAPI) brauchen ein Projekt-Sandbox-Image (`infra/sandbox-images/README.md`).
+4. Drittabhängigkeiten eines Projekts installiert der Coder über `install_dependencies` (D-014); ein Projekt-Sandbox-Image
+   (`infra/sandbox-images/README.md`) bleibt für Systempakete nötig.

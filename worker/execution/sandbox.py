@@ -98,6 +98,7 @@ MIN_MEMORY_BYTES = 6 * 1024 * 1024  # podman/docker refuse smaller memory limits
 MIN_CPUS = 0.01
 #: longest pause between two checks whether a command's process has exited
 EXIT_POLL_MAX_SECONDS = 0.1
+ENGINE_READER_GRACE_SECONDS = 2.0  # output still arriving after an engine helper exited
 #: size of the writable ``/dev/shm`` (POSIX semaphores/shared memory, e.g. Python multiprocessing)
 DEFAULT_SHM_SIZE = "64m"
 MAX_ENV_VALUE_CHARS = 32_768
@@ -357,27 +358,33 @@ async def _pump(stream: asyncio.StreamReader | None, capture: OutputCapture) -> 
 
 
 async def engine_exec(argv: Sequence[str], *, timeout_seconds: float = 60.0, max_bytes: int = 4_000_000) -> tuple[int, str, str]:
-    """Run an engine helper command (``kill``, ``rm``, ``inspect``, ``info``, ``pull`` …) with a timeout.
+    """Run an engine helper command (``kill``, ``rm``, ``inspect``, ``info``, ``pull``, ``run -d`` …) with a timeout.
 
-    Returns ``(returncode, stdout, stderr)``; a missing executable yields 127 and a timeout -9."""
+    Returns ``(returncode, stdout, stderr)``; a missing executable yields 127 and a timeout -9. Returns as soon as
+    the engine process itself exits: a daemon it spawns (rootless podman's pasta/rootless-netns, conmon) may keep
+    the pipes open forever, which must not turn a finished ``podman run -d`` into a timeout (BUG-160)."""
     try:
         proc = await asyncio.create_subprocess_exec(
             *argv, stdin=asyncio.subprocess.DEVNULL, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE
         )
     except (FileNotFoundError, PermissionError) as exc:
         return 127, "", f"{argv[0]}: {exc.strerror or exc}"
-    try:
-        out, err = await asyncio.wait_for(proc.communicate(), timeout_seconds)
-    except BaseException as exc:
-        with contextlib.suppress(ProcessLookupError):
-            proc.kill()
-        with contextlib.suppress(Exception):
-            await asyncio.shield(proc.wait())
-        if isinstance(exc, TimeoutError):
-            return -9, "", f"{argv[0]} {argv[1] if len(argv) > 1 else ''} timed out after {timeout_seconds:g}s"
-        raise
-    rc = proc.returncode if proc.returncode is not None else -1
-    return rc, out[:max_bytes].decode("utf-8", "replace"), err[:max_bytes].decode("utf-8", "replace")
+
+    async def no_container() -> None:
+        return None
+
+    outcome = await _supervise(
+        proc,
+        timeout_seconds=timeout_seconds,
+        terminate=no_container,
+        limit=max_bytes,
+        reader_grace=ENGINE_READER_GRACE_SECONDS,
+        started=time.monotonic(),
+    )
+    if outcome.timed_out:
+        return -9, "", f"{argv[0]} {argv[1] if len(argv) > 1 else ''} timed out after {timeout_seconds:g}s"
+    rc = outcome.returncode if outcome.returncode is not None else -1
+    return rc, outcome.stdout.text(), outcome.stderr.text()
 
 
 @dataclass

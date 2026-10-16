@@ -442,6 +442,9 @@ async def test_install_dependencies_runs_a_runtime_built_command_with_registry_e
     assert req.egress is True and req.network is False and req.purpose == "install" and req.timeout_seconds == 900
     assert req.image == "python"  # the toolchain image: compiled wheels match the interpreter of later commands
     assert "pip install" in req.command and "--target /deps/python" in req.command and "-r requirements.txt" in req.command
+    # BUG-161: a fresh /deps/python each time, and the image's own packages (its pytest) are constraints
+    assert req.command.startswith("find /deps/python -mindepth 1 -delete && PYTHONPATH= python3 -m pip list")
+    assert "-c /tmp/hermclaw-image-constraints.txt -r requirements.txt" in req.command and "--upgrade" not in req.command
     assert res.data["packages"] == ["fastapi==0.115.0", "httpx==0.28.1", "starlette==0.38.6"]
     assert "3 package(s) available" in res.output
     ev = await events_for(sessionmaker, h.step.id, EventType.COMMAND_RUN)
@@ -470,3 +473,4 @@ async def test_install_dependencies_is_offered_only_when_enabled(sessionmaker: S
     h = await make_harness(sessionmaker, repo, contract=scope(**SCOPE), permissions=perms, executor=failed)
     res = await h.call("install_dependencies", ecosystem="python")
     assert not res.ok and res.error_code == E.COMMAND_FAILED and res.data["packages"] == []
+    assert "fixed to the image's versions" in res.output  # BUG-161: tells the coder why a pinned pytest fails
