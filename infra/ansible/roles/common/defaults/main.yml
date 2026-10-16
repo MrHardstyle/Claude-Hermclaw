@@ -118,3 +118,7 @@ common_directories:
   - {path: "{{ hermclaw_data_dir }}/repos", owner: "{{ hermclaw_user }}", group: "{{ hermclaw_group }}", mode: "0750"}
   - {path: "{{ hermclaw_log_dir }}", owner: "{{ hermclaw_user }}", group: "{{ hermclaw_group }}", mode: "0750"}
   - {path: "{{ hermclaw_credstore_dir }}", owner: root, group: root, mode: "0700"}
+
+# Static nameservers (e.g. the LAN router). Empty: resolv.conf is only checked. dhcpcd hosts get them via
+# /etc/resolv.conf.head, so a reboot without IPv6 router advertisements keeps DNS working.
+common_dns_servers: []

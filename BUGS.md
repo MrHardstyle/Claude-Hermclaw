@@ -46,6 +46,12 @@ Noch keine.
 
 ## Behobene Bugs
 
+### BUG-172 – DNS nach Neustart weg: statische IPv4 ohne Nameserver, DNS nur aus IPv6-Router-Advertisements
+- Phase: Betrieb, Neustart von .222/.224 für die CPU-Umstellung (2026-10-17) · Komponente: infra/ansible (Rolle common) · Severity: P1 · blockierend: ja (behoben) · Status: **behoben** (Rolle `common`, `tasks/dns.yml`; live: Sandbox-Suite auf .222 nach dem Fix 29/29)
+- Reproduktion: Nach dem Neustart von VM 102 (.222) schrieb dhcpcd eine `/etc/resolv.conf` ohne Nameserver (IPv4 statisch in `/etc/network/interfaces`, DNS kam bisher nur per IPv6-RA). Folge: Image-Pulls und der Egress-Proxy scheiterten, die Sandbox-Suite übersprang alle 29 Tests („no non-loopback nameserver“); doctor meldete trotzdem 19 ok.
+- Ursache: Die Basisrolle verwaltete DNS nicht; die Hosts hingen vom zeitlichen Eintreffen der IPv6-RAs ab.
+- Fix: `common_dns_servers` (Inventar: LAN-Router) landen in `/etc/resolv.conf.head`, die dhcpcd jeder erzeugten `resolv.conf` voranstellt; die Rolle prüft danach, dass ein Nicht-Loopback-Nameserver vorhanden ist (geteilte Hosts wie .223 ausgenommen).
+
 ### BUG-171 – Coder ohne Gedächtnis über Züge: liest dieselben Dateien und wiederholt grüne Testläufe
 - Phase: Live-Auftragsbatterie auf 0.1.0rc9 (J2) · Komponente: context_builder, tools/engine, Coder-Vertrag · Severity: P1 · blockierend: ja (behoben) · Status: **behoben** (`tests/unit/test_context_builder_relevance.py::test_files_read_in_this_attempt_stay_in_the_context`, `tests/integration/test_tools_engine_exec.py::test_identical_command_on_unchanged_files_is_not_rerun`)
 - Reproduktion: Job `50784df5-d1b3-41c0-b200-853729b28219` (J2 „POST /items mit Validierung“, Fixture `acceptance/service`). Erster Versuch: neunmal `read_file` auf dieselben drei Dateien („Reading store.py to understand the current implementation“), kein Edit → Stagnation. Zweiter Versuch: achtmal lesen, dann `server.py` geschrieben, dreimal dieselbe grüne Testsuite („Running tests to verify current state“), keine neuen Tests. Nach dem Replan viermal dieselbe Suite vor jeder Änderung.

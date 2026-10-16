@@ -3,3 +3,8 @@
     name: systemd-timesyncd
     state: restarted
   when: hermclaw_manage_services | bool
+
+- name: Rebind dhcpcd
+  ansible.builtin.command: dhcpcd --rebind  # rewrites resolv.conf with /etc/resolv.conf.head in front
+  changed_when: true
+  failed_when: false

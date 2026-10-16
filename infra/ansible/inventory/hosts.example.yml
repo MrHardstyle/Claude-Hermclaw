@@ -19,6 +19,7 @@ all:
     # hermclaw_sandbox_image_version: "1"
     # Time zone of the Hermclaw hosts.
     # hermclaw_timezone: Europe/Berlin
+    # common_dns_servers: ["192.168.178.1"]   # static nameservers (LAN router); keeps DNS after reboots
     # Variables of playbooks/group_vars/all.yml (e.g. hermclaw_release_root) beat all.vars and group vars here:
     # pass them with -e <name>=<value> or set them per host.
     # Configuration overrides deep-merged into config/<name>.example.yaml (docs/operations/deployment.md):

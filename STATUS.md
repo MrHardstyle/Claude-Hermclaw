@@ -29,6 +29,10 @@
   fertig mit grünen Tests im ersten Versuch – Verifier lehnte wegen fehlendem Test-Kriterium ab (BUG-170). Lauf nach J2
   abgebrochen; Fix in 0.1.0rc10. J2 (Job `50784df5…`): Coder ohne Gedächtnis über Züge (liest dieselben Dateien,
   wiederholt grüne Testläufe, BUG-171); Fix in **0.1.0rc11** (enthält rc10).
+- **Hardware (2026-10-17):** Alle VMs liefen mit CPU-Typ `x86-64-v2-AES` (kein AVX/AVX2/FMA); die 18-GB-Modelle rechnen
+  größtenteils auf der CPU. Mit Freigabe des Betreibers VM 102 (.222) und VM 104 (.224) über die Proxmox-API auf
+  `x86-64-v3` umgestellt (VM 105/.225 folgt später). Messung auf .224 (Generierung): qwen3-coder:30b 2 → 18,9 Token/s,
+  gemma4:26b 5–7 → 27,6, qwen3:8b 4 → 20,0, qwen3.8:27b 0,8 → 4,7. Beim Neustart fiel DNS auf .222 aus (BUG-172, behoben).
 - **D-014 (Betreiberentscheidung 2026-10-16): Abhängigkeits-Installation** über einen Registry-Proxy auf .222 (P43). Live auf .222
   verifiziert (pip und npm durch den Proxy, alles andere blockiert); in 0.1.0rc4, eingeschaltet mit `hermclaw_config_dependency_installs: true`.
 - Blocker: BLOCKER-001 und BLOCKER-003 aufgehoben (GitLab-Suite PASS); BLOCKER-002 (Tag-Push) unverändert.
@@ -121,7 +125,7 @@ Lint, mypy, ShellCheck, ansible-lint (production) sauber.
 - Embeddings: `embeddinggemma:300m` (768 dim; EmbeddingGemma 2 erst, wenn Ollama es unter Linux/CUDA ausführt, D-010)
 
 ## Bugs
-- 171 gefunden, **171 behoben** (P0 2, P1 37, P2 68, P3 54, P4 3) – `BUGS.md`. Live-Abnahme: BUG-143 bis BUG-171.
+- 172 gefunden, **172 behoben** (P0 2, P1 38, P2 68, P3 54, P4 3) – `BUGS.md`. Live-Abnahme: BUG-143 bis BUG-172.
   BUG-143–169 sind produktiv (0.1.0rc9); BUG-170/171 wirken nach dem Deployment von 0.1.0rc11.
 - Externe Blocker: BLOCKER-002 (Tag-Push)
 

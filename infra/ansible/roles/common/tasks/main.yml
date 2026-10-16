@@ -18,6 +18,11 @@
   when: common_shared_host | bool
   tags: [common, time]
 
+- name: DNS resolver
+  ansible.builtin.import_tasks: dns.yml
+  when: not common_shared_host | bool
+  tags: [common, dns]
+
 - name: Users and groups
   ansible.builtin.import_tasks: users.yml
   tags: [common, users]

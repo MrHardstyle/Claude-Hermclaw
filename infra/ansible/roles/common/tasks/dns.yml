@@ -1,0 +1,40 @@
+# DNS of a Hermclaw host. A statically addressed host whose nameserver came only from IPv6 router advertisements
+# (dhcpcd) lost DNS after a reboot (.222, 2026-10-17): image pulls and the egress proxy failed. With
+# common_dns_servers set, the servers go into /etc/resolv.conf.head, which dhcpcd puts in front of every generated
+# resolv.conf; without dhcpcd, resolv.conf is left alone (managed elsewhere) and only checked.
+- name: Detect dhcpcd
+  ansible.builtin.stat:
+    path: /etc/dhcpcd.conf
+  register: common_dhcpcd
+
+- name: Static nameservers before the ones dhcpcd learns
+  ansible.builtin.copy:
+    content: |
+      # Managed by Hermclaw (role common, common_dns_servers)
+      {% for server in common_dns_servers %}
+      nameserver {{ server }}
+      {% endfor %}
+    dest: /etc/resolv.conf.head
+    owner: root
+    group: root
+    mode: "0644"
+  when: common_dns_servers | length > 0 and common_dhcpcd.stat.exists
+  notify: Rebind dhcpcd
+
+- name: Rewrite resolv.conf before it is checked
+  ansible.builtin.meta: flush_handlers
+
+- name: Read resolv.conf
+  ansible.builtin.slurp:
+    src: /etc/resolv.conf
+  register: common_resolv
+
+- name: Assert a non-loopback nameserver
+  ansible.builtin.assert:
+    that: >-
+      common_resolv.content | b64decode | regex_findall('(?m)^nameserver\s+(\S+)')
+      | reject('match', '^(127\.|::1$)') | list | length > 0
+    fail_msg: >-
+      /etc/resolv.conf has no non-loopback nameserver: image pulls and the egress proxy fail.
+      Set common_dns_servers (e.g. the LAN router) in the inventory.
+    quiet: true
