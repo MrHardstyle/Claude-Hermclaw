@@ -189,3 +189,20 @@ async def test_unscoped_implement_step_is_repaired_before_it_can_block() -> None
     repair = chat.calls[1].messages[-1].content
     assert "step S001: implement step names no files to work on" in repair and "allowed_new_paths" in repair
     assert outcome.value.steps[0].allowed_new_paths == ["app/health.py", "tests/test_health.py"]
+
+
+def test_model_facing_schemas_require_the_scope_fields() -> None:
+    """BUG-159 (live job c04f9fb8): Ollama's grammar emits properties in schema order and lets the model skip
+    optional ones; Gemma skipped repo_hints/allowed_new_paths and could not add them after rerun_reason. The schema
+    sent to the model requires them (empty lists allowed); the contracts themselves keep their defaults."""
+    from hermclaw.contracts.plan import PlanStep
+    from hermclaw.planner.replanner import replan_json_schema
+
+    for schema, name in ((plan_json_schema(), "PlanStep"), (replan_json_schema(), "ReplanStep")):
+        required = schema["$defs"][name]["required"]
+        assert {"depends_on", "repo_hints", "allowed_new_paths", "acceptance"} <= set(required), required
+        assert "rerun_reason" not in required
+    assert (
+        PlanStep.model_validate({"id": "S001", "title": "abc", "kind": "research", "capability": "research", "goal": "find it"}).repo_hints
+        == []
+    )

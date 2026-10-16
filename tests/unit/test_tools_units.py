@@ -26,7 +26,7 @@ ROOT = Path(__file__).resolve().parents[2]
 
 # ------------------------------------------------------------------------------------------------ registry
 def test_registry_covers_all_tools_with_flags() -> None:
-    assert set(TOOL_SPECS) == set(ToolName) and len(TOOL_SPECS) == 19 + len(OPS_TOOLS)
+    assert set(TOOL_SPECS) == set(ToolName) and len(TOOL_SPECS) == 20 + len(OPS_TOOLS)
     for name, spec in TOOL_SPECS.items():
         assert spec.mutating == (name in MUTATING_TOOLS)
         assert spec.terminal == (name in TERMINAL_TOOLS)

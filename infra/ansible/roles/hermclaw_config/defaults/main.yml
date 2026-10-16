@@ -39,6 +39,11 @@ hermclaw_config_sandbox_toolchain_images: true
 # Tag of those images: localhost/hermclaw-sandbox-<toolchain>:<tag>. Shared with the roles hermclaw_release and
 # hermclaw_worker (same default, test_deploy_infra.py keeps them equal); set it in the inventory (all.vars).
 hermclaw_sandbox_image_version: "1"  # noqa: var-naming[no-role-prefix]
+# D-014: dependency installs of the coder (install_dependencies) through the egress proxy on .222, which reaches only
+# policies.sandbox.egress.allowed_hosts (pypi.org, files.pythonhosted.org, registry.npmjs.org). Sets
+# policies.sandbox.egress.enabled on the orchestrator (offers the tool) and on .222 (runs the proxy). Set it in the
+# inventory (all.vars); hermclaw_config_overrides can still change the host list or the subnets.
+hermclaw_config_dependency_installs: false
 
 hermclaw_config_staging_dir: "{{ hermclaw_config_dir }}/deploy-staging"
 # false: main.yml installs the validated files right away. playbooks/deploy.yml sets true: the host role

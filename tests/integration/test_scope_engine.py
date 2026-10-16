@@ -141,6 +141,24 @@ async def test_new_hinted_paths_only_for_creating_kinds(sessionmaker: SM, repo: 
     assert ro.contract.allowed_operations == [] and ro.contract.target_paths == [] and ro.evidence["read_only"] is True
 
 
+async def test_declared_new_file_left_in_the_work_tree_stays_creatable(sessionmaker: SM, repo: Path) -> None:
+    """BUG-158 (live job c04f9fb8): an unfinished attempt left src/main.py uncommitted in the work tree. The next
+    step declared it in allowed_new_paths; the engine promoted it to target_paths with only "modify", while the
+    tool guard judges against the step baseline (HEAD), where the file does not exist, i.e. as "create" – every
+    edit was refused until the step stagnated. Creating exactly the listed file stays allowed, nothing else."""
+    from hermclaw.scope.guard import ScopeGuard
+
+    (repo / "src" / "app" / "leftover.py").write_text("print('half done')\n", encoding="utf-8")  # untracked
+    step = await make_step(sessionmaker, allowed_new_paths=["src/app/leftover.py"])
+    decision = await ScopeEngine(sessionmaker, make_config(), FakeRepo()).create_scope(step.id, workspace_for(step.job_id, repo))
+    assert decision.contract is not None
+    assert decision.contract.target_paths == ["src/app/leftover.py"] and decision.contract.allowed_new_paths == []
+    assert decision.contract.allowed_operations == ["create", "modify"]
+    guard = ScopeGuard(decision.contract)
+    assert guard.allowed("src/app/leftover.py", "create") and guard.allowed("src/app/leftover.py", "modify")
+    assert not guard.allowed("src/app/other.py", "create")
+
+
 async def test_bare_file_name_resolves_unique_basename(sessionmaker: SM, repo: Path) -> None:
     step = await make_step(sessionmaker, repo_hints=["helpers.py", "test_core.py"])
     decision = await ScopeEngine(sessionmaker, make_config(), FakeRepo()).create_scope(step.id, workspace_for(step.job_id, repo))

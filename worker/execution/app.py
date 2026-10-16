@@ -105,7 +105,7 @@ def default_runner(settings: WorkerDaemonSettings) -> CommandRunner:
     if settings.sandbox.engine == "local":
         runner: CommandRunner = make_sandbox(settings.sandbox)
     else:  # one label source: the daemon settings (recovery and sandbox must agree)
-        runner = make_sandbox(settings.sandbox, managed_label=settings.container_label)
+        runner = make_sandbox(settings.sandbox, managed_label=settings.container_label, deps_root=settings.deps_dir)
     return runner
 
 
@@ -393,6 +393,9 @@ class ExecutionService:
             existed = path.exists()
             if existed:
                 await asyncio.to_thread(shutil.rmtree, path)
+            deps = self.settings.deps_dir / path.name  # installed dependencies of the workspace (D-014)
+            if deps.exists():
+                await asyncio.to_thread(shutil.rmtree, deps, True)
         if lk.idle:
             self.locks.pop(ws, None)
         return WorkspaceInfo(workspace=ws, exists=False, mode="none")

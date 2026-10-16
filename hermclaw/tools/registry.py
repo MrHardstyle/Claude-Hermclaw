@@ -110,6 +110,15 @@ class RunTestArgs(ToolArgs):
     framework: Framework | None = Field(default=None, description="output parser; auto-detected when omitted")
 
 
+class InstallDependenciesArgs(ToolArgs):
+    ecosystem: Literal["python", "node"] = Field(description="python installs a requirements file with pip, node a package.json with npm")
+    manifest: str | None = Field(
+        default=None,
+        max_length=1000,
+        description="dependency file relative to the repository root (default requirements.txt / package.json; node: root only)",
+    )
+
+
 class RequestResearchArgs(ToolArgs):
     question: str = Field(min_length=5, max_length=2000)
 
@@ -271,6 +280,13 @@ _SPECS: list[ToolSpec] = [
         "Run a shell command in the sandbox (no git mutations, no sudo; out-of-scope file changes are reverted).",
     ),
     _spec(ToolName.run_test, RunTestArgs, "exec", "Run a test command in the sandbox and get parsed pass/fail counts."),
+    _spec(
+        ToolName.install_dependencies,
+        InstallDependenciesArgs,
+        "exec",
+        "Install the dependencies declared in the manifest from the allow-listed package registries; later commands and "
+        "tests of this job can import them. Declare every dependency in the manifest first.",
+    ),
     _spec(
         ToolName.request_scope_expansion,
         ScopeExpansionRequest,

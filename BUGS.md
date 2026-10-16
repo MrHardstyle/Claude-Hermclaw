@@ -46,6 +46,18 @@ Noch keine.
 
 ## Behobene Bugs
 
+### BUG-158 – Liegengebliebene Datei eines abgebrochenen Versuchs: Scope erlaubt nur „modify“, die Schreibprüfung verlangt „create“
+- Phase: Live-Abnahme nach Deployment 0.1.0rc3 · Komponente: scope/engine · Severity: P1 · blockierend: ja (behoben) · Status: **behoben** (`tests/integration/test_scope_engine.py::test_declared_new_file_left_in_the_work_tree_stays_creatable`)
+- Reproduktion: Job `c04f9fb8-fa18-4416-847a-cb7f593a9404` (erster Testauftrag „/health-Endpunkt“ auf `hermclaw-test`, 0.1.0rc3, 2026-10-16 08:35). S002 legte `src/main.py` und `src/requirements.txt` an und forderte dann einen Replan an (Versuch ohne Commit, Dateien bleiben untracked im Work Tree). Der Replan-Step S007 deklarierte beide in `allowed_new_paths`. Scope v1: `target_paths=[src/main.py, src/requirements.txt]`, `allowed_operations=[modify]` („already exists: promoted to target_paths“). Jede Änderung → `SCOPE_VIOLATION: operation 'create' not allowed`, nach 4 Runden `STAGNATION`.
+- Ursache: Die Scope-Engine prüft die Existenz im Work Tree (tracked + untracked), Tool-Guard und Verifier beurteilen Operationen gegen die Step-Baseline (HEAD), in der die Dateien fehlen → „create“.
+- Fix: Für deklarierte neue Dateien, die schon im Work Tree liegen, bleibt „create“ erlaubt (zusätzlich zu „modify“). Der Guard lässt „create“ nur für ausdrücklich gelistete Ziel-Dateien zu; der Scope bleibt explizit.
+
+### BUG-159 – Gemma kann übersprungene Scope-Felder im Replan nicht nachtragen (Grammatik in Schema-Reihenfolge)
+- Phase: Live-Abnahme nach Deployment 0.1.0rc3 · Komponente: planner (Modell-Schema) · Severity: P1 · blockierend: ja (behoben) · Status: **behoben** (`tests/unit/test_planner_loop.py::test_model_facing_schemas_require_the_scope_fields`)
+- Reproduktion: Job `c04f9fb8-fa18-4416-847a-cb7f593a9404` (erster Testauftrag „/health-Endpunkt“ auf `hermclaw-test`, 0.1.0rc3, 2026-10-16 08:35), zweiter Replan: drei Antworten, in denen S009/S010 nur `id … risk, rerun_reason` enthalten; `rerun_reason` endet in der Schleife „I will also include 'src/main.py' in allowed_new_paths …“ bis zur Längengrenze. Die gesammelte Fehlermeldung (BUG-153) kam an, wurde aber nicht umgesetzt → `PLANNER_INVALID_OUTPUT`.
+- Ursache: Ollama erzeugt aus dem JSON-Schema eine Grammatik, die Eigenschaften in Schema-Reihenfolge ausgibt und optionale überspringen lässt. `repo_hints`/`allowed_new_paths` stehen vor `risk`/`rerun_reason`; einmal übersprungen, sind sie im selben Objekt nicht mehr erreichbar.
+- Fix: Das an das Modell gesendete Schema (Plan und Replan) verlangt `depends_on`, `repo_hints`, `allowed_new_paths` und `acceptance` (leere Liste erlaubt). Die Contracts selbst und die Validierung bleiben unverändert.
+
 ### BUG-153 – Replan-Validierung meldet Fehler stufenweise: Repair-Budget verbraucht, bevor Gemma die Scope-Fehler sieht
 - Phase: Live-Abnahme nach Deployment 0.1.0rc2 · Komponente: planner/replanner · Severity: P1 · blockierend: ja (behoben) · Status: **behoben** (`tests/integration/test_planner_replan.py::test_replan_reports_rule_and_scope_errors_in_one_repair_turn`)
 - Reproduktion: Job `eadf1b6f-3a82-475c-bbca-c92acd878d6f` (erneuter erster Testauftrag „/health-Endpunkt“ auf `hermclaw-test`, 0.1.0rc2, 2026-10-16 02:31). S002 (Coder) forderte einen Replan an.

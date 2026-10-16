@@ -7,7 +7,9 @@ Order of precedence for a workspace:
    offline in the network-less sandbox;
 2. the repository's primary language mapped to a toolchain alias of ``policies.sandbox.images``
    (python → ``python``, typescript/javascript → ``node``, php → ``php``), when that alias is configured;
-3. ``None`` – the sandbox default image (``policies.sandbox.image``).
+   a new repository without recognised code is recognised by its dependency manifest (``requirements.txt`` …);
+3. ``None`` – the sandbox default image (``policies.sandbox.image``); asked again on the next command, because a
+   step may create the project's first files (BUG-155).
 
 Only aliases/images allowed by ``policies.sandbox`` are ever used; the sandbox re-checks the allow-list itself.
 """
@@ -16,6 +18,8 @@ from __future__ import annotations
 
 import dataclasses
 import uuid
+from collections.abc import Awaitable, Callable
+from pathlib import Path
 from typing import Any
 
 from sqlalchemy import select
@@ -28,6 +32,15 @@ from hermclaw.core.logging import get_logger
 from hermclaw.persistence.models import Repository, Workspace
 
 log = get_logger(__name__)
+
+#: dependency manifests that identify a project's toolchain before it has recognised source files
+MANIFEST_IMAGE_ALIASES: tuple[tuple[str, str], ...] = (
+    ("requirements.txt", "python"),
+    ("pyproject.toml", "python"),
+    ("setup.py", "python"),
+    ("package.json", "node"),
+    ("composer.json", "php"),
+)
 
 LANGUAGE_IMAGE_ALIASES: dict[str, str] = {
     "python": "python",
@@ -72,6 +85,13 @@ class SandboxImageSelector:
                 return alias
         return None
 
+    def _manifest_alias(self, handle: WorkspaceHandle) -> str | None:
+        root = Path(handle.path)
+        for name, alias in MANIFEST_IMAGE_ALIASES:
+            if alias in self.policy.images and (root / name).is_file():
+                return alias
+        return None
+
     async def image_for(self, handle: WorkspaceHandle) -> str | None:
         if handle.id in self._cache:
             return self._cache[handle.id]
@@ -81,6 +101,8 @@ class SandboxImageSelector:
             image = None
         if image is None:
             image = await self._language_alias(handle)
+        if image is None:
+            image = self._manifest_alias(handle)
         # A workspace without a recognised language (a new, empty repository) is asked again next time: the first
         # step may create the project's first Python file, and later steps then need the toolchain image (BUG-155).
         if image is not None:
@@ -89,12 +111,19 @@ class SandboxImageSelector:
 
 
 class ImageDefaultingExecutor:
-    """Executor wrapper: requests without an explicit image run with the job's selected image."""
+    """Executor wrapper: requests without an explicit image run with the job's selected image.
 
-    def __init__(self, inner: CommandExecutor, image: str | None) -> None:
-        self.inner, self.image = inner, image
+    With a ``resolve`` callback and no selection yet, every command asks again (a step that creates the project's
+    first ``requirements.txt`` gets the Python toolchain for its next command, BUG-155)."""
+
+    def __init__(
+        self, inner: CommandExecutor, image: str | None, resolve: Callable[[WorkspaceHandle], Awaitable[str | None]] | None = None
+    ) -> None:
+        self.inner, self.image, self.resolve = inner, image, resolve
 
     async def run(self, workspace: WorkspaceHandle, req: ExecutionRequest) -> CommandResult:
+        if self.image is None and self.resolve is not None:
+            self.image = await self.resolve(workspace)
         if req.image is None and self.image is not None:
             req = dataclasses.replace(req, image=self.image)
         return await self.inner.run(workspace, req)

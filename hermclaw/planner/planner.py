@@ -64,8 +64,24 @@ log = get_logger(__name__)
 PLANNER_ROLE = "planner"
 
 
+# Step fields the model must always write out (an empty list is fine). Ollama turns the JSON schema into a grammar
+# that emits properties in schema order and lets the model skip optional ones; once Gemma had skipped repo_hints and
+# allowed_new_paths it could not add them later in the object – in a replan it wrote "I will also include
+# src/main.py in allowed_new_paths" into rerun_reason three times instead (BUG-159). Validation is unchanged.
+MODEL_REQUIRED_STEP_FIELDS: tuple[str, ...] = ("depends_on", "repo_hints", "allowed_new_paths", "acceptance")
+
+
+def model_facing_schema(schema: dict[str, Any], step_definition: str) -> dict[str, Any]:
+    """``schema`` with :data:`MODEL_REQUIRED_STEP_FIELDS` required on its step definition (``$defs``)."""
+    step = schema["$defs"][step_definition]
+    required = list(step.get("required", []))
+    required += [f for f in MODEL_REQUIRED_STEP_FIELDS if f in step["properties"] and f not in required]
+    step["required"] = required
+    return schema
+
+
 def plan_json_schema() -> dict[str, Any]:
-    return PlanContract.model_json_schema()
+    return model_facing_schema(PlanContract.model_json_schema(), "PlanStep")
 
 
 class PlannerBase:

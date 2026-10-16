@@ -6,6 +6,7 @@ import asyncio
 import shlex
 import sys
 from pathlib import Path
+from typing import Any
 
 import pytest
 
@@ -409,3 +410,63 @@ async def test_marker_may_be_written_when_file_already_contains_it(sessionmaker:
     res = await h.call("write_file", path="src/calc.py", content=f"MASK = '{REDACTED}'\nOTHER = 1\n")
     assert res.ok
     assert (await h.call("write_file", path="src/gen_new.py", content=f"X = '{REDACTED}'\n")).error_code == E.REDACTED_PLACEHOLDER
+
+
+# ------------------------------------------------------------------------------------------------ D-014 dependency installs
+class InstallRecorder:
+    """Executor double: records the requests and answers like pip/npm with a package listing."""
+
+    def __init__(self, stdout: str, exit_code: int = 0) -> None:
+        self.stdout, self.exit_code = stdout, exit_code
+        self.requests: list[Any] = []
+
+    async def run(self, workspace: Any, req: Any) -> Any:
+        from hermclaw.contracts.worker import CommandResult
+
+        self.requests.append(req)
+        return CommandResult(request_id="r", exit_code=self.exit_code, stdout=self.stdout, sandbox="podman")
+
+
+async def test_install_dependencies_runs_a_runtime_built_command_with_registry_egress(sessionmaker: SM, repo: Path) -> None:
+    """D-014: the model names only the ecosystem and the manifest; the runtime builds the pip/npm command and sends
+    it with ``egress=True`` (never full network) and the install timeout; installed versions are reported."""
+    (repo / "requirements.txt").write_text("fastapi\nhttpx\n", encoding="utf-8")
+    (repo / "package.json").write_text('{"name": "x", "dependencies": {"express": "^4"}}\n', encoding="utf-8")
+    commit_all(repo)
+    pip = InstallRecorder("Successfully installed fastapi-0.115.0\nfastapi==0.115.0\nhttpx==0.28.1\nstarlette==0.38.6\n")
+    perms = ToolPermissions.for_step(kind="implement", dependency_install=True)
+    h = await make_harness(sessionmaker, repo, contract=scope(**SCOPE), permissions=perms, executor=pip)
+    res = await h.call("install_dependencies", ecosystem="python")
+    assert res.ok, res.output
+    req = pip.requests[0]
+    assert req.egress is True and req.network is False and req.purpose == "install" and req.timeout_seconds == 900
+    assert req.image == "python"  # the toolchain image: compiled wheels match the interpreter of later commands
+    assert "pip install" in req.command and "--target /deps/python" in req.command and "-r requirements.txt" in req.command
+    assert res.data["packages"] == ["fastapi==0.115.0", "httpx==0.28.1", "starlette==0.38.6"]
+    assert "3 package(s) available" in res.output
+    ev = await events_for(sessionmaker, h.step.id, EventType.COMMAND_RUN)
+    assert ev[-1].payload["egress"] is True and ev[-1].payload["purpose"] == "install"
+
+    npm = InstallRecorder("x@ /workspace\n├── express@4.21.2\n└── zod@3.23.8\n")
+    h = await make_harness(sessionmaker, repo, contract=scope(**SCOPE), permissions=perms, executor=npm)
+    res = await h.call("install_dependencies", ecosystem="node")
+    assert res.ok and "--ignore-scripts" in npm.requests[0].command and res.data["packages"] == ["express@4.21.2", "zod@3.23.8"]
+    assert (await h.call("install_dependencies", ecosystem="node", manifest="src/package.json")).error_code in (E.NOT_FOUND, E.ARGS_INVALID)
+    assert (await h.call("install_dependencies", ecosystem="python", manifest="missing.txt")).error_code == E.NOT_FOUND
+    assert (await h.call("install_dependencies", ecosystem="python", manifest="../etc/passwd")).error_code in (
+        E.PATH_INVALID,
+        E.PATH_OUTSIDE_WORKSPACE,
+    )
+
+
+async def test_install_dependencies_is_offered_only_when_enabled(sessionmaker: SM, repo: Path) -> None:
+    assert ToolName.install_dependencies not in (ToolPermissions.for_step(kind="implement").allowed_tools or set())
+    assert ToolName.install_dependencies not in (ToolPermissions.for_step(kind="review", dependency_install=True).allowed_tools or set())
+    h = await make_harness(sessionmaker, repo, contract=scope(**SCOPE), permissions=ToolPermissions.for_step(kind="implement"))
+    assert (await h.call("install_dependencies", ecosystem="python")).error_code == E.TOOL_NOT_ALLOWED
+    failed = InstallRecorder("ERROR: No matching distribution found for nosuchpkg\n", exit_code=1)
+    (repo / "requirements.txt").write_text("nosuchpkg\n", encoding="utf-8")
+    perms = ToolPermissions.for_step(kind="implement", dependency_install=True)
+    h = await make_harness(sessionmaker, repo, contract=scope(**SCOPE), permissions=perms, executor=failed)
+    res = await h.call("install_dependencies", ecosystem="python")
+    assert not res.ok and res.error_code == E.COMMAND_FAILED and res.data["packages"] == []

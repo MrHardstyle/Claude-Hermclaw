@@ -871,15 +871,20 @@ class ScopeEngine:
         evidence["excluded"] = draft.excluded
         evidence["caps"].update({"target_count": len(targets), "new_path_count": len(new_paths)})
 
+        # Declared new files that already exist in the work tree (left there uncommitted by an earlier, unfinished
+        # attempt) are promoted to targets, but the tool guard and the verifier judge operations against the step
+        # baseline (HEAD), where they do not exist: writing them is a creation, so "create" must stay allowed. The
+        # guard allows creating only files the contract lists explicitly (BUG-158).
+        promoted_new = [p for p in targets if any(src.endswith("(existing)") for src in draft.targets.get(p, []))]
         operations: list[Operation] = []
-        if new_paths:
+        if new_paths or promoted_new:
             operations.append("create")
         if targets:
             operations.append("modify")
         if delete_paths:
             operations.append("delete")
         evidence["operations"] = {
-            "create": "allowed new paths present" if new_paths else None,
+            "create": "allowed new paths present" if new_paths else "declared new files already in the work tree" if promoted_new else None,
             "modify": "resolved target paths present" if targets else None,
             "delete": "acceptance absence evidence / explicit delete constraint" if delete_paths else None,
         }

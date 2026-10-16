@@ -70,6 +70,9 @@
       {%- endfor -%}
       {%- set data = data | combine({'sandbox': {'image': images[hermclaw_sandbox_default_toolchain], 'images': images}}, recursive=true) -%}
       {%- endif -%}
+      {%- if name == 'policies' -%}
+      {%- set data = data | combine({'sandbox': {'egress': {'enabled': hermclaw_config_dependency_installs | bool}}}, recursive=true) -%}
+      {%- endif -%}
       {%- set data = data | combine(hermclaw_config_overrides.get(name, {}), recursive=true) -%}
       {%- if name == 'hosts' -%}
       {%- set entries = data.get('hosts', []) -%}

@@ -7,6 +7,7 @@ fresh checkout and the test-suite run without manual setup. Production installs 
 
 from __future__ import annotations
 
+import ipaddress
 from functools import lru_cache
 from pathlib import Path
 from typing import Any, Literal
@@ -193,6 +194,50 @@ RUNTIME_SANDBOX_ENV: tuple[str, ...] = (
 )
 
 
+DEFAULT_EGRESS_ALLOWED_HOSTS: tuple[str, ...] = ("pypi.org", "files.pythonhosted.org", "registry.npmjs.org")
+
+
+class EgressPolicy(_Strict):
+    """Registry-only network for dependency installs (D-014).
+
+    An install command runs on ``internal_network`` (podman ``--internal``: no route outside); the only peer there
+    is the ``hermclaw-egress-proxy`` container at ``proxy_ip``, which is also attached to ``outbound_network`` and
+    forwards CONNECT tunnels to ``allowed_hosts`` only (``worker/execution/egress_proxy.py``)."""
+
+    enabled: bool = False
+    allowed_hosts: list[str] = Field(default_factory=lambda: list(DEFAULT_EGRESS_ALLOWED_HOSTS), min_length=1)
+    internal_network: str = Field(default="hermclaw-egress", pattern=r"^[A-Za-z0-9][A-Za-z0-9_.-]{0,62}$")
+    outbound_network: str = Field(default="hermclaw-egress-out", pattern=r"^[A-Za-z0-9][A-Za-z0-9_.-]{0,62}$")
+    internal_subnet: str = "10.89.240.0/24"
+    outbound_subnet: str = "10.89.241.0/24"
+    proxy_ip: str = "10.89.240.2"
+    proxy_port: int = Field(default=3128, ge=1, le=65535)
+    proxy_container: str = Field(default="hermclaw-egress-proxy", pattern=r"^[A-Za-z0-9][A-Za-z0-9_.-]{0,62}$")
+    #: image with python3 that runs the proxy script (the generic toolchain image has it)
+    proxy_image: str = "localhost/hermclaw-sandbox-generic:1"
+    #: resolvers of the proxy container; empty = the worker host's non-loopback nameservers (/etc/resolv.conf)
+    dns: list[str] = Field(default_factory=list)
+    install_timeout_seconds: int = Field(default=900, ge=30, le=7200)
+
+    @model_validator(mode="after")
+    def _addresses(self) -> EgressPolicy:
+        internal = ipaddress.ip_network(self.internal_subnet)
+        ipaddress.ip_network(self.outbound_subnet)
+        if ipaddress.ip_address(self.proxy_ip) not in internal:
+            raise ValueError(f"egress.proxy_ip {self.proxy_ip} is not inside egress.internal_subnet {self.internal_subnet}")
+        if self.internal_network == self.outbound_network:
+            raise ValueError("egress.internal_network and egress.outbound_network must differ")
+        for host in self.allowed_hosts:
+            h = host.strip().lstrip(".")
+            if not h or "/" in h or ":" in h or " " in h or "*" in h:
+                raise ValueError(f"egress.allowed_hosts: {host!r} is not a host name (exact, or .domain for subdomains)")
+        return self
+
+    @property
+    def proxy_url(self) -> str:
+        return f"http://{self.proxy_ip}:{self.proxy_port}"
+
+
 class SandboxPolicy(_Strict):
     engine: Literal["podman", "docker", "local"] = "podman"
     image: str = "docker.io/library/python:3.12-slim"
@@ -204,6 +249,7 @@ class SandboxPolicy(_Strict):
     default_timeout_seconds: int = 600
     network_default: Literal["none", "allowed"] = "none"
     env_allowlist: list[str] = Field(default_factory=lambda: ["PATH", "HOME", "LANG", "LC_ALL", "CI", "PYTHONDONTWRITEBYTECODE"])
+    egress: EgressPolicy = Field(default_factory=EgressPolicy)
 
     @property
     def request_env_allowlist(self) -> list[str]:

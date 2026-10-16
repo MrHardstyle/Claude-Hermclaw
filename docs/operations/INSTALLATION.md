@@ -1033,6 +1033,7 @@ Deployment erneut ausführen (Kapitel 8.4, schlafende Worker vorher wecken, Kapi
 | `policies` → `sandbox.network_default` | `none` | Netz in der Sandbox nur über die Schritt-Capability |
 | `policies` → `sandbox.cpus` / `memory` / `pids_limit` | 2 / `2g` / … | an die Hardware von .222 anpassen |
 | `policies` → `sandbox.env_allowlist` | PATH, HOME, LANG, LC_ALL, CI, PYTHONDONTWRITEBYTECODE | Variablen, die Projekt-Befehle setzen dürfen |
+| `policies` → `sandbox.egress.enabled` | `false` | Abhängigkeits-Installation über den Registry-Proxy (D-014); im Inventar `hermclaw_config_dependency_installs: true` |
 | `policies` → `coder.max_turns` | 20 | Werkzeugrunden je Schritt |
 | `policies` → `correction` | 2 Korrekturen, 3 Versuche, 2 Neuplanungen | Ausdauer bei Fehlschlägen |
 | `policies` → `research.primary_domains` | offizielle Doku-Domains | eigene bevorzugte Quellen |
@@ -1160,7 +1161,24 @@ sudo hermclaw repo-list
 
 Optional `--sandbox-image node` (bzw. `python`, `php`, `generic`), wenn das Projekt eine bestimmte Toolchain braucht.
 
-**Projekte mit Abhängigkeiten (vor dem ersten Job):** Die Sandbox auf .222 läuft ohne Netz
+**Abhängigkeiten im Job installieren lassen (D-014, empfohlen für neue Projekte):** Mit
+`hermclaw_config_dependency_installs: true` im Inventar (`all.vars`) bekommt der Coder das Werkzeug `install_dependencies`.
+Er trägt die Pakete in `requirements.txt` bzw. `package.json` ein; die Runtime installiert sie auf .222 über den
+Proxy-Container `hermclaw-egress-proxy`, der nur `pypi.org`, `files.pythonhosted.org` und `registry.npmjs.org`
+erreicht. Alle anderen Befehle laufen weiter ohne Netz und sehen die Pakete read-only. Wirksam nach dem nächsten
+Deployment (orchestrator und .222); den Proxy startet .222 bei der ersten Installation selbst. Prüfen:
+
+```bash
+# auf .222, als hermclaw: Proxy läuft, Entscheidungen (allowed/blocked) als JSON-Zeilen
+cd / && sudo -u hermclaw XDG_RUNTIME_DIR=/run/user/$(id -u hermclaw) podman ps --filter name=hermclaw-egress-proxy
+cd / && sudo -u hermclaw XDG_RUNTIME_DIR=/run/user/$(id -u hermclaw) podman logs --tail 20 hermclaw-egress-proxy
+```
+
+Weitere Registries (z. B. ein eigener Mirror) über `hermclaw_config_overrides: {policies: {sandbox: {egress:
+{allowed_hosts: [...]}}}}` (vollständige Liste). Ausschalten: `hermclaw_config_dependency_installs: false` + Deployment.
+Risiken: RISK_REGISTER R-043.
+
+**Projekte mit Abhängigkeiten ohne D-014 (Projekt-Image, vor dem ersten Job):** Die Sandbox auf .222 läuft ohne Netz
 (`policies.sandbox.network_default: none`). Die Toolchain-Images enthalten nur Python 3.12 + pytest/ruff/mypy,
 Node 22 + TypeScript, PHP 8.3 + Composer bzw. Basiswerkzeuge, aber keine Abhängigkeiten Ihres Projekts. Tests, die
 Fremdpakete importieren, scheitern deshalb, und `pip install`/`npm ci` geht im Job nicht. Backen Sie die Abhängigkeiten

@@ -30,6 +30,8 @@ class ToolName(StrEnum):
     checkpoint = "checkpoint"
     complete_step = "complete_step"
     block_step = "block_step"
+    # dependency install through the egress proxy (D-014): offered only when policies.sandbox.egress.enabled
+    install_dependencies = "install_dependencies"
     # runtime operations tools (Bauplan §29–31): offered only to steps of the matching capability and only when the
     # runtime provides them; they act on registered hosts/databases/containers, never via the coder shell
     ssh_read = "ssh_read"
@@ -53,6 +55,7 @@ class ToolName(StrEnum):
 MUTATING_TOOLS = frozenset({ToolName.write_file, ToolName.replace_text, ToolName.apply_patch})
 TERMINAL_TOOLS = frozenset({ToolName.complete_step, ToolName.block_step, ToolName.request_replan})
 
+DEPENDENCY_TOOLS = frozenset({ToolName.install_dependencies})
 SSH_TOOLS = frozenset({ToolName.ssh_read, ToolName.ssh_command, ToolName.ssh_upload, ToolName.ssh_service_status})
 DB_TOOLS = frozenset(
     {

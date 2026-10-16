@@ -35,3 +35,7 @@ sandbox:
 and bind the project image to the repository: `hermclaw repo-add myapp <url> --update --sandbox-image myapp`.
 Without a repository image the runtime picks the toolchain by the repository's primary language
 (`hermclaw/runtime/images.py`).
+
+Alternative without project images (D-014): with `policies.sandbox.egress.enabled` the coder installs the
+manifest's dependencies itself (`install_dependencies`, registry-only proxy, packages in `<data>/deps/<workspace>`).
+The generic image also runs that proxy (`worker/execution/egress_proxy.py`, needs `python3`).

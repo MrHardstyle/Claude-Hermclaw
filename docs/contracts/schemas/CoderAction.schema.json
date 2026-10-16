@@ -21,6 +21,7 @@
         "checkpoint",
         "complete_step",
         "block_step",
+        "install_dependencies",
         "ssh_read",
         "ssh_command",
         "ssh_upload",

@@ -219,11 +219,13 @@ def test_build_messages_is_deterministic() -> None:
     assert a.user_payload_chars == len(a.messages[1].content)
 
 
-def test_prompts_state_that_the_sandbox_cannot_install_packages() -> None:
-    """BUG-157 (live job eadf1b6f): planner and coder did not know that code steps run offline with a fixed
-    toolchain; the coder spent its turns on `pip install pytest` and requested a replan."""
+def test_prompts_explain_how_dependencies_get_into_the_sandbox() -> None:
+    """BUG-157 (live job eadf1b6f) and D-014: the coder spent its turns on `pip install` in run_command. Planner and
+    coder know that the sandbox has no network, that dependencies go into the manifest and that the coder installs
+    them with install_dependencies (from the allow-listed registries), else uses the standard library."""
     from hermclaw.context_builder.sections import DEFAULT_SYSTEM_CONTRACT
 
     system = planner_system_prompt({"implement": "coding"}, ["coding"], 20)
-    assert "packages cannot be installed" in system and "standard library" in system
-    assert "do not install packages" in DEFAULT_SYSTEM_CONTRACT and "block_step" in DEFAULT_SYSTEM_CONTRACT
+    assert "network-less sandbox" in system and "requirements.txt or package.json" in system and "standard library" in system
+    assert "install_dependencies" in DEFAULT_SYSTEM_CONTRACT and "always fail" in DEFAULT_SYSTEM_CONTRACT
+    assert "block_step" in DEFAULT_SYSTEM_CONTRACT

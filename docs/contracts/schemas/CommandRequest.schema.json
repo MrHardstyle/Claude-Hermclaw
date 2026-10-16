@@ -51,6 +51,12 @@
       "title": "Network",
       "type": "boolean"
     },
+    "egress": {
+      "default": false,
+      "description": "dependency install (D-014): registry-only network through the egress proxy, writable /deps",
+      "title": "Egress",
+      "type": "boolean"
+    },
     "env": {
       "additionalProperties": {
         "type": "string"

@@ -73,7 +73,7 @@ suite_files() {
         wol) echo tests/integration/test_wol_live.py ;;
         gitops) echo tests/integration/test_gitops_live.py ;;
         backup) echo tests/integration/test_backup_live.py ;;
-        sandbox) echo tests/integration/test_sandbox_podman.py ;;
+        sandbox) echo tests/integration/test_sandbox_podman.py tests/integration/test_egress_live.py ;;
         *) return 1 ;;
     esac
 }

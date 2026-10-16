@@ -355,7 +355,7 @@ async def test_prepare_is_reentrant_after_crash(world: World, tmp_path: Path) ->
     assert len(await world.engine.list_workspaces(jid)) == 1
 
 
-def test_failed_step_keys_put_the_cause_before_its_dependents() -> None:
+async def test_failed_step_keys_put_the_cause_before_its_dependents() -> None:
     """BUG-156 (live job eadf1b6f): S002 blocked with CODER_REQUESTED_REPLAN, S003/S004 blocked with
     DEPENDENCY_FAILED; the replan trigger named S004 as the failed step."""
     ev = {

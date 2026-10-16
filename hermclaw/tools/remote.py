@@ -124,6 +124,7 @@ class RemoteSandboxExecutor:
                 image=req.image,
                 timeout_seconds=min(max(req.timeout_seconds, 1), 7200),
                 network=req.network,
+                egress=req.egress,
                 env=dict(req.env),
                 cpus=self.policy.cpus,
                 memory=self.policy.memory,

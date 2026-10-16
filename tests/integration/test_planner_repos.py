@@ -19,6 +19,7 @@ from hermclaw.core.config import get_config
 from hermclaw.events.store import list_events
 from hermclaw.persistence.models import Job, Plan, PlanVersion, Step, StepDependency
 from hermclaw.planner import PlanConflict, Planner, PlannerError
+from hermclaw.planner.planner import plan_json_schema
 from hermclaw.planner.prompt import PLANNER_INPUT_KEYS
 from tests.unit.test_planner_support import (
     FASTAPI,
@@ -86,7 +87,7 @@ async def test_plan_created_for_unrelated_repositories(sessionmaker: object, fix
     assert len(chat.calls) == 1
     call = chat.calls[0]
     assert call.alias == "planner-gemma"
-    assert call.json_schema == PlanContract.model_json_schema()
+    assert call.json_schema == plan_json_schema()  # the PlanContract schema with the scope fields required (BUG-159)
     assert call.ctx.purpose == "planner" and call.ctx.job_id == job_id
     assert [m.role for m in call.messages] == ["system", "user"]
     assert tuple(chat.user_payload()) == PLANNER_INPUT_KEYS

@@ -316,7 +316,13 @@ class ImplementStepHandler:
             self.deps.git.reader(),
             self.deps.repo,
             _Callbacks(self.deps, ctx, handle),
-            permissions=ToolPermissions.for_step(kind=row.kind, network=row.network, turn_budget=row.turn_budget, capability=capability),
+            permissions=ToolPermissions.for_step(
+                kind=row.kind,
+                network=row.network,
+                turn_budget=row.turn_budget,
+                capability=capability,
+                dependency_install=self.config.policies.sandbox.egress.enabled,  # D-014
+            ),
             ops=self.deps.ops,
             capability=row.capability,
             artifacts_dir=self.deps.artifacts_dir,

@@ -70,6 +70,7 @@ from hermclaw.core.errors import ConfigError, PolicyViolation
 from hermclaw.core.logging import get_logger
 from hermclaw.core.redaction import DEFAULT_REDACTOR, REDACTED, Redactor
 from worker.common.settings import DEFAULT_CONTAINER_LABEL
+from worker.execution.egress import EgressGateway
 
 log = get_logger(__name__)
 
@@ -102,6 +103,12 @@ DEFAULT_SHM_SIZE = "64m"
 MAX_ENV_VALUE_CHARS = 32_768
 #: environment every container starts with (read-only rootfs: ``/tmp`` is the only writable scratch dir)
 BASE_CONTAINER_ENV: Mapping[str, str] = {"HOME": "/tmp", "TMPDIR": "/tmp"}  # noqa: S108 - paths inside the container
+#: dependency directory of a workspace inside the container (D-014): writable only for an install request
+DEPS_MOUNT = "/deps"
+PYTHON_DEPS_DIR = f"{DEPS_MOUNT}/python"
+NODE_MODULES_MOUNT = f"{WORKDIR}/node_modules"
+#: environment of every container that has a dependency directory (tests and tools import from it)
+DEPS_CONTAINER_ENV: Mapping[str, str] = {"PYTHONPATH": PYTHON_DEPS_DIR}
 
 _ENV_NAME_RE = re.compile(r"^[A-Za-z_][A-Za-z0-9_]{0,127}$")
 _SIZE_RE = re.compile(r"^(\d{1,15})([bkmg]?)$")
@@ -704,6 +711,7 @@ class ContainerSandbox:
         selinux_relabel: bool = True,
         shell: Sequence[str] = DEFAULT_SHELL,
         shm_size: str = DEFAULT_SHM_SIZE,
+        deps_root: Path | None = None,
     ) -> None:
         if not shell:
             raise ConfigError("sandbox shell must not be empty")
@@ -734,6 +742,9 @@ class ContainerSandbox:
         self._active: dict[str, str] = {}  # container name -> request id
         self._image_verdicts: dict[str, str | None] = {}  # image -> None (safe) or the refusal reason
         self._engine_rootless: bool | None = None  # from the last health()/preflight(); None = not checked yet
+        #: ``<deps_root>/<workspace id>`` holds the installed dependencies of a workspace (D-014); None = no installs
+        self.deps_root = deps_root
+        self.egress = EgressGateway(policy.egress, exec_fn=engine_exec, executable=self.executable)
 
     # ------------------------------------------------------------------ introspection
     def active_containers(self) -> dict[str, str]:
@@ -815,9 +826,51 @@ class ContainerSandbox:
             return ["--network=none"]
         return [f"--network={self.allowed_network or self.default_allowed_network}"]
 
+    def _egress_network_args(self) -> list[str]:
+        """The internal network whose only peer is the egress proxy (no route, no DNS)."""
+        return [f"--network={self.policy.egress.internal_network}"]
+
     def _engine_args(self, workspace: Path) -> list[str]:
         """Engine specific isolation flags and the workspace mount."""
         raise NotImplementedError
+
+    def deps_dir(self, workspace: Path) -> Path | None:
+        return self.deps_root / workspace.name if self.deps_root is not None else None
+
+    def _egress_check(self, req: CommandRequest) -> None:
+        if not req.egress:
+            return
+        if self.engine != "podman":
+            raise PolicyViolation("dependency installs need the podman sandbox (D-014)", code="EGRESS_UNSUPPORTED")
+        if not self.policy.egress.enabled:
+            raise PolicyViolation("dependency installs are disabled (policies.sandbox.egress.enabled: false)", code="EGRESS_DISABLED")
+        if self.deps_root is None:
+            raise PolicyViolation("this worker has no dependency directory (deps_root)", code="EGRESS_UNSUPPORTED")
+        if req.network:
+            raise PolicyViolation("an install request gets registry-only egress, never full network", code="EGRESS_INVALID")
+
+    def _deps_args(self, req: CommandRequest, workspace: Path) -> tuple[list[str], dict[str, str]]:
+        """Mounts and environment of the workspace's dependency directory: read-write for an install request,
+        read-only once it exists, absent otherwise. ``node_modules`` is mounted into the workspace (Node resolves
+        modules relative to the project), so it is neither synced back to the orchestrator nor seen by git."""
+        deps = self.deps_dir(workspace)
+        if deps is None:
+            return [], {}
+        if req.egress:
+            (deps / "python").mkdir(parents=True, exist_ok=True)
+            (deps / "node_modules").mkdir(parents=True, exist_ok=True)
+        elif not deps.is_dir():
+            return [], {}
+        mode = "rw" if req.egress else "ro"
+        relabel = ",Z" if self.selinux_relabel else ""
+        args = [f"--volume={deps}:{DEPS_MOUNT}:{mode}{relabel}"]
+        if (deps / "node_modules").is_dir():
+            args.append(f"--volume={deps / 'node_modules'}:{NODE_MODULES_MOUNT}:{mode}{relabel}")
+        env = dict(DEPS_CONTAINER_ENV)
+        if req.egress:
+            url = self.egress.proxy_url
+            env.update({"HTTPS_PROXY": url, "HTTP_PROXY": url, "https_proxy": url, "http_proxy": url, "NO_PROXY": "", "no_proxy": ""})
+        return args, env
 
     def build_invocation(self, req: CommandRequest, workspace_dir: Path) -> SandboxInvocation:
         """Validate the request against the policy and build the engine command line (no I/O but stat)."""
@@ -826,9 +879,11 @@ class ContainerSandbox:
         if "\x00" in req.command:
             raise PolicyViolation("command contains a NUL byte", code="SANDBOX_COMMAND_INVALID")
         workspace = validate_workspace_dir(workspace_dir)
+        self._egress_check(req)
         image = resolve_image(self.policy, req.image, self.extra_images)
         requested = validate_request_env(req.env, self.policy.request_env_allowlist)
-        env = {**BASE_CONTAINER_ENV, **requested}
+        deps_args, deps_env = self._deps_args(req, workspace)
+        env = {**BASE_CONTAINER_ENV, **requested, **deps_env}
         passthrough = {k: v for k, v in requested.items() if not is_engine_env_name(k)}
         for k in requested.keys() - passthrough.keys():
             if is_secret_env_name(k):
@@ -847,7 +902,7 @@ class ContainerSandbox:
             f"--label={LABEL_REQUEST}={label_value(req.request_id)}",
             f"--label={LABEL_JOB}={label_value(req.job_id)}",
             f"--label={LABEL_STEP}={label_value(req.step_id)}",
-            *self._network_args(network),
+            *(self._egress_network_args() if req.egress else self._network_args(network)),
             "--read-only",
             f"--tmpfs=/tmp:rw,nosuid,nodev,size={tmpfs},mode=1777",
             "--cap-drop=ALL",
@@ -858,6 +913,7 @@ class ContainerSandbox:
             f"--cpus={cpus}",
             f"--pull={self.pull}",
             *self._engine_args(workspace),
+            *deps_args,
             f"--workdir={WORKDIR}",
             *env_args,
             f"--entrypoint={self.shell[0]}",
@@ -869,7 +925,7 @@ class ContainerSandbox:
             argv=argv,
             container_name=name,
             image=image,
-            network=network,
+            network=network or req.egress,
             timeout_seconds=self.effective_timeout(req),
             cpus=cpus,
             memory=memory,
@@ -970,6 +1026,11 @@ class ContainerSandbox:
             inv = self.build_invocation(req, workspace_dir)
         except PolicyViolation as exc:
             return _violation_result(req, self.engine, exc)
+        if req.egress:
+            try:
+                await self.egress.ensure()
+            except ConfigError as exc:
+                return _violation_result(req, self.engine, PolicyViolation(exc.message, code=exc.code))
         name = inv.container_name
         if name in self._active:
             return _violation_result(
@@ -1162,6 +1223,8 @@ class LocalSandbox:
         try:
             if "\x00" in req.command:
                 raise PolicyViolation("command contains a NUL byte", code="SANDBOX_COMMAND_INVALID")
+            if req.egress:
+                raise PolicyViolation("dependency installs need the podman sandbox (D-014)", code="EGRESS_UNSUPPORTED")
             workspace = validate_workspace_dir(workspace_dir)
             env = self.build_env(req)
         except PolicyViolation as exc:

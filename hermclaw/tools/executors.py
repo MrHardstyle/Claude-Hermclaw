@@ -146,6 +146,8 @@ class SubprocessExecutor:
         cwd = Path(workspace.path)
         if not await asyncio.to_thread(cwd.is_dir):
             raise SandboxUnavailable(f"workspace directory does not exist: {cwd}")
+        if req.egress:
+            raise SandboxUnavailable("dependency installs need the podman sandbox with the egress proxy (D-014)")
         if req.network:
             log.debug("subprocess executor cannot restrict network access", extra={"request_id": request_id})
         out, err = _CappedBuffer(self.max_output_bytes), _CappedBuffer(self.max_output_bytes)
@@ -252,6 +254,7 @@ class LocalSandboxExecutor:
             image=req.image,
             timeout_seconds=max(1, min(req.timeout_seconds, 7200)),
             network=req.network,
+            egress=req.egress,
             env=dict(req.env),
         )
         return await backend.run(creq, Path(workspace.path))

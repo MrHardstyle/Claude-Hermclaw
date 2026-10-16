@@ -2,6 +2,22 @@
 
 Format: [Keep a Changelog](https://keepachangelog.com/de/1.1.0/), Versionen nach PEP 440.
 
+## [0.1.0rc4] – Release Candidate (2026-10-16)
+
+Fixes aus dem ersten Testauftrag nach dem Deployment von 0.1.0rc3 (BUG-158, BUG-159) und Abhängigkeits-Installation (D-014).
+
+### Neu
+- **Abhängigkeiten installieren (D-014):** Werkzeug `install_dependencies` für den Coder (pip/npm aus dem Manifest,
+  Befehl von der Runtime gebaut). Netz nur für diesen Befehl über den Proxy-Container `hermclaw-egress-proxy` auf
+  .222, der nur `pypi.org`, `files.pythonhosted.org` und `registry.npmjs.org` erreicht; Pakete pro Workspace unter
+  `/deps` (für alle anderen Befehle read-only). Standard aus, Inventar-Schalter `hermclaw_config_dependency_installs`.
+
+### Behoben
+- **Scope (BUG-158):** Eine als neu deklarierte Datei, die ein abgebrochener Versuch im Work Tree hinterlassen hat,
+  bleibt anlegbar (vorher nur „modify“ erlaubt, Schreibprüfung verlangte „create“ → Stagnation).
+- **Planner-Schema (BUG-159):** Das Schema für Gemma verlangt `depends_on`, `repo_hints`, `allowed_new_paths` und
+  `acceptance` an jedem Step; übersprungene Scope-Felder waren im Replan nicht mehr nachtragbar.
+
 ## [0.1.0rc3] – Release Candidate (2026-10-16)
 
 Fixes aus dem erneuten ersten Testauftrag nach dem Deployment von 0.1.0rc2 (BUG-153–157).

@@ -67,6 +67,10 @@ class CommandRequest(Contract):
     image: str | None = None
     timeout_seconds: int = Field(default=600, ge=1, le=7200)
     network: bool = False
+    egress: bool = Field(
+        default=False,
+        description="dependency install (D-014): registry-only network through the egress proxy, writable /deps",
+    )
     env: dict[str, str] = Field(default_factory=dict)
     cpus: float | None = None
     memory: str | None = None

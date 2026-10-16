@@ -105,6 +105,11 @@ class WorkerDaemonSettings(BaseModel):
     def workspaces_dir(self) -> Path:
         return self.data_dir / "workspaces"
 
+    @property
+    def deps_dir(self) -> Path:
+        """Installed dependencies per workspace (D-014): ``<data_dir>/deps/<workspace id>``, never synced."""
+        return self.data_dir / "deps"
+
     def all_capabilities(self) -> list[str]:
         """Base capabilities of the kind plus the configured ones (sorted, de-duplicated)."""
         return sorted({*BASE_CAPABILITIES.get(self.kind, ()), *self.capabilities})

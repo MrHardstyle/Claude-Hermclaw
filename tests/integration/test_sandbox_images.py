@@ -158,6 +158,22 @@ async def test_defaulting_executor_sets_image_only_when_unset(tmp_path: Path) ->
     assert inner.dropped
 
 
+async def test_manifest_identifies_a_new_project_and_the_executor_asks_again(sessionmaker: Any, tmp_path: Path) -> None:
+    """D-014/BUG-155: a step in an empty repository writes requirements.txt and installs dependencies; its next
+    commands (same executor) must run in the Python toolchain, whose interpreter matches the installed wheels."""
+    ws = await _workspace(sessionmaker, tmp_path)
+    sel = SandboxImageSelector(sessionmaker, policy(python=PYTHON_IMAGE, node=NODE_IMAGE), FakeRepo([]))
+    inner = RecordingExecutor()
+    ex = ImageDefaultingExecutor(inner, await sel.image_for(ws), sel.image_for)
+    await ex.run(ws, ExecutionRequest(command="ls"))
+    (tmp_path / "requirements.txt").write_text("fastapi\n", encoding="utf-8")
+    await ex.run(ws, ExecutionRequest(command="pytest -q"))
+    await ex.run(ws, ExecutionRequest(command="pytest -q"))
+    assert [r.image for r in inner.requests] == [None, "python", "python"]
+    (tmp_path / "package.json").write_text("{}", encoding="utf-8")  # the first selection stays
+    assert await sel.image_for(ws) == "python"
+
+
 # ------------------------------------------------------------------------------------------------ real podman
 
 

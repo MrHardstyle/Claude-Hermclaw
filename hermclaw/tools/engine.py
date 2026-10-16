@@ -58,6 +58,7 @@ from hermclaw.tools.registry import (
     CheckpointArgs,
     FindTextArgs,
     GitDiffArgs,
+    InstallDependenciesArgs,
     ListFilesArgs,
     ReadFileArgs,
     ReadRangeArgs,
@@ -88,6 +89,25 @@ from hermclaw.tools.workspace import (
 )
 
 log = get_logger(__name__)
+
+#: install target of Python dependencies inside the sandbox (``worker.execution.sandbox.PYTHON_DEPS_DIR``)
+PYTHON_DEPS_DIR = "/deps/python"
+
+
+def installed_packages(ecosystem: str, stdout: str) -> list[str]:
+    """``name==version`` (pip freeze) / ``name@version`` (npm ls) lines of an install's listing."""
+    out: list[str] = []
+    for raw in stdout.splitlines():
+        line = raw.strip()
+        if ecosystem == "python":
+            if "==" in line and " " not in line:
+                out.append(line)
+        else:
+            entry = line.lstrip("├└─┬│ `+-|").strip()
+            if "@" in entry[1:] and " " not in entry:
+                out.append(entry)
+    return out
+
 
 # error codes that mean "the runtime refused the call" (vs. "the call ran and failed")
 REFUSAL_CODES = frozenset(
@@ -206,6 +226,7 @@ class ToolEngine:
             ToolName.apply_patch: self._apply_patch,
             ToolName.run_command: self._run_command,
             ToolName.run_test: self._run_test,
+            ToolName.install_dependencies: self._install_dependencies,
             ToolName.request_scope_expansion: self._request_scope_expansion,
             ToolName.request_research: self._request_research,
             ToolName.request_replan: self._request_replan,
@@ -895,15 +916,18 @@ class ToolEngine:
         purpose: str,
         ctx: CallContext,
         events: list[PendingEvent],
+        egress: bool = False,
+        image: str | None = None,
     ) -> _RunOutcome:
         classification = self._classify(command)
         cwd = self._resolve_cwd(cwd_raw)
         full = command if cwd == "." else f"cd -- {shlex.quote(cwd)} || exit 97\n{command}"
         req = ExecutionRequest(
             command=full,
-            timeout_seconds=self._timeout(timeout_seconds),
-            network=self.permissions.network,
-            image=self.permissions.image,
+            timeout_seconds=timeout_seconds if egress and timeout_seconds else self._timeout(timeout_seconds),
+            network=False if egress else self.permissions.network,
+            egress=egress,
+            image=image or self.permissions.image,
             job_id=ctx.job_id,
             step_id=ctx.step_id,
             attempt_id=ctx.attempt_id,
@@ -958,6 +982,7 @@ class ToolEngine:
                         "exit_code": exit_code,
                         "timed_out": timed_out,
                         "network": req.network,
+                        "egress": req.egress,
                         "purpose": purpose,
                         "sandbox": result.sandbox if result else None,
                         "error": error,
@@ -1117,6 +1142,66 @@ class ToolEngine:
                 "duration_ms": run.duration_ms,
                 "violations": [v.to_dict() for v in run.audit.violations[:50]],
                 "cleaned": run.audit.cleaned[:50],
+            },
+        )
+
+    def _install_command(self, args: InstallDependenciesArgs) -> tuple[str, str]:
+        """``(manifest, command)`` of a dependency install; the runtime builds the command, never the model (D-014)."""
+        default = "requirements.txt" if args.ecosystem == "python" else "package.json"
+        tf = self.fs.read_text(args.manifest or default, max_bytes=1_000_000)
+        manifest = tf.rel
+        if args.ecosystem == "python":
+            command = (
+                f"python3 -m pip install --disable-pip-version-check --no-input --no-cache-dir --upgrade --target {PYTHON_DEPS_DIR} "
+                f"-r {shlex.quote(manifest)} && python3 -m pip list --disable-pip-version-check --path {PYTHON_DEPS_DIR} --format=freeze"
+            )
+            return manifest, command
+        if manifest != "package.json":
+            raise ToolError(E.ARGS_INVALID, "node dependencies are installed from the package.json at the repository root")
+        command = (
+            "npm install --ignore-scripts --no-audit --no-fund --no-save --package-lock=false --cache /tmp/npm-cache && npm ls --depth=0"
+        )
+        return manifest, command
+
+    async def _install_dependencies(self, args: InstallDependenciesArgs, ctx: CallContext, events: list[PendingEvent]) -> ToolResult:
+        manifest, command = await asyncio.to_thread(self._install_command, args)
+        run = await self._sandbox_run(
+            ToolName.install_dependencies,
+            command=command,
+            cwd_raw=".",
+            timeout_seconds=self.policies.sandbox.egress.install_timeout_seconds,
+            purpose="install",
+            ctx=ctx,
+            events=events,
+            egress=True,
+            # compiled wheels must match the interpreter of later commands: always the ecosystem's toolchain image
+            image=args.ecosystem if args.ecosystem in self.policies.sandbox.images else None,
+        )
+        text, truncated = self._render_run(command, run, budget=self.output_limit, head_ratio=0.2)
+        res = run.result
+        error_code: str | None = None
+        if run.audit.violations:
+            error_code = E.COMMAND_SCOPE_VIOLATION
+        elif res is None or run.sandbox_failed:
+            error_code = E.SANDBOX_ERROR
+        elif res.timed_out:
+            error_code = E.COMMAND_TIMEOUT
+        elif res.exit_code != 0:
+            error_code = E.COMMAND_FAILED
+        installed = installed_packages(args.ecosystem, res.stdout if res else "") if error_code is None else []
+        if error_code is None:
+            text += f"\n[dependencies] {len(installed)} package(s) available to later commands and tests of this job"
+        return ToolResult(
+            tool=ToolName.install_dependencies,
+            ok=error_code is None,
+            output=text,
+            error_code=error_code,
+            truncated=truncated,
+            data={
+                "ecosystem": args.ecosystem,
+                "manifest": manifest,
+                "packages": installed[:500],
+                "exit_code": res.exit_code if res else None,
             },
         )
 

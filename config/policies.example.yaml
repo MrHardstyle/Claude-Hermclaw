@@ -35,6 +35,22 @@ sandbox:
   tmpfs_size: 512m
   default_timeout_seconds: 600
   network_default: none
+  # D-014: dependency installs (coder tool install_dependencies). The install command runs on an internal podman
+  # network whose only peer is the egress proxy container; the proxy forwards HTTPS (CONNECT) to allowed_hosts only.
+  # Installed packages live per workspace on the execution worker (/deps, read-only for all other commands).
+  # Deployment: hermclaw_config_dependency_installs: true in the inventory sets enabled.
+  egress:
+    enabled: false
+    allowed_hosts: [pypi.org, files.pythonhosted.org, registry.npmjs.org]
+    internal_network: hermclaw-egress
+    outbound_network: hermclaw-egress-out
+    internal_subnet: 10.89.240.0/24
+    outbound_subnet: 10.89.241.0/24
+    proxy_ip: 10.89.240.2
+    proxy_port: 3128
+    proxy_image: localhost/hermclaw-sandbox-generic:1
+    dns: []            # empty: the worker's non-loopback nameservers from /etc/resolv.conf
+    install_timeout_seconds: 900
 scope:
   always_forbidden: [".git/**", "**/.env", "**/.env.*", "**/*.pem", "**/*.key", "**/id_rsa*", "**/id_ed25519*", "**/secrets/**"]
   max_target_paths: 25

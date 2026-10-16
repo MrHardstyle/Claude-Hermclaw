@@ -34,6 +34,7 @@ class ExecutionRequest:
     command: str
     timeout_seconds: int = 600
     network: bool = False
+    egress: bool = False  # dependency install through the egress proxy (D-014), never set by a model
     env: dict[str, str] = field(default_factory=dict)
     image: str | None = None
     job_id: uuid.UUID | None = None

@@ -1,14 +1,18 @@
 # STATUS
 
 ## Aktueller Zustand (2026-10-16)
-- Projekt: Hermclaw Next · Branch: `claude/hermclaw-next-build` · Version `0.1.0rc3` (gebaut); **deployt: 0.1.0rc2** auf .222–.225
-- **Live-Abnahme nach Kapitel 12 durchgeführt** (2026-10-16): 391 Schritte erledigt, 33 mit offenem Live-Teil (`[~]`), 0 offen.
+- Projekt: Hermclaw Next · Branch: `claude/hermclaw-next-build` · Version `0.1.0rc4` (gebaut); **deployt: 0.1.0rc3** auf .222–.225
+- **Live-Abnahme nach Kapitel 12 durchgeführt** (2026-10-16): 396 Schritte erledigt, 34 mit offenem Live-Teil (`[~]`), 0 offen.
 - 0.1.0rc2 deployt (vom Betreiber, alle Hosts inkl. .224): doctor 19 ok, models 6/6 (Fallback, BUG-150 wirksam), workers 3/3.
 - Erster Testauftrag erneut eingereicht (Job `eadf1b6f…`): Die Erstplanung ist jetzt gültig (BUG-143 wirkt, Steps mit Scope),
   der Job scheiterte aber im Replan → BUG-153 bis BUG-157 (Replan-Fehler stufenweise gemeldet, falscher failed_step,
-  generisches Sandbox-Image im leeren Repository, Coder versuchte `pip install`). Behoben in **0.1.0rc3**, Deployment ausstehend.
+  generisches Sandbox-Image im leeren Repository, Coder versuchte `pip install`). Behoben in 0.1.0rc3 (deployt).
+- Testauftrag auf 0.1.0rc3 (Job `c04f9fb8…`): erster Replan gültig (BUG-153/156 wirken), dann Stagnation durch eine liegengebliebene
+  Datei (BUG-158) und ein zweiter Replan ohne Scope-Felder (BUG-159, Ollama-Grammatik). Behoben in **0.1.0rc4**, Deployment ausstehend.
+- **D-014 (Betreiberentscheidung 2026-10-16): Abhängigkeits-Installation** über einen Registry-Proxy auf .222 (P43). Live auf .222
+  verifiziert (pip und npm durch den Proxy, alles andere blockiert); in 0.1.0rc4, eingeschaltet mit `hermclaw_config_dependency_installs: true`.
 - Blocker: BLOCKER-001 und BLOCKER-003 aufgehoben (GitLab-Suite PASS); BLOCKER-002 (Tag-Push) unverändert.
-- Release-Status: **RC – live abgenommen bis auf** End-to-End-Testauftrag (nach Deployment rc3 wiederholen),
+- Release-Status: **RC – live abgenommen bis auf** End-to-End-Testauftrag (nach Deployment rc4 wiederholen),
   Wake-on-LAN (nicht eingerichtet), Backup nach Terra (nicht eingerichtet), Soak-Test, Cutover.
 
 ## Fortschritt BUILD_PLAN (automatisch: `python scripts/dev/plan_progress.py --markdown`)
@@ -57,14 +61,15 @@
 | P40 – SOAK TEST | 6 | 3 | 0 |
 | P41 – RELEASE CANDIDATE | 8 | 1 | 0 |
 | P42 – CUTOVER PLAN | 2 | 4 | 0 |
-| **Summe** | **391** | **33** | **0** |
+| P43 – DEPENDENCY INSTALLS (D-014, Betreiberentscheidung 2026-10-16) | 5 | 1 | 0 |
+| **Summe** | **396** | **34** | **0** |
 
 ## Deploymentstatus pro Host
 | Host | Rolle | Status (2026-10-16) |
 |---|---|---|
-| 192.168.178.225 | Orchestrator | deployt 0.1.0rc2; API/Scheduler/LiteLLM/SearXNG aktiv; doctor 19 ok / 0 fail; Live-Suiten s. u. |
-| 192.168.178.222 | Coding / Execution Worker | deployt 0.1.0rc2; Sandbox-Suite 25/25; `podman-compose` 1.3.0 nachinstalliert (BUG-149, per Ansible-Rolle) |
-| 192.168.178.224 | Model / Media Worker | deployt 0.1.0rc2; Ollama 0.40.4, 6 Rollenmodelle; gemma4:12b@32K braucht `gpu_layers: 30` (BUG-150, wirksam) |
+| 192.168.178.225 | Orchestrator | deployt 0.1.0rc3; API/Scheduler/LiteLLM/SearXNG aktiv; doctor 19 ok / 0 fail; Live-Suiten s. u. |
+| 192.168.178.222 | Coding / Execution Worker | deployt 0.1.0rc3; Sandbox-Suite 25/25; `podman-compose` 1.3.0 nachinstalliert (BUG-149, per Ansible-Rolle) |
+| 192.168.178.224 | Model / Media Worker | deployt 0.1.0rc3; Ollama 0.40.4, 6 Rollenmodelle; gemma4:12b@32K braucht `gpu_layers: 30` (BUG-150, wirksam) |
 | 192.168.178.223 | Kontrollraum 8080/8443 neben dem Portal (Apache :80, D-013) | deployt; 8080→8443, API-Proxy ok; Portal unverändert |
 | 192.168.178.226 | GitLab | Push + Merge Request ok (gitops-Suite PASS) |
 | 192.168.178.60 | Terra / Unraid Backup | noch nicht eingerichtet (Backup-Suite nicht ausgeführt) |
@@ -84,7 +89,7 @@ Abnahme so deployt. Einschalten erst mit funktionierendem WoL (R-042).
 | infratools | .225 | PASS 3 + 1 Skip (`nginx -t` ohne Sudo auf .223, gewollt R-038) (nach BUG-149) |
 | wol (ohne `--full-wol`) | .225 | PASS `test_live_probes`; Magic Packet Skip (WoL deaktiviert), DB-Pipeline nicht ausgeführt |
 | gitops (`local-ai/hermclaw-test`) | .225 | PASS 1/1 nach Vergabe des Schreibrechts (vorher BLOCKER-003); offener Test-MR in `hermclaw-test` kann geschlossen werden |
-| sandbox | .222 | PASS 25/25 (nach BUG-146/147) |
+| sandbox | .222 | PASS 25/25 (nach BUG-146/147); mit D-014-Live-Test 27/27 (Stand rc4-Quellen) |
 | backup, `--full-wol` | – | nicht ausgeführt (nicht eingerichtet, Auftrag) |
 
 Lokale Gesamtsuite auf .225: 3137 passed, 146 skipped; 57 vorbestehende Umgebungsfehler (identisch am Ausgangsstand, s. TEST_MATRIX).
@@ -96,8 +101,8 @@ Lint, mypy, ShellCheck, ansible-lint (production) sauber.
 - Embeddings: `embeddinggemma:300m` (768 dim; EmbeddingGemma 2 erst, wenn Ollama es unter Linux/CUDA ausführt, D-010)
 
 ## Bugs
-- 157 gefunden, **157 behoben** (P0 2, P1 27, P2 66, P3 54, P4 3) – `BUGS.md`. Live-Abnahme: BUG-143 bis BUG-157.
-  BUG-143–152 sind mit 0.1.0rc2 produktiv; BUG-153–157 wirken nach dem Deployment von 0.1.0rc3.
+- 159 gefunden, **159 behoben** (P0 2, P1 27, P2 66, P3 54, P4 3) – `BUGS.md`. Live-Abnahme: BUG-143 bis BUG-159.
+  BUG-143–157 sind produktiv (0.1.0rc3); BUG-158/159 wirken nach dem Deployment von 0.1.0rc4.
 - Externe Blocker: BLOCKER-002 (Tag-Push)
 
 ## Letzte Testresultate (2026-10-15, Build-Host)
@@ -122,7 +127,7 @@ Tests 2026-10-15, einzeln ausgeführt: `test_bootstrap_infra` 63, `test_bootstra
 bestanden; ansible-lint (production) sauber. `test_deploy_converge` ist angepasst; ihn führt der Integrator aus.
 
 ## Nächster Schritt
-1. 0.1.0rc3 ausrollen (`hermclaw_version: "0.1.0rc3"` im Inventar, `ansible-playbook … deploy.yml -K`), dann den ersten
+1. 0.1.0rc4 ausrollen (`hermclaw_version: "0.1.0rc4"` im Inventar, `ansible-playbook … deploy.yml -K`), dann den ersten
    Testauftrag erneut einreichen.
 2. Wake-on-LAN einrichten (MACs, BIOS, Kapitel 13.1), danach `--suite wol --full-wol` und erst dann den Leerlauf-Suspend einschalten.
 3. Backup nach Terra einrichten (Kapitel 11), Backup-Suite; danach Soak-Test und Cutover (`docs/runbooks/cutover.md`).

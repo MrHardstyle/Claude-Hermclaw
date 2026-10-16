@@ -62,7 +62,7 @@ from hermclaw.planner.persist import (
     merge_job_metadata,
     step_dependency_keys,
 )
-from hermclaw.planner.planner import PlannerBase
+from hermclaw.planner.planner import PlannerBase, model_facing_schema
 from hermclaw.planner.prompt import PromptBuild, build_messages, fit_to_budget, replan_user_payload, replanner_system_prompt
 from hermclaw.planner.replan_contract import APPROACH_FAILURE_REASONS, ReplanContract, ReplanTrigger
 from hermclaw.planner.validation import ValidationContext, normalise_text, semantic_errors
@@ -72,7 +72,7 @@ STEP_FINAL_STATES = frozenset({StepStatus.completed.value, StepStatus.failed.val
 
 
 def replan_json_schema() -> dict[str, Any]:
-    return ReplanContract.model_json_schema()
+    return model_facing_schema(ReplanContract.model_json_schema(), "ReplanStep")
 
 
 @dataclass
