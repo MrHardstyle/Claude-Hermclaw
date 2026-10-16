@@ -46,6 +46,12 @@ Noch keine.
 
 ## Behobene Bugs
 
+### BUG-162 – Coder wiederholt `pip install` in `run_command` statt `install_dependencies` (Stagnation)
+- Phase: Live-Abnahme nach Deployment 0.1.0rc5 · Komponente: tools/engine (Befehlsprüfung) · Severity: P1 · blockierend: ja (behoben) · Status: **behoben** (`tests/integration/test_tools_engine_exec.py::test_package_installs_in_commands_are_refused_without_running`, `tests/unit/test_tools_units.py::test_package_install_detection`)
+- Reproduktion: Job `b0080372-df78-461f-af3a-e91bb7479088` (Testauftrag „/health-Endpunkt“, 0.1.0rc5, 2026-10-16 12:30). S002 nutzte `install_dependencies` korrekt (BUG-160/161 wirken: Proxy-Start sofort, keine Toolchain-Überdeckung), `httpx` fehlte im Manifest. Nach dem Replan rief der Coder in S006 über vier Versuche 25-mal `pip install …` in `run_command`/`run_test` auf (je 9 s Netz-Timeout; Ausgabe „Requirement already satisfied: fastapi … in /deps/python“ wirkte wie ein Teilerfolg), nie `install_dependencies` → `STAGNATION`, `REPLAN_LIMIT`. Das Werkzeug war angeboten.
+- Ursache: Paket-Installationen ohne Netz liefen bis in die Sandbox; der Hinweis im Systemvertrag allein reichte dem Modell nicht.
+- Fix: `run_command`/`run_test` erkennen Paket-Installationen (`pip install`, `python -m pip install`, `uv pip install`, `poetry add`, `npm install/ci/i`, `yarn/pnpm add`, `apt-get install` …, auch in `bash -c`) und lehnen sie ohne Netz sofort mit `PACKAGE_INSTALL_REFUSED` ab – mit dem Weg, der funktioniert (Manifest + `install_dependencies`, sonst Standardbibliothek/`block_step`). Steps mit Netz und der Runtime-Befehl von `install_dependencies` sind ausgenommen.
+
 ### BUG-160 – Erster Start des Egress-Proxys läuft in den Timeout, obwohl der Container läuft
 - Phase: Live-Abnahme nach Deployment 0.1.0rc4 · Komponente: worker/execution (`engine_exec`) · Severity: P1 · blockierend: ja (behoben) · Status: **behoben** (`tests/unit/test_sandbox_command_line.py::test_engine_exec_returns_when_the_engine_exits_even_if_a_daemon_keeps_the_pipes`)
 - Reproduktion: Job `bec4c5e9-2382-4e49-8c19-0621bed965eb` (Testauftrag „/health-Endpunkt“ auf `hermclaw-test`, 0.1.0rc4, 2026-10-16 11:22). Erster Aufruf von `install_dependencies` (S002, Zug 9): Netze angelegt 11:23:40, Proxy-Container läuft ab 11:23:40 (`podman ps`: „Up“, Log „listening“), aber `podman run -d` kehrt nicht zurück → nach 300 s `EGRESS_PROXY_FAILED: cannot start the egress proxy: podman run timed out after 300s`; der Coder forderte deshalb einen Replan an. Spätere Installationen nutzten den laufenden Proxy und gelangen.

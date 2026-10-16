@@ -45,7 +45,7 @@ from hermclaw.core.logging import get_logger
 from hermclaw.core.redaction import DEFAULT_REDACTOR, REDACTED, Redactor
 from hermclaw.scope.guard import ScopeGuard
 from hermclaw.tools import errors as E
-from hermclaw.tools.classify import CommandClassification, CommandClassifier
+from hermclaw.tools.classify import CommandClassification, CommandClassifier, package_install
 from hermclaw.tools.context import CallContext, NullCallbacks, ScopeExpansionOutcome, ToolCallbacks, ToolPermissions
 from hermclaw.tools.errors import ToolError, ToolProtocolError
 from hermclaw.tools.gitlocal import LocalGit
@@ -900,8 +900,20 @@ class ToolEngine:
             )
         )
 
-    def _classify(self, command: str) -> CommandClassification:
+    def _classify(self, command: str, *, install: bool = False) -> CommandClassification:
         cls = self.classifier.classify(command)
+        manager = None if install or self.permissions.network else package_install(command)
+        if manager is not None and cls.kind != "forbidden":
+            hint = (
+                "add the package to requirements.txt / package.json, then call install_dependencies"
+                if ToolName.install_dependencies in (self.permissions.allowed_tools or set())
+                else "use the standard library, or block_step naming the missing dependency"
+            )
+            raise ToolError(
+                E.PACKAGE_INSTALL_REFUSED,
+                f"command refused: '{manager}' needs network, and commands run without network – {hint}",
+                data={"classification": cls.kind, "package_manager": manager},
+            )
         if cls.kind == "forbidden":
             raise ToolError(
                 E.COMMAND_FORBIDDEN, f"command refused: {cls.reason}", data={"classification": cls.kind, "pattern": cls.pattern}
@@ -937,7 +949,7 @@ class ToolEngine:
         egress: bool = False,
         image: str | None = None,
     ) -> _RunOutcome:
-        classification = self._classify(command)
+        classification = self._classify(command, install=egress)
         cwd = self._resolve_cwd(cwd_raw)
         full = command if cwd == "." else f"cd -- {shlex.quote(cwd)} || exit 97\n{command}"
         req = ExecutionRequest(

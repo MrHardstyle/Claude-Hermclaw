@@ -154,6 +154,41 @@ def git_mutation(words: list[str]) -> str | None:
     return None if read_only else sub
 
 
+_PIP = frozenset({"pip", "pip3"})
+_PY = re.compile(r"^python(?:3(?:\.\d+)?)?$")
+_NODE_INSTALL = {"npm": {"install", "i", "ci", "add"}, "yarn": {"add", "install"}, "pnpm": {"add", "install", "i"}}
+_SYSTEM_INSTALL = {"apt": {"install"}, "apt-get": {"install"}, "apk": {"add"}, "dnf": {"install"}, "yum": {"install"}}
+
+
+def package_install(command: str) -> str | None:
+    """The package manager invocation if ``command`` installs packages (``pip install``, ``python -m pip install``,
+    ``uv pip install``, ``poetry add``, ``npm install``, ``apt-get install`` …), else ``None``.
+
+    Such commands need network; in a network-less sandbox they only burn time and print misleading output
+    (BUG-162). ``pip install --help`` / ``npm install --help`` are not installs."""
+    for words in command_segments(command):
+        if any(w in ("--help", "-h") for w in words):
+            continue
+        head = words
+        if len(head) >= 3 and _PY.match(head[0]) and head[1] == "-m":
+            head = head[2:]
+        if head[:1] == ["uv"] and len(head) >= 2 and head[1] == "pip":
+            head = head[1:]
+        if len(head) >= 2:
+            tool, sub = head[0], head[1]
+            if tool in _PIP and sub == "install":
+                return f"{tool} install"
+            if tool == "poetry" and sub in ("add", "install"):
+                return f"poetry {sub}"
+            if tool == "uv" and sub in ("add", "sync"):
+                return f"uv {sub}"
+            if sub in _NODE_INSTALL.get(tool, ()):
+                return f"{tool} {sub}"
+            if sub in _SYSTEM_INSTALL.get(tool, ()):
+                return f"{tool} {sub}"
+    return None
+
+
 class CommandClassifier:
     def __init__(self, policy: CommandPolicy) -> None:
         self.forbidden = _compile(policy.forbidden_patterns, "forbidden_patterns")

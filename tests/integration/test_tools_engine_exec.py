@@ -474,3 +474,27 @@ async def test_install_dependencies_is_offered_only_when_enabled(sessionmaker: S
     res = await h.call("install_dependencies", ecosystem="python")
     assert not res.ok and res.error_code == E.COMMAND_FAILED and res.data["packages"] == []
     assert "fixed to the image's versions" in res.output  # BUG-161: tells the coder why a pinned pytest fails
+
+
+async def test_package_installs_in_commands_are_refused_without_running(sessionmaker: SM, repo: Path) -> None:
+    """BUG-162 (live job b0080372): after a replan the coder ran `pip install httpx` in run_command/run_test 25 times
+    (9 s network timeout each, misleading "Requirement already satisfied … /deps") instead of install_dependencies.
+    Without network such commands are refused before they run, with the way that works."""
+    recorder = InstallRecorder("")
+    perms = ToolPermissions.for_step(kind="implement", dependency_install=True)
+    h = await make_harness(sessionmaker, repo, contract=scope(**SCOPE), permissions=perms, executor=recorder)
+    res = await h.call("run_command", command="pip install httpx")
+    assert res.error_code == E.PACKAGE_INSTALL_REFUSED and "install_dependencies" in res.output
+    res = await h.call("run_test", command="cd . && python -m pip install -r requirements.txt")
+    assert res.error_code == E.PACKAGE_INSTALL_REFUSED
+    assert recorder.requests == []  # nothing reached the sandbox
+    (repo / "requirements.txt").write_text("httpx\n", encoding="utf-8")
+    assert (await h.call("install_dependencies", ecosystem="python")).ok  # the runtime's own pip command still runs
+    plain = await make_harness(sessionmaker, repo, contract=scope(**SCOPE), permissions=ToolPermissions.for_step(kind="implement"))
+    res = await plain.call("run_command", command="npm install left-pad")
+    assert res.error_code == E.PACKAGE_INSTALL_REFUSED and "standard library" in res.output
+    networked = InstallRecorder("ok\n")
+    net = ToolPermissions.for_step(kind="implement", network=True)
+    h = await make_harness(sessionmaker, repo, contract=scope(**SCOPE), permissions=net, executor=networked)
+    assert (await h.call("run_command", command="pip install httpx")).error_code != E.PACKAGE_INSTALL_REFUSED
+    assert len(networked.requests) == 1  # a step with network may install directly

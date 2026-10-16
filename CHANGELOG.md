@@ -2,6 +2,15 @@
 
 Format: [Keep a Changelog](https://keepachangelog.com/de/1.1.0/), Versionen nach PEP 440.
 
+## [0.1.0rc6] – Release Candidate (2026-10-16)
+
+Fix aus dem Testauftrag nach dem Deployment von 0.1.0rc5 (BUG-162).
+
+### Behoben
+- **Paket-Installation im Befehl (BUG-162):** `pip install`, `npm install` & Co. in `run_command`/`run_test` werden ohne
+  Netz sofort abgelehnt (`PACKAGE_INSTALL_REFUSED`) und verweisen auf `install_dependencies`; vorher liefen sie in
+  einen Netz-Timeout und der Coder stagnierte.
+
 ## [0.1.0rc5] – Release Candidate (2026-10-16)
 
 Fixes aus dem Testauftrag nach dem Deployment von 0.1.0rc4 mit eingeschalteter Abhängigkeits-Installation (BUG-160, BUG-161).

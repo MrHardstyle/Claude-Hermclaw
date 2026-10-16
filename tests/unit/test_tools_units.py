@@ -12,7 +12,7 @@ from hermclaw.core.config import CapabilityConfig, CommandPolicy, load_config
 from hermclaw.core.errors import ConfigError
 from hermclaw.core.redaction import Redactor
 from hermclaw.tools import errors as E
-from hermclaw.tools.classify import CommandClassifier, command_segments, git_mutation
+from hermclaw.tools.classify import CommandClassifier, command_segments, git_mutation, package_install
 from hermclaw.tools.context import BASE_TOOLS, READ_ONLY_TOOLS, ToolPermissions
 from hermclaw.tools.errors import ToolError, ToolProtocolError
 from hermclaw.tools.output import clip_head, clip_middle, strip_ansi
@@ -127,6 +127,32 @@ def classifier() -> CommandClassifier:
 )
 def test_classification(classifier: CommandClassifier, command: str, kind: str) -> None:
     assert classifier.classify(command).kind == kind
+
+
+@pytest.mark.parametrize(
+    ("command", "manager"),
+    [
+        ("pip install httpx", "pip install"),
+        ("python -m pip install -r requirements.txt", "pip install"),
+        ("/usr/local/bin/python3.12 -m pip install x", "pip install"),
+        ("cd app && pip3 install --upgrade --force-reinstall httpx", "pip3 install"),
+        ("bash -c 'pip install x'", "pip install"),
+        ("uv pip install x", "pip install"),
+        ("env A=1 poetry add x", "poetry add"),
+        ("npm i lodash", "npm i"),
+        ("npm ci", "npm ci"),
+        ("yarn add react", "yarn add"),
+        ("apt-get install -y curl", "apt-get install"),
+        ("pip list", None),
+        ("pip install --help", None),
+        ("npm test", None),
+        ("python -m pytest -q", None),
+        ("echo pip install x", None),
+    ],
+)
+def test_package_install_detection(command: str, manager: str | None) -> None:
+    """BUG-162: package installs in run_command/run_test are recognised (they need network the sandbox lacks)."""
+    assert package_install(command) == manager
 
 
 @pytest.mark.parametrize(

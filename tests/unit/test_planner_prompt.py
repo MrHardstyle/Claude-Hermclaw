@@ -227,7 +227,7 @@ def test_prompts_explain_how_dependencies_get_into_the_sandbox() -> None:
 
     system = planner_system_prompt({"implement": "coding"}, ["coding"], 20)
     assert "network-less sandbox" in system and "requirements.txt or package.json" in system and "standard library" in system
-    assert "install_dependencies" in DEFAULT_SYSTEM_CONTRACT and "always fail" in DEFAULT_SYSTEM_CONTRACT
+    assert "install_dependencies" in DEFAULT_SYSTEM_CONTRACT and "is refused" in DEFAULT_SYSTEM_CONTRACT
     assert "block_step" in DEFAULT_SYSTEM_CONTRACT
     # BUG-161 (live job bec4c5e9): reinstalled without adding the missing module, then pinned an older pytest
     assert "add\n  it to the manifest first" in DEFAULT_SYSTEM_CONTRACT and "pin the test tools" in DEFAULT_SYSTEM_CONTRACT
