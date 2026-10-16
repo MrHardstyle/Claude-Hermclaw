@@ -140,3 +140,20 @@ async def test_live_install_keeps_the_image_test_toolchain(box: PodmanSandbox, t
     (ws / "test_idna.py").write_text("import idna\n\n\ndef test_idna():\n    assert idna.encode('bücher.de') == b'xn--bcher-kva.de'\n")
     tests = await box.run(_req("python3 -m pytest -q -p no:cacheprovider"), ws)
     assert tests.exit_code == 0 and "1 passed" in tests.stdout, tests.stdout[-2000:]
+
+
+async def test_live_project_package_is_importable_with_plain_pytest(box: PodmanSandbox, tmp_path: Path) -> None:
+    """BUG-167 (live job 0a98a5eb): `pytest app/test_main.py` failed with "No module named 'app'" because plain
+    pytest does not put the working directory on sys.path. The repository root is on PYTHONPATH in the container,
+    with and without a dependency directory."""
+    ws = tmp_path / "workspaces" / "ws1"
+    (ws / "app").mkdir(parents=True)
+    (ws / "app" / "main.py").write_text("def answer():\n    return 42\n", encoding="utf-8")
+    (ws / "app" / "test_main.py").write_text("from app.main import answer\n\n\ndef test_answer():\n    assert answer() == 42\n")
+    plain = await box.run(_req("pytest -q -p no:cacheprovider app/test_main.py"), ws)
+    assert plain.exit_code == 0 and "1 passed" in plain.stdout, plain.stdout[-2000:] + plain.stderr[-1000:]
+    (ws / "requirements.txt").write_text("idna==3.10\n", encoding="utf-8")
+    install = await box.run(_req(python_install_command("requirements.txt"), egress=True, timeout_seconds=600), ws)
+    assert install.exit_code == 0, install.stderr[-2000:]
+    with_deps = await box.run(_req("cd app && pytest -q -p no:cacheprovider test_main.py && python3 -c 'import idna'"), ws)
+    assert with_deps.exit_code == 0 and "1 passed" in with_deps.stdout, with_deps.stdout[-2000:] + with_deps.stderr[-1000:]

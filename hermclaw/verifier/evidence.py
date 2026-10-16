@@ -28,10 +28,10 @@ from hermclaw.contracts.acceptance import (
 )
 from hermclaw.contracts.scope import normalise_path
 from hermclaw.contracts.verification import CheckStatus, VerificationCheck
-from hermclaw.scope.guard import path_matches
+from hermclaw.scope.guard import acceptance_glob_matches
 from hermclaw.tools.testparse import Framework, parse_counts, summarise
 from hermclaw.tools.workspace import has_git_segment, regex_is_risky
-from hermclaw.verifier.changes import matching, read_text
+from hermclaw.verifier.changes import acceptance_matching, read_text
 from hermclaw.verifier.commands import TestRecord
 from hermclaw.verifier.context import VerifyContext
 from hermclaw.verifier.schema import SchemaParseError, parse_document, validate
@@ -84,7 +84,7 @@ async def candidates(ctx: VerifyContext, glob: str) -> list[str]:
     """Existing workspace paths matching ``glob``. A literal path is also found when it is git-ignored."""
     files = await ctx.files()
     if any(ch in _GLOB_CHARS for ch in glob):
-        return [f for f in files if path_matches(f, glob)]
+        return [f for f in files if acceptance_glob_matches(f, glob)]
     rel = glob.rstrip("/")
     try:
         rel = normalise_path(rel)
@@ -240,10 +240,10 @@ def diff_evidence(ctx: VerifyContext, index: int, ev: DiffEvidence) -> Verificat
     name = label(index, ev)
     paths = ctx.changes.paths
     problems: list[str] = []
-    missing = [g for g in ev.must_change if not matching(paths, [g])]
+    missing = [g for g in ev.must_change if not acceptance_matching(paths, [g])]
     if missing:
         problems.append(f"expected changes matching {missing} but none were found")
-    touched = matching(paths, ev.must_not_change)
+    touched = acceptance_matching(paths, ev.must_not_change)
     if touched:
         problems.append(f"files that must not change were changed: {touched[:10]}")
     if ev.max_changed_files is not None and len(paths) > ev.max_changed_files:

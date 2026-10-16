@@ -43,6 +43,7 @@ from hermclaw.core.config import PoliciesConfig
 from hermclaw.core.interfaces import CommandExecutor, ExecutionRequest, GitReader, RepoContextProvider, RepoHit, WorkspaceHandle
 from hermclaw.core.logging import get_logger
 from hermclaw.core.redaction import DEFAULT_REDACTOR, REDACTED, Redactor
+from hermclaw.research.questions import unanswerable_reason
 from hermclaw.scope.guard import ScopeGuard
 from hermclaw.tools import errors as E
 from hermclaw.tools.classify import CommandClassification, CommandClassifier, package_install
@@ -1388,6 +1389,9 @@ class ToolEngine:
 
     # ============================================================================================ 17.7-17.9 requests
     async def _request_research(self, args: RequestResearchArgs, ctx: CallContext, events: list[PendingEvent]) -> ToolResult:
+        why = unanswerable_reason(args.question)
+        if why:
+            raise ToolError(E.RESEARCH_REFUSED, f"research refused: web research cannot answer this – {why}")
         if self._research_requests >= self.permissions.max_research_requests:
             raise ToolError(
                 E.RESEARCH_FAILED, f"research request limit ({self.permissions.max_research_requests}) reached for this attempt"

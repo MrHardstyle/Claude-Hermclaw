@@ -104,12 +104,16 @@ DEFAULT_SHM_SIZE = "64m"
 MAX_ENV_VALUE_CHARS = 32_768
 #: environment every container starts with (read-only rootfs: ``/tmp`` is the only writable scratch dir)
 BASE_CONTAINER_ENV: Mapping[str, str] = {"HOME": "/tmp", "TMPDIR": "/tmp"}  # noqa: S108 - paths inside the container
+#: the repository root is importable however a test runner is invoked (``pytest`` does not put the working
+#: directory on ``sys.path``, ``python -m pytest`` does): ``from app.main import app`` must not depend on it (analysis
+#: 2026-10-16, U5, BUG-167)
+WORKSPACE_CONTAINER_ENV: Mapping[str, str] = {"PYTHONPATH": WORKDIR}
 #: dependency directory of a workspace inside the container (D-014): writable only for an install request
 DEPS_MOUNT = "/deps"
 PYTHON_DEPS_DIR = f"{DEPS_MOUNT}/python"
 NODE_MODULES_MOUNT = f"{WORKDIR}/node_modules"
 #: environment of every container that has a dependency directory (tests and tools import from it)
-DEPS_CONTAINER_ENV: Mapping[str, str] = {"PYTHONPATH": PYTHON_DEPS_DIR}
+DEPS_CONTAINER_ENV: Mapping[str, str] = {"PYTHONPATH": f"{WORKDIR}:{PYTHON_DEPS_DIR}"}
 
 _ENV_NAME_RE = re.compile(r"^[A-Za-z_][A-Za-z0-9_]{0,127}$")
 _SIZE_RE = re.compile(r"^(\d{1,15})([bkmg]?)$")
@@ -890,7 +894,7 @@ class ContainerSandbox:
         image = resolve_image(self.policy, req.image, self.extra_images)
         requested = validate_request_env(req.env, self.policy.request_env_allowlist)
         deps_args, deps_env = self._deps_args(req, workspace)
-        env = {**BASE_CONTAINER_ENV, **requested, **deps_env}
+        env = {**BASE_CONTAINER_ENV, **WORKSPACE_CONTAINER_ENV, **requested, **deps_env}
         passthrough = {k: v for k, v in requested.items() if not is_engine_env_name(k)}
         for k in requested.keys() - passthrough.keys():
             if is_secret_env_name(k):

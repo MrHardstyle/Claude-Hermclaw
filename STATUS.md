@@ -1,7 +1,7 @@
 # STATUS
 
 ## Aktueller Zustand (2026-10-16)
-- Projekt: Hermclaw Next · Branch: `claude/hermclaw-next-build` · Version `0.1.0rc8` (gebaut); **deployt: 0.1.0rc7** auf .222–.225 (Deployment jetzt durch Claude, Become-Passwort per systemd-creds)
+- Projekt: Hermclaw Next · Branch: `claude/hermclaw-next-build` · Version `0.1.0rc9` (gebaut); **deployt: 0.1.0rc8** auf .222–.225 (Deployment jetzt durch Claude, Become-Passwort per systemd-creds)
 - **Live-Abnahme nach Kapitel 12 durchgeführt** (2026-10-16): 396 Schritte erledigt, 34 mit offenem Live-Teil (`[~]`), 0 offen.
 - 0.1.0rc2 deployt (vom Betreiber, alle Hosts inkl. .224): doctor 19 ok, models 6/6 (Fallback, BUG-150 wirksam), workers 3/3.
 - Erster Testauftrag erneut eingereicht (Job `eadf1b6f…`): Die Erstplanung ist jetzt gültig (BUG-143 wirkt, Steps mit Scope),
@@ -18,11 +18,17 @@
   abgebrochenen Step liegengebliebene Datei war als Repo-Hinweis nicht beschreibbar (BUG-163), und Server/Tests ohne
   `close()` blockierten `run_test` je 600 s (BUG-164). Behoben in 0.1.0rc7 (deployt, doctor 19 ok).
 - Testauftrag auf 0.1.0rc7 (Job `837dcd50…`): BUG-163/164 wirken; der Coder installierte das unveränderte Manifest
-  wiederholt, statt das fehlende `httpx` einzutragen, und schloss einen erledigten Step nicht ab (BUG-165). Behoben in **0.1.0rc8**.
+  wiederholt, statt das fehlende `httpx` einzutragen, und schloss einen erledigten Step nicht ab (BUG-165). Behoben in 0.1.0rc8 (deployt).
+- Testauftrag auf 0.1.0rc8 (Job `0a98a5eb…`): gescheitert (Recherche „populärste Frameworks“, FastAPI, eigenes Paket nicht importierbar).
+- **Ursachenanalyse aller acht Live-Jobs** (`docs/analysis/live-job-root-causes-2026-10-16.md`, Betreiberauftrag): früheste
+  vermeidbare Entscheidung war jedes Mal eine Web-Recherche über das eigene Repository bzw. die Framework-Wahl; dazu Code und
+  Test in getrennten Steps, keine Präferenz für einfache Lösungen, ein Verifier-False-Negative (`must_change: ["*"]`) und
+  nicht importierbare Projektpakete. Allgemeine Fixes BUG-166 bis BUG-169 in **0.1.0rc9**; neue Live-Auftragsbatterie
+  `hermclaw acceptance-jobs` mit gemessenen Kriterien (J1–J6).
 - **D-014 (Betreiberentscheidung 2026-10-16): Abhängigkeits-Installation** über einen Registry-Proxy auf .222 (P43). Live auf .222
   verifiziert (pip und npm durch den Proxy, alles andere blockiert); in 0.1.0rc4, eingeschaltet mit `hermclaw_config_dependency_installs: true`.
 - Blocker: BLOCKER-001 und BLOCKER-003 aufgehoben (GitLab-Suite PASS); BLOCKER-002 (Tag-Push) unverändert.
-- Release-Status: **RC – live abgenommen bis auf** End-to-End-Testauftrag (nach Deployment rc8 wiederholen),
+- Release-Status: **RC – live abgenommen bis auf** Live-Auftragsbatterie J1–J6 (`hermclaw acceptance-jobs`, zwei Läufe in Folge),
   Wake-on-LAN (nicht eingerichtet), Backup nach Terra (nicht eingerichtet), Soak-Test, Cutover.
 
 ## Fortschritt BUILD_PLAN (automatisch: `python scripts/dev/plan_progress.py --markdown`)
@@ -111,8 +117,8 @@ Lint, mypy, ShellCheck, ansible-lint (production) sauber.
 - Embeddings: `embeddinggemma:300m` (768 dim; EmbeddingGemma 2 erst, wenn Ollama es unter Linux/CUDA ausführt, D-010)
 
 ## Bugs
-- 165 gefunden, **165 behoben** (P0 2, P1 32, P2 67, P3 54, P4 3) – `BUGS.md`. Live-Abnahme: BUG-143 bis BUG-165.
-  BUG-143–164 sind produktiv (0.1.0rc7); BUG-165 wirkt nach dem Deployment von 0.1.0rc8.
+- 169 gefunden, **169 behoben** (P0 2, P1 35, P2 68, P3 54, P4 3) – `BUGS.md`. Live-Abnahme: BUG-143 bis BUG-169.
+  BUG-143–165 sind produktiv (0.1.0rc8); BUG-166–169 wirken nach dem Deployment von 0.1.0rc9.
 - Externe Blocker: BLOCKER-002 (Tag-Push)
 
 ## Letzte Testresultate (2026-10-15, Build-Host)
@@ -137,8 +143,9 @@ Tests 2026-10-15, einzeln ausgeführt: `test_bootstrap_infra` 63, `test_bootstra
 bestanden; ansible-lint (production) sauber. `test_deploy_converge` ist angepasst; ihn führt der Integrator aus.
 
 ## Nächster Schritt
-1. 0.1.0rc8 ausrollen (`hermclaw_version: "0.1.0rc8"` im Inventar, `ansible-playbook … deploy.yml`), dann den ersten
-   Testauftrag erneut einreichen und mit schwierigeren Aufträgen fortfahren (Validierung, Refactoring, Node, Abbruch, parallele Jobs).
+1. 0.1.0rc9 ausrollen (`hermclaw_version: "0.1.0rc9"` im Inventar, `ansible-playbook … deploy.yml`), Fixtures pushen
+   (`scripts/ops/acceptance-fixtures.sh`) und die Auftragsbatterie `hermclaw acceptance-jobs` J1–J6 laufen lassen; danach Abbruch,
+   parallele Jobs und Worker-Neustart prüfen.
 2. Wake-on-LAN einrichten (MACs, BIOS, Kapitel 13.1), danach `--suite wol --full-wol` und erst dann den Leerlauf-Suspend einschalten.
 3. Backup nach Terra einrichten (Kapitel 11), Backup-Suite; danach Soak-Test und Cutover (`docs/runbooks/cutover.md`).
 4. Drittabhängigkeiten eines Projekts installiert der Coder über `install_dependencies` (D-014); ein Projekt-Sandbox-Image

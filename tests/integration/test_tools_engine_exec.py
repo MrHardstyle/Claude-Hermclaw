@@ -233,6 +233,18 @@ async def test_request_research_forwards_and_limits(sessionmaker: SM, repo: Path
     assert (await h.call("request_research", question="?")).error_code == E.ARGS_INVALID
 
 
+async def test_request_research_refuses_repository_and_technology_choice_questions(sessionmaker: SM, repo: Path) -> None:
+    """Analysis 2026-10-16, U1 (live job 0a98a5eb): the coder spent its research budget on "most popular web
+    frameworks" and then asked for a replan. Such questions are refused without using the budget."""
+    cb = RecordingCallbacks(research_answer="docs")
+    h = await make_harness(sessionmaker, repo, callbacks=cb, permissions=ToolPermissions(max_research_requests=1))
+    for q in ("What are the most popular web frameworks in Python?", "Which test layout does this repository use?"):
+        res = await h.call("request_research", question=q)
+        assert res.error_code == E.RESEARCH_REFUSED and "web research cannot answer" in res.output
+    assert cb.research == []
+    assert (await h.call("request_research", question="How to read a text file in Python 3.12?")).ok  # budget still there
+
+
 async def test_request_scope_expansion_swaps_guard(sessionmaker: SM, repo: Path) -> None:
     v2 = ScopeContract(source="runtime_expansion", version=2, target_paths=["src/calc.py", "app.py"], allowed_new_paths=["src/gen_*.py"])
     cb = RecordingCallbacks(expansion=ScopeExpansionOutcome(True, "granted: mechanical dependency", v2))

@@ -2,6 +2,26 @@
 
 Format: [Keep a Changelog](https://keepachangelog.com/de/1.1.0/), Versionen nach PEP 440.
 
+## [0.1.0rc9] – Release Candidate (2026-10-16)
+
+Ursachenanalyse aller Live-Jobs (Ursachenanalyse `docs/analysis/live-job-root-causes-2026-10-16.md`) und allgemeine Fixes der Ursachen (BUG-166 bis BUG-169) statt weiterer
+Symptom-Fixes. Neue Live-Abnahme mit gemessenen Kriterien.
+
+### Behoben
+- **Verifier-False-Negative (BUG-166):** `must_change: ["*"]` und andere Dateinamen-Globs passen in jeder Tiefe;
+  die Plan-Validierung weist `must_change`-Globs zurück, die auf keinen Pfad des Steps passen können.
+- **Projekt-Importe (BUG-167):** Das Repository-Wurzelverzeichnis steht in jedem Container auf `PYTHONPATH`.
+- **Recherche (BUG-168):** Fragen über das eigene Repository und zur Technologiewahl werden in Plan und Coder-Werkzeug
+  abgelehnt (Web-Recherche kann sie nicht beantworten); externe Fragen bleiben erlaubt.
+- **Planstruktur und Einfachheit (BUG-169):** Code und seine Tests gehören in einen Step (Validierung); Planner und
+  Coder wählen die einfachste vollständige Lösung (Standardbibliothek und vorhandene Werkzeuge zuerst).
+
+### Hinzugefügt
+- `hermclaw job-metrics JOB_ID` und `hermclaw acceptance-jobs SPEC`: Live-Auftragsbatterie mit gemessenen Kriterien
+  (Status/MR, Dauer, Replans, Erstplan-Größe, unbeantwortbare Recherche, neue Abhängigkeiten, Wiederholungen,
+  `complete_step`); Spezifikation `config/acceptance-jobs.example.yaml`, Fixtures `tests/live/fixtures/`,
+  `scripts/ops/acceptance-fixtures.sh`.
+
 ## [0.1.0rc8] – Release Candidate (2026-10-16)
 
 Fix aus dem Testauftrag nach dem Deployment von 0.1.0rc7 (BUG-165).

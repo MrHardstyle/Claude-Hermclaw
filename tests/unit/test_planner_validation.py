@@ -427,3 +427,65 @@ def test_checking_step_error_names_candidate_dependencies() -> None:
     ), errors
     lone = plan("goal", [step("S001", "review", "review", "Review everything carefully.")])
     assert any(e.endswith("add the ids of those steps to its depends_on") for e in _errors(lone))
+
+
+# --------------------------------------------------------------------------------------------- live-job root causes (2026-10-16)
+LIVE_REPO_QUESTIONS = [  # research questions of the live jobs rc1-rc8 (research_runs.question)
+    "What is the programming language and web framework used in this repository?",
+    "Determine a suitable web framework and language to implement the health endpoint since the repository is empty.",
+    "What is the most efficient way to scaffold a minimal web server for a single endpoint in this environment?",
+    "What is the preferred web framework and language for this project?",
+    "What is the intended tech stack for this repository?",
+    "Research how to add a simple JSON health endpoint and a corresponding test in the identified framework.",
+    "What are the most popular web frameworks in Python and Node.js for building REST APIs?",
+    "Add JSON health endpoint in [framework] with test",
+]
+
+
+@pytest.mark.parametrize("question", LIVE_REPO_QUESTIONS)
+def test_research_about_the_repository_or_a_technology_choice_is_rejected(question: str) -> None:
+    """U1: research searches the web; questions about the repository itself or about which technology to use
+    returned other people's projects and popularity rankings and steered every live job into frameworks."""
+    as_request = plan("goal", [_impl("S001")], research_needed=[{"question": question}])
+    assert any("cannot be researched on the web" in e for e in _errors(as_request))
+    as_step = plan("goal", [step("S001", "research", "research", question), _impl("S002", depends_on=["S001"])])
+    assert any("S001: research step" in e and "cannot be answered by web research" in e for e in _errors(as_step))
+
+
+@pytest.mark.parametrize(
+    "question",
+    [
+        "Which lockout window does OWASP recommend?",
+        "How do I configure CORS in Flask 3.1?",
+        "What does the PostgreSQL 17 error 'could not serialize access' mean?",
+        "Which options does the nginx proxy_buffering directive accept?",
+    ],
+)
+def test_external_research_questions_stay_allowed(question: str) -> None:
+    data = plan("goal", [step("S001", "research", "research", question), _impl("S002", depends_on=["S001"])])
+    assert not any("web research" in e for e in _errors(data))
+
+
+def test_tests_for_new_code_belong_in_the_same_step() -> None:
+    """U3 (every live first plan): "implement code" -> "implement test" as separate steps. The implementing step
+    could not run its tests, the test step could not fix the code, and handoffs stagnated."""
+    code = step("S001", "implement", "coding", "Create the service module.", allowed_new_paths=["app/service.py"])
+    tests = step("S002", "implement", "coding", "Write tests for the service.", allowed_new_paths=["tests/"], depends_on=["S001"])
+    errors = _errors(plan("goal", [code, tests]))
+    assert any("S002 only writes tests for the code of step S001" in e and "ONE step" in e for e in errors)
+    merged = step("S001", "implement", "coding", "Create the service module with tests.", allowed_new_paths=["app/service.py", "tests/"])
+    assert not any("only writes tests" in e for e in _errors(plan("goal", [merged])))
+    # tests for code a completed step already delivered (replan) are fine as a step of their own
+    assert not any("only writes tests" in e for e in _errors(plan("goal", [code, tests]), preserved=frozenset({"S001"})))
+    js = step("S003", "implement", "coding", "Write src/app.test.js.", allowed_new_paths=["src/app.test.js"], depends_on=["S001"])
+    assert any("S003 only writes tests" in e for e in _errors(plan("goal", [code, js])))
+
+
+def test_must_change_has_to_match_the_files_of_the_step() -> None:
+    """U4: a must_change glob that matches none of the step's files can never pass verification."""
+    ok = _impl("S001", allowed_new_paths=["src/**"], acceptance=[{"type": "diff", "must_change": ["*"]}])
+    assert not any("must_change" in e for e in _errors(plan("goal", [ok])))
+    ok2 = _impl("S001", acceptance=[{"type": "diff", "must_change": ["app/routers/*.py"]}])
+    assert not any("must_change" in e for e in _errors(plan("goal", [ok2])))
+    bad = _impl("S001", allowed_new_paths=["src/"], acceptance=[{"type": "diff", "must_change": ["lib/util.py"]}])
+    assert any("must_change 'lib/util.py' matches none of the files" in e for e in _errors(plan("goal", [bad])))

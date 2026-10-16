@@ -195,8 +195,13 @@ def test_research_is_for_external_facts_not_the_repository_itself() -> None:
     kc = _kc()
     for system in (planner_system_prompt(kc, sorted(set(kc.values())), 30), replanner_system_prompt(kc, sorted(set(kc.values())), 30)):
         assert "use it only for external facts" in system
-        assert "Facts about this repository itself" in system and "come from repository_inventory and retrieved_context" in system
+        assert "Questions about this repository itself" in system and "repository facts come from repository_inventory" in system
         assert "an empty or nearly empty repository has no stack yet" in system
+        # analysis 2026-10-16: the prompt alone did not stop it (U1); validation enforces it, the prompt says so
+        assert "which technology to use are rejected" in system
+        # U2 / U3: simplest sufficient solution, code and its tests in one step
+        assert "Choose the simplest solution that fully meets the job" in system and "standard library" in system
+        assert "never split code and its tests into separate steps" in system
 
 
 def test_replanner_system_prompt_adds_rerun_rules() -> None:
@@ -235,3 +240,7 @@ def test_prompts_explain_how_dependencies_get_into_the_sandbox() -> None:
     assert "never run a server, watcher or REPL" in DEFAULT_SYSTEM_CONTRACT and "port 0" in DEFAULT_SYSTEM_CONTRACT
     # BUG-165 (live job 837dcd50): goal met (dependencies installed), but the coder kept waiting for tests a later step owned
     assert "Call complete_step as soon as the STEP GOAL" in DEFAULT_SYSTEM_CONTRACT and "a later step owns them" in DEFAULT_SYSTEM_CONTRACT
+    # analysis 2026-10-16 (U1/U2): simplest solution, research only for external facts
+    assert (
+        "Prefer the simplest solution" in DEFAULT_SYSTEM_CONTRACT and "never\n  for facts about this repository" in DEFAULT_SYSTEM_CONTRACT
+    )

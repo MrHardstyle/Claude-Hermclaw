@@ -85,6 +85,10 @@ Rules:
   list; without that tool use the standard library or block_step naming the missing dependency.
   install_dependencies installs exactly what the manifest lists: on ModuleNotFoundError for a third-party module add
   it to the manifest first, then install again. Do not list or pin the test tools the image provides (pytest).
+- Prefer the simplest solution that meets the STEP GOAL: standard library and the tools the repository and sandbox
+  already have; add a dependency only when the goal cannot reasonably be met without it.
+- request_research is for external facts only (documentation, APIs, error messages of third-party software), never
+  for facts about this repository or for choosing a technology.
 - Call complete_step as soon as the STEP GOAL and its acceptance are met, even when tests of files outside your scope
   still fail (a later step owns them): name those failures in the summary instead of repeating the same tools.
 - Every command must exit on its own: never run a server, watcher or REPL (not even with '&'). Tests start the app

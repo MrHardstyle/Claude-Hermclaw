@@ -11,6 +11,8 @@ Subcommands
                           --sandbox-image ALIAS)
   repo-list               list registered repositories
   job-submit PROMPT       create a job (--title, --repo NAME, --base-branch, --constraint …)
+  job-metrics JOB_ID      measured acceptance criteria of a finished job (--allow-dependencies)
+  acceptance-jobs SPEC    live job battery: submit every job of SPEC, wait, measure, report (--out, --only)
   litellm-config OUT      generate the LiteLLM proxy config from config/models.yaml
   schemas OUT_DIR         export the JSON schemas of all contracts
   doctor                  installation/operations preflight: config, DB, paths, tokens, LiteLLM, workers, models,
@@ -173,41 +175,100 @@ def cmd_repo_list(_: argparse.Namespace) -> int:
     return 0
 
 
-def cmd_job_submit(ns: argparse.Namespace) -> int:
+async def _create_job(
+    sm: Any,
+    prompt: str,
+    *,
+    title: str | None = None,
+    repo: str | None = None,
+    base_branch: str | None = None,
+    priority: int = 50,
+    constraints: Sequence[str] = (),
+    created_by: str = "cli",
+) -> Any:
     from hermclaw.contracts.events import EventType
     from hermclaw.events.store import append_event
     from hermclaw.persistence.models import Job, JobInput
 
+    repo_id = (await _git_engine(sm).registry.resolve(repo)).id if repo else None
+    async with sm() as s:
+        job = Job(
+            title=(title or prompt)[:200],
+            prompt=prompt,
+            repository_id=repo_id,
+            base_branch=base_branch,
+            priority=priority,
+            created_by=created_by,
+        )
+        s.add(job)
+        await s.flush()
+        s.add(JobInput(job_id=job.id, kind="prompt", content=prompt))
+        for c in constraints:
+            s.add(JobInput(job_id=job.id, kind="constraint", content=c))
+        await append_event(
+            s,
+            EventType.JOB_CREATED,
+            source_type=created_by,
+            job_id=job.id,
+            payload={"title": job.title, "repository_id": str(repo_id) if repo_id else None},
+        )
+        await s.commit()
+        return job
+
+
+def cmd_job_submit(ns: argparse.Namespace) -> int:
     async def run(sm: Any) -> Any:
-        repo_id = None
-        if ns.repo:
-            repo_id = (await _git_engine(sm).registry.resolve(ns.repo)).id
-        async with sm() as s:
-            job = Job(
-                title=(ns.title or ns.prompt)[:200],
-                prompt=ns.prompt,
-                repository_id=repo_id,
-                base_branch=ns.base_branch,
-                priority=ns.priority,
-                created_by="cli",
-            )
-            s.add(job)
-            await s.flush()
-            s.add(JobInput(job_id=job.id, kind="prompt", content=ns.prompt))
-            for c in ns.constraint or []:
-                s.add(JobInput(job_id=job.id, kind="constraint", content=c))
-            await append_event(
-                s,
-                EventType.JOB_CREATED,
-                source_type="cli",
-                job_id=job.id,
-                payload={"title": job.title, "repository_id": str(repo_id) if repo_id else None},
-            )
-            await s.commit()
-            return {"job_id": str(job.id), "status": job.status}
+        job = await _create_job(
+            sm, ns.prompt, title=ns.title, repo=ns.repo, base_branch=ns.base_branch, priority=ns.priority, constraints=ns.constraint or []
+        )
+        return {"job_id": str(job.id), "status": job.status}
 
     _print(asyncio.run(_with_db(run)))
     return 0
+
+
+def cmd_job_metrics(ns: argparse.Namespace) -> int:
+    import uuid
+
+    from hermclaw.acceptance.job_metrics import Expectation, collect, evaluate
+
+    async def run(sm: Any) -> Any:
+        return await collect(sm, uuid.UUID(ns.job_id))
+
+    metrics = asyncio.run(_with_db(run))
+    criteria = evaluate(metrics, Expectation(allow_dependencies=ns.allow_dependencies))
+    _print({"metrics": metrics.as_dict(), "criteria": [c.__dict__ for c in criteria], "passed": all(c.passed for c in criteria)})
+    return 0
+
+
+def cmd_acceptance_jobs(ns: argparse.Namespace) -> int:
+    from datetime import UTC, datetime
+
+    from hermclaw.acceptance.runner import load_spec, report, run_battery, write_report
+
+    specs = load_spec(ns.spec)
+    if ns.only:
+        specs = [s for s in specs if s.id in set(ns.only)]
+
+    async def run(sm: Any) -> Any:
+        async def create(job: dict[str, Any]) -> Any:
+            row = await _create_job(
+                sm,
+                job["prompt"],
+                title=job["title"],
+                repo=job["repo"],
+                base_branch=job["base_branch"],
+                constraints=job["constraints"],
+                created_by="acceptance",
+            )
+            return row.id
+
+        return await run_battery(sm, specs, create, poll_s=ns.poll, log=lambda m: print(m, flush=True))
+
+    rep = report(asyncio.run(_with_db(run)))
+    js, md = write_report(rep, ns.out, datetime.now(UTC).strftime("%Y%m%dT%H%M%SZ"))
+    print(f"report: {md} ({js})")
+    return 0 if rep["passed"] else 1
 
 
 def cmd_api(_: argparse.Namespace) -> int:  # pragma: no cover - process entry point
@@ -285,6 +346,16 @@ def build_parser() -> argparse.ArgumentParser:
     j.add_argument("--priority", type=int, default=50)
     j.add_argument("--constraint", action="append")
     j.set_defaults(fn=cmd_job_submit)
+    jm = sub.add_parser("job-metrics", help="measured acceptance criteria of a finished job (analysis 2026-10-16)")
+    jm.add_argument("job_id")
+    jm.add_argument("--allow-dependencies", action="store_true", help="the job asked for external dependencies")
+    jm.set_defaults(fn=cmd_job_metrics)
+    aj = sub.add_parser("acceptance-jobs", help="live job battery: submit, wait, measure (exit 1 when a criterion fails)")
+    aj.add_argument("spec", type=Path, help="job specification (YAML, see config/acceptance-jobs.example.yaml)")
+    aj.add_argument("--out", type=Path, default=Path("/var/lib/hermclaw/acceptance"))
+    aj.add_argument("--only", action="append", help="run only this job id (repeatable)")
+    aj.add_argument("--poll", type=float, default=30.0, help="status poll interval in seconds")
+    aj.set_defaults(fn=cmd_acceptance_jobs)
     lc = sub.add_parser("litellm-config", help="generate the LiteLLM proxy config")
     lc.add_argument("out", type=Path)
     lc.add_argument("--config-dir", type=Path, default=None)

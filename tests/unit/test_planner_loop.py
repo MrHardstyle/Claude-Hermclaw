@@ -191,6 +191,86 @@ async def test_unscoped_implement_step_is_repaired_before_it_can_block() -> None
     assert outcome.value.steps[0].allowed_new_paths == ["app/health.py", "tests/test_health.py"]
 
 
+async def test_live_first_plan_is_repaired_into_one_step_without_web_research() -> None:
+    """Analysis 2026-10-16: the first plans of all live jobs had the same shape – web research about the repository
+    and which framework to use, code and its test in separate steps, a verify step on top. All of it is rejected in
+    one repair turn with the reasons, and the repaired plan is a single implement step with its tests."""
+    from hermclaw.core.config import get_config
+    from hermclaw.planner.validation import ValidationContext, semantic_errors
+
+    ctx = ValidationContext.build(get_config(), FASTAPI.inputs, PlannerSettings())
+
+    def validate(data: dict[str, Any]) -> PlanContract:
+        contract = validate_schema(PlanContract, data)
+        errors = semantic_errors(contract, ctx)
+        if errors:
+            raise PlanInvalid("semantic", errors)
+        return contract
+
+    diff = [{"type": "diff", "must_change": ["*"], "must_not_change": [], "allow_empty": False}]
+    live = {  # plan v1 of live job e3cab55e, ids and texts as recorded
+        "goal": "Add a /health endpoint that returns {'status': 'ok'}, with a test.",
+        "summary": "plan",
+        "research_needed": [
+            {"question": "What is the programming language and web framework used in this repository?", "reason": "unknown"}
+        ],
+        "steps": [
+            {"id": "S001", "title": "Discover project stack", "kind": "discover", "capability": "discover", "goal": "Find the stack."},
+            {
+                "id": "S002",
+                "title": "Research framework implementation",
+                "kind": "research",
+                "capability": "research",
+                "goal": "Research how to add a simple JSON health endpoint and a corresponding test in the identified framework.",
+                "depends_on": ["S001"],
+            },
+            {
+                "id": "S003",
+                "title": "Implement health endpoint",
+                "kind": "implement",
+                "capability": "coding",
+                "goal": "Implement the endpoint.",
+                "allowed_new_paths": ["src/**/*", "app/**/*"],
+                "depends_on": ["S002"],
+                "acceptance": diff,
+            },
+            {
+                "id": "S004",
+                "title": "Implement health endpoint test",
+                "kind": "implement",
+                "capability": "coding",
+                "goal": "Write the test.",
+                "allowed_new_paths": ["tests/**/*"],
+                "depends_on": ["S003"],
+                "acceptance": diff,
+            },
+        ],
+    }
+    fixed = {
+        "goal": live["goal"],
+        "summary": "one step: endpoint and its test with the standard library",
+        "assumptions": ["empty repository: Python standard library (http.server) and unittest, no dependencies"],
+        "steps": [
+            {
+                "id": "S001",
+                "title": "Health endpoint with test",
+                "kind": "implement",
+                "capability": "coding",
+                "goal": "Implement the endpoint and its test.",
+                "allowed_new_paths": ["app/", "tests/"],
+                "acceptance": diff,
+            }
+        ],
+    }
+    chat = ScriptedChat([live, fixed])
+    outcome = await _run(chat, validate)
+    repair = chat.calls[1].messages[-1].content
+    assert "research_needed[0]" in repair and "cannot be researched on the web" in repair
+    assert "step S002: research step 'Research framework implementation' cannot be answered by web research" in repair
+    assert "step S004 only writes tests for the code of step S003" in repair
+    assert outcome.repair_attempts == 1 and len(outcome.value.steps) == 1
+
+
 def test_model_facing_schemas_require_the_scope_fields() -> None:
     """BUG-159 (live job c04f9fb8): Ollama's grammar emits properties in schema order and lets the model skip
     optional ones; Gemma skipped repo_hints/allowed_new_paths and could not add them after rerun_reason. The schema

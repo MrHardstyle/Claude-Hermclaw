@@ -194,7 +194,7 @@ def test_install_request_gets_the_internal_network_proxy_env_and_writable_deps(w
     assert flag(argv, "--network") == ["hermclaw-egress"]
     env = dict(e.split("=", 1) for e in flag(argv, "--env"))
     assert env["HTTPS_PROXY"] == env["http_proxy"] == "http://10.89.240.2:3128" and env["NO_PROXY"] == ""
-    assert env["PYTHONPATH"] == "/deps/python"
+    assert env["PYTHONPATH"] == "/workspace:/deps/python"
     assert f"{deps_root / 'ws1'}:/deps:rw" in flag(argv, "--volume")
     assert f"{deps_root / 'ws1' / 'node_modules'}:/workspace/node_modules:rw" in flag(argv, "--volume")
     assert (deps_root / "ws1" / "python").is_dir()
@@ -204,11 +204,11 @@ def test_later_commands_see_the_deps_read_only_without_network(ws: Path) -> None
     deps_root = ws.parent.parent / "deps"
     box = PodmanSandbox(POLICY, deps_root=deps_root, selinux_relabel=False)
     plain = box.build_invocation(req(), ws).argv
-    assert not any(v.endswith(":/deps:ro") for v in flag(plain, "--volume")) and "PYTHONPATH=/deps/python" not in flag(plain, "--env")
+    assert not any(v.endswith(":/deps:ro") for v in flag(plain, "--volume")) and "PYTHONPATH=/workspace" in flag(plain, "--env")
     (deps_root / "ws1" / "python").mkdir(parents=True)
     argv = box.build_invocation(req(command="pytest -q"), ws).argv
     assert flag(argv, "--network") == ["none"]
-    assert f"{deps_root / 'ws1'}:/deps:ro" in flag(argv, "--volume") and "PYTHONPATH=/deps/python" in flag(argv, "--env")
+    assert f"{deps_root / 'ws1'}:/deps:ro" in flag(argv, "--volume") and "PYTHONPATH=/workspace:/deps/python" in flag(argv, "--env")
     assert not any("PROXY" in e for e in flag(argv, "--env"))
 
 

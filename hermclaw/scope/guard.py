@@ -117,6 +117,20 @@ def any_match(path: str, patterns: list[str]) -> bool:
     return any(path_matches(path, pat) for pat in patterns)
 
 
+def acceptance_glob_matches(path: str, glob: str) -> bool:
+    """Whether ``path`` matches a planner-written acceptance glob.
+
+    Scope semantics, plus the gitignore convention for wildcard patterns without ``/``: they match the file name in
+    any directory (``*`` = any file, ``*.py`` = any Python file). Planners write them that way; with scope semantics
+    ``must_change: ["*"]`` matched only files in the repository root and failed a step that changed ``src/app.js``
+    (BUG-166). Literal paths and patterns with ``/`` keep exact scope semantics.
+    """
+    if any_match(path, [glob]):
+        return True
+    g = glob.strip().rstrip("/")
+    return bool(g) and "/" not in g and any(c in g for c in "*?[") and any_match(path.rsplit("/", 1)[-1], [g])
+
+
 _ESCAPED_GLOB_CHAR_RE = re.compile(r"\[([\[*?])\]")
 
 

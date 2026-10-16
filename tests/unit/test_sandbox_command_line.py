@@ -88,7 +88,7 @@ def test_podman_argv_has_every_isolation_flag(ws: Path) -> None:
     # options come before the image
     assert argv.index("docker.io/library/python:3.12-slim") > max(i for i, a in enumerate(argv) if a.startswith("--"))
     assert inv.timeout_seconds == 300  # policy default when the request did not set one
-    assert inv.env_names == ("HOME", "TMPDIR")
+    assert inv.env_names == ("HOME", "PYTHONPATH", "TMPDIR")
 
 
 def test_docker_argv_equivalent_flags(ws: Path) -> None:
@@ -180,7 +180,7 @@ def test_env_allowlist(ws: Path) -> None:
     inv = PodmanSandbox(POLICY, max_output_bytes=10_000).build_invocation(req(env={"APP_TOKEN": "s3cr3t-value", "CI": "1"}), ws)
     envs = [a.removeprefix("--env=") for a in inv.argv if a.startswith("--env=")]
     # request values are forwarded by name from the engine's own environment, never written into argv
-    assert envs == ["HOME=/tmp", "TMPDIR=/tmp", "APP_TOKEN", "CI"]
+    assert envs == ["HOME=/tmp", "TMPDIR=/tmp", "PYTHONPATH=/workspace", "APP_TOKEN", "CI"]
     assert dict(inv.passthrough_env) == {"APP_TOKEN": "s3cr3t-value", "CI": "1"}
     assert not any("s3cr3t-value" in a for a in inv.argv)
     assert inv.secrets == ("s3cr3t-value",)  # masked in the output later
@@ -192,7 +192,7 @@ def test_request_env_may_override_base_home(ws: Path) -> None:
     policy = SandboxPolicy(**{**POLICY.model_dump(), "env_allowlist": ["HOME"]})
     inv = PodmanSandbox(policy, max_output_bytes=10_000).build_invocation(req(env={"HOME": "/workspace"}), ws)
     # HOME would change the engine binary's own behaviour (storage path) -> passed as NAME=value, not via its env
-    assert flag(inv.argv, "--env") == ["HOME=/workspace", "TMPDIR=/tmp"] and dict(inv.passthrough_env) == {}
+    assert flag(inv.argv, "--env") == ["HOME=/workspace", "TMPDIR=/tmp", "PYTHONPATH=/workspace"] and dict(inv.passthrough_env) == {}
 
 
 def test_engine_sensitive_names(ws: Path) -> None:
@@ -499,3 +499,11 @@ async def test_engine_exec_returns_when_the_engine_exits_even_if_a_daemon_keeps_
     rc, _out, err = await sb.engine_exec(["sleep", "5"], timeout_seconds=0.3)
     assert rc == -9 and "timed out" in err
     assert (await sb.engine_exec([str(tmp_path / "missing-engine")]))[0] == 127
+
+
+def test_the_repository_root_is_importable_in_every_container(ws: Path) -> None:
+    """BUG-167 (live job 0a98a5eb): `pytest app/test_main.py` failed on `from app.main import app` with
+    "No module named 'app'" – plain `pytest` does not put the working directory on sys.path. The repository root is
+    on PYTHONPATH in every container (before /deps/python when a dependency directory exists)."""
+    inv = PodmanSandbox(POLICY, max_output_bytes=10_000).build_invocation(req(), ws)
+    assert "PYTHONPATH=/workspace" in flag(inv.argv, "--env")

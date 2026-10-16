@@ -20,7 +20,7 @@ from pathlib import Path
 
 from hermclaw.contracts.scope import normalise_path
 from hermclaw.core.interfaces import GitReader, GitStatusEntry, WorkspaceHandle
-from hermclaw.scope.guard import any_match
+from hermclaw.scope.guard import acceptance_glob_matches, any_match
 from hermclaw.tools.gitlocal import LocalGit
 from hermclaw.tools.workspace import has_git_segment, is_binary
 from hermclaw.verifier.types import AddedContent, AddedLine, ChangeSet, FileChange, Operation
@@ -319,3 +319,9 @@ def matching(paths: Iterable[str], globs: Iterable[str]) -> list[str]:
     """Paths matching any of ``globs`` (ScopeGuard glob semantics)."""
     pats = [g for g in globs if g]
     return sorted(p for p in paths if any_match(p, pats))
+
+
+def acceptance_matching(paths: Iterable[str], globs: Iterable[str]) -> list[str]:
+    """Paths matching any planner-written acceptance glob (:func:`acceptance_glob_matches`)."""
+    pats = [g for g in globs if g]
+    return sorted(p for p in paths if any(acceptance_glob_matches(p, g) for g in pats))

@@ -404,7 +404,14 @@ def _base_rules(kind_capability: dict[str, str], capability_names: Sequence[str]
         f"Use no other kinds. Allowed capabilities: {', '.join(capability_names)}. Use no other capability.",
         "Step ids are S001, S002, S003, ... (unique). depends_on lists ids of steps that must finish first. "
         "The dependency graph must be acyclic and must not contain duplicate work.",
-        f"At most {max_steps} steps. One step per coherent change; prefer few, well-scoped steps.",
+        f"At most {max_steps} steps. One step per coherent change; prefer few, well-scoped steps. A change and the "
+        "tests that check it are ONE step (its allowed_new_paths/repo_hints contain both, its acceptance runs the "
+        "tests): never split code and its tests into separate steps. Add verify or review steps only when they check "
+        "something the implementing step's own acceptance does not; a small job usually needs one implement step.",
+        "Choose the simplest solution that fully meets the job. Use the language's standard library and the tools the "
+        "repository or the sandbox already has (e.g. its test runner) unless the job explicitly asks for a framework or "
+        "library, or the repository already uses one. Every external dependency is an extra failure source: add one "
+        "only when the job cannot reasonably be done without it, and state the reason under assumptions.",
         f"Every mutating step (kinds: {MUTATING_KINDS_TEXT}) MUST have machine-checkable acceptance criteria. "
         f"Use only these evidence types: {', '.join(EVIDENCE_TYPES)}. Examples:\n{_evidence_examples()}",
         "Test evidence uses the repository's own test command as given in repository_inventory/existing_tests. "
@@ -421,9 +428,11 @@ def _base_rules(kind_capability: dict[str, str], capability_names: Sequence[str]
         "If information is missing and must be researched first, add an entry to research_needed "
         "(question + reason); the runtime schedules research before the dependent work. A research step "
         "(kind research) must be a dependency of the steps that need its result. Research searches the web: use it "
-        "only for external facts (documentation, APIs, versions). Facts about this repository itself (language, "
-        "framework, layout, tests) come from repository_inventory and retrieved_context; an empty or nearly empty "
-        "repository has no stack yet, so choose one that fits the job and state it as an assumption.",
+        "only for external facts (documentation, APIs, versions of third-party software). Questions about this "
+        "repository itself (language, framework, layout, tests) and questions about which technology to use are "
+        "rejected: repository facts come from repository_inventory and retrieved_context; an empty or nearly empty "
+        "repository has no stack yet, so choose the simplest fitting one yourself and state it as an assumption. "
+        "Most jobs need no research at all.",
         "Review steps (kind review) and verify steps (kind verify) must depend on the steps they check.",
         "Network is off by default. Set network true (on a step or on command evidence) only for steps whose "
         "capability has network=true in capabilities.",

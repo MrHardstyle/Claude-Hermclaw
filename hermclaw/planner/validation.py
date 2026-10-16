@@ -38,7 +38,8 @@ from hermclaw.planner.inputs import (
     detect_test_command,
     has_file_shape,
 )
-from hermclaw.scope.guard import any_match, path_matches
+from hermclaw.research.questions import unanswerable_reason
+from hermclaw.scope.guard import acceptance_glob_matches, any_match, path_matches
 
 MUTATING_KINDS = frozenset(k.value for k in MUTATING_STEP_KINDS)
 INFO_KINDS = frozenset({StepKind.research.value, StepKind.discover.value, StepKind.inventory.value})
@@ -385,6 +386,106 @@ def _acceptance_errors(step: PlanStep, ctx: ValidationContext) -> list[str]:
     return errors
 
 
+def _research_question_errors(plan: PlanContract, new_steps: Sequence[PlanStep]) -> list[str]:
+    """Research searches the web: questions about the repository itself or about which technology to use are
+    unanswerable there and steered every live job into unrelated frameworks (analysis 2026-10-16, U1)."""
+    errors: list[str] = []
+    for idx, req in enumerate(plan.research_needed):
+        why = unanswerable_reason(req.question)
+        if why:
+            errors.append(f"research_needed[{idx}] '{req.question[:120]}' cannot be researched on the web – {why}; remove it")
+    for step in new_steps:
+        if step.kind.value != StepKind.research.value:
+            continue
+        why = unanswerable_reason(f"{step.title}. {step.goal}")
+        if why:
+            errors.append(f"step {step.id}: research step '{step.title[:120]}' cannot be answered by web research – {why}; remove the step")
+    return errors
+
+
+TEST_PATH_RE = re.compile(
+    r"(?:^|/)(?:tests?|__tests__|spec|specs)(?:/|$)|(?:^|/)test_[^/]*$|_test\.[a-z]+$|\.(?:test|spec)\.[a-z]+$|(?:^|/)conftest\.py$",
+    re.IGNORECASE,
+)
+
+
+def _step_paths(step: PlanStep, ctx: ValidationContext) -> list[str]:
+    paths = [*path_like_hints(step, ctx)]
+    for raw in step.allowed_new_paths:
+        try:
+            paths.append(normalise_path(raw))
+        except ValueError:
+            continue
+    return paths
+
+
+def _split_test_errors(plan: PlanContract, new_steps: Sequence[PlanStep], ctx: ValidationContext, preserved: frozenset[str]) -> list[str]:
+    """Code and the tests for it belong in one step: an implementing step cannot run tests a later step writes, and
+    the test step may not fix the code (analysis 2026-10-16, U3). A step that only writes tests may therefore not
+    depend on a workspace-mutating step that writes non-test code."""
+    errors: list[str] = []
+    by_id = {s.id: s for s in plan.steps}
+    for step in new_steps:
+        if step.kind.value not in WORKSPACE_MUTATING_KINDS:
+            continue
+        paths = _step_paths(step, ctx)
+        if not paths or not all(TEST_PATH_RE.search(p) for p in paths):
+            continue
+        for dep in step.depends_on:
+            other = by_id.get(dep)
+            if other is None or dep in preserved or other.kind.value not in WORKSPACE_MUTATING_KINDS:
+                continue  # tests for code a completed step already delivered are a step of their own
+            code = [p for p in _step_paths(other, ctx) if not TEST_PATH_RE.search(p)]
+            if code:
+                errors.append(
+                    f"step {step.id} only writes tests for the code of step {dep}: put code and its tests into ONE step "
+                    f"(merge {step.id} into {dep}: add its test paths to {dep}'s allowed_new_paths/repo_hints and its "
+                    "test acceptance), so the step can run its own tests and fix both"
+                )
+    return errors
+
+
+def _must_change_errors(step: PlanStep, ctx: ValidationContext) -> list[str]:
+    """A ``must_change`` glob that can match none of the step's files can never pass: the verifier would fail a
+    correctly finished step (live job e3cab55e, analysis 2026-10-16, U4)."""
+    if step.kind.value not in WORKSPACE_MUTATING_KINDS:
+        return []
+    paths = _step_paths(step, ctx)
+    if not paths:
+        return []
+    errors: list[str] = []
+    for idx, crit in enumerate(step.acceptance):
+        if not isinstance(crit, DiffEvidence):
+            continue
+        for glob in crit.must_change:
+            if not any(_globs_overlap(glob, p) for p in paths):
+                errors.append(
+                    f"step {step.id}: acceptance[{idx}] (diff) must_change '{glob[:120]}' matches none of the files the "
+                    f"step may change ({', '.join(paths[:8])}); use those paths"
+                )
+    return errors
+
+
+def _literal_prefix(pattern: str) -> str:
+    cut = min((pattern.find(c) for c in "*?[" if c in pattern), default=len(pattern))
+    return pattern[:cut]
+
+
+def _globs_overlap(glob: str, path: str) -> bool:
+    """Whether the acceptance ``glob`` can match a file covered by the step path/pattern ``path`` (conservative:
+    when unsure, they overlap)."""
+    g = glob.strip()
+    if not g:
+        return True
+    concrete = not any(c in GLOB_CHARS for c in path) and not path.endswith("/")
+    if concrete:
+        return acceptance_glob_matches(path, g)
+    if "/" not in g.rstrip("/") and any(c in g for c in "*?["):
+        return True  # file-name pattern (gitignore convention): may match a file anywhere
+    a, b = _literal_prefix(g), _literal_prefix(path)
+    return a.startswith(b) or b.startswith(a)
+
+
 def find_research_step(question: str, steps: Sequence[PlanStep]) -> PlanStep | None:
     """An existing research step that already covers ``question`` (normalised containment, deterministic)."""
     q = normalise_text(question)
@@ -445,7 +546,10 @@ def semantic_errors(
     if open_requests and ctx.research_capability is None:
         errors.append("research_needed requires the 'research' capability, which is not available; state an assumption instead")
 
+    errors.extend(_research_question_errors(plan, new_steps))
+    errors.extend(_split_test_errors(plan, new_steps, ctx, preserved))
     for step in new_steps:
+        errors.extend(_must_change_errors(step, ctx))
         errors.extend(_capability_errors(step, ctx))
         errors.extend(_scope_source_errors(step, ctx))
         errors.extend(_hint_errors(step, ctx))

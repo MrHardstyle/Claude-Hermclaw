@@ -517,6 +517,29 @@ async def test_diff_evidence(sessionmaker: Any, tmp_path: Path) -> None:
     assert by_name(outcome2.report)["acceptance[0]:diff"].message == "the change is empty"
 
 
+async def test_file_name_globs_in_diff_evidence_match_in_any_directory(sessionmaker: Any, tmp_path: Path) -> None:
+    """BUG-166 (live job e3cab55e): the planner wrote ``must_change: ["*"]`` ("some change"); with scope semantics
+    ``*`` matched only root files, so the only step any live job ever completed (src/app.js created) was failed by
+    the verifier and its correction looped. Wildcard patterns without '/' follow the gitignore convention."""
+    repo = init_repo(tmp_path / "repo", {"README.md": "x\n"})
+    write(repo, "src/app.js", "module.exports = 1;\n")
+    st = step(
+        "documentation",
+        scope_contract=scope(allowed_new_paths=["src/**"]),
+        acceptance=[
+            {"type": "diff", "must_change": ["*"]},
+            {"type": "diff", "must_change": ["*.js"]},
+            {"type": "diff", "must_change": ["src/*.js"]},
+            {"type": "diff", "must_change": ["*.py"]},
+            {"type": "diff", "must_not_change": ["*.js"]},
+            {"type": "diff", "must_change": ["app.js"]},  # a literal path stays exact: only the root file
+        ],
+    )
+    outcome, *_ = await run(sessionmaker, repo, st, kind="documentation")
+    names = by_name(outcome.report)
+    assert [names[f"acceptance[{i}]:diff"].status for i in range(6)] == ["pass", "pass", "pass", "fail", "fail", "fail"]
+
+
 # ------------------------------------------------------------------------------------------- schema / artifact
 async def test_schema_evidence(sessionmaker: Any, tmp_path: Path) -> None:
     repo = init_repo(tmp_path / "repo", {"README.md": "x\n"})

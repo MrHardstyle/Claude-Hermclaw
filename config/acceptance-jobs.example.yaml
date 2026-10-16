@@ -1,0 +1,63 @@
+# Live job battery (root-cause analysis 2026-10-16, §5): real jobs against the real models, measured afterwards.
+#
+#   sudo -u hermclaw hermclaw acceptance-jobs /etc/hermclaw/acceptance-jobs.yaml [--only J1] [--out DIR]
+#
+# Each job starts from a fixture branch of the test repository (scripts/ops/acceptance-fixtures.sh creates them):
+#   acceptance/empty    README only
+#   acceptance/service  small Python service (standard library, unittest) with a known bug
+#   acceptance/node     package.json with "node --test", no dependencies
+# A release is accepted when the whole battery passes in two consecutive runs.
+repository: hermclaw-test
+defaults:
+  max_minutes: 45          # per successful job
+  max_replans: 1
+  max_first_plan_steps: 3
+  allow_dependencies: false
+  max_repeats: 2           # identical run/install/research calls on an unchanged workspace, per step
+  require_merge_request: true
+  timeout_minutes: 120     # the runner stops waiting (the job keeps running)
+jobs:
+  - id: J1
+    title: health endpoint in an empty repository
+    base_branch: acceptance/empty
+    prompt: "Erstelle einen funktionierenden Health-Endpunkt mit Test."
+
+  - id: J2
+    title: endpoint with validation and error cases
+    base_branch: acceptance/service
+    prompt: >-
+      Ergänze den Inventar-Server um POST /items. Der Endpunkt nimmt JSON mit "name" (nicht leer) und "quantity"
+      (ganze Zahl >= 0) an und legt den Artikel an; bei ungültigen Daten antwortet er mit Status 400 und einer
+      Fehlermeldung als JSON. Ergänze Tests für Erfolgs- und Fehlerfälle.
+
+  - id: J3
+    title: configuration from environment variables (multi-file refactoring)
+    base_branch: acceptance/service
+    expect: {max_first_plan_steps: 4}
+    prompt: >-
+      Host und Port des Inventar-Servers sind fest im Code. Lies sie stattdessen aus den Umgebungsvariablen
+      INVENTORY_HOST und INVENTORY_PORT (Standard 127.0.0.1 und 8080), zentral in einem eigenen Konfigurationsmodul,
+      das alle Stellen verwenden. Ein ungültiger Port soll mit einer verständlichen Fehlermeldung abbrechen. Mit Tests.
+
+  - id: J4
+    title: impossible dependency must block cleanly
+    base_branch: acceptance/service
+    expect: {status: [blocked, waiting_for_user, failed], max_minutes: 30, allow_dependencies: true, require_merge_request: false, max_replans: 2}
+    prompt: >-
+      Binde das Python-Paket "hermclaw-nonexistent-sdk-zz9" ein und rufe beim Start des Servers dessen Funktion
+      connect() auf. Verwende genau dieses Paket.
+
+  - id: J5
+    title: Node function with tests
+    base_branch: acceptance/node
+    prompt: >-
+      Schreibe eine Funktion slugify(text), die einen Text in einen URL-tauglichen Slug umwandelt (Kleinbuchstaben,
+      Umlaute ä/ö/ü/ß als ae/oe/ue/ss, alles andere außer a-z und 0-9 wird zu einzelnen Bindestrichen, keine
+      Bindestriche am Anfang oder Ende), und teste sie mit dem eingebauten Test-Runner von Node.
+
+  - id: J6
+    title: bug fix from a bug report only
+    base_branch: acceptance/service
+    prompt: >-
+      Fehlerbericht: Die Gesamtmenge des Inventars ist falsch. Bei leerem Lager wird 1 statt 0 gemeldet, und mit
+      Artikeln ist die Summe zu hoch. Finde die Ursache, behebe sie und sichere die Korrektur mit einem Test ab.
