@@ -239,6 +239,9 @@ class ToolEngine:
         # unchanged workspace would only block for the full timeout again (BUG-164)
         self._writes = 0
         self._timed_out: dict[tuple[str, str, int], int] = {}
+        # every finished command: (file-change count, turn, outcome). The coder gets a fresh context each turn and
+        # re-ran identical commands on unchanged files again and again (analysis 2026-10-16, live job 50784df5)
+        self._ran: dict[tuple[str, str, int], tuple[int, int, str]] = {}
         # manifest digest of the last successful install per (ecosystem, manifest): reinstalling it changes nothing
         self._installed: dict[tuple[str, str], str] = {}
         self._handlers: dict[ToolName, Handler] = {
@@ -973,6 +976,15 @@ class ToolEngine:
                 f"would block for {effective_timeout}s again. {TIMEOUT_HINT}",
                 data={"timeout_seconds": effective_timeout, "repeated": True},
             )
+        previous = self._ran.get(repeat_key) if not egress else None
+        if previous is not None and previous[0] == self._writes:
+            raise ToolError(
+                E.COMMAND_REPEATED,
+                f"command refused: it already ran in turn {previous[1]} and no file changed since ({previous[2]}); running it "
+                "again gives the same result. Change the code or the tests first, run a different command, or call "
+                "complete_step when the STEP GOAL and its acceptance are met.",
+                data={"previous_turn": previous[1], "repeated": True},
+            )
         req = ExecutionRequest(
             command=full,
             timeout_seconds=effective_timeout,
@@ -1011,6 +1023,9 @@ class ToolEngine:
         timed_out = bool(result and result.timed_out)
         if timed_out:
             self._timed_out[repeat_key] = self._writes
+        elif result is not None and error is None:
+            outcome = f"exit code {exit_code}"
+            self._ran[repeat_key] = (self._writes, ctx.turn, outcome)
         await self.recorder.command_run(
             ctx,
             command=command,

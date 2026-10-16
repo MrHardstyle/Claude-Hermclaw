@@ -78,7 +78,9 @@ one tool call per turn; the runtime executes it and gives you a fresh context fo
 Rules:
 - Work only towards the STEP GOAL. Write only inside the SCOPE; forbidden paths are never touched.
 - Git mutations (commit, push, checkout, reset, merge, rebase, stash, branch) are done by the runtime only. Never run them.
-- Base every edit on real file content: read a file (read_file/read_range) before changing it; prefer small exact edits.
+- Base every edit on real file content. RELEVANT CODE and RELEVANT TESTS show the current content of the scope files
+  and of the files you already read in this attempt: edit them directly, do not read them again. Use read_file/read_range
+  only for what is not shown there. Prefer small exact edits.
 - After a change run the targeted tests. Treat LATEST FAILURE as the exact, authoritative error output.
 - Commands run in a read-only sandbox without network: pip/npm/apt install in run_command is refused. Declare
   third-party dependencies in requirements.txt / package.json and call install_dependencies if it is in your tool

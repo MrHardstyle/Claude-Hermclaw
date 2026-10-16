@@ -312,8 +312,27 @@ async def test_hits_per_query_are_capped_by_score() -> None:
     repo.files.update({f"h{i:02d}.py": f"v = {i}\n" for i in range(30)})
     repo.context_hits = [RepoHit(f"h{i:02d}.py", 1, 1, i / 30, "") for i in range(30)]
     builder, _, _ = make_builder(repo=repo, max_hits_per_query=5)
-    built = await builder.build(make_input(step=make_step(scope=None)))
+    built = await builder.build(make_input(step=make_step(scope=None), history=[]))
     code = section(built.messages[1].content, "RELEVANT CODE")
     shown = sorted(line.split()[1] for line in code.splitlines() if line.startswith("### "))
     assert shown == [f"h{i}.py" for i in range(25, 30)]
     assert sum(1 for d in built.report.dropped if d.reason == "limit") == 25
+
+
+async def test_files_read_in_this_attempt_stay_in_the_context() -> None:
+    """Live job 50784df5 (analysis 2026-10-16): every turn gets a fresh context; a file the coder read outside its
+    scope targets vanished from the next turn, and it read the same files eight times. Files read in this attempt
+    are shown under RELEVANT CODE / RELEVANT TESTS like the targets."""
+    from hermclaw.context_builder.history import TurnRecord
+
+    repo = default_repo()
+    repo.files["helpers/format.py"] = "def fmt(x):\n    return str(x)\n"
+    builder, _, _ = make_builder(repo=repo)
+    history = [
+        TurnRecord(1, "read_file", '{"path": "helpers/format.py"}', True, "2 lines"),
+        TurnRecord(2, "read_file", '{"path": "missing.py"}', False, "not found", "NOT_FOUND"),
+    ]
+    built = await builder.build(make_input(history=history))
+    code = section(built.messages[1].content, "RELEVANT CODE")
+    assert "### helpers/format.py lines 1-2 [read]" in code and "return str(x)" in code
+    assert "missing.py" not in code  # failed reads are not part of the working set

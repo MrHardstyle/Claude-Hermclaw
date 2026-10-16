@@ -576,3 +576,19 @@ def test_missing_modules_from_python_and_node_output() -> None:
     )
     assert missing_modules(out) == ["yaml", "a", "express", "@scope/pkg"]
     assert missing_modules("all good") == []
+
+
+async def test_identical_command_on_unchanged_files_is_not_rerun(sessionmaker: SM, repo: Path) -> None:
+    """Live job 50784df5 (J2 of the job battery): with a fresh context every turn the coder re-ran the green test
+    suite four times without changing anything instead of adding tests or completing. An identical command on
+    unchanged files is refused with the earlier outcome and what to do next."""
+    rec = InstallRecorder("Ran 3 tests\nOK\n")
+    h = await make_harness(sessionmaker, repo, contract=scope(**SCOPE), executor=rec)
+    assert (await h.call("run_test", command="python -m unittest")).ok
+    again = await h.call("run_test", command="python -m unittest")
+    assert again.error_code == E.COMMAND_REPEATED and "already ran in turn" in again.output and "complete_step" in again.output
+    assert len(rec.requests) == 1
+    assert (await h.call("run_command", command="python -m unittest -v")).ok  # a different command runs
+    assert (await h.call("write_file", path="src/gen_new.py", content="X = 1\n")).ok
+    assert (await h.call("run_test", command="python -m unittest")).ok  # after a file change it runs again
+    assert len(rec.requests) == 3

@@ -2,6 +2,14 @@
 
 Format: [Keep a Changelog](https://keepachangelog.com/de/1.1.0/), Versionen nach PEP 440.
 
+## [0.1.0rc11] – Release Candidate (2026-10-16)
+
+Fix aus J2 des ersten Batterie-Laufs (BUG-171); enthält 0.1.0rc10 (nicht separat ausgerollt).
+
+### Behoben
+- **Coder-Gedächtnis (BUG-171):** Im Versuch gelesene Dateien bleiben im Kontext; identische Befehle auf unveränderten
+  Dateien werden nicht erneut ausgeführt (`COMMAND_REPEATED`); Vertrag: gezeigte Dateien nicht erneut lesen.
+
 ## [0.1.0rc10] – Release Candidate (2026-10-16)
 
 Fix aus dem ersten Lauf der Live-Auftragsbatterie (J1 auf 0.1.0rc9: Plan und Umsetzung korrekt, Verifier-Ablehnung

@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import asyncio
 import hashlib
+import json
 import math
 import re
 import shlex
@@ -65,6 +66,7 @@ from hermclaw.scope.guard import any_match
 
 log = get_logger(__name__)
 
+_ARG_PATH_RE = re.compile(r'"path":\s*"([^"]+)"')
 _PY_FRAME_RE = re.compile(r'File "(?P<path>[^"\n]+)", line (?P<line>\d+)')
 _PATH_LINE_RE = re.compile(r"(?P<path>/?(?:[\w.\-]+/)*[\w\-][\w.\-]*\.[A-Za-z][A-Za-z0-9]{0,7}):(?P<line>\d+)")
 _PYTEST_NODE_RE = re.compile(r"(?P<path>(?:[\w.\-]+/)*[\w\-][\w.\-]*\.[A-Za-z][A-Za-z0-9]{0,7})::[\w\[\]\-.]+")
@@ -206,7 +208,8 @@ class ContextBuilder:
             return lambda: self.repo.read(ws, path, start, end, max_chars=cfg.read_max_chars)
 
         head_targets = [p for p in targets if not is_test_path(p)] + [p for p in targets if is_test_path(p)]
-        file_heads = list(dict.fromkeys([*head_targets, *(p for p in acc_tests if p not in targets)]))
+        read_set = [p for p in self._read_paths(inp.history, ws) if p not in targets and p not in acc_tests]
+        file_heads = list(dict.fromkeys([*head_targets, *(p for p in acc_tests if p not in targets), *read_set]))
         jobs: list[tuple[str, Callable[[], Awaitable[Any]], Any]] = [
             ("repo.inventory_summary", lambda: self.repo.inventory_summary(ws), None),
             ("git.status", lambda: self.git.status(ws), []),
@@ -252,7 +255,7 @@ class ContextBuilder:
             if not isinstance(text, str) or not text.strip():
                 dropped.append(DroppedItem(_section_for(p).value, p, "read_failed"))
                 continue
-            origin = "target" if p in targets else "acceptance"
+            origin = "target" if p in targets else "acceptance" if p in acc_tests else "read"
             candidates.append(make_snippet(p, 1, text, 2.0 - i * 0.001, origin))
         target_set = set(targets)
         hit_cands, hit_drops = await self._hit_snippets(
@@ -461,6 +464,25 @@ class ContextBuilder:
                 continue
             out.append(p)
         return out, drops
+
+    def _read_paths(self, history: Sequence[TurnRecord], ws: WorkspaceHandle, limit: int = 6) -> list[str]:
+        """Files the coder read in this attempt, most recent first. Every turn gets a fresh context: without them
+        the coder re-read the same files turn after turn (live job 50784df5, analysis 2026-10-16)."""
+        out: list[str] = []
+        for r in sorted(history, key=lambda h: h.turn, reverse=True):
+            if r.tool not in ("read_file", "read_range") or not r.ok:
+                continue
+            try:
+                raw = json.loads(r.args_digest).get("path")
+            except (ValueError, AttributeError):
+                m = _ARG_PATH_RE.search(r.args_digest)
+                raw = m.group(1) if m else None
+            p = self._clean_path(raw, ws) if isinstance(raw, str) else None
+            if p and p not in out:
+                out.append(p)
+            if len(out) >= limit:
+                break
+        return out
 
     def _failure_refs(self, failure: str, correction: Sequence[CorrectionItem], ws: WorkspaceHandle) -> list[_FileRef]:
         texts = [failure, *(c.message for c in correction)]

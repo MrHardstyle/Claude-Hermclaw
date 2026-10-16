@@ -186,3 +186,14 @@ Gegenprobe: `hermclaw job-metrics` auf die Jobs rc6 und rc8 verfehlt erwartungsg
 - rc8: dazu ein neu angelegtes `requirements.txt`.
 
 Die Kennzahlen messen also genau die beobachteten Fehlerbilder.
+
+## 7. Befunde aus Batterie-Lauf 1 (0.1.0rc9)
+
+| Job | Befund | Ursache | Fix |
+|---|---|---|---|
+| J1 `04820ff9` | Plan (2 Steps, keine Recherche) und Code korrekt, Tests grün, `complete_step` im 1. Versuch; Verifier: kein Test-Kriterium | U7/A6: Plan-Defekt wie Code-Fehler behandelt | BUG-170 (rc10) |
+| J2 `50784df5` | Neunmal dieselben Dateien gelesen, dieselbe grüne Testsuite viermal wiederholt, keine neuen Tests | U6 im Kern: frischer Kontext je Zug, Ergebnisse nur als Digest; „read before changing“ | BUG-171 (rc11) |
+
+Die Planqualität ist mit rc9 deutlich besser: höchstens 2 Steps, keine Web-Recherche, Code und Test zusammen. Offen
+bleibt die Technologiewahl: J1 nahm erneut FastAPI („simplicity and speed“). Gemessen wird das über
+`no_new_dependencies`; bleibt das Kriterium rot, folgt eine deterministische Regel für neue Manifeste.
