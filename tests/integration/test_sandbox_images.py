@@ -120,6 +120,20 @@ async def test_inventory_failure_uses_default_and_result_is_cached(sessionmaker:
     assert repo.calls == 1
 
 
+async def test_empty_repository_gets_the_toolchain_once_it_has_code(sessionmaker: Any, tmp_path: Path) -> None:
+    """BUG-155 (live job eadf1b6f): an empty repository has no primary language, so the first selection is the
+    generic default image. That None was cached for the workspace, and the steps after the one that created the
+    first Python file still ran in the generic image without pytest. Only a real selection is cached."""
+    ws = await _workspace(sessionmaker, tmp_path)
+    repo = FakeRepo([])
+    sel = SandboxImageSelector(sessionmaker, policy(python=PYTHON_IMAGE), repo)
+    assert await sel.image_for(ws) is None
+    repo.languages = ["python"]  # S002 created app/main.py
+    assert await sel.image_for(ws) == "python"
+    assert await sel.image_for(ws) == "python"
+    assert repo.calls == 2
+
+
 async def test_workspace_without_repository_row(sessionmaker: Any, tmp_path: Path) -> None:
     ghost = WorkspaceHandle(
         id=uuid.uuid4(), job_id=uuid.uuid4(), path=tmp_path, branch="b", base_branch="main", base_sha="0" * 40, repository_key="x"

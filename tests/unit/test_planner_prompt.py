@@ -217,3 +217,13 @@ def test_build_messages_is_deterministic() -> None:
     assert a.stats == b.stats and a.stats["input_sha256"] == b.stats["input_sha256"]
     assert [m.role for m in a.messages] == ["system", "user"] and json.loads(a.messages[1].content) == {"k": [1, 2]}
     assert a.user_payload_chars == len(a.messages[1].content)
+
+
+def test_prompts_state_that_the_sandbox_cannot_install_packages() -> None:
+    """BUG-157 (live job eadf1b6f): planner and coder did not know that code steps run offline with a fixed
+    toolchain; the coder spent its turns on `pip install pytest` and requested a replan."""
+    from hermclaw.context_builder.sections import DEFAULT_SYSTEM_CONTRACT
+
+    system = planner_system_prompt({"implement": "coding"}, ["coding"], 20)
+    assert "packages cannot be installed" in system and "standard library" in system
+    assert "do not install packages" in DEFAULT_SYSTEM_CONTRACT and "block_step" in DEFAULT_SYSTEM_CONTRACT

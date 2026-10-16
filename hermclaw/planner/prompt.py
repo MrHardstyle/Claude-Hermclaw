@@ -427,6 +427,10 @@ def _base_rules(kind_capability: dict[str, str], capability_names: Sequence[str]
         "Review steps (kind review) and verify steps (kind verify) must depend on the steps they check.",
         "Network is off by default. Set network true (on a step or on command evidence) only for steps whose "
         "capability has network=true in capabilities.",
+        "Code steps run their commands in a network-less sandbox with a fixed toolchain (language runtime and test "
+        "tools such as pytest); packages cannot be installed there. Prefer the standard library and dependencies "
+        "the repository already declares; a new third-party dependency needs a project sandbox image provided by "
+        "the operator, so name it in assumptions or risks.",
         "risk is low|medium|high. Deployments, SSH/server administration and database changes are at least medium.",
         "Respect every entry of constraints. Never plan git commits, pushes, merges or branch operations; "
         "the runtime performs all git mutations.",

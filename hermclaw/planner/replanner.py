@@ -340,29 +340,32 @@ class Replanner(PlannerBase):
             contract = validate_schema(ReplanContract, data, limit=limit)
             errors: list[str] = []
             reruns: dict[str, str] = {}
+            unreasoned: set[str] = set()
             for step in contract.steps:
                 reason = (step.rerun_reason or "").strip()
                 if step.id in completed_keys:
                     if reason:
                         reruns[step.id] = reason
                     else:
+                        unreasoned.add(step.id)
                         errors.append(
                             f"step {step.id}: is already completed and is never re-run without a reason; remove it "
                             f"(new steps may depend on {step.id}) or set rerun_reason"
                         )
-                elif reason:
-                    errors.append(
-                        f"step {step.id}: rerun_reason is only allowed for completed steps "
-                        f"({', '.join(sorted(completed_keys)) or 'none'}); remove it"
-                    )
-            if errors:
-                raise PlanInvalid("replan", errors[:limit])
+                # a rerun_reason on a step that is not completed has no effect (it is never persisted): ignored
+                # instead of costing a repair turn (BUG-154)
             kept_keys = frozenset(completed_keys - reruns.keys())
             kept = [s for s in completed_steps if s.id in kept_keys]
-            merged = validate_schema(PlanContract, merge_plan(contract, kept), limit=limit)
+            # Report the merged-plan and semantic errors together with the replan-rule errors: one phase per repair
+            # turn used up the repair budget before the model ever saw the scope errors (BUG-153).
+            candidate = contract.model_copy(update={"steps": [s for s in contract.steps if s.id not in unreasoned]})
+            try:
+                merged = validate_schema(PlanContract, merge_plan(candidate, kept), limit=limit)
+            except PlanInvalid as invalid:
+                raise PlanInvalid("replan" if errors else invalid.phase, (errors + invalid.errors)[:limit]) from None
             sem = semantic_errors(merged, vctx, preserved=kept_keys, limit=limit)
-            if sem:
-                raise PlanInvalid("semantic", sem)
+            if errors or sem:
+                raise PlanInvalid("replan" if errors else "semantic", (errors + sem)[:limit])
             enriched = enrich_plan(merged, vctx, risk_policy, preserved=kept_keys, reserved_ids=set(snapshot.active_keys))
             repeat = self._repeat_errors(enriched.plan, kept_keys, snapshot, trigger)
             if repeat:

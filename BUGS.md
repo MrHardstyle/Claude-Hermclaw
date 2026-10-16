@@ -31,6 +31,7 @@ P0/P1-Blocker werden sofort behoben. Nicht-blockierende Bugs werden reproduziert
   `docs/operations/FINAL_BUILD_REPORT.md` zuletzt geändert wurde (der Release-Candidate-Stand).
 
 ### BLOCKER-003 – Deploy-Key des Orchestrators ohne Schreibrecht im Wegwerf-Projekt `local-ai/hermclaw-test`
+- Status: **aufgehoben** (2026-10-16): Schreibrecht vom Betreiber vergeben; GitLab-Suite PASS.
 - Zeit: 2026-10-16T00:30+02:00 · Phase: Live-Abnahme (Suite `gitops`) · Severity: extern (GitLab-Einstellung)
 - Reproduktion (als `hermclaw` auf .225, Schlüssel `/etc/hermclaw/ssh/id_ed25519`): Push eines Branches nach
   `git@192.168.178.226:local-ai/hermclaw-test.git` → `remote: This deploy key does not have write access to this project.`
@@ -44,6 +45,36 @@ P0/P1-Blocker werden sofort behoben. Nicht-blockierende Bugs werden reproduziert
 Noch keine.
 
 ## Behobene Bugs
+
+### BUG-153 – Replan-Validierung meldet Fehler stufenweise: Repair-Budget verbraucht, bevor Gemma die Scope-Fehler sieht
+- Phase: Live-Abnahme nach Deployment 0.1.0rc2 · Komponente: planner/replanner · Severity: P1 · blockierend: ja (behoben) · Status: **behoben** (`tests/integration/test_planner_replan.py::test_replan_reports_rule_and_scope_errors_in_one_repair_turn`)
+- Reproduktion: Job `eadf1b6f-3a82-475c-bbca-c92acd878d6f` (erneuter erster Testauftrag „/health-Endpunkt“ auf `hermclaw-test`, 0.1.0rc2, 2026-10-16 02:31). S002 (Coder) forderte einen Replan an.
+- Ablauf (`events` `planner.repair`): Versuch 1 → Schemafehler (`S002_NEW` ist keine gültige Step-ID); Versuch 2 → nur die Replan-Regel („rerun_reason is only allowed for completed steps“, 5×); Versuch 3 → erst jetzt die semantischen Fehler („step S002: implement step names no files to work on …“) → keine Reparatur mehr übrig → `PLANNER_INVALID_OUTPUT`, Job `failed`. Gemma hat jede gemeldete Fehlerklasse korrekt behoben.
+- Erwartet: Eine Repair-Runde nennt alle prüfbaren Fehler.
+- Ursache: `Replanner._validator` brach nach den Replan-Regeln ab, ohne den zusammengeführten Plan semantisch zu prüfen.
+- Fix: Replan-Regelfehler, Schemafehler des zusammengeführten Plans und semantische Fehler werden gemeinsam gemeldet (abgeschlossene Steps ohne `rerun_reason` werden dafür aus dem Kandidaten genommen). Nur ein Schemafehler der Modellantwort selbst bleibt eine eigene Runde (ohne gültiges Schema ist nichts prüfbar).
+
+### BUG-154 – `rerun_reason` an einem nicht abgeschlossenen Step kostet eine Repair-Runde
+- Phase: Live-Abnahme nach Deployment 0.1.0rc2 · Komponente: planner/replanner · Severity: P2 · blockierend: nein (Teil von BUG-153) · Status: **behoben** (gleicher Test)
+- Reproduktion: wie BUG-153, Versuch 2: Gemma setzte `rerun_reason` an S002–S006 (blockiert, nicht abgeschlossen).
+- Erwartet: Das Feld wirkt nur bei abgeschlossenen Steps; an anderen Steps ist es bedeutungslos und wird nie gespeichert (`merge_plan` verwirft es).
+- Fix: An nicht abgeschlossenen Steps wird `rerun_reason` ignoriert statt abgelehnt. Abgeschlossene Steps ohne Begründung bleiben ein Fehler.
+
+### BUG-155 – Sandbox-Image eines leeren Repositorys bleibt für den ganzen Job das generische Image
+- Phase: Live-Abnahme nach Deployment 0.1.0rc2 · Komponente: runtime/images · Severity: P2 · blockierend: nein · Status: **behoben** (`tests/integration/test_sandbox_images.py::test_empty_repository_gets_the_toolchain_once_it_has_code`)
+- Reproduktion: Job `eadf1b6f-3a82-475c-bbca-c92acd878d6f` (erneuter erster Testauftrag „/health-Endpunkt“ auf `hermclaw-test`, 0.1.0rc2, 2026-10-16 02:31). Das Repository enthält nur `README.md`; S002 legt `app/main.py` an und ruft `python3 -m pytest` auf → `No module named pytest` (`hermclaw-sandbox-generic:1` statt `hermclaw-sandbox-python:1`).
+- Ursache: `SandboxImageSelector.image_for` cachte auch das Ergebnis „keine Sprache erkannt“ (`None`) pro Workspace.
+- Fix: Nur eine tatsächliche Auswahl (Repository-Image oder Sprach-Alias) wird gecacht; ohne erkannte Sprache wird beim nächsten Executor neu gefragt.
+
+### BUG-156 – Replan-Trigger nennt einen nur durch Abhängigkeit blockierten Step als fehlgeschlagen
+- Phase: Live-Abnahme nach Deployment 0.1.0rc2 · Komponente: runtime/driver · Severity: P2 · blockierend: nein · Status: **behoben** (`tests/integration/test_runtime_driver.py::test_failed_step_keys_put_the_cause_before_its_dependents`)
+- Reproduktion: Job `eadf1b6f-3a82-475c-bbca-c92acd878d6f` (erneuter erster Testauftrag „/health-Endpunkt“ auf `hermclaw-test`, 0.1.0rc2, 2026-10-16 02:31). S002 blockiert mit `CODER_REQUESTED_REPLAN`, S003/S004 mit `DEPENDENCY_FAILED`; `replan.started` meldete `failed_step: S004`. Gemmas Zusammenfassung lautete entsprechend „the previous plan failed because S004 depended on S003 …“.
+- Fix: `driver.failed_step_keys` ordnet: fehlgeschlagene Steps, dann blockierte mit eigenem Fehler, zuletzt `DEPENDENCY_FAILED`.
+
+### BUG-157 – Planner und Coder wissen nicht, dass die Sandbox offline ist und keine Pakete installiert
+- Phase: Live-Abnahme nach Deployment 0.1.0rc2 · Komponente: planner/prompt, context_builder · Severity: P2 · blockierend: nein · Status: **behoben** (`tests/unit/test_planner_prompt.py::test_prompts_state_that_the_sandbox_cannot_install_packages`)
+- Reproduktion: Job `eadf1b6f-3a82-475c-bbca-c92acd878d6f` (erneuter erster Testauftrag „/health-Endpunkt“ auf `hermclaw-test`, 0.1.0rc2, 2026-10-16 02:31). Der Coder plante FastAPI, rief `pip install pytest` auf (`pip: not found`, Sandbox ohne Netz und read-only) und forderte einen Replan an.
+- Fix: Planner-Regel (Code-Steps laufen offline mit fester Toolchain, Standardbibliothek und deklarierte Abhängigkeiten bevorzugen, neue Drittabhängigkeit braucht ein Projekt-Image des Betreibers → in assumptions/risks) und Coder-Systemvertrag (keine Paketinstallation; fehlt eine Abhängigkeit: Standardbibliothek oder `block_step` mit Namen). Keine Sonderfälle, Modellrollen unverändert. Neue Drittabhängigkeiten in einem neuen Projekt bleiben eine Betreiberaufgabe (Projekt-Image, `infra/sandbox-images/README.md`, R-022).
 
 ### BUG-152 – Abgelehnter Push meldet nur „see stderr“ statt der Begründung des Servers
 - Phase: Live-Abnahme (Kapitel 12, Suite `gitops`, 2026-10-16) · Komponente: gitops · Severity: P3 · blockierend: nein · Status: **behoben** (`tests/unit/test_gitops_errors_hint.py`, `tests/integration/test_gitops_push.py::test_server_side_refusal_names_the_servers_reason`)

@@ -270,6 +270,34 @@ async def test_failure_package_contents(sessionmaker: object) -> None:
     assert payload["repository_inventory"]["test_command"] == "pytest -q"
 
 
+async def test_replan_reports_rule_and_scope_errors_in_one_repair_turn(sessionmaker: object) -> None:
+    """BUG-153/154 (live job eadf1b6f): the replan validator reported one phase per repair turn – schema, then the
+    rerun_reason rule, then the scope errors – so the model only saw the scope errors when no repair was left.
+    A rerun_reason on a step that is not completed is ignored (it has no effect), and the remaining replan-rule
+    errors come together with the semantic errors of the merged plan."""
+    sm = _sm(sessionmaker)
+    job_id, ids = await _planned_fastapi(sm)
+    unscoped = step("S005", "implement", "coding", "Create the pagination helper module.", depends_on=["S001"])
+    again = step("S001", "implement", "coding", "Re-apply pagination on top of the changed router.", repo_hints=["app/routers/users.py"])
+    first = _replan_answer()
+    first["steps"][0]["rerun_reason"] = "the previous S002 was blocked, so it runs again"  # not completed: ignored
+    first["steps"].insert(0, dict(again))  # completed without a reason: replan-rule error
+    first["steps"].append(unscoped)  # no repo_hints/allowed_new_paths: semantic error
+    second = _replan_answer()
+    second["steps"][0]["rerun_reason"] = "still ignored"
+    second["steps"].append({**unscoped, "allowed_new_paths": ["app/pagination.py"]})
+    chat = ScriptedChat([first, second])
+    result = await Replanner(chat, sm, get_config()).replan(job_id, _trigger(ids, "repository_changed"), FASTAPI.inputs)
+    assert result.repair_attempts == 1
+    errors = result.validation_errors[0]["errors"]
+    assert any("S001: is already completed and is never re-run without a reason" in e for e in errors), errors
+    assert any("S005: implement step names no files to work on" in e for e in errors), errors
+    assert not any("rerun_reason is only allowed" in e for e in errors), errors
+    assert result.rerun_reasons == {}
+    s002 = next(r for r in await _rows(sm, job_id) if r.step_key == "S002" and not r.superseded)
+    assert s002.kind == "documentation"
+
+
 async def test_completed_step_needs_rerun_reason(sessionmaker: object) -> None:
     sm = _sm(sessionmaker)
     job_id, ids = await _planned_fastapi(sm)

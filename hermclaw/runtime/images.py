@@ -81,7 +81,10 @@ class SandboxImageSelector:
             image = None
         if image is None:
             image = await self._language_alias(handle)
-        self._cache[handle.id] = image
+        # A workspace without a recognised language (a new, empty repository) is asked again next time: the first
+        # step may create the project's first Python file, and later steps then need the toolchain image (BUG-155).
+        if image is not None:
+            self._cache[handle.id] = image
         return image
 
 

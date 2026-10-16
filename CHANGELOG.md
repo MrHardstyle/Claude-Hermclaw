@@ -2,6 +2,19 @@
 
 Format: [Keep a Changelog](https://keepachangelog.com/de/1.1.0/), Versionen nach PEP 440.
 
+## [0.1.0rc3] – Release Candidate (2026-10-16)
+
+Fixes aus dem erneuten ersten Testauftrag nach dem Deployment von 0.1.0rc2 (BUG-153–157).
+
+### Behoben
+- **Replanner (BUG-153, BUG-154):** Eine Repair-Runde meldet Replan-Regel-, Schema- und Scope-Fehler gemeinsam
+  (vorher eine Fehlerklasse pro Runde, Repair-Budget erschöpft); `rerun_reason` an nicht abgeschlossenen Steps wird
+  ignoriert statt abgelehnt.
+- **Sandbox-Image (BUG-155):** Ein leeres Repository bekommt das Toolchain-Image, sobald es Code enthält.
+- **Replan-Trigger (BUG-156):** Der fehlgeschlagene Step ist die Ursache, nicht ein nur abhängig blockierter Step.
+- **Prompts (BUG-157):** Planner und Coder wissen, dass Code-Steps offline mit fester Toolchain laufen und keine
+  Pakete installieren können.
+
 ## [0.1.0rc2] – Release Candidate (2026-10-16)
 
 Fixes aus der Live-Abnahme auf den Ziel-Hosts (INSTALLATION.md Kapitel 12, BUG-143–152).

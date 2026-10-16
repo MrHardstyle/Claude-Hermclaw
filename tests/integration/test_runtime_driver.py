@@ -19,7 +19,7 @@ from hermclaw.core.interfaces import RepoHit, WorkspaceHandle
 from hermclaw.models.protocols import CallContext, ChatMessage, ChatResult, StructuredResult
 from hermclaw.persistence.models import Artifact, Event, Job, Step, VerificationRun
 from hermclaw.planner import Planner, Replanner
-from hermclaw.runtime.driver import DriverSettings, RuntimeJobDriver, TriageResult, replan_reason_code
+from hermclaw.runtime.driver import DriverSettings, RuntimeJobDriver, TriageResult, failed_step_keys, replan_reason_code
 from hermclaw.scheduler import Scheduler, SchedulerSettings, StepOutcome, StepRunContext
 from tests.integration.test_gitops_support import SEED_FILES, World, git, make_world, write
 from tests.unit.test_planner_support import ScriptedChat, plan, step
@@ -353,6 +353,23 @@ async def test_prepare_is_reentrant_after_crash(world: World, tmp_path: Path) ->
     again = await driver.prepare(jid, CancelToken())  # no scripted answer left: would raise if it planned again
     assert again.ok and again.next_status == "running"
     assert len(await world.engine.list_workspaces(jid)) == 1
+
+
+def test_failed_step_keys_put_the_cause_before_its_dependents() -> None:
+    """BUG-156 (live job eadf1b6f): S002 blocked with CODER_REQUESTED_REPLAN, S003/S004 blocked with
+    DEPENDENCY_FAILED; the replan trigger named S004 as the failed step."""
+    ev = {
+        "failed_steps": [
+            {"step_key": "S004", "status": "blocked", "error_code": "DEPENDENCY_FAILED"},
+            {"step_key": "S003", "status": "blocked", "error_code": "DEPENDENCY_FAILED"},
+            {"step_key": "S002", "status": "blocked", "error_code": "CODER_REQUESTED_REPLAN"},
+            {"status": "blocked", "error_code": "X"},
+        ]
+    }
+    assert failed_step_keys(ev) == ["S002", "S004", "S003"]
+    ev["failed_steps"].append({"step_key": "S009", "status": "failed", "error_code": "VERIFIER_FAILED"})
+    assert failed_step_keys(ev)[0] == "S009"
+    assert failed_step_keys({}) == []
 
 
 async def test_replan_reason_mapping() -> None:

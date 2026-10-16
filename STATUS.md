@@ -1,18 +1,18 @@
 # STATUS
 
 ## Aktueller Zustand (2026-10-16)
-- Projekt: Hermclaw Next · Branch: `claude/hermclaw-next-build` · Version `0.1.0rc1` (auf .222–.225 deployt)
-- **Live-Abnahme nach Kapitel 12 durchgeführt** (2026-10-16): 389 Schritte erledigt, 35 mit offenem Live-Teil (`[~]`), 0 offen.
-- Erster Testauftrag (Job `4af00159…`, „/health-Endpunkt“ auf `hermclaw-test`) war gescheitert: BUG-143 (Plan mit Implement-Steps
-  ohne Scope-Quelle angenommen → `SCOPE_UNAVAILABLE` → Replan `PLANNER_INVALID_OUTPUT`). Behoben im Code mit Regressionstests;
-  **wirksam erst nach dem nächsten Release-Deployment** (der Scheduler läuft noch mit 0.1.0rc1).
-- Blocker: BLOCKER-001 erledigt (Hosts erreichbar, Abnahme lief auf .225/.222); BLOCKER-002 (Tag-Push) unverändert;
-  **BLOCKER-003**: Deploy-Key ohne Schreibrecht in `local-ai/hermclaw-test` (GitLab-Einstellung).
-- Release-Status: **RC – live abgenommen bis auf** GitLab-Push (BLOCKER-003), Planner-Fallback (BUG-150, Deployment nötig),
+- Projekt: Hermclaw Next · Branch: `claude/hermclaw-next-build` · Version `0.1.0rc3` (gebaut); **deployt: 0.1.0rc2** auf .222–.225
+- **Live-Abnahme nach Kapitel 12 durchgeführt** (2026-10-16): 391 Schritte erledigt, 33 mit offenem Live-Teil (`[~]`), 0 offen.
+- 0.1.0rc2 deployt (vom Betreiber, alle Hosts inkl. .224): doctor 19 ok, models 6/6 (Fallback, BUG-150 wirksam), workers 3/3.
+- Erster Testauftrag erneut eingereicht (Job `eadf1b6f…`): Die Erstplanung ist jetzt gültig (BUG-143 wirkt, Steps mit Scope),
+  der Job scheiterte aber im Replan → BUG-153 bis BUG-157 (Replan-Fehler stufenweise gemeldet, falscher failed_step,
+  generisches Sandbox-Image im leeren Repository, Coder versuchte `pip install`). Behoben in **0.1.0rc3**, Deployment ausstehend.
+- Blocker: BLOCKER-001 und BLOCKER-003 aufgehoben (GitLab-Suite PASS); BLOCKER-002 (Tag-Push) unverändert.
+- Release-Status: **RC – live abgenommen bis auf** End-to-End-Testauftrag (nach Deployment rc3 wiederholen),
   Wake-on-LAN (nicht eingerichtet), Backup nach Terra (nicht eingerichtet), Soak-Test, Cutover.
 
 ## Fortschritt BUILD_PLAN (automatisch: `python scripts/dev/plan_progress.py --markdown`)
-| Phase | erledigt | erledigt, live offen | offen |
+| Phase | erledigt | erledigt, live offen (BLOCKER-001) | offen |
 |---|---|---|---|
 | P00 – Initiale Research- und Inventurphase | 10 | 10 | 0 |
 | P01 – Clean System Bootstrap | 14 | 1 | 0 |
@@ -20,9 +20,9 @@
 | P03 – Persistence | 9 | 0 | 0 |
 | P04 – Event Store | 8 | 0 | 0 |
 | P05 – State Machines | 6 | 0 | 0 |
-| P06 – Git Engine | 11 | 1 | 0 |
+| P06 – Git Engine | 12 | 0 | 0 |
 | P07 – Worker Protocol | 9 | 0 | 0 |
-| P08 – Model Gateway | 9 | 2 | 0 |
+| P08 – Model Gateway | 10 | 1 | 0 |
 | P09 – Resource Manager | 9 | 0 | 0 |
 | P10 – Wake-on-LAN | 2 | 7 | 0 |
 | P11 – Repository Intelligence | 12 | 0 | 0 |
@@ -57,16 +57,16 @@
 | P40 – SOAK TEST | 6 | 3 | 0 |
 | P41 – RELEASE CANDIDATE | 8 | 1 | 0 |
 | P42 – CUTOVER PLAN | 2 | 4 | 0 |
-| **Summe** | **389** | **35** | **0** |
+| **Summe** | **391** | **33** | **0** |
 
 ## Deploymentstatus pro Host
 | Host | Rolle | Status (2026-10-16) |
 |---|---|---|
-| 192.168.178.225 | Orchestrator | deployt 0.1.0rc1; API/Scheduler/LiteLLM/SearXNG aktiv; doctor 19 ok / 0 fail; Live-Suiten s. u. |
-| 192.168.178.222 | Coding / Execution Worker | deployt; Sandbox-Suite 25/25; `podman-compose` 1.3.0 nachinstalliert (BUG-149, per Ansible-Rolle) |
-| 192.168.178.224 | Model / Media Worker | deployt; Ollama 0.40.4, 6 Rollenmodelle; gemma4:12b@32K braucht `gpu_layers: 30` (BUG-150) |
+| 192.168.178.225 | Orchestrator | deployt 0.1.0rc2; API/Scheduler/LiteLLM/SearXNG aktiv; doctor 19 ok / 0 fail; Live-Suiten s. u. |
+| 192.168.178.222 | Coding / Execution Worker | deployt 0.1.0rc2; Sandbox-Suite 25/25; `podman-compose` 1.3.0 nachinstalliert (BUG-149, per Ansible-Rolle) |
+| 192.168.178.224 | Model / Media Worker | deployt 0.1.0rc2; Ollama 0.40.4, 6 Rollenmodelle; gemma4:12b@32K braucht `gpu_layers: 30` (BUG-150, wirksam) |
 | 192.168.178.223 | Kontrollraum 8080/8443 neben dem Portal (Apache :80, D-013) | deployt; 8080→8443, API-Proxy ok; Portal unverändert |
-| 192.168.178.226 | GitLab | lesen ok; Push verweigert (BLOCKER-003) |
+| 192.168.178.226 | GitLab | Push + Merge Request ok (gitops-Suite PASS) |
 | 192.168.178.60 | Terra / Unraid Backup | noch nicht eingerichtet (Backup-Suite nicht ausgeführt) |
 
 Leerlauf-Suspend von exec-222/model-224: aus (`idle_sleep_command: null`, Wake-on-LAN `enabled: false`) – war schon vor der
@@ -77,13 +77,13 @@ Abnahme so deployt. Einschalten erst mit funktionierendem WoL (R-042).
 |---|---|---|
 | doctor | .225 / .222 | PASS (19 ok) / PASS |
 | workers | .225 | PASS 3/3 |
-| models | .225 | 5/6 – `test_live_planner_fallback_alias_serves` FAIL (BUG-150; Fix live über temporären Proxy bestätigt, Deployment nötig) |
+| models | .225 | 6/6 nach Deployment 0.1.0rc2 (vorher 5/6, BUG-150) |
 | repo_intelligence | .225 | PASS 1/1 |
 | research | .225 | PASS 2/2 (nach BUG-148) |
 | sshtools | .225 | PASS 4/4 |
 | infratools | .225 | PASS 3 + 1 Skip (`nginx -t` ohne Sudo auf .223, gewollt R-038) (nach BUG-149) |
 | wol (ohne `--full-wol`) | .225 | PASS `test_live_probes`; Magic Packet Skip (WoL deaktiviert), DB-Pipeline nicht ausgeführt |
-| gitops (`local-ai/hermclaw-test`) | .225 | FAIL – BLOCKER-003 (Deploy-Key ohne Schreibrecht) |
+| gitops (`local-ai/hermclaw-test`) | .225 | PASS 1/1 nach Vergabe des Schreibrechts (vorher BLOCKER-003); offener Test-MR in `hermclaw-test` kann geschlossen werden |
 | sandbox | .222 | PASS 25/25 (nach BUG-146/147) |
 | backup, `--full-wol` | – | nicht ausgeführt (nicht eingerichtet, Auftrag) |
 
@@ -96,9 +96,9 @@ Lint, mypy, ShellCheck, ansible-lint (production) sauber.
 - Embeddings: `embeddinggemma:300m` (768 dim; EmbeddingGemma 2 erst, wenn Ollama es unter Linux/CUDA ausführt, D-010)
 
 ## Bugs
-- 152 gefunden, **152 behoben** (P0 2, P1 27, P2 66, P3 54, P4 3) – `BUGS.md`. Live-Abnahme: BUG-143 bis BUG-152.
-  BUG-143 und BUG-150 wirken produktiv erst nach dem nächsten Release-Deployment; BUG-149 ist auf .222 angewendet.
-- Externe Blocker: BLOCKER-002 (Tag-Push), BLOCKER-003 (GitLab Deploy-Key)
+- 157 gefunden, **157 behoben** (P0 2, P1 27, P2 66, P3 54, P4 3) – `BUGS.md`. Live-Abnahme: BUG-143 bis BUG-157.
+  BUG-143–152 sind mit 0.1.0rc2 produktiv; BUG-153–157 wirken nach dem Deployment von 0.1.0rc3.
+- Externe Blocker: BLOCKER-002 (Tag-Push)
 
 ## Letzte Testresultate (2026-10-15, Build-Host)
 - Finale Testmatrix `docs/testing/test-matrix-results.md`: **208 Dateien, 3232 bestanden, 0 fehlgeschlagen**, 24 Live-Tests
@@ -122,7 +122,8 @@ Tests 2026-10-15, einzeln ausgeführt: `test_bootstrap_infra` 63, `test_bootstra
 bestanden; ansible-lint (production) sauber. `test_deploy_converge` ist angepasst; ihn führt der Integrator aus.
 
 ## Nächster Schritt
-1. Neues Release mit den Fixes bauen und ausrollen (Kapitel 8), dann den ersten Testauftrag erneut einreichen.
-2. In GitLab den Deploy-Key für `local-ai/hermclaw-test` mit Schreibrecht versehen, GitLab-Suite wiederholen (BLOCKER-003).
-3. Wake-on-LAN einrichten (MACs, BIOS, Kapitel 13.1), danach `--suite wol --full-wol` und erst dann den Leerlauf-Suspend einschalten.
-4. Backup nach Terra einrichten (Kapitel 11), Backup-Suite; danach Soak-Test und Cutover (`docs/runbooks/cutover.md`).
+1. 0.1.0rc3 ausrollen (`hermclaw_version: "0.1.0rc3"` im Inventar, `ansible-playbook … deploy.yml -K`), dann den ersten
+   Testauftrag erneut einreichen.
+2. Wake-on-LAN einrichten (MACs, BIOS, Kapitel 13.1), danach `--suite wol --full-wol` und erst dann den Leerlauf-Suspend einschalten.
+3. Backup nach Terra einrichten (Kapitel 11), Backup-Suite; danach Soak-Test und Cutover (`docs/runbooks/cutover.md`).
+4. Neue Drittabhängigkeiten eines Projekts (z. B. FastAPI) brauchen ein Projekt-Sandbox-Image (`infra/sandbox-images/README.md`).

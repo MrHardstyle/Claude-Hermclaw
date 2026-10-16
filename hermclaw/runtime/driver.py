@@ -98,6 +98,20 @@ def _test_hints(inv: dict[str, Any]) -> tuple[str | None, str | None, list[str]]
     return (cmd if isinstance(cmd, str) else None), framework, files
 
 
+def failed_step_keys(evidence: dict[str, Any]) -> list[str]:
+    """Step keys of the replan evidence, the step that actually failed first: failed steps, then blocked steps with
+    their own error, and only then the steps blocked because a dependency failed (BUG-156: the replanner was told
+    that S004 – blocked by DEPENDENCY_FAILED – had failed, not S002, whose coder had requested the replan)."""
+    entries = [f for f in evidence.get("failed_steps") or [] if f.get("step_key")]
+
+    def rank(f: dict[str, Any]) -> int:
+        if f.get("status") == "failed":
+            return 0
+        return 2 if str(f.get("error_code") or "").upper() == "DEPENDENCY_FAILED" else 1
+
+    return [str(f["step_key"]) for f in sorted(entries, key=rank)]
+
+
 def replan_reason_code(reason: str, evidence: dict[str, Any]) -> str:
     """Map scheduler evidence to a planner ``ReplanReason`` deterministically (generic, no task rules)."""
     if reason and reason != "blocked_or_failed_steps":
@@ -360,9 +374,7 @@ class RuntimeJobDriver:
 
     async def replan(self, job_id: uuid.UUID, reason: str, evidence: dict[str, Any], token: CancelToken) -> JobPhaseResult:
         code = replan_reason_code(reason, evidence)
-        failed_keys = [f.get("step_key") for f in evidence.get("failed_steps") or [] if f.get("status") == "failed"] or [
-            f.get("step_key") for f in evidence.get("failed_steps") or []
-        ]
+        failed_keys = failed_step_keys(evidence)
         failed_step_id = None
         if failed_keys:
             async with self.sm() as s:
