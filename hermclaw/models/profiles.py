@@ -122,14 +122,13 @@ def check_architecture(models: ModelsConfig) -> list[ProfileIssue]:
             continue
         for p in enabled:
             if not _model_matches(p.model, req.model_prefixes):
-                issues.append(
-                    ProfileIssue(
-                        "error",
-                        req.role,
-                        p.alias,
-                        f"model '{p.model}' violates the fixed architecture (expected {' / '.join(req.model_prefixes)}*)",
-                    )
-                )
+                expected = " / ".join(req.model_prefixes)
+                if p.deviation.strip():
+                    message = f"model '{p.model}' deviates from the architecture (expected {expected}*): {p.deviation.strip()}"
+                    issues.append(ProfileIssue("warning", req.role, p.alias, message))
+                else:
+                    message = f"model '{p.model}' violates the fixed architecture (expected {expected}*)"
+                    issues.append(ProfileIssue("error", req.role, p.alias, message))
             if p.kind != req.kind:
                 issues.append(ProfileIssue("error", req.role, p.alias, f"kind must be '{req.kind}', got '{p.kind}'"))
             if req.min_context is not None and p.context_tokens < req.min_context:

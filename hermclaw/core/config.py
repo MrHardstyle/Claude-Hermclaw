@@ -122,6 +122,9 @@ class ModelProfileConfig(_Strict):
     # error instead of offloading to the CPU).
     gpu_layers: int | None = Field(default=None, ge=0, le=1000)
     enabled: bool = True
+    # A documented decision (DECISIONS.md) to run this role on another model than the architecture names: the check
+    # reports the deviation as a warning instead of an error. Empty = the architecture's model is required.
+    deviation: str = Field(default="", max_length=500)
 
 
 class LiteLLMConfig(_Strict):

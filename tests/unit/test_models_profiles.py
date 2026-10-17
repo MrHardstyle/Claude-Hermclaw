@@ -134,6 +134,17 @@ def test_architecture_missing_role_and_warnings() -> None:
     assert assert_architecture(warn)  # warnings only -> returned, not raised
 
 
+def test_a_documented_deviation_turns_the_model_check_into_a_warning() -> None:
+    """The user allowed other models per role (2026-10-17): a profile naming its decision runs on another model,
+    reported as a warning; without a reason the fixed architecture still refuses it."""
+    cfg = replace_profile(models_config(), "coder-main", model="qwen3.6:35b", deviation="D-047: battery A/B")
+    issues = [i for i in check_architecture(cfg) if i.alias == "coder-main"]
+    assert [i.severity for i in issues] == ["warning"] and "D-047: battery A/B" in issues[0].message
+    assert assert_architecture(cfg)
+    blank = replace_profile(models_config(), "coder-main", model="qwen3.6:35b", deviation="  ")
+    assert any(i.severity == "error" for i in check_architecture(blank) if i.alias == "coder-main")
+
+
 def test_registry_lookups() -> None:
     cfg = replace_profile(models_config(), "heavy-review", enabled=False)
     reg = ProfileRegistry(cfg)
