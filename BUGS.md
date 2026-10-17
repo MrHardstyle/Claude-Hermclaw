@@ -47,7 +47,7 @@ Noch keine.
 ## Behobene Bugs
 
 ### BUG-218 – Neue Programme, Optionen und Umgebungsvariablen bleiben undokumentiert
-- Phase: Qualitätsprüfung der gelieferten Dateien, Batterie auf 0.1.0rc23 (X1, X3) · Komponente: planner · Severity: P3 · blockierend: nein (behoben) · Status: **behoben** (`tests/unit/test_planner_prompt.py::test_planner_system_prompt_rules`, Prüfung der Regel im Prompt)
+- Phase: Qualitätsprüfung der gelieferten Dateien, Batterie auf 0.1.0rc23 (X1, X3) · Komponente: planner · Severity: P3 · blockierend: nein (behoben) · Status: **behoben** (`tests/unit/test_planner_prompt.py::test_research_is_for_external_facts_not_the_repository_itself`, prüft die Regel im Prompt)
 - Reproduktion: Job `47d60d3e-…` (X1) liefert ein neues CLI mit `--format`, Job `1dbe5ea5-…` (X3) führt `INVENTORY_DB` ein. Beide Repositorys haben eine README, keine wurde ergänzt. Das Ergebnis ist ohne Lesen des Codes nicht bedienbar.
 - Ursache: Der Planner plante nur, was der Auftrag wörtlich nennt. Dokumentation gehörte nicht zum Begriff „fertig“.
 - Fix: Planner-Regel „Deliver complete work“. Führt der Auftrag ein Programm, einen Befehl, Optionen, Konfiguration oder Umgebungsvariablen ein und hat das Repository eine README, dokumentiert der umsetzende Schritt deren Nutzung dort (README in den repo_hints). Das Review meldet fehlende Doku zusätzlich als minor (BUG-216).
