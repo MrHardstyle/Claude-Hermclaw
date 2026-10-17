@@ -1,0 +1,55 @@
+# Long live battery: multi-part jobs that take hours and touch many files – the kind that must not fail late.
+# Run after the regression battery (acceptance-jobs.example.yaml) and the extended battery pass:
+#
+#   sudo -u hermclaw hermclaw acceptance-jobs /etc/hermclaw/acceptance-jobs-long.yaml [--only L1] [--out DIR]
+#
+# Same fixture branches as the other batteries (scripts/ops/acceptance-fixtures.sh). The prompts describe a product,
+# not a file layout or a step list: the planner has to decompose it. No job needs a third-party package.
+repository: hermclaw-test
+defaults:
+  max_minutes: 240
+  max_replans: 4
+  max_first_plan_steps: 12
+  allow_dependencies: false
+  max_repeats: 3
+  require_merge_request: true
+  timeout_minutes: 360
+jobs:
+  - id: L1
+    title: library management application
+    base_branch: acceptance/empty
+    prompt: >-
+      Entwickle in Python eine kleine Bibliotheksverwaltung. Bücher (ISBN, Titel, Autor, Jahr), Mitglieder (Name,
+      E-Mail) und Ausleihen (Buch, Mitglied, Ausleihdatum, Rückgabedatum, Frist 28 Tage) werden in einer
+      SQLite-Datenbank (Modul sqlite3) gespeichert; das Schema wird beim ersten Start angelegt. Eine Kommandozeile
+      bietet: Buch und Mitglied anlegen, ausleihen, zurückgeben, Suche nach Titel oder Autor, Liste der überfälligen
+      Ausleihen und einen Export aller aktuellen Ausleihen als CSV. Ein bereits ausgeliehenes Buch kann nicht erneut
+      ausgeliehen werden; ungültige ISBNs (ISBN-13 mit Prüfziffer) werden abgelehnt. Die Fachlogik ist von der
+      Kommandozeile getrennt. Teste die Fachlogik und die Kommandozeile mit unittest (auch Fehlerfälle) und
+      beschreibe Installation und Bedienung in der README. Nur Standardbibliothek.
+
+  - id: L2
+    title: data pipeline with report
+    base_branch: acceptance/empty
+    prompt: >-
+      Baue in Python eine Datenpipeline für Wetterstationsdaten. Eingaben: ein Ordner mit CSV-Dateien (station,
+      timestamp ISO 8601, temperature_c, humidity_pct) und eine JSON-Datei mit Stammdaten der Stationen (id, name,
+      latitude, longitude). Die Pipeline liest alle Dateien, verwirft ungültige Zeilen (fehlende Werte, Temperatur
+      außerhalb -60 bis 60 °C, Luftfeuchte außerhalb 0–100) mit Begründung in einem Fehlerprotokoll, lädt die
+      gültigen Messwerte in eine SQLite-Datenbank und berechnet per SQL Tagesmittel, Minimum und Maximum je Station.
+      Ergebnis ist ein eigenständiger HTML-Bericht mit einer Tabelle je Station und einem Temperaturverlauf als
+      inline-SVG-Liniendiagramm, ohne externe Bibliotheken oder Skripte. Lege Beispieldaten für drei Stationen bei
+      (mit einigen ungültigen Zeilen), teste Validierung, Aggregation und Berichtserzeugung mit unittest und
+      dokumentiere den Aufruf in der README. Nur Standardbibliothek.
+
+  - id: L3
+    title: static site generator in Node
+    base_branch: acceptance/node
+    prompt: >-
+      Schreibe einen kleinen Generator für statische Webseiten in Node ohne Abhängigkeiten. Er liest Markdown-Dateien
+      aus content/ mit einem Kopfbereich (title, date, tags zwischen zwei Zeilen ---) und erzeugt daraus HTML-Seiten in
+      public/. Unterstützt werden Überschriften, Absätze, Listen, Links, Hervorhebungen und Codeblöcke; HTML im Text
+      wird maskiert. Alle Seiten nutzen eine gemeinsame Vorlage mit Navigation. Zusätzlich entstehen eine
+      Startseite mit den Beiträgen nach Datum absteigend und je Tag eine Übersichtsseite. Ein Aufruf mit --watch ist
+      nicht nötig. Lege drei Beispielbeiträge bei, teste Markdown-Umwandlung, Kopfbereich und Seitenerzeugung mit dem
+      eingebauten Test-Runner von Node und beschreibe die Nutzung in der README.
