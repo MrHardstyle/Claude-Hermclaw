@@ -8,11 +8,12 @@ from pathlib import Path
 from typing import Any
 
 import pytest
+from sqlalchemy import update
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from hermclaw.acceptance.job_metrics import Expectation, collect, evaluate
 from hermclaw.acceptance.runner import load_spec, report, run_battery
-from hermclaw.persistence.models import GitOperation, Job, Plan, PlanVersion, ResearchRun, Step, ToolCallRow, VerificationRun
+from hermclaw.persistence.models import Event, GitOperation, Job, Plan, PlanVersion, ResearchRun, Step, ToolCallRow, VerificationRun
 
 pytestmark = pytest.mark.integration
 SM = async_sessionmaker[AsyncSession]
@@ -164,3 +165,25 @@ def test_shipped_batteries_load(name: str) -> None:
     ids = [s.id for s in specs]
     assert ids and len(ids) == len(set(ids))
     assert all(s.base_branch.startswith("acceptance/") for s in specs)
+
+
+async def test_a_job_waiting_for_the_user_gets_a_duration(sessionmaker: SM) -> None:
+    """rc17 battery J4 asked the user after 3.1 min but was counted FAIL with 'None min': waiting_for_user has no
+    finished_at; the run ends with its last job transition (BUG-190)."""
+    from hermclaw.events.store import append_event
+
+    async with sessionmaker() as s:
+        start = datetime(2026, 10, 17, 15, 0, tzinfo=UTC)
+        job = Job(title="asks", prompt="p", status="waiting_for_user", error_code="USER_INPUT_REQUIRED")
+        s.add(job)
+        await s.flush()
+        job.created_at = start
+        await append_event(s, "job.transition", source_type="runtime", job_id=job.id, payload={"to": "waiting_for_user"})
+        await s.flush()
+        await s.execute(update(Event).where(Event.job_id == job.id).values(ts=start + timedelta(minutes=3)))
+        await s.commit()
+        job_id = job.id
+    m = await collect(sessionmaker, job_id)
+    assert m.duration_minutes == 3.0
+    exp = Expectation(status=("blocked", "waiting_for_user", "failed"), max_minutes=30, require_merge_request=False)
+    assert {c.name: c.passed for c in evaluate(m, exp)}["duration"]

@@ -22,12 +22,13 @@ from collections.abc import Iterable, Sequence
 from dataclasses import asdict, dataclass, field
 from typing import Any
 
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from hermclaw.coder.handler import TOOL_STEP_KINDS
+from hermclaw.contracts.events import EventType
 from hermclaw.contracts.tools import MUTATING_TOOLS, ToolName
-from hermclaw.persistence.models import GitOperation, Job, PlanVersion, ResearchRun, Step, ToolCallRow, VerificationRun
+from hermclaw.persistence.models import Event, GitOperation, Job, PlanVersion, ResearchRun, Step, ToolCallRow, VerificationRun
 from hermclaw.research.questions import unanswerable_reason
 
 #: dependency manifests of the ecosystems the sandbox installs from (D-014) and their common siblings
@@ -138,12 +139,17 @@ async def collect(sm: async_sessionmaker[AsyncSession], job_id: uuid.UUID) -> Jo
         research = list((await s.scalars(select(ResearchRun).where(ResearchRun.job_id == job_id))).all())
         verifications = list((await s.scalars(select(VerificationRun).where(VerificationRun.job_id == job_id))).all())
         git_ops = list((await s.scalars(select(GitOperation).where(GitOperation.job_id == job_id))).all())
+        # waiting_for_user/blocked end the run without finished_at: the run ended with the last job transition
+        ended = job.finished_at
+        if ended is None and job.status in TERMINAL:
+            last = select(func.max(Event.ts)).where(Event.job_id == job_id, Event.event_type == EventType.JOB_TRANSITION)
+            ended = (await s.execute(last)).scalar_one_or_none()
 
     first = plans[0].plan_json.get("steps", []) if plans else []
     questions = [r.question for r in research]
     duration = None
-    if job.finished_at and job.created_at:
-        duration = round((job.finished_at - job.created_at).total_seconds() / 60.0, 1)
+    if ended and job.created_at:
+        duration = round((ended - job.created_at).total_seconds() / 60.0, 1)
     worst, label = _repeats(calls)
     completed_by_tool = {c.step_id for c in calls if c.tool == ToolName.complete_step.value and c.status == "succeeded"}
     implementing_done = [st for st in steps if st.kind in IMPLEMENTING_KINDS and st.status == "completed" and not st.superseded]

@@ -46,6 +46,18 @@ Noch keine.
 
 ## Behobene Bugs
 
+### BUG-190 – Batterie wertet eine korrekte Rückfrage als FAIL („None min“); Rückfrage mitten im Satz abgeschnitten
+- Phase: Batterie-Lauf 1 auf 0.1.0rc17 (J4) · Komponente: acceptance/job_metrics, planner/replan_contract · Severity: P2 · blockierend: ja für die Abnahme (behoben) · Status: **behoben** (`tests/integration/test_acceptance_jobs.py::test_a_job_waiting_for_the_user_gets_a_duration`)
+- Reproduktion: Job `f50ee894-4e8c-423e-80ab-724e0dfa0a4e` (J4).
+  - Nach 3,1 min stand er korrekt in `waiting_for_user` mit `USER_INPUT_REQUIRED` und einer klaren Frage (BUG-187 wirkt). Trotzdem lautete das Ergebnis FAIL: `duration: None min`.
+  - Die Frage füllte die 1000 Zeichen von `user_question` und endete mitten im Satz („The specific question is: How do I“). Das JSON-Schema wird per Grammatik erzwungen und kappt deshalb hart.
+- Ursache:
+  - Die Dauer wurde nur aus `finished_at` berechnet, das `waiting_for_user` und `blocked` nicht setzen.
+  - Für die Länge der Frage gab es keine Vorgabe.
+- Fix:
+  - Für Jobs, die die Batterie als beendet zählt, endet die Dauer mit dem letzten `job.transition`.
+  - `user_question` und der Replanner-Prompt verlangen ein bis zwei kurze Sätze (höchstens 400 Zeichen).
+
 ### BUG-189 – Retry eines gescheiterten Jobs scheitert sofort wieder; lange Aufträge ließen sich nicht fortsetzen
 - Phase: Analyse nach Batterie-Lauf 1 auf 0.1.0rc16 · Komponente: api/jobs, runtime/driver, scheduler, planner/replanner · Severity: P1 · blockierend: ja (behoben) · Status: **behoben** (`tests/integration/test_runtime_driver.py::test_retry_after_the_replan_limit_continues_with_a_fresh_budget`)
 - Reproduktion: Ein Job endet mit `REPLAN_LIMIT`, dann folgt `POST /api/jobs/{id}/retry`.

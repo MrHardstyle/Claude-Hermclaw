@@ -73,7 +73,8 @@ class ReplanContract(Contract):
         max_length=1000,
         description="only when the remaining work cannot continue without a decision or input of the user (the job "
         "explicitly requires something that does not exist or cannot be obtained, requirements contradict each other, "
-        "access only the user can grant): one concrete question; steps are then ignored",
+        "access only the user can grant): one or two short sentences, what is missing and what you need decided "
+        "(at most 400 characters); steps are then ignored",
     )
 
     @model_validator(mode="after")
