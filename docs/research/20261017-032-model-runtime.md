@@ -70,3 +70,28 @@ Invalid JSON and runaway outputs to `max_tokens` therefore cannot occur for stru
   - `scripts/ops/build-llamacpp.sh` builds the binaries.
 - **Rollback:** delete the `models` override and set `ollama_llamacpp_enabled: false`. Ollama and the previous profiles stay installed.
 - **Decision rule:** the battery decides whether the switch stays (success, repeats, duration vs run 1 on rc14).
+
+## Evidence after the switch (battery run 1 on 0.1.0rc16, 2026-10-17)
+- Report: `/var/lib/hermclaw/acceptance/20261017T142643Z-jobs.md`.
+- Coder turns: 67 calls, mean 14.9 s, max 36.3 s, no failed call. On rc14 the mean was 39 s.
+- Review calls: mean 19.3 s.
+- Replans: mean 35.9 s.
+- Planner: 29–95 s.
+
+Durations, J1–J6 together 36 min:
+
+| Job | Duration | Notes |
+|---|---|---|
+| J1 | 3.3 min | |
+| J2 | 4.7 min | |
+| J3 | 10.1 min | |
+| J4 | 12.4 min | rc14: 35 min |
+| J5 | 2.7 min | |
+| J6 | 2.9 min | rc14: cancelled after 92 min |
+
+- **Outcome:** With the corrected metric (BUG-185), J1/J2/J3/J6 succeeded with a merge request.
+  - J4 burnt its replans instead of asking the user (BUG-187).
+  - J5's planner answer listed invented files and repeated itself in the repairs (BUG-188).
+  - Both are runtime fixes in 0.1.0rc17. No failure traced back to the model swap itself.
+- **New model habit:** qwen3.6 guessed `cd /home/user/repo` in about 11 % of its commands (BUG-186, contract hint).
+- **Decision:** The switch stays (D-016).

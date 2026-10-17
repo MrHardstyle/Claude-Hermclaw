@@ -45,6 +45,7 @@ class EventType:
     PLANNER_FAILED = "planner.failed"
     REPLAN_STARTED = "replan.started"
     REPLAN_CREATED = "replan.created"
+    REPLAN_USER_QUESTION = "replan.user_question"
     SCOPE_CREATED = "scope.created"
     SCOPE_EXPANSION_REQUESTED = "scope.expansion.requested"
     SCOPE_EXPANDED = "scope.expanded"

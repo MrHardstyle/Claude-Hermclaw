@@ -286,3 +286,16 @@ def test_model_facing_schemas_require_the_scope_fields() -> None:
         PlanStep.model_validate({"id": "S001", "title": "abc", "kind": "research", "capability": "research", "goal": "find it"}).repo_hints
         == []
     )
+
+
+async def test_a_repair_that_changes_nothing_raises_the_temperature() -> None:
+    """BUG-188 (rc16 battery J5): two repair turns at 0.2 reproduced the same runaway answer verbatim."""
+    bad = FASTAPI.answer()
+    bad["steps"][0]["id"] = "one"
+    chat = ScriptedChat([bad, dict(bad), FASTAPI.answer()])
+    outcome = await _run(chat)
+    assert outcome.repair_attempts == 2
+    assert [c.temperature for c in chat.calls] == [0.2, 0.2, PlannerSettings().repeat_temperature]
+    fixed = ScriptedChat([bad, FASTAPI.answer()])
+    await _run(fixed)
+    assert [c.temperature for c in fixed.calls] == [0.2, 0.2]

@@ -235,6 +235,8 @@ def test_prompts_explain_how_dependencies_get_into_the_sandbox() -> None:
     assert "network-less sandbox" in system and "requirements.txt or package.json" in system and "standard library" in system
     assert "install_dependencies" in DEFAULT_SYSTEM_CONTRACT and "is refused" in DEFAULT_SYSTEM_CONTRACT
     assert "block_step" in DEFAULT_SYSTEM_CONTRACT
+    # rc16 battery J3: the coder guessed "cd /home/user/repo" before every test run (BUG-186)
+    assert "Commands start in the repository root" in DEFAULT_SYSTEM_CONTRACT
     # BUG-161 (live job bec4c5e9): reinstalled without adding the missing module, then pinned an older pytest
     assert "add\n  it to the manifest first" in DEFAULT_SYSTEM_CONTRACT and "pin the test tools" in DEFAULT_SYSTEM_CONTRACT
     # BUG-164 (live job e3cab55e): servers started with run_test blocked for the full timeout again and again

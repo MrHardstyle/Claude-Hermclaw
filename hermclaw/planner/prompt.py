@@ -476,6 +476,11 @@ def replanner_system_prompt(kind_capability: dict[str, str], capability_names: S
         "deterministic_evidence.runtime_refusals are runtime policy decisions (e.g. a dependency the job does not "
         "name, a forbidden command): they will be refused again. Plan the remaining work so it does not need the "
         "refused action – for a refused dependency, the standard-library solution without that package or manifest.",
+        "Never plan around an explicit requirement of the job: when the job demands exactly a thing (a package, "
+        "service, file, API, credential) that the evidence shows does not exist or cannot be obtained, or two of its "
+        "requirements contradict each other, set user_question to one concrete question for the user (what is "
+        "missing and which decision you need) and leave steps empty. The job then waits for the answer. Do not ask "
+        "about anything the repository, research or a different approach can settle.",
     ]
     numbered = "\n".join(f"{i}. {r}" for i, r in enumerate(rules, start=1))
     return (

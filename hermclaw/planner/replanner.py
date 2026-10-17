@@ -65,7 +65,14 @@ from hermclaw.planner.persist import (
 from hermclaw.planner.planner import PlannerBase, model_facing_schema
 from hermclaw.planner.prompt import PromptBuild, build_messages, fit_to_budget, replan_user_payload, replanner_system_prompt
 from hermclaw.planner.replan_contract import APPROACH_FAILURE_REASONS, ReplanContract, ReplanTrigger
-from hermclaw.planner.validation import AdviceOnce, ValidationContext, new_manifest_notes, normalise_text, semantic_errors
+from hermclaw.planner.validation import (
+    AdviceOnce,
+    ValidationContext,
+    new_manifest_notes,
+    normalise_text,
+    prune_unreachable_must_change,
+    semantic_errors,
+)
 from hermclaw.runtime.transitions import transition_step
 
 STEP_FINAL_STATES = frozenset({StepStatus.completed.value, StepStatus.failed.value, StepStatus.cancelled.value})
@@ -77,9 +84,19 @@ def replan_json_schema() -> dict[str, Any]:
 
 @dataclass
 class ReplanValidated:
-    enriched: EnrichmentResult
+    enriched: EnrichmentResult | None
     kept_keys: frozenset[str]
     reruns: dict[str, str] = field(default_factory=dict)
+    question: str = ""
+
+
+@dataclass(frozen=True)
+class ReplanQuestion:
+    """The replanner's answer when the job cannot continue without the user: no new plan version, the job waits."""
+
+    job_id: uuid.UUID
+    question: str
+    reason_code: str
 
 
 @dataclass(frozen=True)
@@ -172,14 +189,14 @@ class Replanner(PlannerBase):
 
     actor = "replanner"
 
-    async def replan(self, job_id: uuid.UUID, trigger: ReplanTrigger, inputs: PlannerInput | None = None) -> PlanResult:
+    async def replan(self, job_id: uuid.UUID, trigger: ReplanTrigger, inputs: PlannerInput | None = None) -> PlanResult | ReplanQuestion:
         inputs = inputs or PlannerInput()
         risk_policy = RiskPolicy.effective(inputs.risk_policy, self.settings)
         max_replans = self.config.policies.correction.max_replans_per_job
         try:
             async with self.sessionmaker() as session:
                 job = await lock_job(session, job_id)
-                if job.replan_count >= max_replans:
+                if job_metadata.replans_used(job.replan_count, job.metadata_) >= max_replans:
                     raise ReplanLimitReached(
                         f"job {job_id} reached the replan limit ({job.replan_count}/{max_replans})",
                         details={"replan_count": job.replan_count, "max_replans_per_job": max_replans, "reason_code": trigger.reason_code},
@@ -234,6 +251,8 @@ class Replanner(PlannerBase):
                 settings=self.settings,
                 on_repair=on_repair,
             )
+            if outcome.value.question:
+                return await self._ask(job_id, snapshot, outcome.value.question, trigger)
             return await self._persist(job_id, snapshot, outcome, trigger)
         except Exception as exc:
             await self.report_failure(job_id, exc, mode="replan")
@@ -341,6 +360,8 @@ class Replanner(PlannerBase):
 
         def validate(data: dict[str, Any]) -> ReplanValidated:
             contract = validate_schema(ReplanContract, data, limit=limit)
+            if contract.user_question.strip():
+                return ReplanValidated(enriched=None, kept_keys=frozenset(), question=contract.user_question.strip())
             errors: list[str] = []
             reruns: dict[str, str] = {}
             unreasoned: set[str] = set()
@@ -366,11 +387,13 @@ class Replanner(PlannerBase):
                 merged = validate_schema(PlanContract, merge_plan(candidate, kept), limit=limit)
             except PlanInvalid as invalid:
                 raise PlanInvalid("replan" if errors else invalid.phase, (errors + invalid.errors)[:limit]) from None
+            merged, pruned = prune_unreachable_must_change(merged, vctx, preserved=kept_keys)
             sem = semantic_errors(merged, vctx, preserved=kept_keys, limit=limit)
             sem += advice(new_manifest_notes(merged, vctx, kept_keys))
             if errors or sem:
                 raise PlanInvalid("replan" if errors else "semantic", (errors + sem)[:limit])
             enriched = enrich_plan(merged, vctx, risk_policy, preserved=kept_keys, reserved_ids=set(snapshot.active_keys))
+            enriched.notes[:0] = pruned
             repeat = self._repeat_errors(enriched.plan, kept_keys, snapshot, trigger)
             if repeat:
                 raise PlanInvalid("replan", repeat)
@@ -395,11 +418,33 @@ class Replanner(PlannerBase):
         return out
 
     # ------------------------------------------------------------------------------------------- persistence
+    async def _ask(self, job_id: uuid.UUID, snapshot: ReplanSnapshot, question: str, trigger: ReplanTrigger) -> ReplanQuestion:
+        """Record the question; the plan stays as it is and the replan budget is not used (the user answers first)."""
+        async with self.sessionmaker() as session:
+            await append_event(
+                session,
+                EventType.REPLAN_USER_QUESTION,
+                source_type=SOURCE_TYPE,
+                source_id=self.actor,
+                job_id=job_id,
+                step_id=trigger.failed_step_id,
+                payload={
+                    "reason_code": trigger.reason_code,
+                    "failed_step": snapshot.failed_key,
+                    "from_version": snapshot.base_version,
+                    "question": question,
+                    "model_alias": self.profile.alias,
+                },
+            )
+            await session.commit()
+        return ReplanQuestion(job_id=job_id, question=question, reason_code=trigger.reason_code)
+
     async def _persist(
         self, job_id: uuid.UUID, snapshot: ReplanSnapshot, outcome: LoopOutcome[ReplanValidated], trigger: ReplanTrigger
     ) -> PlanResult:
         validated = outcome.value
         enriched = validated.enriched
+        assert enriched is not None  # a question never reaches _persist
         source = "fallback" if outcome.fallback_used else "replanner"
         max_replans = self.config.policies.correction.max_replans_per_job
         async with self.sessionmaker() as session:
@@ -410,7 +455,9 @@ class Replanner(PlannerBase):
                     f"expected {snapshot.base_version})",
                     code=PLAN_CHANGED,
                 )
-            if job.replan_count >= max_replans:  # pragma: no cover - guarded by the snapshot check above
+            if (
+                job_metadata.replans_used(job.replan_count, job.metadata_) >= max_replans
+            ):  # pragma: no cover - guarded by the snapshot check above
                 raise ReplanLimitReached(f"job {job_id} reached the replan limit", details={"replan_count": job.replan_count})
             plan_row = await load_plan(session, job_id, for_update=True)
             if plan_row is None:  # pragma: no cover - plans are never deleted while a job exists

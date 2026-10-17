@@ -40,7 +40,7 @@ async def transition_job(
         job.started_at = _now()
     if dst in JOB_TERMINAL:
         job.finished_at = _now()
-    if dst == JobStatus.queued:  # retry
+    if dst == JobStatus.queued or src == JobStatus.waiting_for_user.value:  # retry, or the user answered/resumed
         job.finished_at = None
         job.error_code = None
         job.error_message = None

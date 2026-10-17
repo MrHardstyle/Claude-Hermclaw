@@ -44,7 +44,12 @@ operator scripts. It is built once on the control node and verified by checksum:
 * For `scripts/deploy/build-release.sh`: CPython **3.13** with `venv` (`python3`/`python3-venv` on Debian 13, or
   `--python /path/to/python3.13`), Node.js ≥ 22.12 with npm (NodeSource 22.x; ≥ 22.23.2 recommended, research 028),
   `tar`, `gzip`, `sha256sum`. The build needs PyPI and the npm registry. Offline alternatives are `--offline-from`
-  (a wheel mirror) and `--ui-dist` (a prebuilt UI).
+  (a wheel mirror) and `--ui-dist` (a prebuilt UI). A control node without Node.js builds the UI in the pinned
+  container and passes the result with `--ui-dist`. Rebuild it for every release: a stale bundle ships an old UI.
+  ```
+  podman run --rm -v "$PWD/ui:/ui:Z" -w /ui docker.io/library/node:22.23.2-bookworm-slim \
+    sh -c "npm ci && npm run lint && npm run test:unit && npm run build"
+  ```
 * The release must target the hosts' Python minor version. Debian 13 ships 3.13, and the preflight compares
   `release.json` with the hosts' `python3`.
 

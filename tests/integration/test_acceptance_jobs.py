@@ -109,7 +109,9 @@ async def test_metrics_of_a_good_job_pass(sessionmaker: SM) -> None:
             )
         )
         impl = Step(job_id=job.id, step_key="S001", title="impl", kind="implement", capability="coding", goal="g", status="completed")
-        s.add(impl)
+        # rc16 battery J3: a test step is verifier-only and completes without the coder, hence without complete_step (BUG-185)
+        check = Step(job_id=job.id, step_key="S002", title="run tests", kind="test", capability="testing", goal="g", status="completed")
+        s.add_all([impl, check])
         await s.flush()
         s.add_all([_call(job, impl, 1, "run_test", {"command": "python -m pytest -q"}), _call(job, impl, 2, "complete_step", {})])
         s.add(GitOperation(job_id=job.id, operation="merge_request.create", status="ok"))
@@ -154,3 +156,11 @@ def test_spec_rejects_unknown_expectations(tmp_path: Path) -> None:
     spec.write_text("jobs:\n  - {id: J1, prompt: p, expect: {max_minuts: 3}}\n", encoding="utf-8")
     with pytest.raises(ValueError, match="max_minuts"):
         load_spec(spec)
+
+
+@pytest.mark.parametrize("name", ["acceptance-jobs.example.yaml", "acceptance-jobs-extended.example.yaml"])
+def test_shipped_batteries_load(name: str) -> None:
+    specs = load_spec(Path(__file__).resolve().parents[2] / "config" / name)
+    ids = [s.id for s in specs]
+    assert ids and len(ids) == len(set(ids))
+    assert all(s.base_branch.startswith("acceptance/") for s in specs)

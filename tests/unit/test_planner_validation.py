@@ -25,6 +25,7 @@ from hermclaw.planner.validation import (
     ancestors,
     new_manifest_notes,
     open_research_requests,
+    prune_unreachable_must_change,
     quoted_names,
     semantic_errors,
 )
@@ -497,6 +498,31 @@ def test_must_change_has_to_match_the_files_of_the_step() -> None:
     assert not any("must_change" in e for e in _errors(plan("goal", [ok2])))
     bad = _impl("S001", allowed_new_paths=["src/"], acceptance=[{"type": "diff", "must_change": ["lib/util.py"]}])
     assert any("must_change 'lib/util.py' matches none of the files" in e for e in _errors(plan("goal", [bad])))
+
+
+def test_invented_must_change_files_are_dropped_when_the_step_keeps_a_reachable_one() -> None:
+    """BUG-188 (rc16 battery J5): the planner listed src/index.js, src/utils/encoders.js, ... next to the step's own
+    files; the plan was rejected three times and the job failed. Unreachable globs are dropped with a note; a step
+    whose globs ALL miss keeps the error (a wrong path the planner must fix)."""
+    runaway = _impl(
+        "S001",
+        allowed_new_paths=["src/slugify.js"],
+        acceptance=[
+            {"type": "diff", "must_change": ["src/slugify.js"]},
+            {"type": "diff", "must_change": ["src/utils/encoders.js"]},
+            {"type": "diff", "must_change": ["src/index.js", "src/slugify.js"], "must_not_change": ["README.md"]},
+            {"type": "presence", "path_glob": "src/slugify.js", "pattern": "slugify"},
+        ],
+    )
+    pruned, notes = prune_unreachable_must_change(PlanContract.model_validate(plan("goal", [runaway])), _ctx())
+    diffs = [c for c in pruned.steps[0].acceptance if c.type == "diff"]
+    assert [d.must_change for d in diffs] == [["src/slugify.js"], ["src/slugify.js"]]
+    assert diffs[1].must_not_change == ["README.md"] and len(pruned.steps[0].acceptance) == 3
+    assert notes == ["step S001: dropped must_change outside the step's files: src/utils/encoders.js, src/index.js"]
+    assert not any("must_change" in e for e in semantic_errors(pruned, _ctx()))
+    wrong = _impl("S001", allowed_new_paths=["src/"], acceptance=[{"type": "diff", "must_change": ["lib/util.py"]}])
+    kept, none = prune_unreachable_must_change(PlanContract.model_validate(plan("goal", [wrong])), _ctx())
+    assert none == [] and any("matches none of the files" in e for e in semantic_errors(kept, _ctx()))
 
 
 # ------------------------------------------------------------------------------ new dependency manifest (BUG-178)

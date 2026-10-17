@@ -47,7 +47,7 @@ export function controlStates(job: Pick<Job, "status" | "pause_requested" | "can
       !terminal && (job.pause_requested || job.status === "waiting_for_user"),
       terminal ? "Job ist bereits beendet" : "Job ist weder pausiert noch wartend",
     ),
-    retry: make("retry", RETRYABLE.has(job.status), "Nur fehlgeschlagene oder blockierte Jobs können erneut versucht werden"),
+    retry: make("retry", RETRYABLE.has(job.status), "Nur fehlgeschlagene oder blockierte Jobs können erneut versucht werden", false, true),
     replan: make("replan", !terminal, "Job ist bereits beendet", false, true),
   };
 }
@@ -56,6 +56,7 @@ export const CONTROL_CONFIRM_TEXT: Record<ControlAction, string> = {
   cancel: "Den Job wirklich abbrechen? Laufende Schritte werden am nächsten Checkpoint beendet.",
   pause: "Den Job pausieren? Laufende Schritte laufen bis zum nächsten Checkpoint, neue Schritte werden nicht gestartet.",
   resume: "Den Job fortsetzen?",
-  retry: "Den Job erneut in die Warteschlange stellen? Fehlgeschlagene Schritte werden wiederholt.",
-  replan: "Eine Neuplanung durch den Planer (Gemma) anfordern?",
+  retry:
+    "Den Job fortsetzen? Erledigte Schritte bleiben, fehlgeschlagene starten mit frischem Budget. Mit einem Hinweis plant der Planer die offene Arbeit stattdessen neu.",
+  replan: "Eine Neuplanung durch den Planer anfordern? Wartet der Job auf eine Antwort, gehört sie in die Begründung.",
 };

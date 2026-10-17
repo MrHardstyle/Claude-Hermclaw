@@ -1,0 +1,65 @@
+# Extended live battery: longer, harder jobs of the kinds Hermclaw is meant for (programs, websites, data analysis,
+# databases, plugins, multi-part features). Run after the regression battery (acceptance-jobs.example.yaml) passes:
+#
+#   sudo -u hermclaw hermclaw acceptance-jobs /etc/hermclaw/acceptance-jobs-extended.yaml [--only X1] [--out DIR]
+#
+# Same fixture branches as the regression battery (scripts/ops/acceptance-fixtures.sh). The prompts name outcomes,
+# not file layouts, so the planner has to decompose the work itself. No job needs a third-party package.
+repository: hermclaw-test
+defaults:
+  max_minutes: 120
+  max_replans: 2
+  max_first_plan_steps: 6
+  allow_dependencies: false
+  max_repeats: 2
+  require_merge_request: true
+  timeout_minutes: 240
+jobs:
+  - id: X1
+    title: data analysis command-line program
+    base_branch: acceptance/empty
+    prompt: >-
+      Schreibe ein Python-Kommandozeilenprogramm, das eine CSV-Datei mit Verkäufen (Spalten date, region, product,
+      quantity, unit_price) auswertet: Umsatz je Region und je Monat sowie die drei umsatzstärksten Produkte.
+      Ausgabe wahlweise als lesbare Tabelle oder als JSON (Option --format). Fehlerhafte Zeilen werden übersprungen
+      und am Ende gezählt gemeldet. Nur Standardbibliothek. Lege eine kleine Beispieldatei bei und teste das Programm
+      mit unittest, auch die fehlerhaften Zeilen.
+
+  - id: X2
+    title: static website with tested client-side logic
+    base_branch: acceptance/node
+    prompt: >-
+      Baue eine statische Webseite für eine Veranstaltungsanmeldung: eine HTML-Seite mit Formular (Name, E-Mail,
+      Anzahl Personen 1–10), eigenes Stylesheet und ein JavaScript-Modul. Die Prüflogik des Formulars steckt in einer
+      exportierten Funktion validateRegistration(data), die ein Objekt mit Fehlermeldungen je Feld liefert; die Seite
+      zeigt diese Meldungen neben den Feldern an. Teste validateRegistration mit dem eingebauten Test-Runner von Node.
+      Keine Abhängigkeiten.
+
+  - id: X3
+    title: persistent storage with SQLite
+    base_branch: acceptance/service
+    prompt: >-
+      Der Inventar-Server hält seine Artikel nur im Speicher. Speichere sie stattdessen in einer SQLite-Datenbank
+      (Modul sqlite3), deren Pfad aus der Umgebungsvariable INVENTORY_DB kommt (Standard inventory.db). Das Schema
+      wird beim Start angelegt, falls es fehlt. Die bestehenden Tests müssen weiter bestehen; ergänze einen Test, der
+      zeigt, dass Artikel einen Neustart überleben.
+
+  - id: X4
+    title: plugin system
+    base_branch: acceptance/empty
+    prompt: >-
+      Entwickle in Python ein kleines Textwerkzeug mit Plugin-System: Plugins liegen als Module in einem Ordner
+      plugins/ und werden zur Laufzeit gefunden. Jedes Plugin hat einen Namen und eine Funktion, die einen Text
+      verarbeitet. Liefere zwei Beispiel-Plugins (Großschreibung, Wörter zählen) und eine Kommandozeile, die die
+      Plugins auflistet und eines auf einen Text anwendet. Ein fehlerhaftes Plugin darf das Laden der übrigen nicht
+      verhindern und wird gemeldet. Mit unittest-Tests, auch für das fehlerhafte Plugin.
+
+  - id: X5
+    title: multi-part REST feature
+    base_branch: acceptance/service
+    expect: {max_first_plan_steps: 8}
+    prompt: >-
+      Erweitere den Inventar-Server zu einer vollständigen REST-Schnittstelle für Artikel: GET /items mit Paginierung
+      (limit, offset), GET /items/<id>, POST /items, PUT /items/<id> und DELETE /items/<id>. Ungültige Eingaben und
+      unbekannte IDs liefern passende Statuscodes mit einer einheitlichen JSON-Fehlerstruktur. Dokumentiere die
+      Schnittstelle in der README und teste jeden Endpunkt einschließlich der Fehlerfälle.

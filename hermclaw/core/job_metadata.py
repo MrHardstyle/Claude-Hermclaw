@@ -37,6 +37,7 @@ TRIAGE = "triage"
 REPLAN_REQUESTED = "replan_requested"
 REPLAN_REASON = "replan_reason"
 RETRY_REQUESTED = "retry_requested"
+REPLAN_BUDGET_BASE = "replan_budget_base"
 RECOVERED_PREPARE_FROM = "recovered_prepare_from"
 # --- planner provenance (hermclaw/planner/) ----------------------------------------------------------------------
 PLANNER_MODEL_ALIAS = "planner_model_alias"
@@ -56,6 +57,7 @@ RESERVED_KEYS: Mapping[str, str] = MappingProxyType(
         REPLAN_REQUESTED: "manual replan request (POST /api/jobs/{id}/replan)",
         REPLAN_REASON: "reason of the running replan (scheduler, restart recovery)",
         RETRY_REQUESTED: "retry marker (POST /api/jobs/{id}/retry)",
+        REPLAN_BUDGET_BASE: "replan_count at the last retry; the replan budget counts from there",
         RECOVERED_PREPARE_FROM: "startup recovery marker (scheduler)",
         PLANNER_MODEL_ALIAS: "model alias that produced the current plan",
         PLANNER_MODEL_FALLBACK: "the technical fallback planner served",
@@ -113,6 +115,12 @@ def describe_reserved() -> str:
     )
 
 
+def replans_used(replan_count: int, metadata: Mapping[str, Any] | None) -> int:
+    """Replans counted against the budget: a retry (POST /api/jobs/{id}/retry) grants a fresh budget (BUG-189)."""
+    base = (metadata or {}).get(REPLAN_BUDGET_BASE, 0)
+    return max(0, replan_count - (base if isinstance(base, int) else 0))
+
+
 __all__ = [
     "ALLOW_NETWORK_RESEARCH",
     "AUTO_COMMIT",
@@ -122,6 +130,7 @@ __all__ = [
     "PLANNER_MODEL_ALIAS",
     "PLANNER_MODEL_FALLBACK",
     "RECOVERED_PREPARE_FROM",
+    "REPLAN_BUDGET_BASE",
     "REPLAN_REASON",
     "REPLAN_REQUESTED",
     "RESERVED_KEYS",
@@ -135,5 +144,6 @@ __all__ = [
     "describe_reserved",
     "is_reserved",
     "normalise_key",
+    "replans_used",
     "reserved_keys_in",
 ]

@@ -67,10 +67,19 @@ class ReplanContract(Contract):
     assumptions: list[str] = Field(default_factory=list, max_length=40)
     risks: list[str] = Field(default_factory=list, max_length=40)
     research_needed: list[ResearchRequest] = Field(default_factory=list, max_length=10)
-    steps: list[ReplanStep] = Field(min_length=1, max_length=60)
+    steps: list[ReplanStep] = Field(default_factory=list, max_length=60)
+    user_question: str = Field(
+        default="",
+        max_length=1000,
+        description="only when the remaining work cannot continue without a decision or input of the user (the job "
+        "explicitly requires something that does not exist or cannot be obtained, requirements contradict each other, "
+        "access only the user can grant): one concrete question; steps are then ignored",
+    )
 
     @model_validator(mode="after")
     def _ids(self) -> ReplanContract:
+        if not self.steps and not self.user_question.strip():
+            raise ValueError("steps: at least one step is required unless user_question is set")
         ids = [s.id for s in self.steps]
         dupes = sorted({i for i in ids if ids.count(i) > 1})
         if dupes:

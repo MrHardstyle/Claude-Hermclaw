@@ -277,7 +277,8 @@ _SPECS: list[ToolSpec] = [
         ToolName.run_command,
         RunCommandArgs,
         "exec",
-        "Run a shell command in the sandbox (no git mutations, no sudo; out-of-scope file changes are reverted).",
+        "Run a shell command in the sandbox, starting in the repository root (no git mutations, no sudo; out-of-scope file "
+        "changes are reverted).",
     ),
     _spec(ToolName.run_test, RunTestArgs, "exec", "Run a test command in the sandbox and get parsed pass/fail counts."),
     _spec(

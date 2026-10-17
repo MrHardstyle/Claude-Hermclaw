@@ -14,6 +14,7 @@ through ``ChatResult.fallback_used``.
 
 from __future__ import annotations
 
+import hashlib
 import time
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, field
@@ -105,13 +106,15 @@ async def run_structured_loop[T](
     attempts: list[AttemptRecord] = []
     conversation = list(messages)
     max_calls = 1 + max(settings.max_repair_attempts, 0)
+    seen: set[str] = set()
+    temperature = call.temperature
     for attempt in range(1, max_calls + 1):
         result = await chat.chat(
             call.alias,
             conversation,
             ctx=ctx,
             max_tokens=call.max_tokens,
-            temperature=call.temperature,
+            temperature=temperature,
             json_schema=call.json_schema,
             timeout_seconds=call.timeout_seconds,
         )
@@ -126,6 +129,9 @@ async def run_structured_loop[T](
             latency_ms=result.latency_ms,
         )
         attempts.append(record)
+        digest = hashlib.sha256(result.content.encode("utf-8")).hexdigest()
+        repeated = digest in seen
+        seen.add(digest)
         data: dict[str, Any] | None = None
         try:
             data = extract_json_object(result.content, reasoning_chars=result.reasoning_chars)
@@ -133,6 +139,8 @@ async def run_structured_loop[T](
         except PlanInvalid as invalid:
             record.phase = invalid.phase
             record.errors = _error_list(invalid, result, settings)
+            if repeated or (len(attempts) > 1 and attempts[-2].errors == record.errors):
+                temperature = max(temperature or 0.0, settings.repeat_temperature)  # the repair changed nothing
             remaining = max_calls - attempt
             if remaining <= 0:
                 break

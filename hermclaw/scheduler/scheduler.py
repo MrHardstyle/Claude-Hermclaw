@@ -941,7 +941,7 @@ class Scheduler:
                 ):
                     reason = str(manual_replan) if manual_replan else "blocked_or_failed_steps"
                     max_replans = self.config.policies.correction.max_replans_per_job
-                    if job.replan_count >= max_replans and not manual_replan:
+                    if job_metadata.replans_used(job.replan_count, job.metadata_) >= max_replans and not manual_replan:
                         failed_keys = [
                             k
                             for (k,) in (
@@ -1101,9 +1101,21 @@ class Scheduler:
             if job.status == JobStatus.replanning.value:
                 if ok:
                     self._outages.pop(job_id, None)
-                    await transition_job(
-                        s, job, JobStatus(nxt) if nxt else JobStatus.running, reason="replan created", actor=self.instance_id
-                    )
+                    if nxt == JobStatus.waiting_for_user.value:  # the replanner needs a decision of the user
+                        await transition_job(
+                            s,
+                            job,
+                            JobStatus.waiting_for_user,
+                            reason="replanner asks the user",
+                            actor=self.instance_id,
+                            error_code=code,
+                            error_message=msg,
+                            status_line="Wartet auf Antwort des Nutzers",
+                        )
+                    else:
+                        await transition_job(
+                            s, job, JobStatus(nxt) if nxt else JobStatus.running, reason="replan created", actor=self.instance_id
+                        )
                 elif await self._defer_on_model_outage(s, job, "Neuplanung", code):
                     pass  # the job stays in replanning; _resume_job_phases runs the replan again after the backoff
                 else:

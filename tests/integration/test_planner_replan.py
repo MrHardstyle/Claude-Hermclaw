@@ -491,3 +491,16 @@ async def test_concurrent_replans_apply_only_once(sessionmaker: object) -> None:
     assert sorted(r.step_key for r in active) == ["S001", "S002", "S004"]
     created = [p for t, p in await _events(sm, job_id) if t == EventType.REPLAN_CREATED]
     assert len(created) == 1
+
+
+def test_replan_contract_needs_steps_unless_it_asks_the_user() -> None:
+    """BUG-187: a question replaces the steps; an answer with neither is still invalid."""
+    from pydantic import ValidationError
+
+    from hermclaw.planner.replan_contract import ReplanContract
+
+    with pytest.raises(ValidationError, match="at least one step"):
+        ReplanContract.model_validate({"goal": "Paginate GET /users", "steps": []})
+    asked = ReplanContract.model_validate({"goal": "Paginate GET /users", "user_question": "Which package should be used?"})
+    assert asked.steps == [] and asked.user_question.startswith("Which")
+    assert "user_question" in replan_json_schema()["properties"]

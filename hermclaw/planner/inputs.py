@@ -63,6 +63,9 @@ class PlannerSettings:
     prompt_safety: float = 0.85
     max_echo_chars: int = 12_000  # previous (invalid) JSON answer echoed back in a repair turn
     max_errors_reported: int = 30
+    #: temperature of the next attempt once a repair changed nothing (same answer or same errors): the same prompt at
+    #: a low temperature reproduces the same runaway answer (rc16 battery J5, BUG-188)
+    repeat_temperature: float = 0.7
 
 
 # --------------------------------------------------------------------------------------------- detection helpers

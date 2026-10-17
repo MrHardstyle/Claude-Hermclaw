@@ -58,7 +58,13 @@ from hermclaw.planner.prompt import (
     planner_system_prompt,
     planner_user_payload,
 )
-from hermclaw.planner.validation import AdviceOnce, ValidationContext, new_manifest_notes, semantic_errors
+from hermclaw.planner.validation import (
+    AdviceOnce,
+    ValidationContext,
+    new_manifest_notes,
+    prune_unreachable_must_change,
+    semantic_errors,
+)
 
 log = get_logger(__name__)
 PLANNER_ROLE = "planner"
@@ -242,11 +248,14 @@ class Planner(PlannerBase):
 
         def validate(data: dict[str, Any]) -> EnrichmentResult:
             plan = validate_schema(PlanContract, data, limit=self.settings.max_errors_reported)
+            plan, pruned = prune_unreachable_must_change(plan, vctx)
             errors = semantic_errors(plan, vctx, limit=self.settings.max_errors_reported)
             errors += advice(new_manifest_notes(plan, vctx))
             if errors:
                 raise PlanInvalid("semantic", errors)
-            return enrich_plan(plan, vctx, risk_policy)
+            enriched = enrich_plan(plan, vctx, risk_policy)
+            enriched.notes[:0] = pruned
+            return enriched
 
         async def on_repair(record: AttemptRecord, remaining: int) -> None:
             await self.record_repair(job_id, "plan", record, remaining)

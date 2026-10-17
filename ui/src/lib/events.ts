@@ -39,6 +39,7 @@ export const KNOWN_EVENT_TYPES: readonly string[] = [
   "planner.failed",
   "replan.started",
   "replan.created",
+  "replan.user_question",
   "scope.created",
   "scope.expansion.requested",
   "scope.expanded",

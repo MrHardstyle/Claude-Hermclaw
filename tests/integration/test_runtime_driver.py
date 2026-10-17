@@ -12,6 +12,8 @@ import pytest
 from pydantic import BaseModel
 from sqlalchemy import select, update
 
+from hermclaw.api import jobs as jobs_api
+from hermclaw.api.auth import Principal
 from hermclaw.contracts.scope import ScopeContract
 from hermclaw.core.config import get_config
 from hermclaw.core.errors import ModelError
@@ -93,13 +95,15 @@ class ImplementHandler:
 
     kinds = frozenset({"implement"})
 
-    def __init__(self, world: World, content: str = "VALUE = 2\n", on_done: Any = None, outcome: str = "completed") -> None:
-        self.world, self.content, self.on_done, self.outcome = world, content, on_done, outcome
+    def __init__(
+        self, world: World, content: str = "VALUE = 2\n", on_done: Any = None, outcome: str = "completed", blocks: int = 1
+    ) -> None:
+        self.world, self.content, self.on_done, self.outcome, self.blocks = world, content, on_done, outcome, blocks
         self.calls = 0
 
     async def run(self, ctx: StepRunContext) -> StepOutcome:
         self.calls += 1
-        if self.outcome == "blocked" and self.calls == 1:
+        if self.outcome == "blocked" and self.calls <= self.blocks:
             return StepOutcome("blocked", error_code="SCOPE_UNAVAILABLE", replan_reason="scope_unavailable", replan_evidence={"path": "x"})
         eng = self.world.engine
         ws = (await eng.list_workspaces(ctx.job_id))[0]
@@ -203,7 +207,13 @@ def _driver(world: World, chat: Chat, tmp_path: Path, **kw: Any) -> RuntimeJobDr
 
 
 async def _run(
-    world: World, driver: RuntimeJobDriver, handlers: list[Any], job_ids: list[uuid.UUID], timeout: float = 60, **settings: Any
+    world: World,
+    driver: RuntimeJobDriver,
+    handlers: list[Any],
+    job_ids: list[uuid.UUID],
+    timeout: float = 60,
+    terminal: tuple[str, ...] = TERMINAL,
+    **settings: Any,
 ) -> dict[uuid.UUID, Job]:
     sched = Scheduler(
         world.sessionmaker,
@@ -217,7 +227,7 @@ async def _run(
             await sched.tick()
             async with world.sessionmaker() as s:
                 jobs = {j.id: j for j in (await s.execute(select(Job).where(Job.id.in_(job_ids)))).scalars()}
-            if all(j.status in TERMINAL for j in jobs.values()) and not sched._job_tasks:
+            if all(j.status in terminal for j in jobs.values()) and not sched._job_tasks:
                 await sched.wait_idle()
                 return jobs
             await asyncio.sleep(0.02)
@@ -318,6 +328,55 @@ async def test_blocked_step_triggers_gemma_replan_and_job_completes(world: World
     assert created, "replan.created event missing"
     replan_call = chat.user_payload(1)
     assert "scope_unavailable" in str(replan_call)
+
+
+async def test_replanner_question_makes_the_job_wait_and_the_answer_resumes_it(world: World, tmp_path: Path) -> None:
+    """rc16 battery J4: the job demanded exactly a package that does not exist; the replanner planned a workaround
+    against the job (remove an import that was never there) and burnt the replan budget. Now it asks the user: the job
+    waits without using the budget, and the answer (POST /replan with the reason) resumes it (BUG-187)."""
+    question = {
+        "goal": "Set VALUE to 2",
+        "steps": [],
+        "user_question": "The required package does not exist. Which package should be used?",
+    }
+    chat = Chat([_plan(), question, _replan()])
+    driver = _driver(world, chat, tmp_path)
+    jid = await _job(world)
+    handlers = [ImplementHandler(world, outcome="blocked"), ReviewHandler()]
+    jobs = await _run(world, driver, handlers, [jid], terminal=(*TERMINAL, "waiting_for_user"))
+    job = jobs[jid]
+    assert (job.status, job.replan_count, job.current_plan_version) == ("waiting_for_user", 0, 1)
+    assert job.error_code == "USER_INPUT_REQUIRED" and "Which package" in (job.error_message or "")
+    asked = [e.payload for e in await _events(world, jid) if e.event_type == "replan.user_question"]
+    assert asked and asked[0]["question"].startswith("The required package")
+    async with world.sessionmaker() as s:
+        await jobs_api._control(s, jid, "replan", Principal("operator", frozenset({"control"})), reason="Use the standard library.")
+    jobs = await _run(world, driver, handlers, [jid])
+    assert jobs[jid].status == "succeeded", (jobs[jid].error_code, jobs[jid].error_message)
+    assert jobs[jid].replan_count == 1 and jobs[jid].error_code is None
+    assert "Use the standard library." in str(chat.user_payload(2))
+
+
+async def test_retry_after_the_replan_limit_continues_with_a_fresh_budget(world: World, tmp_path: Path) -> None:
+    """A job that failed with REPLAN_LIMIT came back from POST /retry only to fail again at once: the blocked step
+    stayed blocked and the used-up budget was checked again. A long job could never be continued (BUG-189)."""
+    second = _replan()
+    for st in second["steps"]:
+        st["id"] = {"S003": "S005", "S004": "S006"}[st["id"]]
+        st["goal"] += " Use the granted scope once more."
+        st["depends_on"] = [{"S003": "S005"}.get(d, d) for d in st.get("depends_on", [])]
+    chat = Chat([_plan(), _replan(), second])
+    driver = _driver(world, chat, tmp_path)
+    jid = await _job(world)
+    handlers = [ImplementHandler(world, outcome="blocked", blocks=3), ReviewHandler()]
+    jobs = await _run(world, driver, handlers, [jid])
+    assert (jobs[jid].status, jobs[jid].error_code, jobs[jid].replan_count) == ("failed", "REPLAN_LIMIT", 2)
+    async with world.sessionmaker() as s:
+        out = await jobs_api._control(s, jid, "retry", Principal("operator", frozenset({"control"})))
+    assert out.status == "queued" and "2 failed/blocked step(s)" in out.detail  # S005 and its review
+    jobs = await _run(world, driver, handlers, [jid])
+    assert jobs[jid].status == "succeeded", (jobs[jid].error_code, jobs[jid].error_message)
+    assert jobs[jid].replan_count == 2 and len(chat.calls) == 3  # continued without another replan
 
 
 async def test_triage_failure_is_not_fatal_and_job_without_repository(world: World, tmp_path: Path) -> None:

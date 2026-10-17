@@ -16,10 +16,11 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from hermclaw.api.auth import Principal, require
 from hermclaw.api.schemas import ArtifactOut, ControlOut, JobDetailOut, JobListOut, JobOut, PlanVersionOut, StepOut
-from hermclaw.contracts.common import JobStatus
+from hermclaw.contracts.common import JobStatus, StepStatus
 from hermclaw.contracts.events import EventType
 from hermclaw.contracts.job import JobCreate
 from hermclaw.core import job_metadata as jm
+from hermclaw.core.config import get_config
 from hermclaw.core.errors import ConflictError, NotFoundError, PolicyViolation, ValidationFailed
 from hermclaw.core.settings import get_settings
 from hermclaw.events.store import append_event
@@ -49,7 +50,7 @@ from hermclaw.persistence.models import (
     VerificationRun,
 )
 from hermclaw.runtime.state_machines import JOB_TERMINAL, can_transition_job
-from hermclaw.runtime.transitions import emit_status, transition_job
+from hermclaw.runtime.transitions import emit_status, transition_job, transition_step
 
 router = APIRouter(prefix="/api", tags=["jobs"])
 
@@ -233,6 +234,52 @@ async def get_job(job_id: uuid.UUID, _: Principal = Depends(require("read")), se
     return detail
 
 
+async def _reset_failed_steps(session: AsyncSession, job: Job) -> int:
+    """Failed/blocked steps of a retried job get a fresh attempt budget; completed steps stay (BUG-189)."""
+    rows = list(
+        (
+            await session.execute(
+                select(Step)
+                .where(
+                    Step.job_id == job.id, Step.superseded.is_(False), Step.status.in_([StepStatus.failed.value, StepStatus.blocked.value])
+                )
+                .with_for_update()
+            )
+        ).scalars()
+    )
+    if not rows:
+        return 0
+    open_ids = {
+        sid
+        for (sid,) in (
+            await session.execute(
+                select(Step.id).where(Step.job_id == job.id, Step.superseded.is_(False), Step.status != StepStatus.completed.value)
+            )
+        ).all()
+    }
+    waiting = {
+        sid
+        for (sid,) in (
+            await session.execute(
+                select(StepDependency.step_id).where(
+                    StepDependency.step_id.in_([r.id for r in rows]), StepDependency.depends_on_step_id.in_(open_ids)
+                )
+            )
+        ).all()
+    }
+    fresh = get_config().policies.correction.max_attempts_per_step
+    for row in rows:
+        row.max_attempts = row.attempt_count + fresh  # attempt numbers stay unique; the budget starts again
+        row.correction_count = 0
+        row.not_before = None
+        row.error_code = None
+        row.error_message = None
+        await transition_step(session, row, StepStatus.ready, reason="retry via API")
+        if row.id in waiting:
+            await transition_step(session, row, StepStatus.pending, reason="retry via API: waits for its dependencies")
+    return len(rows)
+
+
 async def _control(session: AsyncSession, job_id: uuid.UUID, action: str, principal: Principal, *, reason: str = "") -> ControlOut:
     job = await _load_job(session, job_id, lock=True)
     status = JobStatus(job.status)
@@ -265,14 +312,24 @@ async def _control(session: AsyncSession, job_id: uuid.UUID, action: str, princi
             raise ConflictError(f"retry not possible from status {status.value}")
         job.cancel_requested = False
         job.pause_requested = False
-        job.metadata_ = {**(job.metadata_ or {}), jm.RETRY_REQUESTED: True}
+        # completed work stays; the replan budget starts again from here (BUG-189)
+        job.metadata_ = {**(job.metadata_ or {}), jm.RETRY_REQUESTED: True, jm.REPLAN_BUDGET_BASE: job.replan_count}
+        if reason:  # the user's hint: Gemma replans the open work with it instead of repeating the failed steps
+            job.metadata_ = {**job.metadata_, jm.REPLAN_REQUESTED: reason}
         await transition_job(session, job, JobStatus.queued, reason="retry via API", actor=principal.name)
-        detail = "job re-queued; failed steps will be retried"
+        reset = 0 if reason else await _reset_failed_steps(session, job)
+        detail = (
+            "job re-queued; the open work is replanned with your hint"
+            if reason
+            else f"job re-queued; {reset} failed/blocked step(s) start again with fresh attempts"
+        )
     elif action == "replan":
         if status in JOB_TERMINAL:
             raise ConflictError(f"job already {status.value}")
         job.metadata_ = {**(job.metadata_ or {}), jm.REPLAN_REQUESTED: reason or "manual replan via API"}
         detail = "replan requested"
+        if status == JobStatus.waiting_for_user:  # the reason is the user's answer to the replanner's question
+            await transition_job(session, job, JobStatus.running, reason="answer of the user", actor=principal.name)
     else:  # pragma: no cover
         raise ValidationFailed(f"unknown action {action}")
     await append_event(

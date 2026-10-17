@@ -25,6 +25,7 @@ from typing import Any
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
+from hermclaw.coder.handler import TOOL_STEP_KINDS
 from hermclaw.contracts.tools import MUTATING_TOOLS, ToolName
 from hermclaw.persistence.models import GitOperation, Job, PlanVersion, ResearchRun, Step, ToolCallRow, VerificationRun
 from hermclaw.research.questions import unanswerable_reason
@@ -48,7 +49,9 @@ DEPENDENCY_MANIFESTS = frozenset(
 #: tools whose identical repetition on an unchanged workspace cannot produce a new result
 REPEAT_TOOLS = frozenset({ToolName.run_test, ToolName.run_command, ToolName.install_dependencies, ToolName.request_research})
 WRITE_TOOL_NAMES = frozenset(t.value for t in MUTATING_TOOLS)
-IMPLEMENTING_KINDS = frozenset({"implement", "test", "documentation", "docker", "database"})
+#: steps the coder loop runs and ends with complete_step; test/verify steps are verifier-only (VerifyStepHandler) and
+#: complete without the coder (BUG-185)
+IMPLEMENTING_KINDS = TOOL_STEP_KINDS
 TERMINAL = frozenset({"succeeded", "failed", "cancelled", "blocked", "waiting_for_user"})
 #: errors of the infrastructure, not of the job: a job ending with one proves nothing, even an expected failure
 INFRASTRUCTURE_ERRORS = frozenset({"MODEL_UNAVAILABLE", "MODEL_TIMEOUT", "MODEL_LOAD_FAILED", "MODEL_NOT_FOUND", "WORKER_ERROR"})

@@ -46,6 +46,64 @@ Noch keine.
 
 ## Behobene Bugs
 
+### BUG-189 – Retry eines gescheiterten Jobs scheitert sofort wieder; lange Aufträge ließen sich nicht fortsetzen
+- Phase: Analyse nach Batterie-Lauf 1 auf 0.1.0rc16 · Komponente: api/jobs, runtime/driver, scheduler, planner/replanner · Severity: P1 · blockierend: ja (behoben) · Status: **behoben** (`tests/integration/test_runtime_driver.py::test_retry_after_the_replan_limit_continues_with_a_fresh_budget`)
+- Reproduktion: Ein Job endet mit `REPLAN_LIMIT`, dann folgt `POST /api/jobs/{id}/retry`.
+  - Erster Defekt: Die Vorbereitung erkennt den vorhandenen Plan und will direkt `queued -> running`. Diesen Übergang verbietet die State-Machine, also folgt `PREPARE_INVALID_STATE`.
+  - Zweiter Defekt, ohne den ersten: Der blockierte Schritt bleibt blockiert und `replan_count` steht noch am Limit. Damit folgt sofort wieder `REPLAN_LIMIT`.
+  - Die Antwort „failed steps will be retried“ stimmte nie: `retry_requested` wurde gesetzt, aber nirgends gelesen.
+- Ursache: Retry war nur ein Statuswechsel. Weder Schritte noch Budget wurden zurückgesetzt, und der Driver-Pfad für einen bestehenden Plan passte nur zur Wiederherstellung aus `planning`.
+- Fix:
+  - Bei einem Retry bleiben erledigte Schritte erhalten.
+  - Fehlgeschlagene und blockierte Schritte bekommen ein frisches Versuchsbudget (`max_attempts` ab dem bisherigen Zähler, damit die Versuchsnummern eindeutig bleiben; Korrekturzähler 0) und starten als `ready` bzw. `pending`.
+  - Das Replan-Budget zählt ab dem Retry (`replan_budget_base`, `job_metadata.replans_used`; gilt für Scheduler und Replanner).
+  - Ein Retry mit Begründung lässt stattdessen die offene Arbeit mit diesem Hinweis neu planen.
+  - Bei vorhandenem Plan läuft der Driver über `planning`, wie jeder Job; die State-Machine bleibt unverändert.
+  - UI: Retry fragt nach einem optionalen Hinweis.
+
+### BUG-188 – Planer-Wiederholungsschleife: erfundene Dateien in `must_change`, identische Reparaturantworten
+- Phase: Batterie-Lauf 1 auf 0.1.0rc16 (J5) · Komponente: planner/validation, planner/loop · Severity: P1 · blockierend: ja (behoben) · Status: **behoben** (`tests/unit/test_planner_validation.py::test_invented_must_change_files_are_dropped_when_the_step_keeps_a_reachable_one`, `tests/unit/test_planner_loop.py::test_a_repair_that_changes_nothing_raises_the_temperature`)
+- Reproduktion: Job `f4239236-3277-4d7b-9b55-6b74327bf3ae` (J5, Node-Funktion slugify) scheiterte nach 2,7 min mit `PLANNER_INVALID_OUTPUT`.
+  - Der Plan selbst war richtig: ein Schritt mit `src/slugify.js` und `test/slugify.test.js`.
+  - Daneben standen Dutzende Diff-Kriterien für erfundene Dateien (`src/index.js`, `src/utils/encoders.js`, …).
+  - Beide Reparaturantworten waren byteidentisch (gleicher md5, je 923 Tokens).
+- Ursache:
+  - Die Validierung verwarf den ganzen Plan wegen Kriterien, die der Schritt ohnehin nie erfüllen kann.
+  - Die Reparatur lief mit derselben niedrigen Temperatur (0,2) auf fast demselben Prompt und reproduzierte die Schleife.
+- Fix:
+  - `prune_unreachable_must_change` entfernt `must_change`-Muster außerhalb der Dateien des Schritts, mit einer Notiz in `planner.plan.created` bzw. `replan.created`.
+  - Das gilt nur, solange der Schritt mindestens ein erreichbares `must_change` behält. Verfehlen alle, bleibt es der Fehler aus U4 (falscher Pfad), den der Planer korrigieren muss.
+  - Ändert eine Reparatur nichts (gleiche Antwort oder gleiche Fehlerliste), läuft der nächste Versuch mit `repeat_temperature` 0,7.
+
+### BUG-187 – Replanner plant gegen eine ausdrückliche Vorgabe des Auftrags, statt den Nutzer zu fragen
+- Phase: Batterie-Lauf 1 auf 0.1.0rc16 (J4) · Komponente: planner/replanner, runtime/driver, scheduler, api · Severity: P1 · blockierend: ja (behoben) · Status: **behoben** (`tests/integration/test_runtime_driver.py::test_replanner_question_makes_the_job_wait_and_the_answer_resumes_it`, `tests/integration/test_planner_replan.py::test_replan_contract_needs_steps_unless_it_asks_the_user`)
+- Reproduktion: Job `4a0c04c6-6f1d-46ca-af53-21cd161161e7` (J4, „Binde das Python-Paket "hermclaw-nonexistent-sdk-zz9" ein … Verwende genau dieses Paket.“).
+  - S001 blockierte korrekt mit `missing_dependency`: Das Paket existiert in keiner Registry.
+  - Gemma plante darauf „Remove impossible import and call from server.py“. Dieser Import war nie im Code; die Diff-Abnahme konnte also nie erfüllt werden. Ein zweiter Replan folgte.
+  - Frühere Läufe von J4 endeten jedes Mal erst mit `REPLAN_LIMIT` (18,1 min bzw. 35,0 min), nie mit einem sauberen Halt.
+- Ursache:
+  - Der Replanner kannte nur zwei Ausgänge: einen neuen Plan oder einen Fehler.
+  - Sein Prompt verlangte bei einer verweigerten Abhängigkeit ausdrücklich „the standard-library solution without that package“, auch wenn der Auftrag genau dieses Paket fordert.
+  - Kein Runtime-Pfad erzeugte `waiting_for_user`. Ein unlösbares externes Hindernis verbrauchte deshalb immer das ganze Replan-Budget; bei langen Aufträgen sind das Stunden.
+- Fix:
+  - `ReplanContract.user_question`: Ist die Frage gesetzt, entfallen die Steps.
+  - Der Replanner legt dann keine Planversion an und verbraucht kein Replan-Budget. Er schreibt `replan.user_question`.
+  - Der Driver liefert `waiting_for_user` mit `USER_INPUT_REQUIRED`; die Frage steht in `error_message` und als Statuszeile.
+  - Ein `POST /api/jobs/{id}/replan?reason=<Antwort>` setzt den wartenden Job fort. Die Antwort geht als Replan-Grund an Gemma. Fehlercode und Frage werden beim Verlassen von `waiting_for_user` gelöscht.
+  - Prompt-Regel: Niemals um eine ausdrückliche Vorgabe herum planen. Fehlt das Geforderte nachweislich oder widersprechen sich Vorgaben, wird eine konkrete Frage gestellt.
+
+### BUG-186 – Coder rät vor jedem Testlauf ein absolutes Arbeitsverzeichnis
+- Phase: Batterie-Lauf 1 auf 0.1.0rc16 (J3, J4) · Komponente: context_builder, tools/registry · Severity: P3 · blockierend: nein (behoben) · Status: **behoben** (`tests/unit/test_planner_prompt.py`, Vertragsprüfung)
+- Reproduktion: Job `b339a2c8-a255-417c-9792-69692a7a43d9` Zug 4 `cd /home/user/repo && python -m pytest -q` → `can't cd`; ebenso J4 `cd /home/user/repos/hermclaw-test`. In 7 Tagen 5 von 570 Befehlen, alle fehlgeschlagen, je ein verlorener Zug.
+- Ursache: Weder der Vertrag noch die Werkzeugbeschreibung sagen, dass Befehle im Repository-Wurzelverzeichnis starten.
+- Fix: Eine Vertragsregel: Befehle starten im Repository-Root, nur relative Pfade, kein `cd`. `run_command` nennt das Startverzeichnis.
+
+### BUG-185 – Batterie-Metrik verlangt `complete_step` auch von reinen Verifikationsschritten
+- Phase: Batterie-Lauf 1 auf 0.1.0rc16 (J3) · Komponente: acceptance/job_metrics · Severity: P2 · blockierend: ja für die Abnahme (behoben) · Status: **behoben** (`tests/integration/test_acceptance_jobs.py::test_metrics_of_a_good_job_pass`)
+- Reproduktion: J3 endete `succeeded` mit MR und ohne Replan, wurde aber als FAIL gewertet: „2 implementing step(s) completed, 1 without complete_step“. S002 (`kind: test`) lief über `VerifyStepHandler`, ohne Coder.
+- Ursache: `IMPLEMENTING_KINDS` enthielt `test`, obwohl `test`/`verify` reine Verifikationsschritte sind und nie `complete_step` aufrufen.
+- Fix: `IMPLEMENTING_KINDS = TOOL_STEP_KINDS`, die Schrittarten, die der Coder-Loop ausführt. Eine einzige Quelle, keine zweite Liste.
+
 ### BUG-184 – Abbruch eines Auftrags wartet auf die laufende Modellantwort samt Reparaturen
 - Phase: Batterie-Lauf 1 auf 0.1.0rc14 (J6) · Komponente: coder/loop · Severity: P2 · blockierend: nein (behoben) · Status: **behoben** (`tests/integration/test_coder_loop.py::test_a_cancel_interrupts_the_running_model_call`)
 - Reproduktion: Job `bfb59aa6-8ab8-49de-8499-5bf037d7a20b` (J6): Der Abbruch wurde um ~14:52 angefordert (`job.control.cancel`). Der Coder lief noch zwei Modellaufrufe zu je 6144 Tokens (ungültig, Reparaturversuch) weiter; `cancelled` erst um 15:04.

@@ -471,6 +471,42 @@ def _must_change_errors(step: PlanStep, ctx: ValidationContext) -> list[str]:
     return errors
 
 
+def prune_unreachable_must_change(
+    plan: PlanContract, ctx: ValidationContext, *, preserved: frozenset[str] = frozenset()
+) -> tuple[PlanContract, list[str]]:
+    """Drop ``must_change`` globs a step can never satisfy when the step still requires a change it can make.
+
+    A runaway answer listed dozens of invented files (src/utils/encoders.js, ...) next to the right ones; rejecting
+    the whole plan made the repair turns repeat it until the job failed (rc16 battery J5, BUG-188). The step could not
+    change those files anyway, so dropping them narrows nothing it can do. A step whose ``must_change`` globs ALL miss
+    keeps them: that is a wrong path the planner has to fix (``_must_change_errors``)."""
+    notes: list[str] = []
+    steps: list[PlanStep] = []
+    for step in plan.steps:
+        paths = _step_paths(step, ctx) if step.id not in preserved and step.kind.value in WORKSPACE_MUTATING_KINDS else []
+        diffs = [c for c in step.acceptance if isinstance(c, DiffEvidence)]
+        reachable = {g for c in diffs for g in c.must_change if any(_globs_overlap(g, p) for p in paths)}
+        dropped = [g for c in diffs for g in c.must_change if g not in reachable]
+        if not paths or not reachable or not dropped:
+            steps.append(step)
+            continue
+        acceptance: list[AcceptanceCriterion] = []
+        for crit in step.acceptance:
+            if isinstance(crit, DiffEvidence) and any(g not in reachable for g in crit.must_change):
+                keep = [g for g in crit.must_change if g in reachable]
+                if not keep and not crit.must_not_change and crit.max_changed_files is None:
+                    continue
+                acceptance.append(crit.model_copy(update={"must_change": keep}))
+                continue
+            acceptance.append(crit)
+        steps.append(step.model_copy(update={"acceptance": acceptance}))
+        shown = ", ".join(g[:80] for g in dropped[:5]) + (f" (+{len(dropped) - 5})" if len(dropped) > 5 else "")
+        notes.append(f"step {step.id}: dropped must_change outside the step's files: {shown}")
+    if not notes:
+        return plan, []
+    return plan.model_copy(update={"steps": steps}), notes
+
+
 DEPENDENCY_MANIFESTS = ("requirements.txt", "package.json")
 # a name the job quotes literally ("…", „…“, `…`, '…', «…»): a package it asks for by name
 _QUOTED_NAME = re.compile(r"[\"'`\u201e\u201c\u201d\u00ab\u00bb]([A-Za-z0-9@][A-Za-z0-9@/._-]{1,100})[\"'`\u201c\u201d\u00ab\u00bb]")

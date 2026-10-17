@@ -33,6 +33,7 @@ from hermclaw.models.protocols import CallContext, ChatMessage, ChatModel
 from hermclaw.persistence.models import Job, Step
 from hermclaw.planner import ContextSnippet, PlanConflict, PlannerError, PlannerInput, ReplanLimitReached, ReplanTrigger
 from hermclaw.planner.replan_contract import REPLAN_REASONS
+from hermclaw.planner.replanner import ReplanQuestion
 from hermclaw.runtime.ports import RegressionCheck
 from hermclaw.runtime.report import collect_report_data, render_report, write_report_artifact
 from hermclaw.runtime.state_machines import can_transition_job
@@ -279,8 +280,9 @@ class RuntimeJobDriver:
     # ------------------------------------------------------------------ JobDriver
     async def prepare(self, job_id: uuid.UUID, token: CancelToken) -> JobPhaseResult:
         job = await self._job(job_id)
-        if job.current_plan_version is not None:
-            return JobPhaseResult(ok=True, next_status=JobStatus.running.value)  # recovered after planning finished
+        if job.current_plan_version is not None:  # recovered after planning finished, or retried (BUG-189)
+            await self._advance(job_id, JobStatus.planning, f"Bestehender Plan v{job.current_plan_version} wird fortgesetzt")
+            return JobPhaseResult(ok=True, next_status=JobStatus.running.value)
         try:
             ws = None
             if job.repository_id is not None:
@@ -399,6 +401,17 @@ class RuntimeJobDriver:
             return JobPhaseResult(ok=False, error_code=exc.code, error_message=exc.message, detail=exc.details)
         except (ModelError, HermclawError) as exc:
             return JobPhaseResult(ok=False, error_code=exc.code, error_message=DEFAULT_REDACTOR.text(exc.message))
+        if isinstance(res, ReplanQuestion):
+            async with self.sm() as s:
+                await emit_status(s, job_id, f"Rückfrage an den Nutzer ({code}): {res.question}")
+                await s.commit()
+            return JobPhaseResult(
+                ok=True,
+                next_status=JobStatus.waiting_for_user.value,
+                error_code="USER_INPUT_REQUIRED",
+                error_message=res.question,
+                detail={"reason_code": code, "question": res.question},
+            )
         async with self.sm() as s:
             await emit_status(s, job_id, f"Neuer Plan v{res.version} ({code}): {len(res.created_step_keys)} neue Steps")
             await s.commit()
