@@ -42,8 +42,8 @@ from hermclaw.research.browser import BrowserRenderer, RenderingFetcher, find_ch
 from hermclaw.research.claims import ClaimDraft, ClaimExtractor, MergedClaim, SourceScore, merge_claims
 from hermclaw.research.contradictions import ContradictionConfirmer, ContradictionReport, LlmContradictionConfirmer, detect_contradictions
 from hermclaw.research.errors import SearchDisabled, SearchJsonDisabled
-from hermclaw.research.extract import extract_document
-from hermclaw.research.fetch import Fetcher, HttpFetcher
+from hermclaw.research.extract import ExtractedDocument, extract_document
+from hermclaw.research.fetch import Fetcher, FetchResult, HttpFetcher
 from hermclaw.research.planner import PlannedQueries, QueryPlanner
 from hermclaw.research.search import (
     DisabledSearchProvider,
@@ -102,6 +102,23 @@ class ResearchModels:
             return ModelCallParams(p.alias, p.max_output_tokens, p.temperature, float(p.timeout_seconds))
 
         return cls(fast=params(fast_role), deep=params(deep_role))
+
+
+@dataclass(frozen=True)
+class _Fetch:
+    """One fetched candidate: the response and its extracted document, or the error."""
+
+    t0: float
+    url: str
+    fetched: FetchResult | None = None
+    doc: ExtractedDocument | None = None
+    error: Exception | None = None
+
+
+def _fetched_authority(fetch: _Fetch | None, primary_domains: Sequence[str]) -> float:
+    if fetch is None or fetch.error is not None:
+        return 0.0
+    return classify_source(fetch.url, primary_domains).authority_score
 
 
 @dataclass
@@ -391,9 +408,11 @@ class ResearchEngine:
         sem = asyncio.Semaphore(max(1, self.settings.fetch_concurrency))
         results: list[_ReadSource | None] = [None] * len(candidates)
 
+        fetches: list[_Fetch | None] = [None] * len(candidates)
+
         async def worker(position: int, cand: SearchResult) -> None:
             async with sem:
-                results[position] = await self._read_one(st, position, cand, terms)
+                fetches[position] = await self._fetch_one(cand)
 
         try:
             async with asyncio.TaskGroup() as tg:
@@ -401,16 +420,31 @@ class ResearchEngine:
                     tg.create_task(worker(pos, cand))
         except BaseExceptionGroup as group:  # surface the root cause, not the group wrapper
             raise group.exceptions[0] from None
+        # Fetch in parallel, decide in a fixed order: of two sources with identical text the more authoritative (then
+        # the better ranked) one is read and the other skipped as a duplicate – not whichever answered first (BUG-192).
+        order = sorted(range(len(candidates)), key=lambda i: (-_fetched_authority(fetches[i], self.policy.primary_domains), i))
+        for pos in order:
+            fetch = fetches[pos]
+            assert fetch is not None
+            results[pos] = await self._read_one(st, pos, candidates[pos], terms, fetch)
         return [r for r in results if r is not None]
 
-    async def _read_one(self, st: _RunState, position: int, cand: SearchResult, terms: Sequence[str]) -> _ReadSource | None:
-        domain = host_of(cand.url).removeprefix("www.") or "unknown"
-        cls = classify_source(cand.url, self.policy.primary_domains)
+    async def _fetch_one(self, cand: SearchResult) -> _Fetch:
         t0 = time.monotonic()
         try:
             fetched = await self.fetcher.fetch(cand.url)
             doc = extract_document(fetched.text, content_type=fetched.content_type, url=fetched.final_url)
         except Exception as exc:
+            return _Fetch(t0=t0, url=cand.url, error=exc)
+        return _Fetch(t0=t0, url=fetched.final_url, fetched=fetched, doc=doc)
+
+    async def _read_one(self, st: _RunState, position: int, cand: SearchResult, terms: Sequence[str], fetch: _Fetch) -> _ReadSource | None:
+        domain = host_of(cand.url).removeprefix("www.") or "unknown"
+        cls = classify_source(cand.url, self.policy.primary_domains)
+        t0 = fetch.t0
+        fetched, doc = fetch.fetched, fetch.doc
+        if fetch.error is not None or fetched is None or doc is None:
+            exc = fetch.error or RuntimeError("fetch returned nothing")
             code = self._error(st, "fetch", exc, url=cand.url)
             st.failed_sources += 1
             row = store.SourceRow(

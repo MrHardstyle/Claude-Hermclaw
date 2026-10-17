@@ -46,6 +46,15 @@ Noch keine.
 
 ## Behobene Bugs
 
+### BUG-192 – Research: Bei inhaltsgleichen Quellen gewinnt die schnellere statt der maßgeblichen
+- Phase: Full-Suite für 0.1.0rc18 · Komponente: research/engine · Severity: P2 · blockierend: nein (behoben) · Status: **behoben** (`tests/integration/test_research_engine.py::test_duplicate_text_keeps_the_authoritative_source_even_when_the_mirror_answers_first`)
+- Reproduktion: `test_run_links_job_and_identical_claims_from_two_sources_are_merged` war flaky. Einzeln wiederholt schlug er etwa jeden dritten Lauf fehl, weil die Doku statt des Mirrors als Duplikat übersprungen wurde.
+- Ursache: Die Quellen werden parallel geladen. Die Duplikatprüfung (`content_hash`) markierte die Quelle als gelesen, die zuerst antwortete. In der Produktion konnte so ein schneller Mirror oder ein Forum die offizielle Dokumentation verdrängen.
+- Fix:
+  - Weiterhin paralleles Laden, aber die Auswertung läuft in fester Reihenfolge: höhere Autorität zuerst, bei Gleichstand der Suchrang.
+  - Ereignisse und Persistenz folgen dieser Reihenfolge.
+  - Der neue Test lässt die Doku absichtlich langsamer antworten. Ohne Fix schlägt er fehl; der alte Test bestand mit Fix 15 von 15 Läufen.
+
 ### BUG-191 – Review verlangt eine Korrekturrunde für Kleinigkeiten („minor“)
 - Phase: Batterie-Lauf 1 auf 0.1.0rc17 (J5) · Komponente: review/invariant · Severity: P2 · blockierend: nein (behoben) · Status: **behoben** (`tests/unit/test_review_severity.py::test_fix_required_with_only_minor_findings_passes`)
 - Reproduktion: Job `0532105b-2b1e-4a85-9a0f-3726d8aa8196` (J5), Versuch 2 von S001.

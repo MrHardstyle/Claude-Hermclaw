@@ -1,7 +1,7 @@
 # STATUS
 
 ## Aktueller Zustand (2026-10-17)
-- Projekt: Hermclaw Next · Branch: `claude/hermclaw-next-build` · Version `0.1.0rc17` (gebaut); **deployt: 0.1.0rc16** (rc17 folgt) auf .222–.225 (Deployment durch Claude, Become-Passwort per systemd-creds)
+- Projekt: Hermclaw Next · Branch: `claude/hermclaw-next-build` · Version `0.1.0rc18` (gebaut); **deployt: 0.1.0rc17** (rc18 folgt) auf .222–.225 (Deployment durch Claude, Become-Passwort per systemd-creds)
 - Modell-Runtime seit rc16 (D-015): alle Chat-Rollen auf `qwen3.6:35b` in einem residenten `llama-server` auf .224 (`--n-cpu-moe 30`, 32K); Embeddings auf Ollama.
 - **Live-Abnahme nach Kapitel 12 durchgeführt** (2026-10-16): 396 Schritte erledigt, 34 mit offenem Live-Teil (`[~]`), 0 offen.
 - 0.1.0rc2 deployt (vom Betreiber, alle Hosts inkl. .224): doctor 19 ok, models 6/6 (Fallback, BUG-150 wirksam), workers 3/3.
@@ -129,8 +129,8 @@ Lint, mypy, ShellCheck, ansible-lint (production) sauber.
 - Embeddings: `embeddinggemma:300m` (768 dim; EmbeddingGemma 2 erst, wenn Ollama es unter Linux/CUDA ausführt, D-010)
 
 ## Bugs
-- 189 gefunden, **189 behoben** – `BUGS.md`. Live-Abnahme: BUG-143 bis BUG-189.
-  BUG-143–184 sind produktiv (0.1.0rc16); BUG-185–189 (Batterie-Lauf 1 auf rc16) wirken nach dem Deployment von 0.1.0rc17.
+- 192 gefunden, **192 behoben** – `BUGS.md`. Live-Abnahme: BUG-143 bis BUG-192.
+  BUG-143–189 sind produktiv (0.1.0rc17); BUG-190–192 (Batterie-Lauf 1 auf rc17, Full-Suite) wirken nach dem Deployment von 0.1.0rc18.
 - Externe Blocker: BLOCKER-002 (Tag-Push)
 
 ## Letzte Testresultate (2026-10-15, Build-Host)
@@ -158,9 +158,12 @@ bestanden; ansible-lint (production) sauber. `test_deploy_converge` ist angepass
 1. Batterie-Lauf 1 auf rc16 (erster Lauf mit qwen3.6/llama.cpp, `20261017T142643Z-jobs.md`): J1, J2, J3, J6 erfolgreich
    (3,3/4,7/10,1/2,9 min; J3/J6 nur durch die Metrik BUG-185 als FAIL gewertet), J4 `REPLAN_LIMIT` nach 12,4 min statt
    Rückfrage (BUG-187), J5 `PLANNER_INVALID_OUTPUT` (BUG-188). rc14 brauchte für J1–J6 Stunden bei 1/6.
-2. 0.1.0rc17 ausrollen, J1–J6 zweimal in Folge bestehen, dann die erweiterte Batterie X1–X5
+2. Batterie-Lauf 1 auf rc17 (`20261017T152819Z-jobs.md`): J1/J2/J3/J5/J6 erfolgreich (3,4/3,7/9,6/11,5/3,1 min),
+   J4 stellte nach 3,1 min korrekt die Rückfrage, FAIL nur durch die Dauer-Metrik (BUG-190); unnötige Korrekturrunde
+   durch ein Minor-Review in J5 (BUG-191).
+3. 0.1.0rc18 ausrollen, J1–J6 zweimal in Folge bestehen, dann die erweiterte Batterie X1–X5
    (`config/acceptance-jobs-extended.example.yaml`); danach Abbruch, parallele Jobs und Worker-Neustart prüfen.
-3. Wake-on-LAN einrichten (MACs, BIOS, Kapitel 13.1), danach `--suite wol --full-wol` und erst dann den Leerlauf-Suspend einschalten.
-4. Backup nach Terra einrichten (Kapitel 11), Backup-Suite; danach Soak-Test und Cutover (`docs/runbooks/cutover.md`).
-5. Drittabhängigkeiten eines Projekts installiert der Coder über `install_dependencies` (D-014); ein Projekt-Sandbox-Image
+4. Wake-on-LAN einrichten (MACs, BIOS, Kapitel 13.1), danach `--suite wol --full-wol` und erst dann den Leerlauf-Suspend einschalten.
+5. Backup nach Terra einrichten (Kapitel 11), Backup-Suite; danach Soak-Test und Cutover (`docs/runbooks/cutover.md`).
+6. Drittabhängigkeiten eines Projekts installiert der Coder über `install_dependencies` (D-014); ein Projekt-Sandbox-Image
    (`infra/sandbox-images/README.md`) bleibt für Systempakete nötig.

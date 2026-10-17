@@ -694,3 +694,37 @@ async def test_live_research_against_target_hosts(sessionmaker: async_sessionmak
         await gateway.aclose()
     assert contract.status in {"completed", "partial"} and contract.sources and contract.claims
     assert re.search(r"\[\d+\]", contract.synthesis)
+
+
+async def test_duplicate_text_keeps_the_authoritative_source_even_when_the_mirror_answers_first(
+    sessionmaker: async_sessionmaker[AsyncSession], server: FixtureServer
+) -> None:
+    """Sources are fetched in parallel; the duplicate check took whichever answered first, so a fast mirror could
+    replace the official docs (flaky in the rc18 suite, BUG-192). The more authoritative source now always wins."""
+    mirror = url(server, "mirror.example.test", "/copy/install")
+    docs = url(server, "docs.toolkit.test", "/install")
+    inner = fetcher()
+
+    class SlowDocs:
+        async def fetch(self, target: str) -> Any:
+            if "docs.toolkit.test" in target:
+                await asyncio.sleep(0.3)
+            return await inner.fetch(target)
+
+        async def aclose(self) -> None:
+            await inner.aclose()
+
+    engine = ResearchEngine(
+        sessionmaker,
+        happy_chat(),
+        StaticSearchProvider(default=[mirror, docs]),
+        SlowDocs(),
+        policy(),
+        models=MODELS,
+        settings=ResearchSettings(),
+    )
+    try:
+        contract = await engine.run(QUESTION)
+    finally:
+        await engine.aclose()
+    assert [s.domain for s in contract.sources] == ["docs.toolkit.test"]

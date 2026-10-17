@@ -2,6 +2,15 @@
 
 Format: [Keep a Changelog](https://keepachangelog.com/de/1.1.0/), Versionen nach PEP 440.
 
+## [0.1.0rc18] – Release Candidate (2026-10-17)
+
+Fixes aus Batterie-Lauf 1 auf 0.1.0rc17: J1/J2/J3/J5 erfolgreich (3,4/3,7/9,6/11,5 min). J4 stellte nach 3,1 min korrekt eine Rückfrage, wurde aber als FAIL gewertet.
+
+### Behoben
+- **Batterie-Dauer bei Rückfragen (BUG-190):** Die Dauer von Jobs in `waiting_for_user` oder `blocked` endet mit dem letzten Statuswechsel. Die Rückfrage ist auf ein bis zwei kurze Sätze begrenzt; vorher wurde sie bei 1000 Zeichen mitten im Satz abgeschnitten.
+- **Review mit nur „minor“-Befunden (BUG-191):** Das Review erzwingt keine Korrekturrunde mehr; die Befunde bleiben als Hinweise.
+- **Research-Duplikate (BUG-192):** Bei inhaltsgleichen Quellen wird die maßgebliche gelesen, nicht die schnellere.
+
 ## [0.1.0rc17] – Release Candidate (2026-10-17)
 
 Fixes aus Batterie-Lauf 1 auf 0.1.0rc16. Das war der erste Lauf mit qwen3.6:35b auf llama.cpp; Coder-Züge brauchten im Schnitt 14,9 s statt 39 s. Ergebnis mit korrigierter Metrik: J1, J2, J3 und J6 erfolgreich, J4 mit `REPLAN_LIMIT` statt sauberem Halt, J5 mit `PLANNER_INVALID_OUTPUT`. Die sechs Aufträge dauerten zusammen 36 min.
