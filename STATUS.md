@@ -1,7 +1,7 @@
 # STATUS
 
 ## Aktueller Zustand (2026-10-17)
-- Projekt: Hermclaw Next · Branch: `claude/hermclaw-next-build` · Version `0.1.0rc21`; **deployt: 0.1.0rc21** auf .222–.225 (Deployment durch Claude, Become-Passwort per systemd-creds)
+- Projekt: Hermclaw Next · Branch: `claude/hermclaw-next-build` · Version `0.1.0rc22`; **deployt: 0.1.0rc22** auf .222–.225 (Deployment durch Claude, Become-Passwort per systemd-creds)
 - Modell-Runtime seit rc16 (D-015): alle Chat-Rollen auf `qwen3.6:35b` in einem residenten `llama-server` auf .224 (`--n-cpu-moe 30`, 32K); Embeddings auf Ollama.
 - **Live-Abnahme nach Kapitel 12 durchgeführt** (2026-10-16): 396 Schritte erledigt, 34 mit offenem Live-Teil (`[~]`), 0 offen.
 - 0.1.0rc2 deployt (vom Betreiber, alle Hosts inkl. .224): doctor 19 ok, models 6/6 (Fallback, BUG-150 wirksam), workers 3/3.
@@ -130,7 +130,7 @@ Lint, mypy, ShellCheck, ansible-lint (production) sauber.
 
 ## Bugs
 - 207 gefunden, **207 behoben** – `BUGS.md`. Live-Abnahme: BUG-143 bis BUG-207.
-  BUG-143–206 sind produktiv (0.1.0rc21; rc20 deployt 2026-10-17 20:40, Scheduler-Neustart mit laufendem Job live geprüft: Job lief nach dem Deployment weiter).
+  BUG-143–207 sind produktiv (0.1.0rc22; rc20 deployt 2026-10-17 20:40, Scheduler-Neustart mit laufendem Job live geprüft: Job lief nach dem Deployment weiter).
 - Externe Blocker: BLOCKER-002 (Tag-Push)
 
 ## Letzte Testresultate (2026-10-15, Build-Host)
@@ -167,6 +167,10 @@ bestanden; ansible-lint (production) sauber. `test_deploy_converge` ist angepass
 4. Batterie-Lauf 1 auf rc19 (`20261017T181154Z-jobs.md`): J1/J3 erfolgreich (5,8/15,3 min), J4 korrekte Rückfrage nach
    2,5 min; J2 ohne MR (GitLab-Race, BUG-202), J5 unnötige Manifest-Änderung (BUG-203), J6 `REPLAN_LIMIT` durch
    widersprüchliches `must_not_change` (BUG-204).
+5. rc20: J1 `REPLAN_LIMIT` durch liegengebliebene Änderungen eines ersetzten Schritts (BUG-206, auch J5 des
+   verwaisten Parallel-Laufs).
+6. Batterie-Lauf 1 auf rc21 (`20261017T201512Z-jobs.md`): J1–J4 und J6 bestanden (4,6/4,3/13,9/2,4/2,6 min), J5
+   erfolgreich, aber Wiederholungs-Metrik 4 > 2 (BUG-207).
 3. 0.1.0rc18 ausrollen, J1–J6 zweimal in Folge bestehen, dann die erweiterte Batterie X1–X5
    (`config/acceptance-jobs-extended.example.yaml`); danach Abbruch, parallele Jobs und Worker-Neustart prüfen.
 4. Wake-on-LAN einrichten (MACs, BIOS, Kapitel 13.1), danach `--suite wol --full-wol` und erst dann den Leerlauf-Suspend einschalten.
