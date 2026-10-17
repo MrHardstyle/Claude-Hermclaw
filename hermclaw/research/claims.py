@@ -22,6 +22,7 @@ from hermclaw.core.redaction import DEFAULT_REDACTOR
 from hermclaw.models.protocols import CallContext, ChatMessage, ChatModel
 from hermclaw.research.text import (
     extract_values,
+    guess_language,
     key_terms,
     normalize_ws,
     overlap,
@@ -51,6 +52,17 @@ SYSTEM_PROMPT = (
     "- Only state what the source says. Do not add knowledge, opinions or advice. Skip navigation, ads and "
     "boilerplate. Return an empty list if the source is irrelevant."
 )
+
+
+def claim_language_rule(passages: str) -> str:
+    """Claims are checked word by word against the source, so they must be written in the source's language. A
+    German question made the model translate claims from English sources; the grounding check then dropped most of
+    them, including the decisive one (`x-api-key` header, grand job G1 on 0.1.0rc24, BUG-222). The synthesis writes
+    the answer in the question's language afterwards. Named last and concretely, because a rule in the system
+    prompt alone was ignored."""
+    language = guess_language(passages)
+    target = f"in {language}, the language of the source" if language else "in the language of the source text"
+    return f"Write every claim {target}, reusing its wording, even if the question uses another language."
 
 
 @dataclass(frozen=True)
@@ -246,7 +258,7 @@ class ClaimExtractor:
                 "user",
                 f"Research question:\n{question}\n\nSource title: {DEFAULT_REDACTOR.text(title)}\n"
                 f"Source URL: {DEFAULT_REDACTOR.text(url)}\n\n"
-                f"<source>\n{safe}\n</source>",
+                f"<source>\n{safe}\n</source>\n\n{claim_language_rule(passages)}",
             ),
         ]
 

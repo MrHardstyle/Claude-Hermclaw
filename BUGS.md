@@ -46,6 +46,13 @@ Noch keine.
 
 ## Behobene Bugs
 
+### BUG-222 – Recherche verwirft fast alle Claims, wenn die Frage nicht in der Sprache der Quelle gestellt ist
+- Phase: Großauftrag G1 auf 0.1.0rc24 · Komponente: research/claims · Severity: P1 · blockierend: nein (behoben) · Status: **behoben** (`tests/unit/test_research_claims.py::test_claims_are_written_in_the_language_of_the_source`; Live-Nachweis mit dem deployten Modell und der echten Seite: vorher 2/6 Claims grounded, danach 11/11 in zwei Läufen)
+- Reproduktion: Job `b3441414-9422-4887-8cb1-b0f7c43e5ced`, S002 „Recherchiere die aktuelle Unraid GraphQL-API-Dokumentation …“ endete `partial`: „Für die Authentifizierung liegen keine spezifischen Informationen zu API-Keys vor“. Die gelesene offizielle Seite `docs.unraid.net/API/how-to-use-the-api/` beschreibt den Header `x-api-key`. Von ihr kam genau ein Claim (das Fehlerformat).
+- Ursache: Bei einer deutschen Frage schreibt das Extraktionsmodell die Claims auf Deutsch. Die Grounding-Prüfung verlangt, dass mindestens 60 % der Inhaltswörter wörtlich in der (englischen) Quelle stehen. Übersetzte Claims fallen deshalb durch; übrig bleiben nur Claims, die fast ganz aus Code bestehen. Das betrifft jede Recherche mit einer anderen Sprache als die der Quellen, also praktisch jeden deutschen Auftrag.
+- Fix: Die Extraktion nennt am Ende der Nachricht die erkannte Sprache der Quelle (`guess_language`: Englisch/Deutsch über Funktionswörter, sonst „die Sprache des Quelltexts“) und verlangt Claims in dieser Sprache, mit dem Wortlaut der Quelle. Die Synthese antwortet weiterhin in der Sprache der Frage. Eine allgemeine Regel im System-Prompt allein wurde vom Modell ignoriert (live gemessen: weiterhin 3/6 verworfen).
+- Selbstprüfung: echter Schritt nach vorn. Die Grounding-Prüfung bleibt unverändert streng; die Ursache war die Sprache der Eingabe, nicht die Prüfung.
+
 ### BUG-221 – Doppelte Recherche-Schritte, wenn research_needed eine geplante Recherche umformuliert
 - Phase: Großauftrag G1 auf 0.1.0rc24 · Komponente: planner/validation · Severity: P3 · blockierend: nein (behoben) · Status: **behoben** (`tests/unit/test_planner_validation.py::test_research_request_rephrasing_an_existing_research_step_is_covered`)
 - Reproduktion: Job `b3441414-9422-4887-8cb1-b0f7c43e5ced`, Plan v1. Der Planner schrieb eigene Recherche-Schritte (S001 „Recherchiere die aktuelle Proxmox VE REST-API-Dokumentation …“, S002 Unraid) und stellte dieselben Themen anders formuliert unter `research_needed`. Die Anreicherung erzeugte daraus S009/S010. Vier Recherchen statt zwei, alle parallel auf dem Research-Worker; zwei Schritte des 20-Schritte-Budgets verbraucht.

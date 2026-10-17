@@ -27,6 +27,8 @@ Invariants:
 - **Web text is untrusted data.** It is wrapped in a `<source>…</source>` block in prompts, and a page cannot close
   that block early. Model claims must be *grounded*: every number or version they contain must appear in the
   source, and ≥ 60 % of their content terms must too.
+  Claims are therefore written in the source's language: the extraction prompt names the detected language of
+  the passages last (BUG-222). Only the synthesis answers in the question's language.
 - **Secrets never leak.** Questions, source titles, URLs, prompt passages and error messages pass through
   `hermclaw.core.redaction`. `append_event` redacts payloads again. URLs are redacted before they are stored or shown.
 - **SSRF protection** covers every network access, including the requests a browser makes while rendering a page

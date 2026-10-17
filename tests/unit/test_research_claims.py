@@ -17,6 +17,7 @@ from hermclaw.research.claims import (
     select_passages,
 )
 from hermclaw.research.contradictions import LlmContradictionConfirmer, detect_contradictions, find_conflicts, group_pairs
+from hermclaw.research.text import guess_language
 from tests.integration.test_research_support import ScriptedChat
 
 QUESTION = "Which Python version does Toolkit 4 require?"
@@ -96,7 +97,24 @@ async def test_prompt_is_redacted_and_fenced() -> None:
     prompt = chat.prompts()
     assert "sk-abcdefghijklmnopqrstuvwxyz123456" not in prompt
     user = chat.calls[0].messages[-1].content
-    assert user.count("</source>") == 1 and user.endswith("</source>")  # embedded closing fence is neutralised
+    assert user.count("</source>") == 1  # embedded closing fence is neutralised
+    assert user.rsplit("</source>", 1)[1].strip().startswith("Write every claim")  # only the language rule follows
+
+
+def test_claims_are_written_in_the_language_of_the_source() -> None:
+    """BUG-222: a German question made the model translate claims from English sources; grounding dropped them."""
+    english = (
+        "Generated API keys must be included in GraphQL requests as the header x-api-key. The API is available at /graphql "
+        "and the roles of a key can be changed by an admin from the settings page."
+    )
+    german = "Die API ist unter /graphql erreichbar und der Schlüssel wird mit dem Header übergeben, die Rolle ist nicht wählbar."
+    assert guess_language(english) == "English"
+    assert guess_language(german) == "German"
+    assert guess_language("query { info { cpu { cores } } }") is None
+    chat_messages = ClaimExtractor(ScriptedChat({}), "fast").messages("Wie authentifiziert man sich?", title="t", url="u", passages=english)
+    assert chat_messages[-1].content.endswith(
+        "Write every claim in English, the language of the source, reusing its wording, even if the question uses another language."
+    )
 
 
 def test_select_passages_keeps_relevant_paragraphs_within_budget() -> None:

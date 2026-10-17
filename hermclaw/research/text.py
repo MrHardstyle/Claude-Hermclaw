@@ -30,6 +30,24 @@ yourselves zu zum zur über
 """
 STOPWORDS: frozenset[str] = frozenset(_STOPWORDS_TEXT.split())
 
+# frequent function words that tell English and German text apart (for the claim language, BUG-222)
+_ENGLISH_MARKERS = "the and of to is are with for this that you be can by from"
+_GERMAN_MARKERS = "der die das und ist sind mit für nicht auf ein eine den dem sie wird"
+_LANGUAGE_MARKERS: dict[str, frozenset[str]] = {
+    "English": frozenset(_ENGLISH_MARKERS.split()),
+    "German": frozenset(_GERMAN_MARKERS.split()),
+}
+
+
+def guess_language(text: str, *, sample_chars: int = 6000) -> str | None:
+    """``"English"``/``"German"`` when one language's function words clearly dominate ``text``, else ``None``."""
+    words = re.findall(r"[a-zäöüß]+", text[:sample_chars].lower())
+    counts = {lang: sum(1 for w in words if w in markers) for lang, markers in _LANGUAGE_MARKERS.items()}
+    best = max(counts, key=lambda lang: counts[lang])
+    others = sum(v for lang, v in counts.items() if lang != best)
+    return best if counts[best] >= 5 and counts[best] >= 2 * others else None
+
+
 #: words that flip the polarity of a statement (used by contradiction detection)
 _NEGATIONS_TEXT = """
 aren't can't cannot couldn't didn't doesn't don't hadn't hasn't haven't isn't kein keine keinem keinen keiner

@@ -5,6 +5,7 @@ Format: [Keep a Changelog](https://keepachangelog.com/de/1.1.0/), Versionen nach
 ## [Unreleased]
 
 ### Behoben
+- **Recherche bei deutschen Aufträgen (BUG-222):** Claims werden in der Sprache der Quelle extrahiert und gegen sie geprüft; die Antwort bleibt in der Sprache der Frage. Vorher wurden übersetzte Claims als nicht belegt verworfen, z. B. die Unraid-Authentifizierung per `x-api-key`.
 - **Keine doppelten Recherchen (BUG-221):** Eine `research_needed`-Frage, die einen geplanten Recherche-Schritt nur umformuliert, erzeugt keinen zweiten Recherche-Schritt mehr.
 
 ## [0.1.0rc24] – Release Candidate (2026-10-18)
