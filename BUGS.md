@@ -46,6 +46,16 @@ Noch keine.
 
 ## Behobene Bugs
 
+### BUG-210 – Konflikt mit geänderter Base verwirft beim Abschluss die gesamte verifizierte Arbeit
+- Phase: Audit später Fehlerpfade (2026-10-17) · Komponente: runtime/finalize · Severity: P1 · blockierend: nein (behoben) · Status: **behoben** (`tests/integration/test_runtime_driver.py::test_conflicting_base_change_delivers_the_work_on_its_old_base`, `::test_failed_regression_fails_job_but_delivers_a_draft`)
+- Reproduktion: Während ein Job läuft, ändert jemand auf dem Ziel-Branch dieselbe Datei. Beim Abschluss scheitert `update_to_base` mit `MERGE_CONFLICT`, der Job endet `failed` und nichts wird gepusht. Ebenso bei `REGRESSION_FAILED` nach einem erfolgreichen Rebase.
+- Auswirkung: Ein mehrstündiger Job verliert ganz am Ende seine komplette, bereits verifizierte Arbeit. Ein Retry trifft auf denselben Konflikt.
+- Ursache: Der Abschluss behandelte eine Merge-Entscheidung, die die Runtime nie trifft, weil sie nie merged, als Fehler des Jobs.
+- Fix:
+  - Bei Konflikt bleibt der Workspace auf der alten Base. Der Branch wird als Draft-MR gepusht (`Draft:`-Titel, Konfliktdateien in Beschreibung und Bericht). Der Job endet `succeeded` mit dem Hinweis „Base-Konflikt – vor dem Merge auflösen“.
+  - Bei Regression nach dem Base-Update bleibt der Job `failed (REGRESSION_FAILED)`, der Branch wird aber ebenfalls als Draft-MR geliefert.
+- Selbstprüfung: echter Schritt nach vorn. Ein neuer Fehlerpfad, der vorher Arbeit vernichtete, kein Symptom eines früheren Fixes.
+
 ### BUG-209 – Tests in einem `test`-Schritt geplant, der nie Dateien schreibt
 - Phase: Erweiterte Batterie auf 0.1.0rc22 (X1) · Komponente: planner/validation · Severity: P1 · blockierend: ja (behoben) · Status: **behoben** (`tests/unit/test_planner_validation.py::test_a_check_only_step_cannot_create_files`, `::test_tests_for_new_code_belong_in_the_same_step`)
 - Reproduktion: Job `673d680c-7934-45ed-b34d-2d9820d1792a`.

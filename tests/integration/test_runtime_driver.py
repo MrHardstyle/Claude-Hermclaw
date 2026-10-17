@@ -291,7 +291,8 @@ async def test_base_moved_during_job_is_rebased_and_regression_rerun(world: Worl
     assert "Base aktualisiert" in await _report(world, jid)
 
 
-async def test_failed_regression_fails_job_without_push(world: World, tmp_path: Path) -> None:
+async def test_failed_regression_fails_job_but_delivers_a_draft(world: World, tmp_path: Path) -> None:
+    """The job stays failed, but its branch is pushed instead of being lost (BUG-210)."""
     chat = Chat([_plan()])
     driver = _driver(world, chat, tmp_path, regression=FakeRegression(ok=False))
     jid = await _job(world)
@@ -299,18 +300,26 @@ async def test_failed_regression_fails_job_without_push(world: World, tmp_path: 
         world, driver, [ImplementHandler(world, on_done=lambda: world.upstream.commit({"docs/guide.md": "x\n"})), ReviewHandler()], [jid]
     )
     assert jobs[jid].status == "failed" and jobs[jid].error_code == "REGRESSION_FAILED"
-    assert git("branch", "--list", "hermclaw/*", cwd=world.upstream.bare).strip() == ""
+    assert git("branch", "--list", "hermclaw/*", cwd=world.upstream.bare).strip() != ""
     assert "failed (REGRESSION_FAILED)" in await _report(world, jid)
 
 
-async def test_conflicting_base_change_fails_with_merge_conflict(world: World, tmp_path: Path) -> None:
+async def test_conflicting_base_change_delivers_the_work_on_its_old_base(world: World, tmp_path: Path) -> None:
+    """A base change that conflicts with a finished job failed it with MERGE_CONFLICT and nothing was pushed: hours of
+    verified work were lost for a merge decision the runtime never makes. The branch is pushed on its old base and the
+    report names the conflict (BUG-210)."""
     chat = Chat([_plan()])
     driver = _driver(world, chat, tmp_path)
     jid = await _job(world)
     conflict = lambda: world.upstream.commit({"src/module.py": "VALUE = 99\n"})  # noqa: E731
     jobs = await _run(world, driver, [ImplementHandler(world, on_done=conflict), ReviewHandler()], [jid])
-    assert jobs[jid].status == "failed" and jobs[jid].error_code == "MERGE_CONFLICT"
-    assert "MERGE_CONFLICT" in await _report(world, jid)
+    assert jobs[jid].status == "succeeded", (jobs[jid].error_code, jobs[jid].error_message)
+    assert "Base-Konflikt" in (jobs[jid].result_summary or "")
+    branch = git("branch", "--list", "hermclaw/*", cwd=world.upstream.bare).strip().lstrip("* ").strip()
+    assert branch, "the job branch must be pushed"
+    assert git("show", f"{branch}:src/module.py", cwd=world.upstream.bare) != "VALUE = 99"
+    report = await _report(world, jid)
+    assert "Base-Konflikt" in report and "src/module.py" in report
 
 
 async def test_blocked_step_triggers_gemma_replan_and_job_completes(world: World, tmp_path: Path) -> None:

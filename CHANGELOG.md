@@ -4,11 +4,12 @@ Format: [Keep a Changelog](https://keepachangelog.com/de/1.1.0/), Versionen nach
 
 ## [0.1.0rc23] – Release Candidate (2026-10-17)
 
-Fixes aus der erweiterten Batterie auf 0.1.0rc22 (X1 Datenanalyse-CLI).
+Fixes aus der erweiterten Batterie auf 0.1.0rc22 (X1 Datenanalyse-CLI) und dem Audit später Fehlerpfade.
 
 ### Behoben
 - **Bestätigungsfragen des Replanners (BUG-208):** Liefert der Replanner einen Plan und fragt trotzdem nach Bestätigung, laufen die Schritte weiter. Die Frage bleibt als Notiz erhalten. Nur ein Replan ohne Schritte wartet auf den Nutzer.
 - **Tests in Prüfschritten (BUG-209):** Pläne, die Dateien in einen `test`-, `verify`- oder `review`-Schritt legen, werden abgelehnt, mit dem Hinweis, Code und Tests in einen Schritt zu legen. Vorher wurden die Tests nie geschrieben und der Code-Schritt scheiterte am Review.
+- **Base-Konflikt beim Abschluss (BUG-210):** Hat sich der Ziel-Branch während des Jobs konfliktbehaftet geändert, wird die verifizierte Arbeit als Draft-MR auf der alten Base geliefert, statt verworfen zu werden. Eine Regression nach dem Base-Update lässt den Job weiterhin scheitern, liefert den Branch aber ebenfalls als Draft.
 
 ## [0.1.0rc22] – Release Candidate (2026-10-17)
 

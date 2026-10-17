@@ -339,11 +339,25 @@ class RuntimeJobDriver:
             if ws is not None:
                 notes.append(f"Ergebnisse im lokalen Scratch-Repository {ws.repository_name} (Job ohne Repository)")
         result = JobPhaseResult(ok=True)
+        conflict: MergeConflictError | None = None
         if ws is not None and self.git is not None:
             try:
                 base = await self.git.check_base(ws)
+                upd = None
                 if base.stale:
-                    upd = await self.git.update_to_base(ws, strategy=self.settings.update_strategy)
+                    try:
+                        upd = await self.git.update_to_base(ws, strategy=self.settings.update_strategy)
+                    except MergeConflictError as exc:
+                        # The base moved underneath a finished job and conflicts with it. The workspace is restored
+                        # unchanged; the verified work is delivered on its old base as a draft merge request that names
+                        # the conflicted files – a person resolves them when merging. Failing here threw away hours of
+                        # verified work for a decision the runtime never makes (it never merges).
+                        conflict = exc
+                        files = ", ".join(str(f) for f in (exc.details or {}).get("files") or [])
+                        where = files or "unbekannten Dateien"
+                        notes.append(f"Base-Konflikt: Ziel-Branch hat sich geändert, Konflikt in {where}; Draft-MR auf der alten Base")
+                        extra["base_conflict"] = {"files": (exc.details or {}).get("files") or [], "message": exc.message}
+                if upd is not None:
                     notes.append(f"Base aktualisiert ({upd.strategy}) {upd.old_base_sha[:10]} → {upd.new_base_sha[:10]}")
                     if self.regression is not None and upd.updated:
                         ok, info = await self.regression.rerun(job_id, await self.git.handle(ws))
@@ -354,13 +368,31 @@ class RuntimeJobDriver:
                                 error_message="regression rerun after base update failed",
                                 detail=info,
                             )
-                if result.ok and not token.cancelled:
+                # a regression after the base update still fails the job, but the work is delivered as a draft
+                # instead of being lost (BUG-210)
+                regressed = result.error_code == "REGRESSION_FAILED"
+                if (result.ok or regressed) and not token.cancelled:
                     if await self.git.changed_files(ws) or (await self._has_commits(ws)):
+                        title, description = job.title, f"Hermclaw job {job.id}"
+                        if regressed:
+                            title = f"Draft: {title}"
+                            description += (
+                                "\n\nThe target branch changed while the job ran; after rebasing onto it the job's "
+                                "checks fail. Fix before merging (details in the job report)."
+                            )
+                            notes.append("Regression nach Base-Update: Draft-MR, Job fehlgeschlagen")
+                        if conflict is not None:
+                            files = "\n".join(f"- `{f}`" for f in (conflict.details or {}).get("files") or [])
+                            title = f"Draft: {title}"
+                            description += (
+                                f"\n\nThe target branch changed while the job ran and conflicts with this change "
+                                f"({conflict.message}). Resolve before merging:\n{files}"
+                            )
                         push = await self.git.push_job_branch(
                             ws,
                             create_merge_request=False if scratch else self.settings.create_merge_request,
-                            title=job.title,
-                            description=f"Hermclaw job {job.id}",
+                            title=title,
+                            description=description,
                         )
                         if push.merge_request is not None:
                             extra["merge_request_url"] = push.merge_request.web_url
@@ -373,15 +405,19 @@ class RuntimeJobDriver:
             except GitError as exc:
                 code = GIT_NETWORK if _network_failure(exc) else exc.code
                 result = JobPhaseResult(ok=False, error_code=code, error_message=DEFAULT_REDACTOR.text(exc.message), detail=exc.details)
-        extra["final_status"] = "succeeded" if result.ok else f"failed ({result.error_code})"
+        extra["final_status"] = (
+            ("succeeded (Base-Konflikt, Draft-MR)" if conflict else "succeeded") if result.ok else f"failed ({result.error_code})"
+        )
         async with self.sm() as s:
             data = await collect_report_data(s, job_id)
             text = render_report(data, extra=extra)
             art = await write_report_artifact(s, job_id, text, self.settings.artifacts_dir or get_settings().artifacts_dir)
             job_row = (await s.execute(select(Job).where(Job.id == job_id).with_for_update())).scalar_one()
             done = sum(1 for st in data["steps"] if st.status == "completed" and not st.superseded)
-            job_row.result_summary = f"{done} Steps abgeschlossen; Bericht: {art.name}" + (
-                f"; MR: {extra['merge_request_url']}" if extra.get("merge_request_url") else ""
+            job_row.result_summary = (
+                f"{done} Steps abgeschlossen; Bericht: {art.name}"
+                + (f"; MR: {extra['merge_request_url']}" if extra.get("merge_request_url") else "")
+                + ("; Base-Konflikt – vor dem Merge auflösen" if conflict else "")
             )
             await emit_status(s, job_id, "Abschlussbericht erstellt")
             await s.commit()

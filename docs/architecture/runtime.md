@@ -15,8 +15,8 @@
 ## finalize(job_id) – committing → succeeded/failed
 
 Steps commit themselves via `GitEngine.commit_verified` (commit only after a passed verification). Finalize then:
-- `check_base` → if stale `update_to_base` (rebase by default) → `RegressionCheck.rerun` (P23 23.5); failure → `REGRESSION_FAILED`
-- conflict → `MERGE_CONFLICT` (job fails with evidence; operator can retry/replan)
+- `check_base` → if stale `update_to_base` (rebase by default) → `RegressionCheck.rerun` (P23 23.5); failure → `REGRESSION_FAILED` (the job fails, but its branch is still pushed as a draft MR, BUG-210)
+- conflict → the workspace stays on its old base, the branch is pushed as a draft MR (`Draft:` title, conflicted files in the description and the report); the job succeeds with the note `Base-Konflikt` (BUG-210). The runtime never merges, so the person merging resolves the conflict.
 - `push_job_branch` (+ GitLab merge request when configured) only if the branch carries commits
 - deterministic final report `final_report.md` (artifact kind `report`, `runtime/report.py`) from persisted facts:
   steps/attempts, verification, review findings, research sources, commits/pushes/MR, model usage; `jobs.result_summary`.
