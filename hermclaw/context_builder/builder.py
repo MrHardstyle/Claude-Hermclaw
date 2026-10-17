@@ -302,7 +302,8 @@ class ContextBuilder:
         )
         rendered[SectionName.SCOPE] = render_scope(step.scope, cfg.exclude_globs, cost[SectionName.SCOPE], max_items=cfg.max_list_items)
         rendered[SectionName.CONSTRAINTS] = render_constraints([self._red(c) for c in step.constraints], cost[SectionName.CONSTRAINTS])
-        rendered[SectionName.ACCEPTANCE] = render_acceptance(list(step.acceptance), cost[SectionName.ACCEPTANCE])
+        changed_now = list(dict.fromkeys([*_as_paths(changed), *(e.path for e in _as_status(status))]))
+        rendered[SectionName.ACCEPTANCE] = render_acceptance(list(step.acceptance), cost[SectionName.ACCEPTANCE], changed_now)
         for name in (SectionName.SCOPE, SectionName.ACCEPTANCE):
             self._post_redact(rendered[name], cost[name])
         rendered[SectionName.CURRENT_REPO_FACTS] = render_repo_facts(

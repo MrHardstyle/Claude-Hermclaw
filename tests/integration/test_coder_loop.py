@@ -181,20 +181,21 @@ async def test_checks_are_withheld_after_a_refused_repeat_until_a_file_changes(s
         act("run_test", "Test (rot)", command=cmd),
         act("run_test", "nochmal", command=cmd),
         act("read_file", path="app.py"),
-        act("write_file", "Fix", path="app.py", content="def add(a, b):\n    return a + b\n"),
+        act("write_file", "gleicher Inhalt", path="tests/test_app.py", content=TEST_FILE),
+        act("write_file", "Fix", path="app.py", content='"""Adds."""\n\n\ndef add(a, b):\n    return a + b\n'),
         act("read_file", path="app.py"),
     ]
-    h, loop, chat = await _setup(sessionmaker, tmp_repo, actions, max_turns=6)
+    h, loop, chat = await _setup(sessionmaker, tmp_repo, actions, max_turns=7)
     await _run(h, loop)
 
     def prompt(turn: int) -> str:
         return "\n".join(m.content for m in chat.prompts[turn - 1])
 
     assert "- run_test(" in prompt(3), "a first repeat is still offered (the guard refuses it)"
-    for turn in (4, 5):
+    for turn in (4, 5, 6):  # neither a read (turn 4) nor a write of identical content (turn 5, BUG-182) changes anything
         assert "- run_test(" not in prompt(turn) and "- run_command(" not in prompt(turn)
         assert "withheld until something changes" in prompt(turn)
-    assert "- run_test(" in prompt(6) and "withheld" not in prompt(6), "the edit in turn 5 brings the checks back"
+    assert "- run_test(" in prompt(7) and "withheld" not in prompt(7), "the edit in turn 6 brings the checks back"
 
 
 async def test_out_of_scope_write_is_refused_and_reported_to_the_model(sessionmaker: Any, tmp_repo: Path) -> None:

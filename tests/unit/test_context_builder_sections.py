@@ -188,6 +188,27 @@ def test_every_evidence_type_is_described() -> None:
     assert lines[10].startswith("custom: {")
 
 
+async def test_acceptance_shows_which_required_changes_are_still_missing() -> None:
+    """BUG-182: the coder sees per diff criterion whether the workspace already has the required change (untracked
+    new files included), so green tests with a missing file lead to that edit and a complete one to complete_step."""
+    acceptance = [
+        DiffEvidence(must_change=["app.py"]),
+        DiffEvidence(must_change=["tests/test_server.py", "tests/test_*.py"]),
+        DiffEvidence(must_change=["docs/*.md"]),
+        TestEvidence(command="pytest -q", framework="pytest"),
+    ]
+    git = FakeGit(changed=["app.py"], status_entries=[GitStatusEntry(path="tests/test_new.py", status="??")])
+    builder, _, _ = make_builder(git=git)
+    built = await builder.build(make_input(step=make_step(acceptance=acceptance)))
+    text = built.messages[1].content
+    assert "1. diff: must change app.py; diff must not be empty — met (already changed)" in text
+    assert (
+        "2. diff: must change tests/test_server.py, tests/test_*.py; diff must not be empty — NOT YET CHANGED: tests/test_server.py" in text
+    )
+    assert "— NOT YET CHANGED: docs/*.md" in text
+    assert "passes (>= 1 passed) —" not in text, "only diff criteria carry a change status"
+
+
 def test_tool_catalogue_degrades_but_keeps_every_tool() -> None:
     tools = [
         ToolPromptSpec(

@@ -21,6 +21,7 @@ from hermclaw.contracts.scope import ScopeContract
 from hermclaw.contracts.verification import VerificationReport
 from hermclaw.core.interfaces import GitStatusEntry, WorkspaceHandle
 from hermclaw.scope.engine import literal_path
+from hermclaw.scope.guard import acceptance_glob_matches
 
 
 # ---------------------------------------------------------------------------------------------- input types
@@ -240,12 +241,28 @@ def describe_criterion(c: Any) -> str:
     return line + (f" — {clip_line(desc, 200)}" if desc else "")
 
 
-def render_acceptance(acceptance: Sequence[Any], budget: int) -> RenderedSection:
+def change_progress(c: Any, changed: Sequence[str]) -> str:
+    """Which required changes of a diff criterion the workspace already has (empty for other criteria).
+
+    The coder saw the criteria but not which of them its change already met: with green tests it re-ran checks instead
+    of finishing, or finished without a required file (live battery J2/J3 on 0.1.0rc14, BUG-182)."""
+    data: dict[str, Any] = c.model_dump() if isinstance(c, BaseModel) else dict(c) if isinstance(c, Mapping) else {}
+    if data.get("type") != "diff" or not data.get("must_change"):
+        return ""
+    missing = [str(g) for g in data["must_change"] if not any(acceptance_glob_matches(p, str(g)) for p in changed)]
+    if missing:
+        return f" — NOT YET CHANGED: {', '.join(missing[:10])}"
+    return " — met (already changed)"
+
+
+def render_acceptance(acceptance: Sequence[Any], budget: int, changed: Sequence[str] | None = None) -> RenderedSection:
     sec = RenderedSection(SectionName.ACCEPTANCE)
     if not acceptance:
         sec.omitted_reason = "empty"
         return sec
-    lines = [f"{i}. {describe_criterion(c)}" for i, c in enumerate(acceptance, 1)]
+    lines = [
+        f"{i}. {describe_criterion(c)}{change_progress(c, changed) if changed is not None else ''}" for i, c in enumerate(acceptance, 1)
+    ]
     fit_lines(sec, ["The runtime verifies these criteria deterministically after complete_step:", *lines], budget, what="criteria")
     sec.items_included = max(0, sec.items_included - 1)
     return sec

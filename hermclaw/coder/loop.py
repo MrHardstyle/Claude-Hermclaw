@@ -336,7 +336,12 @@ class CoderLoop:
             # 0.1.0rc14): the checks leave the catalogue until a file or the environment changes (BUG-181)
             if repeated and action.tool.value in _RUNNERS:
                 runners_withheld = True
-            elif result.ok and action.tool not in _READ_ONLY and action.tool.value not in _RUNNERS:
+            elif (
+                result.ok
+                and action.tool not in _READ_ONLY
+                and action.tool.value not in _RUNNERS
+                and result.data.get("changed") is not False  # a write of identical content changes nothing (J3, BUG-182)
+            ):
                 runners_withheld = False
             if runners_withheld:
                 notice = "\n".join(x for x in (notice, RUNNERS_WITHHELD) if x)
