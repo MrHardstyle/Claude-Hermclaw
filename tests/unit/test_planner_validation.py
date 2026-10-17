@@ -488,6 +488,28 @@ def test_tests_for_new_code_belong_in_the_same_step() -> None:
     assert not any("only writes tests" in e for e in _errors(plan("goal", [code, tests]), preserved=frozenset({"S001"})))
     js = step("S003", "implement", "coding", "Write src/app.test.js.", allowed_new_paths=["src/app.test.js"], depends_on=["S001"])
     assert any("S003 only writes tests" in e for e in _errors(plan("goal", [code, js])))
+    # rc22 battery X1: a README among the hints of the test step hid the split (BUG-209)
+    readme = step(
+        "S004",
+        "implement",
+        "coding",
+        "Write and run tests.",
+        allowed_new_paths=["test_service.py"],
+        repo_hints=["README.md"],
+        depends_on=["S001"],
+    )
+    assert any("S004 only writes tests" in e for e in _errors(plan("goal", [code, readme])))
+
+
+def test_a_check_only_step_cannot_create_files() -> None:
+    """rc22 battery X1: the unit tests were planned into a kind=test step, which only runs checks; the files were never
+    written and the implementing step's review demanded them until the step failed (BUG-209)."""
+    code = step("S001", "implement", "coding", "Create the analyzer.", allowed_new_paths=["analyzer.py"])
+    tests = step("S002", "test", "testing", "Write and run tests.", allowed_new_paths=["test_analyzer.py"], depends_on=["S001"])
+    errors = _errors(plan("goal", [code, tests]))
+    assert any("S002: kind 'test' only runs checks" in e and "test_analyzer.py" in e for e in errors)
+    run_only = step("S002", "test", "testing", "Run the tests.", depends_on=["S001"])
+    assert not any("only runs checks" in e for e in _errors(plan("goal", [code, run_only])))
 
 
 def test_must_change_has_to_match_the_files_of_the_step() -> None:

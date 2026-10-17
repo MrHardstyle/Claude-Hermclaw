@@ -360,8 +360,9 @@ class Replanner(PlannerBase):
 
         def validate(data: dict[str, Any]) -> ReplanValidated:
             contract = validate_schema(ReplanContract, data, limit=limit)
-            if contract.user_question.strip():
-                return ReplanValidated(enriched=None, kept_keys=frozenset(), question=contract.user_question.strip())
+            question = contract.user_question.strip()
+            if question and not contract.steps:
+                return ReplanValidated(enriched=None, kept_keys=frozenset(), question=question)
             errors: list[str] = []
             reruns: dict[str, str] = {}
             unreasoned: set[str] = set()
@@ -394,6 +395,10 @@ class Replanner(PlannerBase):
                 raise PlanInvalid("replan" if errors else "semantic", (errors + sem)[:limit])
             enriched = enrich_plan(merged, vctx, risk_policy, preserved=kept_keys, reserved_ids=set(snapshot.active_keys))
             enriched.notes[:0] = pruned
+            if question:
+                # A question next to a complete plan asks for confirmation, not for a decision the plan cannot do
+                # without: the job goes on with the plan instead of waiting for the user (BUG-208).
+                enriched.notes.append(f"replanner asked for confirmation while delivering a plan; proceeding: {question}")
             repeat = self._repeat_errors(enriched.plan, kept_keys, snapshot, trigger)
             if repeat:
                 raise PlanInvalid("replan", repeat)

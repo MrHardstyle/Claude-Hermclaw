@@ -414,6 +414,10 @@ TEST_PATH_RE = re.compile(
 )
 
 
+#: documentation a step reads or touches alongside its real work; it does not make a test step a code step (BUG-209)
+DOC_PATH_RE = re.compile(r"\.(?:md|markdown|rst|txt|adoc)$|(?:^|/)(?:README|CHANGELOG|LICENSE|NOTICE|AUTHORS)[^/]*$", re.IGNORECASE)
+
+
 def _step_paths(step: PlanStep, ctx: ValidationContext) -> list[str]:
     paths = [*path_like_hints(step, ctx)]
     for raw in step.allowed_new_paths:
@@ -422,6 +426,27 @@ def _step_paths(step: PlanStep, ctx: ValidationContext) -> list[str]:
         except ValueError:
             continue
     return paths
+
+
+#: kinds whose handler only runs checks: nothing in them ever writes a file
+CHECK_ONLY_KINDS = frozenset({StepKind.test.value, StepKind.verify.value, StepKind.review.value})
+
+
+def _check_only_creation_errors(new_steps: Sequence[PlanStep]) -> list[str]:
+    """A ``test``/``verify``/``review`` step only runs the checks of its acceptance; files listed in its
+    ``allowed_new_paths`` are never written, and the criteria that need them fail every attempt (rc22 battery X1: the
+    unit tests were planned into a ``test`` step, the implementing step's review demanded them, BUG-209)."""
+    errors: list[str] = []
+    for step in new_steps:
+        if step.kind.value in CHECK_ONLY_KINDS and step.allowed_new_paths:
+            paths = ", ".join(step.allowed_new_paths[:5])
+            errors.append(
+                f"step {step.id}: kind '{step.kind.value}' only runs checks and never writes files, so {paths} would "
+                "never be created; files a step writes (tests included) belong in a workspace-mutating step (kind "
+                "implement) - put them into the step that writes the code they test, and keep this step without "
+                "allowed_new_paths or remove it"
+            )
+    return errors
 
 
 def _split_test_errors(plan: PlanContract, new_steps: Sequence[PlanStep], ctx: ValidationContext, preserved: frozenset[str]) -> list[str]:
@@ -434,7 +459,9 @@ def _split_test_errors(plan: PlanContract, new_steps: Sequence[PlanStep], ctx: V
         if step.kind.value not in WORKSPACE_MUTATING_KINDS:
             continue
         paths = _step_paths(step, ctx)
-        if not paths or not all(TEST_PATH_RE.search(p) for p in paths):
+        tests = [p for p in paths if TEST_PATH_RE.search(p)]
+        # a README among the hints of a tests-only step is context, not code (rc22 battery X1)
+        if not tests or any(not TEST_PATH_RE.search(p) and not DOC_PATH_RE.search(p) for p in paths):
             continue
         for dep in step.depends_on:
             other = by_id.get(dep)
@@ -764,6 +791,7 @@ def semantic_errors(
 
     errors.extend(_research_question_errors(plan, new_steps))
     errors.extend(_split_test_errors(plan, new_steps, ctx, preserved))
+    errors.extend(_check_only_creation_errors(new_steps))
     for step in new_steps:
         errors.extend(_must_change_errors(step, ctx))
         errors.extend(_capability_errors(step, ctx))

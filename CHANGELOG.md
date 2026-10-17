@@ -2,6 +2,14 @@
 
 Format: [Keep a Changelog](https://keepachangelog.com/de/1.1.0/), Versionen nach PEP 440.
 
+## [0.1.0rc23] – Release Candidate (2026-10-17)
+
+Fixes aus der erweiterten Batterie auf 0.1.0rc22 (X1 Datenanalyse-CLI).
+
+### Behoben
+- **Bestätigungsfragen des Replanners (BUG-208):** Liefert der Replanner einen Plan und fragt trotzdem nach Bestätigung, laufen die Schritte weiter. Die Frage bleibt als Notiz erhalten. Nur ein Replan ohne Schritte wartet auf den Nutzer.
+- **Tests in Prüfschritten (BUG-209):** Pläne, die Dateien in einen `test`-, `verify`- oder `review`-Schritt legen, werden abgelehnt, mit dem Hinweis, Code und Tests in einen Schritt zu legen. Vorher wurden die Tests nie geschrieben und der Code-Schritt scheiterte am Review.
+
 ## [0.1.0rc22] – Release Candidate (2026-10-17)
 
 Fix aus Batterie-Lauf 1 auf 0.1.0rc21 (J1–J4 bestanden, J5 nur an der Wiederholungs-Metrik gescheitert).

@@ -361,6 +361,24 @@ async def test_replanner_question_makes_the_job_wait_and_the_answer_resumes_it(w
     assert "Use the standard library." in str(chat.user_payload(2))
 
 
+async def test_a_confirmation_question_next_to_a_plan_does_not_stop_the_job(world: World, tmp_path: Path) -> None:
+    """rc22 battery X1: the replanner returned a complete plan AND asked "please confirm if this approach is
+    acceptable"; the job stopped in waiting_for_user although nothing needed the user. A question next to steps is a
+    confirmation request: the steps run and the question is kept as a plan note (BUG-208)."""
+    replan = _replan()
+    replan["user_question"] = "Please confirm if this approach is acceptable."
+    chat = Chat([_plan(), replan])
+    driver = _driver(world, chat, tmp_path)
+    jid = await _job(world)
+    jobs = await _run(world, driver, [ImplementHandler(world, outcome="blocked"), ReviewHandler()], [jid])
+    assert jobs[jid].status == "succeeded", (jobs[jid].error_code, jobs[jid].error_message)
+    assert jobs[jid].replan_count == 1
+    events = await _events(world, jid)
+    assert not [e for e in events if e.event_type == "replan.user_question"]
+    created = [e.payload for e in events if e.event_type == "replan.created"]
+    assert created and "Please confirm" in str(created[0])
+
+
 async def test_retry_after_the_replan_limit_continues_with_a_fresh_budget(world: World, tmp_path: Path) -> None:
     """A job that failed with REPLAN_LIMIT came back from POST /retry only to fail again at once: the blocked step
     stayed blocked and the used-up budget was checked again. A long job could never be continued (BUG-189)."""

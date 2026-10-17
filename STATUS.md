@@ -129,7 +129,7 @@ Lint, mypy, ShellCheck, ansible-lint (production) sauber.
 - Embeddings: `embeddinggemma:300m` (768 dim; EmbeddingGemma 2 erst, wenn Ollama es unter Linux/CUDA ausführt, D-010)
 
 ## Bugs
-- 207 gefunden, **207 behoben** – `BUGS.md`. Live-Abnahme: BUG-143 bis BUG-207.
+- 209 gefunden, **209 behoben** – `BUGS.md`. Live-Abnahme: BUG-143 bis BUG-209.
   BUG-143–207 sind produktiv (0.1.0rc22; rc20 deployt 2026-10-17 20:40, Scheduler-Neustart mit laufendem Job live geprüft: Job lief nach dem Deployment weiter).
 - Externe Blocker: BLOCKER-002 (Tag-Push)
 
@@ -171,6 +171,9 @@ bestanden; ansible-lint (production) sauber. `test_deploy_converge` ist angepass
    verwaisten Parallel-Laufs).
 6. Batterie-Lauf 1 auf rc21 (`20261017T201512Z-jobs.md`): J1–J4 und J6 bestanden (4,6/4,3/13,9/2,4/2,6 min), J5
    erfolgreich, aber Wiederholungs-Metrik 4 > 2 (BUG-207).
+7. Erweiterte Batterie auf rc22: X1 (Datenanalyse-CLI) `waiting_for_user` nach 17,9 min. Die Tests waren in einen
+   `test`-Schritt geplant, der nie schreibt (BUG-209), und der Replanner stellte neben einem fertigen Plan eine
+   Bestätigungsfrage (BUG-208). Davor J1–J6 eines Laufs auf rc22 bestanden.
 3. 0.1.0rc18 ausrollen, J1–J6 zweimal in Folge bestehen, dann die erweiterte Batterie X1–X5
    (`config/acceptance-jobs-extended.example.yaml`); danach Abbruch, parallele Jobs und Worker-Neustart prüfen.
 4. Wake-on-LAN einrichten (MACs, BIOS, Kapitel 13.1), danach `--suite wol --full-wol` und erst dann den Leerlauf-Suspend einschalten.

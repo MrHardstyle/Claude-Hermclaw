@@ -434,7 +434,9 @@ def _base_rules(kind_capability: dict[str, str], capability_names: Sequence[str]
         "rejected: repository facts come from repository_inventory and retrieved_context; an empty or nearly empty "
         "repository has no stack yet, so choose the simplest fitting one yourself and state it as an assumption. "
         "Most jobs need no research at all.",
-        "Review steps (kind review) and verify steps (kind verify) must depend on the steps they check.",
+        "Review steps (kind review) and verify steps (kind verify) must depend on the steps they check. Steps of kind "
+        "test, verify and review only run checks and never write files: the step that writes code also writes its "
+        "tests (test files in its allowed_new_paths, test evidence in its acceptance).",
         "Network is off by default. Set network true (on a step or on command evidence) only for steps whose "
         "capability has network=true in capabilities.",
         "Code steps run their commands in a network-less sandbox with a fixed toolchain (language runtime and test "
@@ -480,7 +482,9 @@ def replanner_system_prompt(kind_capability: dict[str, str], capability_names: S
         "service, file, API, credential) that the evidence shows does not exist or cannot be obtained, or two of its "
         "requirements contradict each other, set user_question to one concrete question for the user in one or "
         "two short sentences (what is missing and which decision you need) and leave steps empty. The job then "
-        "waits for the answer. Do not ask about anything the repository, research or a different approach can settle.",
+        "waits for the answer. Do not ask about anything the repository, research or a different approach can settle, "
+        "and never ask the user to confirm a plan you can deliver: when you can plan the remaining work, return the "
+        "steps and leave user_question empty.",
     ]
     numbered = "\n".join(f"{i}. {r}" for i, r in enumerate(rules, start=1))
     return (

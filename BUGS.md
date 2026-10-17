@@ -46,6 +46,31 @@ Noch keine.
 
 ## Behobene Bugs
 
+### BUG-209 – Tests in einem `test`-Schritt geplant, der nie Dateien schreibt
+- Phase: Erweiterte Batterie auf 0.1.0rc22 (X1) · Komponente: planner/validation · Severity: P1 · blockierend: ja (behoben) · Status: **behoben** (`tests/unit/test_planner_validation.py::test_a_check_only_step_cannot_create_files`, `::test_tests_for_new_code_belong_in_the_same_step`)
+- Reproduktion: Job `673d680c-7934-45ed-b34d-2d9820d1792a`.
+  - Plan v1: S001 `implement` (`sales_analyzer.py`, `sample_sales.csv`), S002 `test` mit `allowed_new_paths: [test_sales_analyzer.py]`.
+  - Ein `test`-Schritt läuft im `VerifyStepHandler` und führt nur Checks aus. Die Testdatei wäre nie entstanden.
+  - Das Review von S001 verlangte die im Auftrag geforderten Tests („lacks the required unit tests“). Es folgten zwei Fehlversuche, `repeated_verifier_failure` und ein Replan mit derselben Aufteilung (S003/S004).
+- Ursache:
+  - Die Validierung prüfte `allowed_new_paths` nur auf Form, nicht darauf, ob der Schritttyp überhaupt schreibt.
+  - Die Regel „Code und Tests in einen Schritt“ (U3) prüfte nur schreibende Schritttypen. Zusätzlich ließ ein `README.md` unter den Hints des Testschritts die Aufteilung als Code-Schritt erscheinen.
+- Fix:
+  - Neuer Validierungsfehler für `test`/`verify`/`review`-Schritte mit `allowed_new_paths`. Die Meldung nennt die Lösung: die Dateien gehören in den Schritt, der den Code schreibt.
+  - In der Aufteilungsregel zählen Dokumentationspfade (`*.md`, `README*` …) nicht als Code.
+  - Planner-Prompt: test/verify/review schreiben nie Dateien; der Code-Schritt schreibt seine Tests selbst.
+- Selbstprüfung: Planner-Ebene wie BUG-188, 203 und 204, aber eine eigene Klasse: Erreichbarkeit nach Schritttyp statt Diff-Kriterien. Die Regel ist deterministisch und gilt für jedes Projekt.
+
+### BUG-208 – Bestätigungsfrage des Replanners stoppt einen Job mit fertigem Plan
+- Phase: Erweiterte Batterie auf 0.1.0rc22 (X1) · Komponente: planner/replanner · Severity: P1 · blockierend: ja (behoben) · Status: **behoben** (`tests/integration/test_runtime_driver.py::test_a_confirmation_question_next_to_a_plan_does_not_stop_the_job`)
+- Reproduktion: Job `673d680c-7934-45ed-b34d-2d9820d1792a`. Der Replanner lieferte gültige Schritte S003/S004 und zusätzlich `user_question`: „… Please confirm if this approach is acceptable or if you have specific constraints on the test structure.“ Der Job ging nach 17,9 min in `waiting_for_user`, obwohl nichts eine Entscheidung des Nutzers brauchte.
+- Ursache: `Replanner` behandelte jede gesetzte `user_question` als Rückfrage (Pfad aus BUG-187) und verwarf die Schritte. Das Modell nutzt das Feld auch für Höflichkeitsbestätigungen.
+- Fix:
+  - Eine Rückfrage zählt nur noch, wenn `steps` leer ist.
+  - Eine Frage neben einem Plan wird als Plan-Notiz im Ereignis `replan.created` festgehalten, und die Schritte laufen.
+  - Schema-Beschreibung und Replanner-Prompt sagen ausdrücklich: nie fragen, um einen lieferbaren Plan bestätigen zu lassen.
+- Selbstprüfung: echter Schritt nach vorn. Die Rückfrage aus BUG-187 bleibt für echte Blocker erhalten; nur der Fehlgebrauch hält keinen Job mehr an.
+
 ### BUG-207 – Grüner Check wird nach der Verweigerung immer wieder vorgeschlagen, statt den Schritt abzuschließen
 - Phase: Batterie-Lauf 1 auf 0.1.0rc21 (J5) · Komponente: coder · Severity: P2 · blockierend: ja für die Abnahme (behoben) · Status: **behoben** (`tests/integration/test_coder_loop.py::test_a_passing_check_proposed_again_after_the_refusal_completes_the_step`)
 - Reproduktion: Job `78c08cc2-5706-4c28-963c-bae59ddc1acb`. Nach grünem `node --test src/slugify.test.js 2>&1` schlug der Coder denselben Befehl noch dreimal vor. Der Guard verweigerte jedes Mal mit „It succeeded … call complete_step“. Metrik `repeats` 4 (max 2), FAIL. Dasselbe passierte bei rotem Test, dort mit Stagnation und Korrekturversuch als Folge.
