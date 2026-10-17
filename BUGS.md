@@ -46,6 +46,16 @@ Noch keine.
 
 ## Behobene Bugs
 
+### BUG-217 – Review meldet Syntaxfehler in einer Datei, die der Verifier fehlerfrei geparst hat
+- Phase: Erweiterte Batterie auf 0.1.0rc23 (X4) · Komponente: review · Severity: P1 · blockierend: ja (behoben) · Status: **behoben** (`tests/unit/test_review_severity.py::test_syntax_claims_against_a_parsed_file_are_downgraded`)
+- Reproduktion: Job `8ed97532-ab1b-4ee3-ae7a-310313c99835` (Plugin-System).
+  - `plugins/broken_plugin.py` enthielt den Kommentar „Force a syntax error by having an unclosed string“ über einer korrekt geschlossenen Zeichenkette. Der Verifier meldete `syntax:plugins/broken_plugin.py` = pass.
+  - Das Review meldete trotzdem zweimal einen blocker „unclosed string literal“ und schrieb selbst: „The verifier report claims syntax checks passed, which contradicts the code content“.
+  - S001 scheiterte (`REVIEW_FIX_REQUIRED`), Replan.
+- Ursache: Die Prompt-Regel „never contradict the verifier“ war nur ein Hinweis. Kein deterministischer Schritt prüfte Findings gegen die Werkzeug-Fakten.
+- Fix: Neue Review-Invariante 4. Ein major- oder blocker-Finding, das einen Syntaxfehler in einer Datei behauptet, deren Syntax-Check bestanden hat, wird auf minor herabgestuft und mit „[contradicts the verifier …]“ markiert; eine Normalisierungsnotiz bleibt erhalten. Andere Behauptungen und andere Dateien bleiben unberührt.
+- Selbstprüfung: echter Schritt nach vorn. Fakten schlagen Meinungen wie bei Invariante 2, jetzt auch in der Gegenrichtung; keine weitere Prompt-Bitte.
+
 ### BUG-216 – Review übersieht Randfall-Fehler bei Auftragsvorgaben (lockeres Parsen, Import-Seiteneffekte)
 - Phase: Qualitätsprüfung der gelieferten Dateien, Batterie auf 0.1.0rc23 (X2, X3) · Komponente: review · Severity: P2 · blockierend: nein (behoben) · Status: **behoben** (`tests/unit/test_review_prompt.py::test_system_prompt_rules`; Live-Nachweis: Review des echten X2-Diffs mit dem neuen Prompt → `fix_required`, major „parseInt accepts '3abc' and '2.5'“)
 - Reproduktion:

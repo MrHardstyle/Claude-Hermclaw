@@ -268,3 +268,42 @@ def test_absolute_and_traversing_paths_are_not_kept(bad: str) -> None:
     review = ReviewContract(verdict="fix_required", findings=[ReviewFinding(severity=FindingSeverity.major, path=bad, summary="look here")])
     out, _ = normalise_findings(review, ["app.py"])
     assert out.findings[0].path == "" and bad in out.findings[0].evidence
+
+
+def test_syntax_claims_against_a_parsed_file_are_downgraded() -> None:
+    """rc23 battery X4: a comment "unclosed string" made the model report a syntax error in a file the verifier had
+    parsed, as a blocker, twice; the step failed. A claim against a tool fact becomes minor (BUG-217)."""
+    from hermclaw.contracts.verification import VerificationCheck, VerificationReport
+    from hermclaw.review.invariant import CONTRADICTION_NOTE, apply_review_invariants, downgrade_contradicted_findings
+
+    report = VerificationReport(
+        passed=True,
+        checks=[
+            VerificationCheck(check_type="syntax", name="syntax:plugins/broken.py", status="pass", evidence={"path": "plugins/broken.py"})
+        ],
+    )
+    review = ReviewContract(
+        verdict="fix_required",
+        findings=[
+            ReviewFinding(
+                severity=FindingSeverity.blocker, path="plugins/broken.py", summary="contains a syntax error (unclosed string literal)"
+            ),
+            ReviewFinding(severity=FindingSeverity.major, summary="plugins/broken.py cannot be parsed by Python", evidence="line 16"),
+        ],
+        summary="broken",
+    )
+    fixed, notes = downgrade_contradicted_findings(review, report)
+    assert [f.severity for f in fixed.findings] == [FindingSeverity.minor, FindingSeverity.minor] and len(notes) == 2
+    assert fixed.findings[0].summary.startswith(CONTRADICTION_NOTE)
+    assert apply_review_invariants(fixed, verifier_passed=True).review.verdict == "pass"
+    # other claims, other files and files without a passed syntax check stay as they are
+    other = ReviewContract(
+        verdict="fix_required",
+        findings=[
+            ReviewFinding(severity=FindingSeverity.major, path="plugins/broken.py", summary="run() ignores its input"),
+            ReviewFinding(severity=FindingSeverity.blocker, path="app.py", summary="syntax error in line 3"),
+        ],
+        summary="x",
+    )
+    kept, none = downgrade_contradicted_findings(other, report)
+    assert kept == other and none == []
