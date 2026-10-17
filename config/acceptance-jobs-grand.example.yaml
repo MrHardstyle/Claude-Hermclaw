@@ -25,16 +25,24 @@ jobs:
       sofern die Schnittstelle sie liefert, Festplatten- bzw. Speicherbelegung (Proxmox-Storages, Unraid-Array, Cache
       und Pools), Status und Laufzeit; je VM bzw. Container Status, CPU, RAM und Laufzeit. Werte, die eine
       Schnittstelle nicht liefert, erscheinen als „n/v“ und werden nie geschätzt oder erfunden.
-      Recherchiere vorher die aktuellen offiziellen API-Dokumentationen: Proxmox VE REST-API mit API-Token und die
-      offizielle Unraid-API (API-Key). Architektur: ein Collector in Python 3 nur mit der Standardbibliothek fragt
-      alle Server parallel mit Zeitlimit ab; ein nicht erreichbarer Server oder ein Fehler blockiert die anderen
-      nicht und wird im Widget als Fehler des Servers angezeigt. Der Collector stellt lokal auf 127.0.0.1 eine
+      Recherchiere vorher die aktuellen offiziellen API-Dokumentationen: die Proxmox-VE-REST-API (/api2/json,
+      Anmeldung per API-Token oder per Benutzer und Passwort über ein Ticket) und die offizielle Unraid-API (GraphQL,
+      ab Unraid 7.2 eingebaut, Anmeldung per API-Key). Architektur: ein Collector in Python 3 nur mit der
+      Standardbibliothek fragt alle Server parallel mit Zeitlimit ab; ein nicht erreichbarer Server, falsche
+      Zugangsdaten oder eine ältere Version ohne die benötigte Schnittstelle blockieren die anderen nicht und werden
+      im Widget als verständlicher Fehler des Servers angezeigt. Der Collector stellt lokal auf 127.0.0.1 eine
       JSON-Schnittstelle und das Widget-Frontend bereit (HTML, CSS und JavaScript ohne Frameworks und ohne externe
       Ressourcen). Aufbereitung, Einheiten und Warnschwellen (Warnung ab 75 %, kritisch ab 90 %, beide
       konfigurierbar) berechnet der Python-Teil, das Frontend stellt nur dar und aktualisiert sich im
-      konfigurierbaren Intervall. Konfiguration in einer TOML-Datei mit Beispieldatei: Server, Adressen, Tokens bzw.
-      API-Keys, Prüfung selbstsignierter Zertifikate per Fingerprint oder bewusst abschaltbar, Intervall, Port.
-      Geheimnisse stehen nie im Code, in Logs oder in der JSON-Ausgabe.
+      konfigurierbaren Intervall.
+      Konfiguration: Das Widget hat einen Einstellungsbereich, in dem ich Server hinzufügen, bearbeiten und
+      entfernen kann – Typ (Proxmox oder Unraid), Anzeigename, IP-Adresse bzw. Hostname und Port, Zugangsdaten
+      (Proxmox: API-Token oder Benutzer und Passwort; Unraid: API-Key), Prüfung selbstsignierter Zertifikate per
+      Fingerprint oder bewusst abschaltbar – sowie Intervall und Schwellen einstelle; ein Knopf „Verbindung testen“
+      prüft einen Server sofort. Gespeichert wird in einer lokalen TOML-Datei (mit kommentierter Beispieldatei, die
+      auch von Hand bearbeitet werden kann). Gespeicherte Passwörter, Tokens und Keys werden nie wieder an das
+      Frontend ausgeliefert (nur „gesetzt“), stehen nie in Logs oder in der JSON-Ausgabe, und Änderungen an der
+      Konfiguration nimmt der Collector nur von 127.0.0.1 mit einem pro Start erzeugten Schutz-Token an.
       Design wie das alte Hermclaw-Webinterface: Hintergrund #070707, Flächen #121212 und #1C1917, Rahmen #292524,
       Text #FAFAF9 bzw. #A8A29E, Primärfarbe Orange #F97316 (Hover #FB923C), Erfolg #22C55E, Warnung #F59E0B, Fehler
       #EF4444, Radien 8 bis 12 px, dezenter orangefarbener Glüh-Schatten, Schrift Inter mit Systemschriften als
@@ -42,7 +50,8 @@ jobs:
       ist schmal genug für den Bildschirmrand.
       Windows-Integration: ein PowerShell-Skript startet Collector und Widget (kompaktes Microsoft-Edge-Fenster im
       App-Modus ohne Browserleiste) und richtet auf Wunsch den Autostart ein, ein zweites entfernt ihn wieder.
-      Teste Collector, Parser beider Schnittstellen, Aufbereitung, Schwellen und die JSON-Schnittstelle mit unittest
+      Teste Collector, Parser beider Schnittstellen, Aufbereitung, Schwellen, das Speichern der Konfiguration (ohne
+      Geheimnisse preiszugeben) und die JSON-Schnittstelle mit unittest
       anhand aufgezeichneter Beispielantworten (ohne Netzwerk). Dokumentiere in der README auf Deutsch Installation
-      unter Windows 11, das Anlegen eines Proxmox-API-Tokens mit nur lesenden Rechten und eines Unraid-API-Keys,
-      Konfiguration, Start, Autostart und Fehlerbehebung.
+      unter Windows 11, das Anlegen eines Proxmox-API-Tokens mit nur lesenden Rechten und eines Unraid-API-Keys mit
+      Leserechten, die Bedienung des Einstellungsbereichs, Start, Autostart und Fehlerbehebung.
