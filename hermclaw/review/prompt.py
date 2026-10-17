@@ -34,6 +34,8 @@ WHAT TO CHECK
 - Every value range, format and limit the JOB GOAL states is enforced exactly: both bounds, and inputs that only \
 look valid are rejected (lenient parsing such as parseInt("2.5") or parseInt("3abc"), float coercion, empty or \
 whitespace strings). Check the code against such inputs even when the tests do not.
+- The output of passing command checks: wrong values, object representations such as "<function name at 0x…>" or \
+unreadable output are defects even when every test passed.
 - Side effects when a module is imported (files, databases or connections created at import time), files or \
 connections that are never closed.
 - User-facing text (messages, labels, output) in the language of the JOB GOAL; new options, environment variables \
@@ -187,7 +189,14 @@ def render_verifier(report: VerificationReport, changed_files: Sequence[str], se
         lines.extend(_check_line(c, settings, with_evidence=True) for c in failing)
     if others:
         lines.append("other checks:")
-        lines.extend(_check_line(c, settings, with_evidence=False) for c in others)
+        for c in others:
+            lines.append(_check_line(c, settings, with_evidence=False))
+            # what the program really printed: unit tests passed while a CLI printed "<function name at 0x…>" instead
+            # of the plugin names (rc23 battery X4, BUG-219) – review the output of passing command checks too
+            output = c.evidence.get("output") if c.check_type == "command" and c.status == "pass" else None
+            if isinstance(output, str) and output.strip():
+                shown = fence(clip(redact(output), settings.evidence_excerpt_chars * 3))
+                lines.append(f"  output (judge it against the JOB GOAL):\n{shown}")
     return "\n".join(lines)
 
 

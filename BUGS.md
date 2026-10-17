@@ -46,6 +46,18 @@ Noch keine.
 
 ## Behobene Bugs
 
+### BUG-219 – Programme werden nie wie vom Nutzer ausgeführt; das Review sieht keine echte Ausgabe
+- Phase: Qualitätsprüfung der gelieferten Dateien, Batterie auf 0.1.0rc23 (X4) · Komponente: planner/review · Severity: P2 · blockierend: nein (behoben) · Status: **behoben** (`tests/unit/test_review_prompt.py::test_passing_command_checks_show_their_output`, Planner-Regel in `tests/unit/test_planner_prompt.py`; Live-Nachweis: Review mit der echten X4-Ausgabe → major „prints the function object instead of the plugin name“, Fix `module.name()`)
+- Reproduktion: Job `8ed97532-ab1b-4ee3-ae7a-310313c99835` (Plugin-System, `succeeded`, PASS). `python plugin_tool.py --list` gibt `- uppercase: <function name at 0x7fa1…>` aus, weil `module.name` nicht aufgerufen wird. 8 Unit-Tests grün, Verifier und Review pass. Außerdem sucht das Tool `plugins/` relativ zum Arbeitsverzeichnis.
+- Ursache:
+  - Kein Plan der bisherigen Batterien enthielt ein `command`-Kriterium. Geprüft wurden nur Unit-Tests, die die CLI-Ausgabe nicht abdecken.
+  - Das Review sah bei bestandenen Checks nur die Statuszeile, nie die Ausgabe des Programms.
+- Fix:
+  - Planner-Regel: Liefert ein Schritt ein ausführbares Programm, bekommt er ein `command`-Kriterium, das es wie ein Nutzer mit den Beispieldaten ausführt. `stdout_pattern` nur für einen Wert, der vorkommen muss, nie für exakte Formatierung; keine Server.
+  - Beispiel im Evidence-Katalog.
+  - Review: Bestandene `command`-Checks zeigen ihre Ausgabe („judge it against the JOB GOAL“); falsche Werte und Objektdarstellungen gelten als Defekt.
+- Selbstprüfung: echter Schritt nach vorn. Schließt die Lücke zwischen „Tests grün“ und „Programm funktioniert“ für jede Art von Programm.
+
 ### BUG-218 – Neue Programme, Optionen und Umgebungsvariablen bleiben undokumentiert
 - Phase: Qualitätsprüfung der gelieferten Dateien, Batterie auf 0.1.0rc23 (X1, X3) · Komponente: planner · Severity: P3 · blockierend: nein (behoben) · Status: **behoben** (`tests/unit/test_planner_prompt.py::test_research_is_for_external_facts_not_the_repository_itself`, prüft die Regel im Prompt)
 - Reproduktion: Job `47d60d3e-…` (X1) liefert ein neues CLI mit `--format`, Job `1dbe5ea5-…` (X3) führt `INVENTORY_DB` ein. Beide Repositorys haben eine README, keine wurde ergänzt. Das Ergebnis ist ohne Lesen des Codes nicht bedienbar.

@@ -205,6 +205,7 @@ def test_research_is_for_external_facts_not_the_repository_itself() -> None:
         assert "gets third-party packages only when the job names them" in system
         # rc23 battery quality review: new programs/options/env vars were never documented (BUG-218)
         assert "documents their use there" in system and "test, verify and review only run checks" in system
+        assert "runs it end to end the way a user would" in system  # BUG-219
 
 
 def test_replanner_system_prompt_adds_rerun_rules() -> None:

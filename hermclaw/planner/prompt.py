@@ -384,6 +384,8 @@ def _evidence_examples() -> str:
             '  {"type":"presence","path_glob":"src/**/*.py","pattern":"def handler\\\\("}',
             '  {"type":"absence","path_glob":"legacy/old_module.py"}  (path must not exist; with "pattern": text must not occur)',
             '  {"type":"command","command":"<read-only check command>","expect_exit_code":0}',
+            '  {"type":"command","command":"python tool.py report sample.csv --format json","stdout_pattern":"total"}  '
+            "(runs the delivered program end to end like a user)",
             '  {"type":"test","command":"<repository test command>","framework":"pytest|unittest|npm|phpunit|go|cargo|generic"}',
             '  {"type":"diff","must_change":["path/or/glob"],"must_not_change":[],"allow_empty":false}',
             '  {"type":"scope"}  (all changes stay inside the runtime scope)',
@@ -413,6 +415,11 @@ def _base_rules(kind_capability: dict[str, str], capability_names: Sequence[str]
         "library, or the repository already uses one. Every external dependency is an extra failure source: a "
         "repository without a dependency manifest gets third-party packages only when the job names them (the runtime "
         "refuses to install others), so plan the standard-library solution unless the job asks for a package.",
+        "When a step delivers a runnable program (command-line tool or script), its acceptance also gets one command "
+        "criterion that runs it end to end the way a user would – the documented command with the sample data or "
+        "arguments the step creates – so its real output is checked, not only unit tests. Use stdout_pattern only for a "
+        "value that must appear (a name, a number), never for exact formatting. Never start servers or watchers "
+        "(they do not exit).",
         "Deliver complete work: when the job adds a program, command, command-line options, configuration or "
         "environment variables and the repository has a README, the step that implements it also documents their "
         "use there (README in its repo_hints, or in allowed_new_paths when the repository has none and the job "

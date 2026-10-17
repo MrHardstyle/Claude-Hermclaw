@@ -254,3 +254,21 @@ def test_render_diff_omits_bodies_below_minimum() -> None:
     _, files = split_diff(_file("a.py", 400) + _file("b.py", 400))
     rendered = render_diff(files, 600, min_file_chars=400)
     assert rendered.files_truncated == 2 and "diff omitted to fit the review budget" in rendered.text
+
+
+def test_passing_command_checks_show_their_output() -> None:
+    """rc23 battery X4: all unit tests passed while `plugin_tool.py --list` printed "<function name at 0x…>"; the
+    review never saw program output. Passing command checks now carry it (BUG-219)."""
+    report = _report()
+    report.checks.append(
+        VerificationCheck(
+            check_type="command",
+            name="acceptance[2]:command",
+            status="pass",
+            evidence={"command": "python plugin_tool.py --list", "output": "Available plugins:\n  - uppercase: <function name at 0x7f>"},
+        )
+    )
+    user, _ = _user(_file("export.py", 2), verification=report)
+    assert "<function name at 0x7f>" in user and "judge it against the JOB GOAL" in user
+    plain, _ = _user(_file("export.py", 2))
+    assert "judge it against the JOB GOAL" not in plain
