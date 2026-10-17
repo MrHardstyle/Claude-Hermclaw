@@ -2,6 +2,32 @@
 
 Format: [Keep a Changelog](https://keepachangelog.com/de/1.1.0/), Versionen nach PEP 440.
 
+## [0.1.0rc17] – Release Candidate (2026-10-17)
+
+Fixes aus Batterie-Lauf 1 auf 0.1.0rc16. Das war der erste Lauf mit qwen3.6:35b auf llama.cpp; Coder-Züge brauchten im Schnitt 14,9 s statt 39 s. Ergebnis mit korrigierter Metrik: J1, J2, J3 und J6 erfolgreich, J4 mit `REPLAN_LIMIT` statt sauberem Halt, J5 mit `PLANNER_INVALID_OUTPUT`. Die sechs Aufträge dauerten zusammen 36 min.
+
+### Neu
+- **Rückfrage statt Workaround (BUG-187):**
+  - Der Replanner kann `user_question` stellen; der Job wartet dann in `waiting_for_user`, ohne Replan-Budget zu verbrauchen.
+  - Eine Neuplanung mit Begründung (`POST /api/jobs/{id}/replan?reason=…`) beantwortet die Frage und setzt den Job fort.
+  - Gemma plant nicht mehr um ausdrückliche Vorgaben des Auftrags herum.
+- **Retry setzt fort (BUG-189):**
+  - Erledigte Schritte bleiben; fehlgeschlagene und blockierte Schritte bekommen ein frisches Versuchs- und Replan-Budget.
+  - Mit Hinweis wird stattdessen die offene Arbeit neu geplant. Die UI fragt beim Retry nach einem optionalen Hinweis.
+- **Erweiterte Batterie** `config/acceptance-jobs-extended.example.yaml` mit fünf langen Aufträgen:
+  - X1: Datenanalyse-CLI;
+  - X2: Webseite mit getesteter Client-Logik;
+  - X3: SQLite-Persistenz;
+  - X4: Plugin-System;
+  - X5: REST-CRUD mit Doku.
+
+### Behoben
+- **Planer-Wiederholungsschleife (BUG-188):**
+  - Erfundene `must_change`-Dateien außerhalb des Schritts werden mit einer Notiz entfernt, solange eine erreichbare Datei bleibt.
+  - Eine Reparatur, die nichts ändert, läuft mit höherer Temperatur weiter.
+- **Batterie-Metrik (BUG-185):** `complete_step` wird nur von Schritten verlangt, die der Coder ausführt, nicht von `test`/`verify`.
+- **Arbeitsverzeichnis (BUG-186):** Coder-Vertrag und `run_command` sagen, dass Befehle im Repository-Root starten (vorher in rund 11 % der Befehle ein geratenes `cd /home/user/repo`).
+
 ## [0.1.0rc16] – Release Candidate (2026-10-17)
 
 Modell- und Runtime-Wechsel nach Messung (D-015, `docs/research/20261017-032-model-runtime.md`).
