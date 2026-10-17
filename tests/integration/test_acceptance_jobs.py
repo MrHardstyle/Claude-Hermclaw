@@ -160,7 +160,13 @@ def test_spec_rejects_unknown_expectations(tmp_path: Path) -> None:
 
 
 @pytest.mark.parametrize(
-    "name", ["acceptance-jobs.example.yaml", "acceptance-jobs-extended.example.yaml", "acceptance-jobs-long.example.yaml"]
+    "name",
+    [
+        "acceptance-jobs.example.yaml",
+        "acceptance-jobs-extended.example.yaml",
+        "acceptance-jobs-long.example.yaml",
+        "acceptance-jobs-grand.example.yaml",
+    ],
 )
 def test_shipped_batteries_load(name: str) -> None:
     specs = load_spec(Path(__file__).resolve().parents[2] / "config" / name)

@@ -1,0 +1,48 @@
+# Grand live job: one realistic multi-hour product job with research, several components and a Windows deliverable.
+# Run on its own (it takes hours), after the regression battery passes:
+#
+#   sudo -u hermclaw hermclaw acceptance-jobs /etc/hermclaw/acceptance-jobs-grand.yaml [--out DIR]
+#
+# The sandbox has neither network nor Windows: the job must make its logic testable with recorded API responses and
+# keep the Windows integration thin (scripts that only start and register the widget).
+repository: hermclaw-test
+defaults:
+  max_minutes: 480
+  max_replans: 6
+  max_first_plan_steps: 20
+  allow_dependencies: false
+  max_repeats: 4
+  require_merge_request: true
+  timeout_minutes: 720
+jobs:
+  - id: G1
+    title: Windows 11 homelab monitoring widget
+    base_branch: acceptance/empty
+    prompt: >-
+      Entwickle ein Desktop-Widget für Windows 11, das meine Homelab-Server überwacht: einen oder mehrere
+      Proxmox-VE-Server mit ihren VMs und LXC-Containern sowie einen oder mehrere Unraid-Server mit ihren VMs und
+      Docker-Containern. Angezeigt werden je Server CPU-Auslastung, RAM-Auslastung, GPU-Auslastung und Temperaturen,
+      sofern die Schnittstelle sie liefert, Festplatten- bzw. Speicherbelegung (Proxmox-Storages, Unraid-Array, Cache
+      und Pools), Status und Laufzeit; je VM bzw. Container Status, CPU, RAM und Laufzeit. Werte, die eine
+      Schnittstelle nicht liefert, erscheinen als „n/v“ und werden nie geschätzt oder erfunden.
+      Recherchiere vorher die aktuellen offiziellen API-Dokumentationen: Proxmox VE REST-API mit API-Token und die
+      offizielle Unraid-API (API-Key). Architektur: ein Collector in Python 3 nur mit der Standardbibliothek fragt
+      alle Server parallel mit Zeitlimit ab; ein nicht erreichbarer Server oder ein Fehler blockiert die anderen
+      nicht und wird im Widget als Fehler des Servers angezeigt. Der Collector stellt lokal auf 127.0.0.1 eine
+      JSON-Schnittstelle und das Widget-Frontend bereit (HTML, CSS und JavaScript ohne Frameworks und ohne externe
+      Ressourcen). Aufbereitung, Einheiten und Warnschwellen (Warnung ab 75 %, kritisch ab 90 %, beide
+      konfigurierbar) berechnet der Python-Teil, das Frontend stellt nur dar und aktualisiert sich im
+      konfigurierbaren Intervall. Konfiguration in einer TOML-Datei mit Beispieldatei: Server, Adressen, Tokens bzw.
+      API-Keys, Prüfung selbstsignierter Zertifikate per Fingerprint oder bewusst abschaltbar, Intervall, Port.
+      Geheimnisse stehen nie im Code, in Logs oder in der JSON-Ausgabe.
+      Design wie das alte Hermclaw-Webinterface: Hintergrund #070707, Flächen #121212 und #1C1917, Rahmen #292524,
+      Text #FAFAF9 bzw. #A8A29E, Primärfarbe Orange #F97316 (Hover #FB923C), Erfolg #22C55E, Warnung #F59E0B, Fehler
+      #EF4444, Radien 8 bis 12 px, dezenter orangefarbener Glüh-Schatten, Schrift Inter mit Systemschriften als
+      Ersatz. Kompakte Karten je Server mit Auslastungsbalken, die je VM bzw. Container aufklappbar sind; das Widget
+      ist schmal genug für den Bildschirmrand.
+      Windows-Integration: ein PowerShell-Skript startet Collector und Widget (kompaktes Microsoft-Edge-Fenster im
+      App-Modus ohne Browserleiste) und richtet auf Wunsch den Autostart ein, ein zweites entfernt ihn wieder.
+      Teste Collector, Parser beider Schnittstellen, Aufbereitung, Schwellen und die JSON-Schnittstelle mit unittest
+      anhand aufgezeichneter Beispielantworten (ohne Netzwerk). Dokumentiere in der README auf Deutsch Installation
+      unter Windows 11, das Anlegen eines Proxmox-API-Tokens mit nur lesenden Rechten und eines Unraid-API-Keys,
+      Konfiguration, Start, Autostart und Fehlerbehebung.
