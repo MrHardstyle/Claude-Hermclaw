@@ -281,13 +281,18 @@
   tags: [ollama, firewall]
 
 - name: Verify that the Ollama firewall table is loaded
+  vars:
+    # one port renders as "dport 11434 counter", Ollama + llama-server as "dport { 11434, 18080 } counter"
+    ollama_firewall_expected: >-
+      {{ ('dport ' ~ ollama_firewall_port ~ ' counter') if not ollama_llamacpp_enabled | bool
+         else ('dport { ' ~ ([ollama_firewall_port | int, ollama_llamacpp_port | int] | join(', ')) ~ ' } counter') }}
   ansible.builtin.command:
     argv: ["{{ ollama_firewall_nft_bin }}", list, table, inet, hermclaw_ollama]
   register: ollama_firewall_table
   changed_when: false
   failed_when: >-
     ollama_firewall_table.rc != 0
-    or ('dport ' ~ ollama_firewall_port ~ ' counter') not in ollama_firewall_table.stdout
+    or ollama_firewall_expected not in ollama_firewall_table.stdout
   check_mode: false
   when:
     - ollama_firewall_enabled | bool
