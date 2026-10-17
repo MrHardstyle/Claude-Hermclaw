@@ -9,6 +9,9 @@ Invariants (deterministic, enforced by the runtime – never left to the model):
 
 - `major`/`blocker` finding → the verdict can never be `pass` (`enforce_review_invariant` of the contract);
 - the verifier did not pass → the review can never pass either (facts beat opinions);
+- fix_required with only `minor` findings → pass, findings kept as notes (BUG-191);
+- a `major`/`blocker` finding that claims a syntax error in a file whose verifier syntax check passed → downgraded to
+  `minor` and marked "[contradicts the verifier …]" (`downgrade_contradicted_findings`, BUG-217);
 - every failure (invalid output after the gateway's repairs, timeout, model/infra error, missing heavy profile,
   unreadable diff, internal error, cancellation) is persisted as `status='error'` with the **fail-closed** verdict
   `fix_required` and a clear reason – no code path turns an error into a pass;
