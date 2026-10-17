@@ -3,6 +3,7 @@ Only the model is scripted (test-only fake)."""
 
 from __future__ import annotations
 
+import asyncio
 import sys
 import uuid
 from pathlib import Path
@@ -196,6 +197,37 @@ async def test_checks_are_withheld_after_a_refused_repeat_until_a_file_changes(s
         assert "- run_test(" not in prompt(turn) and "- run_command(" not in prompt(turn)
         assert "withheld until something changes" in prompt(turn)
     assert "- run_test(" in prompt(7) and "withheld" not in prompt(7), "the edit in turn 6 brings the checks back"
+
+
+class HangingCoder(ScriptedCoder):
+    """A model call that never answers on its own (a long generation with repairs)."""
+
+    def __init__(self) -> None:
+        super().__init__([])
+        self.interrupted = False
+
+    async def structured(self, alias: str, messages: list[ChatMessage], schema: type[T], **_: Any) -> StructuredResult[T]:
+        self.prompts.append(list(messages))
+        try:
+            await asyncio.sleep(3600)
+        except asyncio.CancelledError:
+            self.interrupted = True
+            raise
+        raise AssertionError("unreachable")
+
+
+async def test_a_cancel_interrupts_the_running_model_call(sessionmaker: Any, tmp_repo: Path) -> None:
+    """Live J6 on 0.1.0rc14: the cancel waited until the coder's model call with its repairs ended (BUG-184)."""
+    h, loop, _ = await _setup(sessionmaker, tmp_repo, [])
+    hanging = HangingCoder()
+    loop.chat = hanging
+    token = CancelToken()
+    run = asyncio.create_task(_run(h, loop, token))
+    while not hanging.prompts:
+        await asyncio.sleep(0.01)
+    token.cancel("cancelled via API")
+    res = await asyncio.wait_for(run, timeout=5)
+    assert res.outcome == "cancelled" and res.detail == "cancelled via API" and hanging.interrupted
 
 
 async def test_out_of_scope_write_is_refused_and_reported_to_the_model(sessionmaker: Any, tmp_repo: Path) -> None:

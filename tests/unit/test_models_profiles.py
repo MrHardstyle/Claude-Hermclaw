@@ -222,6 +222,31 @@ def test_example_fallback_caps_gpu_layers() -> None:
         by_role["planner_fallback"].model_validate({**by_role["planner_fallback"].model_dump(), "gpu_layers": -1})
 
 
+def test_llamacpp_profiles_route_to_the_resident_llama_server() -> None:
+    """D-015: every chat role on one resident llama-server (qwen3.6:35b); embeddings stay on Ollama."""
+    cfg = models_config()
+    chat = [p.alias for p in cfg.profiles if p.kind == "chat"]
+    for alias in chat:
+        cfg = replace_profile(cfg, alias, model="qwen3.6:35b", backend="llamacpp", deviation="D-015", gpu_layers=None)
+    assert [i for i in check_architecture(cfg) if i.severity == "error"] == []
+    conf = build_litellm_config(
+        cfg, ollama_urls_by_host={"model-224": "http://10.0.0.5:11434"}, llamacpp_urls_by_host={"model-224": "http://10.0.0.5:18080/"}
+    )
+    by_name = {m["model_name"]: m for m in conf["model_list"]}
+    coder = by_name["coder-main"]["litellm_params"]
+    assert coder["model"] == "openai/qwen3.6:35b" and coder["api_base"] == "http://10.0.0.5:18080/v1"
+    assert coder["extra_body"] == {"chat_template_kwargs": {"enable_thinking": False}}
+    assert not {"num_ctx", "keep_alive", "think", "num_gpu"} & set(coder), "no Ollama options for llama-server"
+    assert by_name["embedding"]["litellm_params"]["model"] == "ollama/embeddinggemma:300m"
+    with pytest.raises(ConfigError):
+        build_litellm_config(cfg, ollama_urls_by_host={"model-224": "http://10.0.0.5:11434"})
+    # one server serves one model; embeddings cannot use it
+    two = replace_profile(cfg, "heavy-review", model="qwen3.8:27b")
+    assert any("serves one model" in i.message for i in check_architecture(two))
+    emb = replace_profile(models_config(), "embedding", backend="llamacpp")
+    assert any("chat profiles only" in i.message for i in check_architecture(emb))
+
+
 # ----------------------------------------------------------------------------------------------- litellm config (8.1)
 def test_build_litellm_config() -> None:
     cfg = models_config()

@@ -103,8 +103,11 @@ ModelRole = Literal["fast", "planner", "planner_fallback", "coder", "heavy", "em
 class ModelProfileConfig(_Strict):
     alias: str
     role: ModelRole
-    model: str  # Ollama tag
+    model: str  # Ollama tag (backend ollama) or the model name llama-server serves (backend llamacpp, ``--alias``)
     kind: Literal["chat", "embedding"] = "chat"
+    # ollama: Ollama loads the model per request. llamacpp: a resident llama-server on the profile's host (service
+    # ``llamacpp`` in hosts.yaml) serves it over its OpenAI-compatible API (D-015: MoE experts in RAM, attention on the GPU)
+    backend: Literal["ollama", "llamacpp"] = "ollama"
     host: str = "model-224"
     context_tokens: int = 8192
     max_output_tokens: int = 2048

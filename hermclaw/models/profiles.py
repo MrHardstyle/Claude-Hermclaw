@@ -34,6 +34,7 @@ from hermclaw.core.errors import ConfigError, NotFoundError
 from hermclaw.persistence.models import ModelProfile
 
 DEFAULT_OLLAMA_PORT = 11434
+DEFAULT_LLAMACPP_PORT = 18080
 
 
 # ----------------------------------------------------------------------------------------------- secrets
@@ -143,6 +144,18 @@ def check_architecture(models: ModelsConfig) -> list[ProfileIssue]:
                 issues.append(ProfileIssue("error", req.role, p.alias, "max_output_tokens must be smaller than context_tokens"))
             if p.kind == "embedding" and not p.embedding_dimensions:
                 issues.append(ProfileIssue("error", req.role, p.alias, "embedding profile needs embedding_dimensions"))
+            if p.backend == "llamacpp" and p.kind != "chat":
+                issues.append(ProfileIssue("error", req.role, p.alias, "backend llamacpp serves chat profiles only"))
+            if p.backend == "llamacpp" and p.gpu_layers is not None:
+                issues.append(ProfileIssue("warning", req.role, p.alias, "gpu_layers is ignored for llamacpp (set on llama-server)"))
+    # one resident llama-server per host serves exactly one model
+    served: dict[str, set[str]] = {}
+    for p in models.profiles:
+        if p.enabled and p.backend == "llamacpp":
+            served.setdefault(p.host, set()).add(normalize_model_tag(p.model))
+    for host, names in sorted(served.items()):
+        if len(names) > 1:
+            issues.append(ProfileIssue("error", "-", None, f"llamacpp on {host} serves one model, profiles name {sorted(names)}"))
     planners = [p.alias for p in models.profiles if p.role == "planner" and p.enabled]
     for p in models.profiles:
         if p.fallback_for is None:
@@ -251,6 +264,18 @@ def ollama_base_url(hosts: HostsConfig, host_id: str) -> str:
 
 def ollama_urls(hosts: HostsConfig, models: ModelsConfig) -> dict[str, str]:
     return {h: ollama_base_url(hosts, h) for h in ProfileRegistry(models).hosts()}
+
+
+def llamacpp_base_url(hosts: HostsConfig, host_id: str) -> str:
+    """llama-server endpoint of a model host: the ``llamacpp`` service probe of ``hosts.yaml`` (default port 18080)."""
+    host = hosts.by_id(host_id)
+    port = next((s.port for s in host.services if s.name == "llamacpp"), DEFAULT_LLAMACPP_PORT)
+    return validate_http_url(f"http://{host.address}:{port}", what=f"llamacpp endpoint of {host_id}")
+
+
+def llamacpp_urls(hosts: HostsConfig, models: ModelsConfig) -> dict[str, str]:
+    hosts_used = {p.host for p in ProfileRegistry(models).enabled() if p.backend == "llamacpp"}
+    return {h: llamacpp_base_url(hosts, h) for h in sorted(hosts_used)}
 
 
 # ----------------------------------------------------------------------------------------------- DB sync

@@ -17,3 +17,11 @@
     name: ollama
     state: restarted
   when: hermclaw_manage_services | bool
+
+- name: Restart llama-server
+  ansible.builtin.systemd_service:
+    name: hermclaw-llamacpp.service
+    state: restarted
+  when:
+    - ollama_llamacpp_enabled | bool
+    - hermclaw_manage_services | bool

@@ -9,9 +9,11 @@ that is the step handler's job.
 
 from __future__ import annotations
 
+import asyncio
+import contextlib
 import json
 import uuid
-from collections.abc import Sequence
+from collections.abc import Awaitable, Sequence
 from dataclasses import dataclass, field
 from typing import Any, Literal, Protocol
 
@@ -68,6 +70,22 @@ COMPLETION_CONTRACT = (
     "block_step: the step cannot be done within scope/requirements (state reason_code and the concrete obstacle). "
     "request_replan: the plan itself is wrong. The runtime verifies everything deterministically after complete_step."
 )
+
+
+async def _unless_cancelled[T](call: Awaitable[T], token: CancelToken) -> T | None:
+    """The call's result, or ``None`` once the token is cancelled first (the call is then cancelled)."""
+    task = asyncio.ensure_future(call)
+    stop = asyncio.ensure_future(token.wait_cancelled())
+    try:
+        await asyncio.wait({task, stop}, return_when=asyncio.FIRST_COMPLETED)
+    finally:
+        stop.cancel()
+    if task.done():
+        return task.result()
+    task.cancel()
+    with contextlib.suppress(asyncio.CancelledError):
+        await task
+    return None
 
 
 class ToolExecutor(Protocol):
@@ -298,7 +316,9 @@ class CoderLoop:
             )
             await self._report(built, job_id, step_id, attempt_id)
             try:
-                res = await self.chat.structured(
+                # a cancel interrupts the model call itself: a turn with repairs ran up to ~15 min before the cancel
+                # of live job J6 on 0.1.0rc14 took effect (BUG-184)
+                call = self.chat.structured(
                     s.alias,
                     built.messages,
                     CoderAction,
@@ -308,6 +328,9 @@ class CoderLoop:
                     temperature=s.temperature,
                     timeout_seconds=s.turn_timeout_seconds,
                 )
+                res = await _unless_cancelled(call, token)
+                if res is None:
+                    return CoderResult("cancelled", turn - 1, records, last_failure=last_failure, detail=token.reason)
             except ModelOutputInvalid as exc:
                 invalid_streak += 1
                 note = "Your last answer was not one valid action object; answer with exactly one tool call as JSON."

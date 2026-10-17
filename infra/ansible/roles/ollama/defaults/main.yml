@@ -63,3 +63,22 @@ ollama_verify: true
 ollama_expected_gpu_library: CUDA
 ollama_gpu_check_retries: 20
 ollama_gpu_check_delay: 3
+
+# llama.cpp next to Ollama (D-015): one resident llama-server on the model host serves the chat roles whose profile
+# says `backend: llamacpp` (experts of the MoE model in RAM via --n-cpu-moe, attention and KV cache on the GPU:
+# ~2x prefill and decode of Ollama's layer split on the 8 GB GTX 1080, measured 2026-10-17). It reads the GGUF from
+# Ollama's model store, so the model is pulled once with `ollama pull` (ollama_llamacpp_model is an Ollama tag).
+# The archive comes from scripts/ops/build-llamacpp.sh on the control node.
+ollama_llamacpp_enabled: false
+ollama_llamacpp_build: b11361
+ollama_llamacpp_archive_src: ""            # control-node path of llamacpp-<build>-sm61.tgz
+ollama_llamacpp_archive_sha256: ""         # its sha256 (printed by build-llamacpp.sh)
+ollama_llamacpp_install_root: /opt/llamacpp
+ollama_llamacpp_model: "qwen3.6:35b"       # Ollama tag; also the name llama-server serves (--alias)
+ollama_llamacpp_port: 18080
+ollama_llamacpp_context: 32768
+ollama_llamacpp_n_cpu_moe: 30              # MoE layers whose experts stay in RAM (lower = more on the GPU; 26 OOMs at 32K)
+ollama_llamacpp_threads: 6
+ollama_llamacpp_flash_attention: "on"
+ollama_llamacpp_extra_args: []             # further llama-server arguments (validated allowlist)
+ollama_llamacpp_health_retries: 60         # x 5 s: a cold page cache loads ~20 GB from disk

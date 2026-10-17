@@ -372,6 +372,7 @@ class Doctor:
                 self.add(name, "ok" if health == "ok" else "warn", f"state {row.state}, /health {health}, version {row.worker_version}")
             if host.worker_kind == "model":
                 await self._models(host, row)
+                await self._llamacpp(host)
             elif host.worker_kind == "execution":
                 await self._sandbox(host, row)
 
@@ -415,6 +416,32 @@ class Doctor:
             self.add(f"models:{host.id}", "fail", f"not installed: {', '.join(missing)} – scripts/ops/hermclaw-model-pull", missing=missing)
         else:
             self.add(f"models:{host.id}", "ok", f"{len(wanted)} role model(s) installed: {', '.join(wanted)}")
+
+    async def _llamacpp(self, host: HostConfig) -> None:
+        """The resident llama-server of a host that llamacpp profiles use (D-015): healthy and serving their model."""
+        from hermclaw.models.profiles import llamacpp_base_url, normalize_model_tag
+
+        wanted = {normalize_model_tag(p.model) for p in self.enabled_profiles() if p.host == host.id and p.backend == "llamacpp"}
+        if not wanted:
+            return
+        name = f"llamacpp:{host.id}"
+        base = llamacpp_base_url(self.config.hosts, host.id)
+        async with self._http() as http:
+            try:
+                health = await http.get(f"{base}/health")
+                listing = await http.get(f"{base}/v1/models")
+            except httpx.HTTPError as exc:
+                self.add(name, "fail", f"{base} unreachable: {type(exc).__name__} (systemctl status hermclaw-llamacpp)")
+                return
+        if health.status_code != 200:
+            self.add(name, "fail", f"{base}/health → HTTP {health.status_code} (model still loading?)")
+            return
+        served = {normalize_model_tag(str(m.get("id", ""))) for m in (listing.json().get("data") or []) if isinstance(m, dict)}
+        missing = sorted(wanted - served)
+        if missing:
+            self.add(name, "fail", f"serves {sorted(served)}, profiles need {missing} (llama-server --alias)")
+        else:
+            self.add(name, "ok", f"healthy, serves {', '.join(sorted(wanted))}")
 
     async def _sandbox(self, host: HostConfig, row: Any) -> None:
         from hermclaw.workers.client import ExecutionWorkerClient

@@ -1,0 +1,27 @@
+# Managed by Hermclaw – resident llama-server for the chat roles with `backend: llamacpp` (role ollama, D-015).
+# Reads the GGUF of the Ollama tag {{ ollama_llamacpp_model }} from Ollama's model store; port {{ ollama_llamacpp_port }} is
+# restricted to loopback and the orchestrator by hermclaw-ollama-firewall.service.
+[Unit]
+Description=Hermclaw llama-server ({{ ollama_llamacpp_model }})
+After=network-online.target hermclaw-ollama-firewall.service
+Wants=network-online.target
+Requires=hermclaw-ollama-firewall.service
+
+[Service]
+Type=simple
+User={{ ollama_user }}
+Group={{ ollama_group }}
+SupplementaryGroups={{ ollama_supplementary_groups | default(['video', 'render']) | join(' ') }}
+ExecStart={{ ollama_llamacpp_install_root }}/current/bin/llama-server -m {{ ollama_llamacpp_model_path }} --alias {{ ollama_llamacpp_model }} --host 0.0.0.0 --port {{ ollama_llamacpp_port }} -c {{ ollama_llamacpp_context }} -ngl 99 --n-cpu-moe {{ ollama_llamacpp_n_cpu_moe }} -fa {{ ollama_llamacpp_flash_attention }} -t {{ ollama_llamacpp_threads }} -np 1 --jinja --no-webui{% for a in ollama_llamacpp_extra_args %} {{ a }}{% endfor %}
+
+Restart=on-failure
+RestartSec=10
+TimeoutStartSec=600
+NoNewPrivileges=yes
+ProtectSystem=strict
+ProtectHome=yes
+PrivateTmp=yes
+ReadOnlyPaths={{ ollama_effective_models_dir }}
+
+[Install]
+WantedBy=multi-user.target

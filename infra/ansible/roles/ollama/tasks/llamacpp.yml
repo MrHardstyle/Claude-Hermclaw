@@ -1,0 +1,126 @@
+# llama.cpp next to Ollama (D-015): install the archive built by scripts/ops/build-llamacpp.sh, resolve the GGUF of
+# ollama_llamacpp_model in Ollama's store (pulled with ollama if missing) and run hermclaw-llamacpp.service.
+- name: Validate the llama.cpp settings
+  ansible.builtin.assert:
+    that:
+      - ollama_llamacpp_build is match('^b[0-9]+$')
+      - ollama_llamacpp_archive_src | length > 0
+      - ollama_llamacpp_archive_sha256 is match('^[0-9a-f]{64}$')
+      - ollama_llamacpp_install_root is match('^/[A-Za-z0-9._/-]+$')
+      - ollama_llamacpp_model is match('^[a-z0-9][a-z0-9._-]*(:[A-Za-z0-9._-]+)?$')
+      - ollama_llamacpp_port | int > 1024 and ollama_llamacpp_port | int < 65536
+      - ollama_llamacpp_port | int != hermclaw_ollama_port | int
+      - ollama_llamacpp_context | int >= 2048
+      - ollama_llamacpp_n_cpu_moe | int >= 0
+      - ollama_llamacpp_threads | int >= 1
+      - ollama_llamacpp_flash_attention in ['on', 'off', 'auto']
+      - ollama_llamacpp_extra_args | map('string') | reject('match', '^[A-Za-z0-9._:=,/-]+$') | list | length == 0
+    fail_msg: >-
+      invalid llama.cpp settings: ollama_llamacpp_archive_src/ollama_llamacpp_archive_sha256 come from scripts/ops/build-llamacpp.sh,
+      ollama_llamacpp_model is an Ollama tag, the port must differ from Ollama's
+    quiet: true
+
+- name: Check the llama.cpp archive on the control node
+  ansible.builtin.stat:
+    path: "{{ ollama_llamacpp_archive_src }}"
+    checksum_algorithm: sha256
+  delegate_to: localhost
+  become: false
+  register: ollama_llamacpp_archive_local
+
+- name: Refuse an archive with another checksum
+  ansible.builtin.assert:
+    that:
+      - ollama_llamacpp_archive_local.stat.exists
+      - ollama_llamacpp_archive_local.stat.checksum == ollama_llamacpp_archive_sha256
+    fail_msg: "{{ ollama_llamacpp_archive_src }} is missing or its sha256 differs from ollama_llamacpp_archive_sha256"
+    quiet: true
+
+- name: Create the llama.cpp directory for {{ ollama_llamacpp_build }}
+  ansible.builtin.file:
+    path: "{{ ollama_llamacpp_install_root }}/{{ ollama_llamacpp_build }}"
+    state: directory
+    owner: root
+    group: root
+    mode: "0755"
+
+- name: Extract llama.cpp {{ ollama_llamacpp_build }}
+  ansible.builtin.unarchive:
+    src: "{{ ollama_llamacpp_archive_src }}"
+    dest: "{{ ollama_llamacpp_install_root }}/{{ ollama_llamacpp_build }}"
+    owner: root
+    group: root
+    creates: "{{ ollama_llamacpp_install_root }}/{{ ollama_llamacpp_build }}/bin/llama-server"
+  notify: Restart llama-server
+
+- name: Point current at llama.cpp {{ ollama_llamacpp_build }}
+  ansible.builtin.file:
+    src: "{{ ollama_llamacpp_install_root }}/{{ ollama_llamacpp_build }}"
+    dest: "{{ ollama_llamacpp_install_root }}/current"
+    state: link
+    force: true
+  notify: Restart llama-server
+
+- name: Locate the Ollama manifest of {{ ollama_llamacpp_model }}
+  vars:
+    ollama_llamacpp_name: "{{ ollama_llamacpp_model.split(':')[0] }}"
+    ollama_llamacpp_tag: "{{ ollama_llamacpp_model.split(':')[1] if ':' in ollama_llamacpp_model else 'latest' }}"
+  ansible.builtin.set_fact:
+    ollama_llamacpp_manifest: "{{ ollama_effective_models_dir }}/manifests/registry.ollama.ai/library/{{ ollama_llamacpp_name }}/{{ ollama_llamacpp_tag }}"
+
+- name: Check for the manifest of {{ ollama_llamacpp_model }}
+  ansible.builtin.stat:
+    path: "{{ ollama_llamacpp_manifest }}"
+  register: ollama_llamacpp_manifest_st
+
+- name: Pull the llama.cpp model with Ollama {{ ollama_llamacpp_model }}
+  ansible.builtin.command:
+    argv: ["{{ ollama_bin }}", pull, "{{ ollama_llamacpp_model }}"]
+  environment:
+    OLLAMA_HOST: "127.0.0.1:{{ hermclaw_ollama_port }}"
+  when: not ollama_llamacpp_manifest_st.stat.exists
+  changed_when: true
+
+- name: Read the manifest of {{ ollama_llamacpp_model }}
+  ansible.builtin.slurp:
+    src: "{{ ollama_llamacpp_manifest }}"
+  register: ollama_llamacpp_manifest_raw
+
+- name: Resolve the GGUF of {{ ollama_llamacpp_model }}
+  vars:
+    ollama_llamacpp_layers: "{{ (ollama_llamacpp_manifest_raw.content | b64decode | from_json).layers }}"
+    ollama_llamacpp_digest: "{{ (ollama_llamacpp_layers | selectattr('mediaType', 'equalto', 'application/vnd.ollama.image.model') | first).digest }}"
+  ansible.builtin.set_fact:
+    ollama_llamacpp_model_path: "{{ ollama_effective_models_dir }}/blobs/{{ ollama_llamacpp_digest | replace(':', '-') }}"
+
+- name: Install hermclaw-llamacpp.service
+  ansible.builtin.template:
+    src: "{{ role_path }}/../../../systemd/hermclaw-llamacpp.service.j2"
+    dest: /etc/systemd/system/hermclaw-llamacpp.service
+    owner: root
+    group: root
+    mode: "0644"
+  notify:
+    - Reload systemd
+    - Restart llama-server
+
+- name: Apply the llama-server unit
+  ansible.builtin.meta: flush_handlers
+
+- name: Enable and start llama-server
+  ansible.builtin.systemd_service:
+    name: hermclaw-llamacpp.service
+    enabled: true
+    state: started
+  when: hermclaw_manage_services | bool
+
+- name: Wait until llama-server has loaded {{ ollama_llamacpp_model }}
+  ansible.builtin.uri:
+    url: "http://127.0.0.1:{{ ollama_llamacpp_port }}/health"
+  register: ollama_llamacpp_health
+  until: ollama_llamacpp_health.status == 200
+  retries: "{{ ollama_llamacpp_health_retries }}"
+  delay: 5
+  when:
+    - hermclaw_manage_services | bool
+    - not ansible_check_mode

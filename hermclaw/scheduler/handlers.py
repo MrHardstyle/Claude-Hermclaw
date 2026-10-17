@@ -52,6 +52,9 @@ class CancelToken:
     def cancelled(self) -> bool:
         return self._cancel.is_set()
 
+    async def wait_cancelled(self) -> None:
+        await self._cancel.wait()
+
     @property
     def checkpoint_requested(self) -> bool:
         return self._yield.is_set()

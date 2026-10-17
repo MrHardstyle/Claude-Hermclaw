@@ -45,9 +45,16 @@ class Endpoints:
         self.images_ok = True
         self.searx_status = 200
         self.litellm_up = True
+        self.llama_served = ["qwen3.6:35b"]
+        self.llama_status = 200
 
     def __call__(self, req: httpx.Request) -> httpx.Response:
         path = req.url.path
+        if req.url.port == 18080:
+            if path == "/health":
+                return httpx.Response(self.llama_status, json={"status": "ok" if self.llama_status == 200 else "loading model"})
+            if path == "/v1/models":
+                return httpx.Response(200, json={"data": [{"id": m} for m in self.llama_served]})
         if req.url.port == 4000:
             if not self.litellm_up:
                 raise httpx.ConnectError("refused", request=req)
@@ -254,3 +261,25 @@ async def test_pgvector_verdicts() -> None:
     status, detail = pgvector_status("0.8.6")
     assert status == "warn" and "CVE-2026-103484" in detail
     assert pgvector_status("0.8.7") == ("ok", "pgvector 0.8.7") and pgvector_status("0.10.0")[0] == "ok"
+
+
+async def test_llamacpp_server_is_checked_for_the_profiles_that_use_it(db: Any, tmp_path: Path) -> None:
+    """D-015: chat roles on the resident llama-server; doctor checks it is healthy and serves their model."""
+    cfg = get_config()
+    profiles = [
+        p.model_copy(update={"backend": "llamacpp", "model": "qwen3.6:35b", "deviation": "D-015", "gpu_layers": None})
+        if p.kind == "chat"
+        else p
+        for p in cfg.models.profiles
+    ]
+    cfg = cfg.model_copy(update={"models": cfg.models.model_copy(update={"profiles": profiles})})
+    ep = Endpoints(cfg)
+    checks = by_name(await doctor(cfg, settings(tmp_path), db, ep).run())
+    assert checks["llamacpp:model-224"].status == "ok" and "qwen3.6:35b" in checks["llamacpp:model-224"].detail
+    ep.llama_served = ["other:1b"]
+    checks = by_name(await doctor(cfg, settings(tmp_path), db, ep).run())
+    assert checks["llamacpp:model-224"].status == "fail" and "--alias" in checks["llamacpp:model-224"].detail
+    ep.llama_status = 503
+    checks = by_name(await doctor(cfg, settings(tmp_path), db, ep).run())
+    assert checks["llamacpp:model-224"].status == "fail" and "loading" in checks["llamacpp:model-224"].detail
+    assert "llamacpp:model-224" not in by_name(await doctor(get_config(), settings(tmp_path), db, Endpoints(get_config())).run())

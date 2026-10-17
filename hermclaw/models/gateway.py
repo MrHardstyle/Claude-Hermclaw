@@ -599,7 +599,7 @@ class LiteLLMGateway:
         }
         if json_schema is not None:
             body["response_format"] = response_format_for(json_schema)
-        if self.options.ollama_passthrough:
+        if self.options.ollama_passthrough and profile.backend == "ollama":
             body["think"] = profile.think
             body["num_ctx"] = profile.context_tokens
             if profile.gpu_layers is not None:

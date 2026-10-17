@@ -1,5 +1,7 @@
 #!/usr/sbin/nft -f
-# Managed by Hermclaw – Ollama has no authentication: port {{ ollama_firewall_port }} on {{ inventory_hostname }}
+{% set ports = [ollama_firewall_port | int] + ([ollama_llamacpp_port | int] if ollama_llamacpp_enabled | bool else []) %}
+{% set dports = (ports[0] | string) if ports | length == 1 else ('{ ' ~ ports | join(', ') ~ ' }') %}
+# Managed by Hermclaw – Ollama and llama-server have no authentication: port(s) {{ ports | join(', ') }} on {{ inventory_hostname }}
 # accepts loopback and {{ ollama_firewall_allowed_sources | join(', ') if ollama_firewall_allowed_sources else 'no other source' }} only (role ollama).
 # Only the table inet hermclaw_ollama is replaced (atomically); other tables and rules stay untouched.
 {% set v4 = ollama_firewall_allowed_sources | select('match', '^[0-9.]+(/[0-9]+)?$') | list %}
@@ -12,11 +14,11 @@ table inet hermclaw_ollama {
 		type filter hook input priority -5; policy accept;
 		iifname "lo" accept
 {% if v4 %}
-		ip saddr { {{ v4 | join(', ') }} } tcp dport {{ ollama_firewall_port }} accept
+		ip saddr { {{ v4 | join(', ') }} } tcp dport {{ dports }} accept
 {% endif %}
 {% if v6 %}
-		ip6 saddr { {{ v6 | join(', ') }} } tcp dport {{ ollama_firewall_port }} accept
+		ip6 saddr { {{ v6 | join(', ') }} } tcp dport {{ dports }} accept
 {% endif %}
-		tcp dport {{ ollama_firewall_port }} counter drop
+		tcp dport {{ dports }} counter drop
 	}
 }

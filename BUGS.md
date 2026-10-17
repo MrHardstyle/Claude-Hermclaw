@@ -46,6 +46,12 @@ Noch keine.
 
 ## Behobene Bugs
 
+### BUG-184 – Abbruch eines Auftrags wartet auf die laufende Modellantwort samt Reparaturen
+- Phase: Batterie-Lauf 1 auf 0.1.0rc14 (J6) · Komponente: coder/loop · Severity: P2 · blockierend: nein (behoben) · Status: **behoben** (`tests/integration/test_coder_loop.py::test_a_cancel_interrupts_the_running_model_call`)
+- Reproduktion: Job `bfb59aa6-8ab8-49de-8499-5bf037d7a20b` (J6): Der Abbruch wurde um ~14:52 angefordert (`job.control.cancel`). Der Coder lief noch zwei Modellaufrufe zu je 6144 Tokens (ungültig, Reparaturversuch) weiter; `cancelled` erst um 15:04.
+- Ursache: Der Coder prüft das Abbruch-Token nur zu Beginn eines Zuges; ein Modellaufruf mit bis zu zwei Reparaturen kann bei einer Endlosausgabe ~15 min dauern.
+- Fix: Der Modellaufruf eines Zuges läuft gegen das Abbruch-Token; ein Abbruch bricht den laufenden HTTP-Aufruf ab und beendet den Versuch sofort als `cancelled`. `CancelToken.wait_cancelled()` ist neu.
+
 ### BUG-183 – Planer-Hinweis zu neuen Manifesten strich das Paket, das der Auftrag ausdrücklich verlangt
 - Phase: Batterie-Lauf 1 auf 0.1.0rc14 (J4) · Komponente: planner/validation · Severity: P2 · blockierend: nein (behoben) · Status: **behoben** (`tests/unit/test_planner_validation.py::test_a_new_manifest_in_a_repository_without_one_gets_advice_once`)
 - Reproduktion: Job `20c71889-2881-45a6-97c1-ae710366709e` (J4, „Binde das Python-Paket "hermclaw-nonexistent-sdk-zz9" ein …“, `REPLAN_LIMIT` nach 35,0 min, erwartet: sauberes Blockieren in höchstens 30 min). Gemmas erster Plan legte requirements.txt an. Nach dem Hinweis aus BUG-178 plante Gemma ohne Manifest, ebenso in beiden Replans. Der Coder konnte das Paket so nie installieren: `install_dependencies` lieferte NOT_FOUND, das Anlegen der Datei wurde als SCOPE_VIOLATION abgewiesen, die Scope-Erweiterung abgelehnt, dann folgte ein Replan. Die Installation, die das Fehlen des Pakets gezeigt hätte, kam nie zustande.

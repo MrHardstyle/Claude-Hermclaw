@@ -203,6 +203,26 @@ async def test_passthrough_can_be_disabled(script: Script) -> None:
     assert not {"think", "num_ctx", "keep_alive"} & set(script.requests[0])
 
 
+async def test_llamacpp_profiles_get_no_ollama_options(script: Script) -> None:
+    """D-015: llama-server ignores or rejects Ollama's top-level options; thinking is set in the LiteLLM deployment."""
+    cfg = models_config()
+    cfg = cfg.model_copy(
+        update={
+            "profiles": [
+                p.model_copy(update={"backend": "llamacpp", "model": "qwen3.6:35b", "deviation": "D-015"}) if p.alias == "coder-main" else p
+                for p in cfg.profiles
+            ]
+        }
+    )
+    script.add("coder-main", completion("ok"))
+    client = httpx.AsyncClient(transport=httpx.MockTransport(script.handler))
+    async with LiteLLMGateway(cfg, api_key=MASTER_KEY, http_client=client) as gw:
+        await gw.chat("coder-main", [ChatMessage("user", "x")], ctx=CTX, json_schema={"type": "object"})
+    body = script.requests[0]
+    assert not {"think", "num_ctx", "keep_alive", "num_gpu"} & set(body)
+    assert body["response_format"]["type"] == "json_schema" and body["max_tokens"] == 6144
+
+
 async def test_context_overflow_rejected_before_http(script: Script) -> None:
     async with make(script) as gw:
         with pytest.raises(ValidationFailed) as exc:

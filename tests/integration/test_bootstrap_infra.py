@@ -246,6 +246,7 @@ def _render_vars(paths: Mapping[str, Any] | None = None) -> dict[str, Any]:
             "systemd_skeleton_worker_bind": "192.168.178.222",
             "ollama_effective_home": "/var/lib/ollama",
             "ollama_effective_models_dir": "/var/lib/ollama/models",
+            "ollama_llamacpp_model_path": "/var/lib/ollama/models/blobs/sha256-" + "0" * 64,
             "common_ssh_runtime_sudo_commands": ["/usr/bin/systemctl suspend"],
         }
     )
@@ -659,6 +660,24 @@ def test_rendered_ollama_and_nvidia_policy(rendered: dict[str, Path]) -> None:
             assert check.returncode == 0, check.stderr
 
 
+def test_llamacpp_unit_and_firewall_cover_the_llama_server_port(tmp_path: Path) -> None:
+    """D-015: the resident llama-server serves the Ollama blob read-only, as the ollama account, and its port is in
+    the same firewall table as Ollama's (loopback and the orchestrator only)."""
+    out = _render(tmp_path, tmp_path / "out", _render_vars({"ollama_llamacpp_enabled": True}))
+    unit = out["systemd/hermclaw-llamacpp.service"].read_text(encoding="utf-8")
+    assert "User=ollama" in unit and "ReadOnlyPaths=/var/lib/ollama/models" in unit
+    assert "--alias qwen3.6:35b --host 0.0.0.0 --port 18080 -c 32768 -ngl 99 --n-cpu-moe 30" in unit
+    assert "-m /var/lib/ollama/models/blobs/sha256-" in unit and "Requires=hermclaw-ollama-firewall.service" in unit
+    table = out["ollama/hermclaw-ollama.nft"].read_text(encoding="utf-8")
+    assert "ip saddr { 192.168.178.225 } tcp dport { 11434, 18080 } accept" in table
+    assert "tcp dport { 11434, 18080 } counter drop" in table
+    nft = shutil.which("nft")
+    if nft is not None:
+        check = _run([nft, "-c", "-f", str(out["ollama/hermclaw-ollama.nft"])], cwd=REPO)
+        if "Operation not permitted" not in check.stderr:
+            assert check.returncode == 0, check.stderr
+
+
 def test_rendered_podman_and_searxng(rendered: dict[str, Path]) -> None:
     delegate = rendered["podman/delegate.conf"].read_text(encoding="utf-8")
     assert "[Service]\nDelegate=cpu cpuset io memory pids" in delegate
@@ -710,6 +729,7 @@ def _stub_paths(root: Path) -> dict[str, str]:
         "systemd_skeleton_backup_command": str(root / "opt/hermclaw/bin/hermclaw-backup"),
         "systemd_skeleton_restore_test_command": str(root / "opt/hermclaw/bin/hermclaw-restore-test"),
         "ollama_install_root": str(root / "opt/ollama"),
+        "ollama_llamacpp_install_root": str(root / "opt/llamacpp"),
         "nvidia_persistenced_bin": str(root / "usr/bin/nvidia-persistenced"),
         "ollama_firewall_nft_bin": str(root / "usr/sbin/nft"),
     }
@@ -722,6 +742,7 @@ def _stub_paths(root: Path) -> dict[str, str]:
         "opt/hermclaw/bin/hermclaw-restore-test",
         "opt/litellm/venv/bin/litellm",
         "opt/ollama/current/bin/ollama",
+        "opt/llamacpp/current/bin/llama-server",
         "usr/sbin/ethtool",
         "usr/bin/nvidia-persistenced",
         "usr/sbin/nft",
@@ -771,6 +792,7 @@ def test_rendered_units_pass_systemd_analyze_verify(tmp_path: Path) -> None:
         "hermclaw-model-worker.service",
         "ollama.service",
         "hermclaw-ollama-firewall.service",
+        "hermclaw-llamacpp.service",
         "nvidia-persistenced.service",
     }
     res = _run([analyze, "verify", *[str(u) for u in units]], cwd=unit_dir, timeout=120)

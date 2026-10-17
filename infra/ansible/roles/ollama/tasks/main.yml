@@ -339,3 +339,31 @@
     - hermclaw_manage_services | bool
     - not ansible_check_mode
   tags: [ollama]
+
+- name: Run llama.cpp next to Ollama
+  ansible.builtin.include_tasks:
+    file: llamacpp.yml
+    apply:
+      tags: [ollama, llamacpp]
+  when:
+    - ollama_llamacpp_enabled | bool
+    - not ansible_check_mode
+  tags: [ollama, llamacpp]
+
+- name: Stop llama-server when it is switched off
+  when: not ollama_llamacpp_enabled | bool
+  tags: [ollama, llamacpp]
+  block:
+    - name: Check for hermclaw-llamacpp.service
+      ansible.builtin.stat:
+        path: /etc/systemd/system/hermclaw-llamacpp.service
+      register: ollama_llamacpp_unit_off
+
+    - name: Stop and disable hermclaw-llamacpp.service
+      ansible.builtin.systemd_service:
+        name: hermclaw-llamacpp.service
+        enabled: false
+        state: stopped
+      when:
+        - ollama_llamacpp_unit_off.stat.exists
+        - hermclaw_manage_services | bool
