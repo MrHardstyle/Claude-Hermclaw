@@ -46,6 +46,17 @@ Noch keine.
 
 ## Behobene Bugs
 
+### BUG-206 – Liegengebliebene Änderungen eines abgebrochenen Schritts gelten als Scope-Verstoß des nächsten Schritts
+- Phase: Batterie-Lauf 1 auf 0.1.0rc20 (J1) · Komponente: scope/coder · Severity: P1 · blockierend: ja (behoben) · Status: **behoben** (`tests/integration/test_scope_engine.py::test_uncommitted_changes_of_an_unfinished_step_are_adopted`)
+- Reproduktion: Job `a71399e6-e15f-486c-ad1e-73dcb0ad068a`.
+  - S001 änderte `README.md`, scheiterte und wurde durch Replan ersetzt; die Änderung blieb uncommittet im Work Tree.
+  - Die neuen Schritte S003 und S005 hatten `README.md` nicht im Scope. Jeder ihrer Versuche scheiterte mit „1 out-of-scope change(s)“ (`README.md`), also an einer Änderung, die sie nie gemacht hatten.
+  - Es folgten zwei Replans bis `REPLAN_LIMIT`. Ein einfacher Health-Endpoint-Job lief über 30 Minuten.
+- Ursache: Schritte eines Jobs laufen nacheinander und committen nach der Verifikation. Eine Änderung beim Start eines Schritts stammt deshalb immer von einem unfertigen früheren Versuch. Der Scope-Check misst gegen den HEAD beim Schrittstart und schrieb sie dem neuen Schritt zu.
+- Fix: Beim ersten Versuch eines Schritts übernimmt `ScopeEngine.adopt_leftovers` die liegengebliebenen Dateien in den Scope.
+  - Es entsteht eine neue Scope-Version (Quelle `replanner`, Ereignis `scope.expanded` mit `adopted_leftovers`). Verbotene Pfade werden nie übernommen.
+  - Verifier und Review beurteilen die Dateien mit dem Rest der Änderung. Vorhandene Arbeit geht nicht verloren.
+
 ### BUG-205 – Hängender Test blockiert einen Coder-Turn für das volle Sandbox-Limit von 600 s
 - Phase: Batterie-Lauf 2 auf 0.1.0rc19 (J1, abgebrochener Lauf) · Komponente: tools · Severity: P2 · blockierend: nein (behoben) · Status: **behoben** (`tests/integration/test_tools_engine_exec.py::test_commands_without_a_timeout_get_the_short_coder_default`)
 - Reproduktion: Job `f6af3249-155a-4fc0-a504-c44ecf199c95`. Der Coder schrieb einen Test, der einen `BaseHTTPRequestHandler` auf einem `BytesIO` aufruft und nie zurückkehrt. Turn 3 `python -m pytest -q` lief bis zum Timeout nach 600,2 s (20:14 → 20:24).

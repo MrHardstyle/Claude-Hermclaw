@@ -804,6 +804,54 @@ class ScopeEngine:
                 return None
             return contract_from_row(row)
 
+    async def adopt_leftovers(self, step_id: uuid.UUID, paths: Sequence[str]) -> ScopeContract | None:
+        """Take uncommitted changes a failed or superseded step left in the work tree into this step's scope.
+
+        Steps of a job run one at a time and commit after verification, so a change present when a step starts was
+        made by an earlier attempt that did not finish. The scope check attributed it to the new step, which could
+        never pass: rc20 battery J1 replanned twice over a README.md the superseded S001 had changed (BUG-206). The
+        new step takes the files over (a new scope version, ``scope.expanded``) – verifier and review judge them with
+        the rest of its change. Forbidden paths are never adopted. Returns the new contract, ``None`` if nothing to
+        adopt."""
+        guard = await self.guard_for(step_id)
+        adopt = [p for p in dict.fromkeys(paths) if not guard.is_forbidden(p) and not guard.decide(p, "modify")[0]]
+        if not adopt:
+            return None
+        async with self.sessionmaker() as session, session.begin():
+            step = await load_step(session, step_id, for_update=True)
+            row = await current_scope_row(session, step)
+            if row is None or row.status != "active":
+                return None
+            current = contract_from_row(row)
+            contract = current.model_copy(
+                update={
+                    "source": "replanner",
+                    "target_paths": [*current.target_paths, *(p for p in adopt if p not in current.target_paths)],
+                    # a leftover may be a new file; ``create`` reaches only explicitly listed files and allowed_new_paths
+                    "allowed_operations": list(dict.fromkeys([*current.allowed_operations, "modify", "create"])),
+                    "reason": f"adopted {len(adopt)} uncommitted change(s) of an earlier unfinished step",
+                }
+            )
+            evidence = {**(row.evidence or {}), "adopted_leftovers": adopt}
+            _, final, previous = await persist_scope_version(
+                session, step, contract, status="active", evidence=evidence, reason=contract.reason
+            )
+            await append_event(
+                session,
+                EventType.SCOPE_EXPANDED,
+                source_type=SOURCE_TYPE,
+                source_id=SOURCE_ID,
+                job_id=step.job_id,
+                step_id=step.id,
+                payload={
+                    **contract_event_payload(final, status="active", previous_version=previous),
+                    "step_key": step.step_key,
+                    "adopted_leftovers": adopt,
+                },
+            )
+        log.info("scope adopted leftover changes", extra={"step_id": str(step_id), "paths": adopt[:20]})
+        return final
+
     async def guard_for(self, step_id: uuid.UUID) -> ScopeGuard:
         """A ScopeGuard for the active scope; deny-all when the step has none (no silent access)."""
         contract = await self.current_contract(step_id)

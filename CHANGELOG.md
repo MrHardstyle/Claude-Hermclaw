@@ -2,6 +2,13 @@
 
 Format: [Keep a Changelog](https://keepachangelog.com/de/1.1.0/), Versionen nach PEP 440.
 
+## [0.1.0rc21] – Release Candidate (2026-10-17)
+
+Fix aus Batterie-Lauf 1 auf 0.1.0rc20.
+
+### Behoben
+- **Liegengebliebene Änderungen nach einem Replan (BUG-206):** Ein neuer Schritt übernimmt die uncommitteten Änderungen eines abgebrochenen Vorgängers in seinen Scope. Vorher scheiterte er an einem „Scope-Verstoß“, den er nicht begangen hatte, bis zum Replan-Limit.
+
 ## [0.1.0rc20] – Release Candidate (2026-10-17)
 
 Fixes aus Batterie-Lauf 1 auf 0.1.0rc19. J1 und J3 waren erfolgreich, J4 stellte nach 2,5 min die richtige Rückfrage. J2 endete ohne MR, J5 änderte package.json unnötig, J6 scheiterte an einem widersprüchlichen Plan.

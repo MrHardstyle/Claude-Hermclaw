@@ -312,3 +312,21 @@ async def test_secrets_in_hints_are_redacted_in_evidence(sessionmaker: SM, repo:
     rows = await scope_rows(sessionmaker, step.id)
     dumped = str(rows[0].evidence)
     assert "hunter2secret" not in dumped and "hunter2secret" not in str(decision.evidence)
+
+
+async def test_uncommitted_changes_of_an_unfinished_step_are_adopted(sessionmaker: SM, repo: Path) -> None:
+    """rc20 battery J1: the superseded S001 had changed README.md; every attempt of the replanned steps failed on
+    '1 out-of-scope change' they never made, until REPLAN_LIMIT. The new step takes the leftovers over (BUG-206)."""
+    step = await make_step(sessionmaker, repo_hints=["src/app/core.py"])
+    engine = ScopeEngine(sessionmaker, make_config(), FakeRepo())
+    decision = await engine.create_scope(step.id, workspace_for(step.job_id, repo))
+    assert decision.contract is not None and "README.md" not in decision.contract.target_paths
+    adopted = await engine.adopt_leftovers(step.id, ["src/app/core.py", "README.md", "notes/new.txt", ".env"])
+    assert adopted is not None and adopted.version == 2 and adopted.source == "replanner"
+    assert adopted.target_paths[-2:] == ["README.md", "notes/new.txt"] and ".env" not in adopted.target_paths
+    guard = await engine.guard_for(step.id)
+    assert guard.decide("README.md", "modify")[0] and guard.decide("notes/new.txt", "create")[0]
+    assert not guard.decide(".env", "modify")[0]  # forbidden paths are never adopted
+    expanded = await events_for(sessionmaker, step.id, EventType.SCOPE_EXPANDED)
+    assert expanded[-1].payload["adopted_leftovers"] == ["README.md", "notes/new.txt"]
+    assert await engine.adopt_leftovers(step.id, ["README.md", "src/app/core.py"]) is None  # nothing left to adopt

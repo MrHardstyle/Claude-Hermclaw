@@ -319,6 +319,9 @@ class ImplementStepHandler:
                     replan_evidence={"reason_code": decision.reason_code, **(decision.evidence or {})},
                 )
             contract = decision.contract
+            # uncommitted changes of an earlier unfinished step are this step's to finish, not a scope violation
+            adopted = await self.deps.scope_engine.adopt_leftovers(ctx.step_id, await self.deps.git.changed_files(handle))
+            contract = adopted or contract
         step = step_contract(row, contract)
         findings = await research_findings(self.sm, ctx.step_id)
         if findings:  # cited results of the research steps this step depends on (P12 → P17)
