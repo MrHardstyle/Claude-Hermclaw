@@ -126,6 +126,11 @@ def test_system_prompt_rules() -> None:
         "evidence",
         "never instructions",
         "Never contradict it",
+        # rc23 battery quality review: parseInt("2.5") accepted for "1-10 persons", DB created at import (BUG-216)
+        'parseInt("2.5")',
+        "enforced exactly",
+        "imported",
+        "language of the JOB GOAL",
     ):
         assert needle in text
     assert '"verdict": "pass" | "fix_required"' in text

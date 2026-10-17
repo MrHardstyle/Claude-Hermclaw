@@ -46,6 +46,19 @@ Noch keine.
 
 ## Behobene Bugs
 
+### BUG-216 – Review übersieht Randfall-Fehler bei Auftragsvorgaben (lockeres Parsen, Import-Seiteneffekte)
+- Phase: Qualitätsprüfung der gelieferten Dateien, Batterie auf 0.1.0rc23 (X2, X3) · Komponente: review · Severity: P2 · blockierend: nein (behoben) · Status: **behoben** (`tests/unit/test_review_prompt.py::test_system_prompt_rules`; Live-Nachweis: Review des echten X2-Diffs mit dem neuen Prompt → `fix_required`, major „parseInt accepts '3abc' and '2.5'“)
+- Reproduktion:
+  - Job `d40f4494-dae2-41ee-a2c0-6ca3fa4d9e8b` (X2) verlangt „Anzahl Personen 1–10“. `validateRegistration` nutzt `parseInt`, das „2.5“ und „3abc“ als gültig durchlässt. Die Fehlermeldungen sind englisch auf einer deutschen Seite. Das Review gab `pass`.
+  - Job `1dbe5ea5-ca00-4938-8cfd-9215976b5098` (X3): Schon der Import von `inventory/server.py` legt `inventory.db` an, Verbindungen werden nie geschlossen (`ResourceWarning`), und `INVENTORY_DB` steht nicht in der README.
+- Ursache: Der Review-Prompt nannte Randfälle nur allgemein („wrong edge cases“). Das Modell prüfte die Anforderungen auf Vorhandensein, nicht auf exakte Durchsetzung.
+- Fix: Konkrete Prüfpunkte im Review-Prompt:
+  - Wertebereiche, Formate und Limits des Auftrags werden exakt durchgesetzt (beide Grenzen; scheinbar gültige Eingaben wie `parseInt("2.5")` werden abgelehnt), auch ohne passende Tests.
+  - Keine Seiteneffekte beim Import, Ressourcen werden geschlossen.
+  - Texte in der Sprache des Auftrags; neue Optionen und Umgebungsvariablen sind dokumentiert.
+  - Schweregrade: nicht exakt durchgesetzte Auftragsvorgabe = major, Sprache, Doku und harmlose Import-Effekte = minor (erzwingen keine Korrektur, BUG-191).
+- Selbstprüfung: Prompt-Änderung, aber kein Kreisen um ein Symptom. Neue Prüfdimension aus der Qualitätsprüfung, live am echten Diff nachgewiesen.
+
 ### BUG-215 – Gelieferter Code mit unbenutzten Variablen und Importen; kein Lint aktiv
 - Phase: Qualitätsprüfung der gelieferten Dateien, Batterie auf 0.1.0rc23 (X1) · Komponente: verifier/config · Severity: P3 · blockierend: nein (behoben) · Status: **behoben** (`tests/integration/test_verifier_engine.py::test_default_python_lint_reports_defects_only`)
 - Reproduktion: Job `47d60d3e-c914-4101-9e47-4741d974efab`. `sales_analyzer.py:64` `except (ValueError, KeyError) as e` mit unbenutztem `e`, `test_sales_analyzer.py:22` importiert `main` ohne Nutzung. Verifier und Review meldeten nichts.

@@ -31,6 +31,13 @@ of a larger job before the runtime commits it. You are strict, precise and evide
 WHAT TO CHECK
 - Does the DIFF really achieve the PLAN STEP goal and every acceptance criterion (not only superficially)?
 - Functional bugs, wrong edge cases, broken error handling, resource leaks, concurrency problems.
+- Every value range, format and limit the JOB GOAL states is enforced exactly: both bounds, and inputs that only \
+look valid are rejected (lenient parsing such as parseInt("2.5") or parseInt("3abc"), float coercion, empty or \
+whitespace strings). Check the code against such inputs even when the tests do not.
+- Side effects when a module is imported (files, databases or connections created at import time), files or \
+connections that are never closed.
+- User-facing text (messages, labels, output) in the language of the JOB GOAL; new options, environment variables \
+or commands documented where the repository documents its usage (README).
 - Security: command/SQL injection, path traversal, SSRF, unsafe deserialisation, secrets in code or logs.
 - Tests: missing tests for new behaviour, tests weakened, skipped or deleted, assertions changed to match wrong \
 behaviour, special cases that only satisfy a specific check instead of solving the problem generally.
@@ -52,6 +59,8 @@ SEVERITY (use exactly one of: minor | major | blocker)
 security problem, data loss, tests disabled or weakened.
 - major: a real defect or missing requirement that must be fixed before the step is accepted.
 - minor: style, naming, small improvements; does not block acceptance.
+- A range, format or limit of the JOB GOAL that is not enforced exactly is major. Text in another language than the \
+JOB GOAL, missing documentation and import-time side effects that do not break behaviour are minor.
 
 VERDICT
 - "pass" only if there is no major and no blocker finding. Any major or blocker finding requires "fix_required".

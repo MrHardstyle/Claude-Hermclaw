@@ -7,6 +7,7 @@ Format: [Keep a Changelog](https://keepachangelog.com/de/1.1.0/), Versionen nach
 Fixes aus der erweiterten Batterie auf 0.1.0rc23.
 
 ### Behoben
+- **Strengeres Review bei Auftragsvorgaben (BUG-216):** Das Review prüft, ob Wertebereiche und Formate des Auftrags exakt durchgesetzt werden (z. B. `parseInt("2.5")` bei „1–10 Personen“), außerdem Import-Seiteneffekte, offene Ressourcen, die Sprache der Texte und die Dokumentation neuer Optionen.
 - **Python-Lint standardmäßig aktiv (BUG-215):** Der Verifier prüft geänderte Python-Dateien mit ruff auf Defekte (unbenutzte Importe und Variablen, undefinierte Namen), ohne Stilregeln.
 - **Laufzeitdaten von Testläufen (BUG-214):** SQLite-Dateien, Journale und Logs, die ein Programm beim Laufen anlegt, werden nach dem Befehl aufgeräumt, statt den Lauf als Scope-Verstoß scheitern zu lassen.
 
