@@ -1,7 +1,7 @@
 # STATUS
 
 ## Aktueller Zustand (2026-10-16)
-- Projekt: Hermclaw Next · Branch: `claude/hermclaw-next-build` · Version `0.1.0rc14` (gebaut); **deployt: 0.1.0rc13** (rc14 folgt) auf .222–.225 (Deployment jetzt durch Claude, Become-Passwort per systemd-creds)
+- Projekt: Hermclaw Next · Branch: `claude/hermclaw-next-build` · Version `0.1.0rc15` (gebaut); **deployt: 0.1.0rc14** (rc15 folgt) auf .222–.225 (Deployment jetzt durch Claude, Become-Passwort per systemd-creds)
 - **Live-Abnahme nach Kapitel 12 durchgeführt** (2026-10-16): 396 Schritte erledigt, 34 mit offenem Live-Teil (`[~]`), 0 offen.
 - 0.1.0rc2 deployt (vom Betreiber, alle Hosts inkl. .224): doctor 19 ok, models 6/6 (Fallback, BUG-150 wirksam), workers 3/3.
 - Erster Testauftrag erneut eingereicht (Job `eadf1b6f…`): Die Erstplanung ist jetzt gültig (BUG-143 wirkt, Steps mit Scope),
@@ -122,14 +122,14 @@ Abnahme so deployt. Einschalten erst mit funktionierendem WoL (R-042).
 Lokale Gesamtsuite auf .225: 3137 passed, 146 skipped; 57 vorbestehende Umgebungsfehler (identisch am Ausgangsstand, s. TEST_MATRIX).
 Lint, mypy, ShellCheck, ansible-lint (production) sauber.
 
-## Modellrollen (fest, `config/models.example.yaml`)
+## Modellrollen (`config/models.example.yaml`; Abweichung nur mit `deviation`, D-015)
 - Planner/Replanner: `gemma4:26b` (32K) · Planner-Fallback (technisch): `gemma4:12b`
 - Implementation Worker: `qwen3-coder:30b` (32K) · Heavy Reviewer: `qwen3.8:27b` · Fast Router: `qwen3:8b` (16K)
 - Embeddings: `embeddinggemma:300m` (768 dim; EmbeddingGemma 2 erst, wenn Ollama es unter Linux/CUDA ausführt, D-010)
 
 ## Bugs
-- 179 gefunden, **179 behoben** – `BUGS.md`. Live-Abnahme: BUG-143 bis BUG-179.
-  BUG-143–176 sind produktiv (0.1.0rc13); BUG-177–179 (Batterie-Lauf 1 auf rc13) wirken nach dem Deployment von 0.1.0rc14.
+- 183 gefunden, **183 behoben** – `BUGS.md`. Live-Abnahme: BUG-143 bis BUG-183.
+  BUG-143–179 sind produktiv (0.1.0rc14); BUG-180–183 (Batterie-Lauf 1 auf rc14) wirken nach dem Deployment von 0.1.0rc15.
 - Externe Blocker: BLOCKER-002 (Tag-Push)
 
 ## Letzte Testresultate (2026-10-15, Build-Host)
@@ -154,9 +154,11 @@ Tests 2026-10-15, einzeln ausgeführt: `test_bootstrap_infra` 63, `test_bootstra
 bestanden; ansible-lint (production) sauber. `test_deploy_converge` ist angepasst; ihn führt der Integrator aus.
 
 ## Nächster Schritt
-1. 0.1.0rc14 ausrollen und die Auftragsbatterie `hermclaw acceptance-jobs` J1–J6 zweimal in Folge bestehen (Lauf 1 auf rc13:
-   J2 und J4 bestanden, J1/J3/J5/J6 `REPLAN_LIMIT` → BUG-177–179); danach Abbruch, parallele Jobs und Worker-Neustart prüfen.
-2. Wake-on-LAN einrichten (MACs, BIOS, Kapitel 13.1), danach `--suite wol --full-wol` und erst dann den Leerlauf-Suspend einschalten.
-3. Backup nach Terra einrichten (Kapitel 11), Backup-Suite; danach Soak-Test und Cutover (`docs/runbooks/cutover.md`).
-4. Drittabhängigkeiten eines Projekts installiert der Coder über `install_dependencies` (D-014); ein Projekt-Sandbox-Image
+1. Modell-/Runtime-Vergleich (D-015): Coder-Kandidat `qwen3.6:35b` gegen `qwen3-coder:30b`, Ollama gegen llama.cpp (b11361,
+   parallel auf .224, `--n-cpu-moe`); Entscheidung nach Messung. Batterie-Lauf 1 auf rc14: J1 bestanden bis auf Wiederholungen,
+   J2–J5 `REPLAN_LIMIT` (BUG-180–183, überwiegend Coder-Schwächen), J6 abgebrochen.
+2. 0.1.0rc15 ausrollen und die Auftragsbatterie J1–J6 zweimal in Folge bestehen; danach Abbruch, parallele Jobs und Worker-Neustart prüfen.
+3. Wake-on-LAN einrichten (MACs, BIOS, Kapitel 13.1), danach `--suite wol --full-wol` und erst dann den Leerlauf-Suspend einschalten.
+4. Backup nach Terra einrichten (Kapitel 11), Backup-Suite; danach Soak-Test und Cutover (`docs/runbooks/cutover.md`).
+5. Drittabhängigkeiten eines Projekts installiert der Coder über `install_dependencies` (D-014); ein Projekt-Sandbox-Image
    (`infra/sandbox-images/README.md`) bleibt für Systempakete nötig.

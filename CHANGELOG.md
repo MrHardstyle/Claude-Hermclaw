@@ -2,6 +2,25 @@
 
 Format: [Keep a Changelog](https://keepachangelog.com/de/1.1.0/), Versionen nach PEP 440.
 
+## [0.1.0rc15] – Release Candidate (2026-10-17)
+
+Fixes aus Batterie-Lauf 1 auf 0.1.0rc14 (J1 erfolgreich, aber zu viele Wiederholungen; J2–J5 mit `REPLAN_LIMIT`; J6 wegen
+der Modellversuche abgebrochen; kein Infrastrukturfehler).
+
+### Behoben
+- **Verify-Schritt mit geforderten Änderungen (BUG-180):** Nicht ändernde Schritte verlieren übernommene `must_change`-
+  Forderungen; `must_not_change`/`max_changed_files` bleiben.
+- **Wiederholte Prüfungen (BUG-181):** Nach einer verweigerten Wiederholung stehen `run_test`/`run_command` bis zur
+  nächsten echten Änderung nicht im Werkzeugkatalog.
+- **Offene Abnahmekriterien sichtbar (BUG-182):** Jedes diff-Kriterium zeigt im Coder-Kontext „met“ oder „NOT YET
+  CHANGED: <Pfade>“. Ein Schreiben mit identischem Inhalt gilt nicht als Änderung.
+- **Verlangtes Paket gestrichen (BUG-183):** Der Manifest-Hinweis entfällt, wenn der Schritt ein Paket einbindet, das
+  der Auftrag in Anführungszeichen nennt.
+
+### Geändert
+- **Modellrollen konfigurierbar (D-015):** Ein Profil darf mit `deviation: "<Begründung>"` ein anderes Modell als die
+  Architektur nennen; die Prüfung meldet das als Warnung.
+
 ## [0.1.0rc14] – Release Candidate (2026-10-17)
 
 Fixes aus Batterie-Lauf 1 auf 0.1.0rc13 (J1, J3, J5, J6 mit `REPLAN_LIMIT`, kein Infrastrukturfehler).
