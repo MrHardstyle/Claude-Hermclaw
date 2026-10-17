@@ -1,7 +1,7 @@
 # STATUS
 
 ## Aktueller Zustand (2026-10-17)
-- Projekt: Hermclaw Next · Branch: `claude/hermclaw-next-build` · Version `0.1.0rc23`; **deployt: 0.1.0rc23** auf .222–.225 (Deployment durch Claude, Become-Passwort per systemd-creds)
+- Projekt: Hermclaw Next · Branch: `claude/hermclaw-next-build` · Version `0.1.0rc24`; **deployt: 0.1.0rc24** auf .222–.225 (Deployment durch Claude, Become-Passwort per systemd-creds)
 - Modell-Runtime seit rc16 (D-015): alle Chat-Rollen auf `qwen3.6:35b` in einem residenten `llama-server` auf .224 (`--n-cpu-moe 30`, 32K); Embeddings auf Ollama.
 - **Live-Abnahme nach Kapitel 12 durchgeführt** (2026-10-16): 396 Schritte erledigt, 34 mit offenem Live-Teil (`[~]`), 0 offen.
 - 0.1.0rc2 deployt (vom Betreiber, alle Hosts inkl. .224): doctor 19 ok, models 6/6 (Fallback, BUG-150 wirksam), workers 3/3.
@@ -130,7 +130,7 @@ Lint, mypy, ShellCheck, ansible-lint (production) sauber.
 
 ## Bugs
 - 220 gefunden, **220 behoben** – `BUGS.md`. Live-Abnahme: BUG-143 bis BUG-220.
-  BUG-143–213 sind produktiv (0.1.0rc23, deployt 2026-10-17 23:20, laufender Job X2 nach dem Neustart fortgesetzt; rc20 deployt 2026-10-17 20:40, Scheduler-Neustart mit laufendem Job live geprüft: Job lief nach dem Deployment weiter).
+  BUG-143–220 sind produktiv (0.1.0rc24, deployt 2026-10-18 01:10; rc20 deployt 2026-10-17 20:40, Scheduler-Neustart mit laufendem Job live geprüft: Job lief nach dem Deployment weiter).
 - Externe Blocker: BLOCKER-002 (Tag-Push)
 
 ## Letzte Testresultate (2026-10-15, Build-Host)
@@ -174,6 +174,9 @@ bestanden; ansible-lint (production) sauber. `test_deploy_converge` ist angepass
 7. Erweiterte Batterie auf rc22: X1 (Datenanalyse-CLI) `waiting_for_user` nach 17,9 min. Die Tests waren in einen
    `test`-Schritt geplant, der nie schreibt (BUG-209), und der Replanner stellte neben einem fertigen Plan eine
    Bestätigungsfrage (BUG-208). Davor J1–J6 eines Laufs auf rc22 bestanden.
+8. Erweiterte Batterie auf rc23 (`20261017T225223Z-jobs.md`): X1/X2/X4 PASS (12,3/5,6/25,3 min), X3 und X5 erfolgreich,
+   aber Wiederholungs-Metrik (BUG-214) bzw. ohne MR (BUG-220). Die Qualitätsprüfung der gelieferten Dateien ergab
+   BUG-215–219 (Lint, Randfälle im Review, README, Review gegen Werkzeug-Fakten, End-to-End-Aufruf von Programmen).
 3. 0.1.0rc18 ausrollen, J1–J6 zweimal in Folge bestehen, dann die erweiterte Batterie X1–X5
    (`config/acceptance-jobs-extended.example.yaml`); danach Abbruch, parallele Jobs und Worker-Neustart prüfen.
 4. Wake-on-LAN einrichten (MACs, BIOS, Kapitel 13.1), danach `--suite wol --full-wol` und erst dann den Leerlauf-Suspend einschalten.
