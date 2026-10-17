@@ -78,9 +78,11 @@ class ChatModel(Protocol):
         max_tokens: int | None = None,
         temperature: float | None = None,
         timeout_seconds: float | None = None,
+        truncation_repairs: int = 1,
     ) -> StructuredResult[T]:
         """Validated structured output: JSON-schema constrained call + Pydantic validation + ≤max_repairs repairs.
-        Raises hermclaw.core.errors.ModelOutputInvalid after the repair budget is exhausted."""
+        Raises hermclaw.core.errors.ModelOutputInvalid after the repair budget is exhausted, ModelOutputTruncated when
+        an answer is still cut off at the output limit after ``truncation_repairs`` repairs."""
         ...
 
 

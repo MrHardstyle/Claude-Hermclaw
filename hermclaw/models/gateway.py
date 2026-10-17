@@ -41,7 +41,15 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from hermclaw.contracts.common import Severity
 from hermclaw.contracts.events import EventType
 from hermclaw.core.config import HermclawConfig, ModelProfileConfig, ModelsConfig
-from hermclaw.core.errors import ConfigError, HermclawError, ModelError, ModelOutputInvalid, ModelTimeout, ValidationFailed
+from hermclaw.core.errors import (
+    ConfigError,
+    HermclawError,
+    ModelError,
+    ModelOutputInvalid,
+    ModelOutputTruncated,
+    ModelTimeout,
+    ValidationFailed,
+)
 from hermclaw.core.logging import get_logger
 from hermclaw.core.redaction import DEFAULT_REDACTOR, Redactor
 from hermclaw.events.store import append_event
@@ -248,6 +256,12 @@ def classify_http_error(status: int, message: str) -> str:
     return MODEL_BAD_REQUEST
 
 
+TRUNCATED_REPAIR = (
+    "The answer hit the output limit of {max_tokens} tokens and was cut off. Answer again, much more concisely, so "
+    "that the complete JSON fits."
+)
+
+
 @dataclass(frozen=True)
 class GatewayOptions:
     #: ``keep_alive`` sent with every request so a call does not shorten the residency chosen by ModelResidency.
@@ -401,8 +415,12 @@ class LiteLLMGateway:
         max_tokens: int | None = None,
         temperature: float | None = None,
         timeout_seconds: float | None = None,
+        truncation_repairs: int = 1,
     ) -> StructuredResult[T]:
         """JSON-schema constrained call + Pydantic validation + ≤ ``max_repairs`` repair calls.
+
+        An answer cut off at the output limit gets at most ``truncation_repairs`` repairs (asking for a much shorter
+        answer); after that ``ModelOutputTruncated`` is raised so the caller can make the task smaller.
 
         Repairs re-send the original conversation, the previous *final content* and the validation errors – never
         reasoning. Empty content (e.g. everything went into thinking) counts as invalid. Raises
@@ -428,6 +446,7 @@ class LiteLLMGateway:
         errors: list[str] = []
         invocation_ids: list[str] = []
         last: _Attempt | None = None
+        truncated = 0
         for attempt_no in range(max_repairs + 1):
             convo = list(conversation)
 
@@ -459,6 +478,27 @@ class LiteLLMGateway:
                 return StructuredResult(value=last.parsed, result=last.result, repair_attempts=attempt_no)
             error = last.error or "invalid answer"
             errors.append(error)
+            if last.result.finish_reason == "length":
+                truncated += 1
+                error = TRUNCATED_REPAIR.format(max_tokens=max_tokens or "the")
+                errors[-1] = error
+            if last.result.finish_reason == "length" and (truncated > truncation_repairs or attempt_no >= max_repairs):
+                # cut off at the output limit: a plain repair under the same limit is cut off again. The coder spent
+                # three 4-minute calls per turn on one oversized write_file (grand job G1 on 0.1.0rc24, BUG-223); the
+                # caller has to make the answer smaller instead
+                raise ModelOutputTruncated(
+                    f"'{last.result.alias}' hit the output limit of {max_tokens or 'the profile'} tokens; the answer was cut off",
+                    details={
+                        "alias": last.result.alias,
+                        "schema": schema.__name__,
+                        "attempts": attempt_no + 1,
+                        "max_tokens": max_tokens,
+                        "completion_tokens": last.result.completion_tokens,
+                        "errors": [self._redactor.text(e)[:MAX_ERROR_CHARS] for e in errors],
+                        "invocation_ids": invocation_ids,
+                        "fallback_used": last.result.fallback_used,
+                    },
+                )
             conversation = self._repair_conversation(
                 messages,
                 last.result.content,

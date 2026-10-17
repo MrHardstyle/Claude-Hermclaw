@@ -222,6 +222,18 @@ async def test_write_file_create_modify_scope_and_events(sessionmaker: SM, repo:
     assert {e.payload["violations"][0]["path"] for e in violations} == {"src/util.py", "src/other.py"}
 
 
+async def test_write_file_append_writes_large_files_in_parts(sessionmaker: SM, repo: Path) -> None:
+    """BUG-223: one model answer has an output token limit, so large files are written part by part."""
+    h = await make_harness(sessionmaker, repo, contract=scope(**IMPLEMENT_SCOPE))
+    res = await h.call("write_file", path="src/new_feature.py", content="A = 1", append=True)
+    assert res.ok and res.data["operation"] == "create" and "created" in res.output
+    res = await h.call("write_file", path="src/new_feature.py", content="B = 2\n", append=True)
+    assert res.ok and res.data["operation"] == "modify" and "appended to" in res.output and "2 lines" in res.output
+    assert (repo / "src" / "new_feature.py").read_text() == "A = 1\nB = 2\n"  # a missing final newline is added first
+    res = await h.call("write_file", path="src/util.py", content="Y = 2\n", append=True)  # scope still applies
+    assert not res.ok and res.error_code == E.SCOPE_VIOLATION
+
+
 async def test_write_tools_require_a_scope_contract(sessionmaker: SM, repo: Path) -> None:
     h = await make_harness(sessionmaker, repo, contract=None)
     for tool, args in (

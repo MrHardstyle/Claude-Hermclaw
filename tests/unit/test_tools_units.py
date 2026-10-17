@@ -37,7 +37,7 @@ def test_registry_covers_all_tools_with_flags() -> None:
     assert names[0] == "list_files" and "complete_step" in names
     assert [e["name"] for e in tool_schemas([ToolName.read_file])] == ["read_file"]
     catalog = render_tool_catalog()
-    assert "- write_file(path, content):" in catalog and "list_files(path?, recursive?, pattern?, max_entries?)" in catalog
+    assert "- write_file(path, content, append?):" in catalog and "list_files(path?, recursive?, pattern?, max_entries?)" in catalog
 
 
 def test_validate_args_errors_are_value_free() -> None:

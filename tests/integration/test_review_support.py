@@ -91,6 +91,7 @@ class ScriptedChatModel:
         max_tokens: int | None = None,
         temperature: float | None = None,
         timeout_seconds: float | None = None,
+        truncation_repairs: int = 1,
     ) -> StructuredResult[T]:
         self.calls.append(StructuredCall(alias, list(messages), schema, ctx, max_repairs, max_tokens, temperature, timeout_seconds))
         if self.delay_seconds:

@@ -831,14 +831,21 @@ class ToolEngine:
         old = await asyncio.to_thread(target.read_bytes) if exists else None
         old_text = old.decode("utf-8", errors="replace") if old is not None and not is_binary(old) else None
         self._check_placeholder(args.content, old_text)
-        lines = args.content.count("\n") + (1 if args.content and not args.content.endswith("\n") else 0)
+        content = args.content
+        if args.append and old is not None:
+            # large files are written in parts: one answer has an output token limit (BUG-223)
+            if old_text is None:
+                raise ToolError(E.ARGS_INVALID, f"'{rel}' is a binary file; append works on text files only")
+            content = old_text + ("" if not old_text or old_text.endswith("\n") else "\n") + args.content
+            data = content.encode("utf-8")
+        lines = content.count("\n") + (1 if content and not content.endswith("\n") else 0)
         if old == data:
             return self._ok(ToolName.write_file, f"{rel} already has this content; nothing written", data={"path": rel, "changed": False})
         mode = stat.S_IMODE(target.stat().st_mode) if exists else None
         await asyncio.to_thread(self.fs.atomic_write, target, data, mode=mode)
         self._note_created([(rel, op)])
         self._file_changed(ToolName.write_file, [{"path": rel, "operation": op, "bytes": len(data)}], events)
-        verb = "created" if op == "create" else "overwrote"
+        verb = "created" if op == "create" else ("appended to" if args.append else "overwrote")
         return self._ok(
             ToolName.write_file,
             f"{verb} {rel} ({len(data)} bytes, {lines} lines)",

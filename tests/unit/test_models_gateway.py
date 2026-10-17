@@ -11,7 +11,7 @@ import httpx
 import pytest
 from pydantic import BaseModel, Field
 
-from hermclaw.core.errors import ConfigError, ModelError, ModelOutputInvalid, ModelTimeout, ValidationFailed
+from hermclaw.core.errors import ConfigError, ModelError, ModelOutputInvalid, ModelOutputTruncated, ModelTimeout, ValidationFailed
 from hermclaw.models import gateway as gw_mod
 from hermclaw.models.gateway import (
     EMBEDDING_DIMENSION_MISMATCH,
@@ -370,6 +370,29 @@ async def test_structured_exhausts_budget(script: Script) -> None:
     assert exc.value.details["attempts"] == 3 and len(exc.value.details["errors"]) == 3
     assert len(exc.value.details["invocation_ids"]) == 3
     assert script.models() == ["planner-gemma"] * 3  # invalid output never triggers the model fallback
+
+
+async def test_structured_cut_off_answers_get_a_concise_repair_then_raise(script: Script) -> None:
+    """BUG-223: a repair of an answer cut off at the output limit was cut off again (three 4-minute calls per turn)."""
+    cut = '{"title": "t", "steps": ["a very long'
+    script.add("planner-gemma", completion(cut, finish="length"), completion(cut, finish="length"))
+    async with make(script) as gw:
+        with pytest.raises(ModelOutputTruncated) as exc:
+            await gw.structured("planner-gemma", [ChatMessage("user", "plan")], Plan, ctx=CTX, max_tokens=100)
+    assert len(script.requests) == 2 and exc.value.code == "MODEL_OUTPUT_TRUNCATED"
+    assert "output limit of 100 tokens" in script.requests[1]["messages"][-1]["content"]
+    assert exc.value.details["attempts"] == 2 and exc.value.details["max_tokens"] == 100
+
+    script.add("planner-gemma", completion(cut, finish="length"))
+    async with make(script) as gw:
+        with pytest.raises(ModelOutputTruncated):
+            await gw.structured("planner-gemma", [ChatMessage("user", "plan")], Plan, ctx=CTX, truncation_repairs=0)
+    assert len(script.requests) == 3  # no repair at all
+
+    script.add("planner-gemma", completion(cut, finish="length"), completion('{"title": "t", "steps": ["one"]}'))
+    async with make(script) as gw:
+        out = await gw.structured("planner-gemma", [ChatMessage("user", "plan")], Plan, ctx=CTX)
+    assert out.value.steps == ["one"] and out.repair_attempts == 1
 
 
 async def test_structured_zero_repairs(script: Script) -> None:

@@ -17,7 +17,7 @@ from hermclaw.coder import CoderLoop, CoderSettings, StagnationDirective, TurnOb
 from hermclaw.context_builder import ContextBuilder, ContextBuilderConfig, CorrectionItem, StepBrief
 from hermclaw.contracts.scope import ScopeContract
 from hermclaw.core.config import get_config
-from hermclaw.core.errors import ModelOutputInvalid, ModelTimeout
+from hermclaw.core.errors import ModelOutputInvalid, ModelOutputTruncated, ModelTimeout
 from hermclaw.models.protocols import CallContext, ChatMessage, ChatResult, StructuredResult
 from hermclaw.persistence.models import Event, StepAttempt
 from hermclaw.scheduler import CancelToken
@@ -308,6 +308,19 @@ async def test_invalid_model_output_twice_fails_and_timeout_is_model_failure(ses
     h2, loop2, _ = await _setup(sessionmaker, tmp_repo, [act("read_file", path="app.py"), ModelTimeout("slow", code="MODEL_TIMEOUT")])
     res2 = await _run(h2, loop2)
     assert res2.outcome == "model_failed" and res2.turns == 1 and res2.error_code == "MODEL_TIMEOUT"
+
+
+async def test_cut_off_answer_asks_for_writing_in_parts_and_gets_one_extra_turn(sessionmaker: Any, tmp_repo: Path) -> None:
+    """BUG-223: an oversized write_file was cut off at the output limit; the model has to write the file in parts."""
+    cut = ModelOutputTruncated("hit the output limit", code="MODEL_OUTPUT_TRUNCATED")
+    h, loop, chat = await _setup(sessionmaker, tmp_repo, [cut, cut, cut])
+    res = await _run(h, loop)
+    assert res.outcome == "model_failed" and res.turns == 3 and res.error_code == "MODEL_OUTPUT_TRUNCATED"
+    note = [m.content for m in chat.prompts[1] if "cut off" in m.content]
+    assert note and '"append": true' in note[0] and "250 lines" in note[0]
+
+    h2, loop2, _ = await _setup(sessionmaker, tmp_repo, [cut, ModelOutputInvalid("bad", code="MODEL_OUTPUT_INVALID")])
+    assert (await _run(h2, loop2)).turns == 2  # a plain invalid answer keeps the normal limit
 
 
 async def test_cancel_and_checkpoint_resume(sessionmaker: Any, tmp_repo: Path) -> None:

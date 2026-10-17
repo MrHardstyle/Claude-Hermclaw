@@ -58,7 +58,7 @@ class LiteLLMGateway:  # ChatModel + EmbeddingModel
     async def chat(self, alias, messages, *, ctx: CallContext, max_tokens=None, temperature=None,
                    json_schema: dict | None = None, timeout_seconds=None) -> ChatResult
     async def structured(self, alias, messages, schema: type[T], *, ctx, max_repairs=2, max_tokens=None,
-                         temperature=None, timeout_seconds=None) -> StructuredResult[T]
+                         temperature=None, timeout_seconds=None, truncation_repairs=1) -> StructuredResult[T]
     async def embed(self, texts: list[str], *, ctx: CallContext) -> list[list[float]]
     async def call_with_fallback(self, alias, fn: Callable[[ModelProfileConfig, bool], Awaitable[R]], *,
                                  ctx: CallContext) -> R
@@ -186,6 +186,9 @@ validation. On failure up to `max_repairs` repair calls follow: original convers
 (≤ 6000 chars; dropped when it would overflow the context window) + the validation errors. Empty content (everything
 went into thinking) counts as invalid. Budget exhausted → `ModelOutputInvalid` with all errors and invocation ids. Once
 the fallback served a call, the repairs stay on the fallback (no switching back and forth).
+An answer cut off at the output limit (`finish_reason=length`) gets at most `truncation_repairs` repairs that ask for a
+much shorter answer; after that `ModelOutputTruncated` (`MODEL_OUTPUT_TRUNCATED`) is raised so the caller can make
+the task smaller. The coder passes 0 and asks for writing the file in parts instead (BUG-223).
 
 Profile sync: `sync_profiles()` upserts every configured profile into `model_profiles`
 (`INSERT … ON CONFLICT DO UPDATE`), disables rows that are no longer configured (never deletes them – invocations

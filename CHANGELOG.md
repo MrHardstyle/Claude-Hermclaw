@@ -5,6 +5,7 @@ Format: [Keep a Changelog](https://keepachangelog.com/de/1.1.0/), Versionen nach
 ## [Unreleased]
 
 ### Behoben
+- **Große Dateien (BUG-223):** Antworten, die am Output-Limit abgeschnitten werden, werden erkannt (`MODEL_OUTPUT_TRUNCATED`) statt sinnlos repariert. Der Coder schreibt große Dateien in Teilen (`write_file` mit `append`) und bekommt nach einem Abbruch eine konkrete Anleitung.
 - **Recherche bei deutschen Aufträgen (BUG-222):** Claims werden in der Sprache der Quelle extrahiert und gegen sie geprüft; die Antwort bleibt in der Sprache der Frage. Vorher wurden übersetzte Claims als nicht belegt verworfen, z. B. die Unraid-Authentifizierung per `x-api-key`.
 - **Keine doppelten Recherchen (BUG-221):** Eine `research_needed`-Frage, die einen geplanten Recherche-Schritt nur umformuliert, erzeugt keinen zweiten Recherche-Schritt mehr.
 

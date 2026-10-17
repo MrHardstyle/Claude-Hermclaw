@@ -30,7 +30,7 @@ from hermclaw.context_builder import (
 )
 from hermclaw.contracts.events import EventType
 from hermclaw.contracts.tools import CoderAction, ToolName, ToolResult
-from hermclaw.core.errors import ModelError, ModelOutputInvalid
+from hermclaw.core.errors import ModelError, ModelOutputInvalid, ModelOutputTruncated
 from hermclaw.core.interfaces import WorkspaceHandle
 from hermclaw.core.logging import get_logger
 from hermclaw.core.redaction import DEFAULT_REDACTOR
@@ -56,6 +56,12 @@ _READ_ONLY = frozenset(
 )
 # withheld after a refused repeat until something changes (BUG-181)
 _RUNNERS = frozenset({ToolName.run_test.value, ToolName.run_command.value})
+# a cut-off answer is not a format problem: the model has to write less per turn (BUG-223)
+TRUNCATED_NOTE = (
+    "Your last answer hit the output limit of {max_tokens} tokens and was cut off, so nothing was executed. Write at most "
+    "about 250 lines per answer: create a large file with its first part, then add each further part with write_file "
+    'and "append": true (or split the code into several modules).'
+)
 RUNNERS_WITHHELD = (
     "run_test and run_command are withheld until something changes: nothing changed since the refused command, so "
     "every check gives the same result. Edit the code or the tests now, or call complete_step if the step is done, "
@@ -346,6 +352,7 @@ class CoderLoop:
                     CoderAction,
                     ctx=CallContext(purpose="coder_turn", job_id=job_id, step_id=step_id, attempt_id=attempt_id),
                     max_repairs=s.max_repairs,
+                    truncation_repairs=0,  # the turn note below asks for writing in parts instead (BUG-223)
                     max_tokens=s.max_output_tokens,
                     temperature=s.temperature,
                     timeout_seconds=s.turn_timeout_seconds,
@@ -355,10 +362,14 @@ class CoderLoop:
                     return CoderResult("cancelled", turn - 1, records, last_failure=last_failure, detail=token.reason)
             except ModelOutputInvalid as exc:
                 invalid_streak += 1
-                note = "Your last answer was not one valid action object; answer with exactly one tool call as JSON."
+                if isinstance(exc, ModelOutputTruncated):
+                    note = TRUNCATED_NOTE.format(max_tokens=s.max_output_tokens)
+                else:
+                    note = "Your last answer was not one valid action object; answer with exactly one tool call as JSON."
                 records.append(self._record(turn, None, None, error_code=exc.code, note=note))
                 await self._persist(attempt_id, turn, records)
-                if invalid_streak >= s.max_invalid_turns:
+                # one extra turn after a cut-off answer: the note tells the model how to write in parts
+                if invalid_streak >= s.max_invalid_turns + (1 if isinstance(exc, ModelOutputTruncated) else 0):
                     return CoderResult("model_failed", turn, records, last_failure=last_failure, error_code=exc.code, detail=exc.message)
                 notice = note
                 continue

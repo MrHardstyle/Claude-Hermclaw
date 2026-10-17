@@ -114,6 +114,7 @@ class ScriptedChat:
         max_tokens: int | None = None,
         temperature: float | None = None,
         timeout_seconds: float | None = None,
+        truncation_repairs: int = 1,
     ) -> StructuredResult[T]:  # pragma: no cover - the planner uses chat() + its own validation loop
         raise NotImplementedError
 

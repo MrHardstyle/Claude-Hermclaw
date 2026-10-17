@@ -82,6 +82,12 @@ class ModelOutputInvalid(ModelError):
     code = "MODEL_OUTPUT_INVALID"
 
 
+class ModelOutputTruncated(ModelOutputInvalid):
+    """The answer hit the output token limit and was cut off; a repair with the same limit is cut off again."""
+
+    code = "MODEL_OUTPUT_TRUNCATED"
+
+
 class WorkerError(ExternalServiceError):
     code = "WORKER_ERROR"
 

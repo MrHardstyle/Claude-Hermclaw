@@ -83,7 +83,8 @@ class GitDiffArgs(ToolArgs):
 
 class WriteFileArgs(ToolArgs):
     path: str = Field(min_length=1, max_length=1000)
-    content: str = Field(max_length=MAX_WRITE_CHARS, description="complete new file content")
+    content: str = Field(max_length=MAX_WRITE_CHARS, description="complete new file content, or the part to append")
+    append: bool = Field(default=False, description="add content to the end of the file (created if missing): write large files in parts")
 
 
 class ReplaceTextArgs(ToolArgs):
@@ -268,7 +269,12 @@ _SPECS: list[ToolSpec] = [
     _spec(ToolName.search_symbol, SearchSymbolArgs, "read", "Find definitions of a symbol (function, class, ...) by name."),
     _spec(ToolName.git_status, NoArgs, "git", "Show changed/untracked files of the workspace (read-only)."),
     _spec(ToolName.git_diff, GitDiffArgs, "git", "Show the current diff of the workspace, optionally limited to paths (read-only)."),
-    _spec(ToolName.write_file, WriteFileArgs, "write", "Create or overwrite a file with the complete content (must be inside the scope)."),
+    _spec(
+        ToolName.write_file,
+        WriteFileArgs,
+        "write",
+        "Create or overwrite a file with the complete content, or append a part to it (must be inside the scope).",
+    ),
     _spec(
         ToolName.replace_text,
         ReplaceTextArgs,

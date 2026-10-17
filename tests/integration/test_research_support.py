@@ -75,6 +75,7 @@ class ScriptedChat:
         max_tokens: int | None = None,
         temperature: float | None = None,
         timeout_seconds: float | None = None,
+        truncation_repairs: int = 1,
     ) -> StructuredResult[T]:
         number = self.count(ctx.purpose)
         self.calls.append(Call(alias, ctx.purpose, schema.__name__, list(messages)))

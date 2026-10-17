@@ -72,7 +72,7 @@ per-attempt state: the active `ScopeGuard` (swapped after a granted expansion), 
 | `find_text` | read | literal (default) or regex search, `glob`, `ignore_case`, result limit + time budget; regexes with nested quantifiers are refused (ReDoS) |
 | `search_repo` / `search_symbol` | read | `RepoContextProvider.search` / `find_symbol`; hits on hidden paths are dropped |
 | `git_status` / `git_diff` | git | `GitReader.status` / `diff` (diff sections of protected files are omitted) |
-| `write_file` | write | create/overwrite, scope-checked, atomic (temp file + fsync + rename), mode preserved, redaction marker refused |
+| `write_file` | write | create/overwrite or `append` a part (large files are written in parts, BUG-223), scope-checked, atomic (temp file + fsync + rename), mode preserved, redaction marker refused |
 | `replace_text` | write | exact match, `count` must equal the number of occurrences (default 1), CRLF-aware, helpful not-found hints |
 | `apply_patch` | write | unified diff (`-p1` git style or `-p0`); every target validated → numstat cross-check → `git apply --check` → `git apply` (worktree only) inside a tracker audit |
 | `run_command` | exec | classified, executed via `CommandExecutor`, side effects audited (see below) |

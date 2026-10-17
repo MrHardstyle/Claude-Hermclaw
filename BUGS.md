@@ -46,6 +46,21 @@ Noch keine.
 
 ## Behobene Bugs
 
+### BUG-223 – Coder scheitert an großen Dateien: Antwort am Output-Limit abgeschnitten, Reparaturen wiederholen es
+- Phase: Großauftrag G1 auf 0.1.0rc24 (S003 Collector) · Komponente: models/gateway, coder/loop, tools · Severity: P1 · blockierend: ja für große Module (behoben) · Status: **behoben** (`tests/unit/test_models_gateway.py::test_structured_cut_off_answers_get_a_concise_repair_then_raise`, `tests/integration/test_coder_loop.py::test_cut_off_answer_asks_for_writing_in_parts_and_gets_one_extra_turn`, `tests/integration/test_tools_engine_read_write.py::test_write_file_append_writes_large_files_in_parts`, Kontrakt-Regel in `tests/unit/test_planner_prompt.py`)
+- Reproduktion: Job `b3441414-9422-4887-8cb1-b0f7c43e5ced`, S003. Nach README und `config.example.toml` wollte der Coder `collector.py` in einem `write_file` schreiben. Vier Aufrufe in Folge endeten mit `finish_reason=length` bei 6144/6144 Tokens, Status `invalid`, je 240–262 s (01:11–01:28). Zwei davon waren Reparaturen mit identischem Request-Hash.
+- Ursache:
+  - Der Gateway behandelte ein abgeschnittenes JSON wie einen Formatfehler und reparierte mit demselben Limit, wodurch die Antwort erneut abgeschnitten wurde.
+  - Der Coder-Loop meldete danach nur „answer with exactly one tool call“; das Modell erfuhr nie, dass es zu viel geschrieben hatte.
+  - Es gab keinen Weg, eine Datei in Teilen zu schreiben.
+  - Ergebnis: Pro Turn bis zu 12 Minuten ohne Fortschritt, nach zwei Turns `model_failed`. Je größer das Programm, desto sicherer passiert das; genau die langen Aufträge scheitern so spät.
+- Fix:
+  - Gateway: `finish_reason=length` wird erkannt. Höchstens `truncation_repairs` Reparaturen (Standard 1) mit dem ausdrücklichen Hinweis „abgeschnitten, deutlich kürzer antworten“, danach `ModelOutputTruncated` (`MODEL_OUTPUT_TRUNCATED`).
+  - Coder: keine Reparatur (`truncation_repairs=0`). Stattdessen sagt der nächste Turn konkret, dass die Antwort am Limit abgeschnitten wurde und große Dateien in Teilen geschrieben werden. Nach einem Abbruch gibt es einen Turn zusätzlich.
+  - `write_file` hat `append`, um eine Datei Teil für Teil zu schreiben. Scope, Platzhalter-Prüfung und Events gelten wie bisher.
+  - Systemkontrakt des Coders: höchstens etwa 250 Zeilen pro Antwort, größere Dateien in Teilen oder als Module.
+- Selbstprüfung: echter Schritt nach vorn. Bisher gab es keine Behandlung des Output-Limits. Das Limit wird bewusst nicht einfach erhöht: Das verschiebt das Problem nur zur nächstgrößeren Datei und verlängert jeden Fehlversuch.
+
 ### BUG-222 – Recherche verwirft fast alle Claims, wenn die Frage nicht in der Sprache der Quelle gestellt ist
 - Phase: Großauftrag G1 auf 0.1.0rc24 · Komponente: research/claims · Severity: P1 · blockierend: nein (behoben) · Status: **behoben** (`tests/unit/test_research_claims.py::test_claims_are_written_in_the_language_of_the_source`; Live-Nachweis mit dem deployten Modell und der echten Seite: vorher 2/6 Claims grounded, danach 11/11 in zwei Läufen)
 - Reproduktion: Job `b3441414-9422-4887-8cb1-b0f7c43e5ced`, S002 „Recherchiere die aktuelle Unraid GraphQL-API-Dokumentation …“ endete `partial`: „Für die Authentifizierung liegen keine spezifischen Informationen zu API-Keys vor“. Die gelesene offizielle Seite `docs.unraid.net/API/how-to-use-the-api/` beschreibt den Header `x-api-key`. Von ihr kam genau ein Claim (das Fehlerformat).

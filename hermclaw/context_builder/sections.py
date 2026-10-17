@@ -83,6 +83,8 @@ Rules:
   only for what is not shown there. Prefer small exact edits.
 - After a change run the targeted tests. Treat LATEST FAILURE as the exact, authoritative error output.
 - Leave no unused imports or variables, undefined names or dead code: the verifier lints the changed files.
+- Write at most about 250 lines per answer: create a larger file with its first part, then add the rest with
+  write_file and "append": true, or split it into modules.
 - Commands start in the repository root: use repository-relative paths, never guess absolute paths or 'cd' first.
 - Commands run in a read-only sandbox without network: pip/npm/apt install in run_command is refused. Declare
   third-party dependencies in requirements.txt / package.json and call install_dependencies if it is in your tool
