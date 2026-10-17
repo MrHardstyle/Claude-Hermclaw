@@ -32,7 +32,7 @@ from hermclaw.contracts.common import MUTATING_STEP_KINDS, JobStatus, Severity, 
 from hermclaw.contracts.events import EventType
 from hermclaw.core import job_metadata
 from hermclaw.core.config import HermclawConfig
-from hermclaw.core.errors import InvalidTransition
+from hermclaw.core.errors import InvalidTransition, ResourceUnavailable
 from hermclaw.core.logging import get_logger
 from hermclaw.events.store import append_event
 from hermclaw.models.gateway import MODEL_LOAD_FAILED, MODEL_TIMEOUT, MODEL_UNAVAILABLE
@@ -114,6 +114,11 @@ class SchedulerSettings:
 
 #: model failures that say nothing about the job – the host is unreachable, hangs or cannot load the model
 MODEL_OUTAGE_CODES = frozenset({MODEL_UNAVAILABLE, MODEL_TIMEOUT, MODEL_LOAD_FAILED})
+#: finalize failures on the way to the remote that a later attempt can overcome (BUG-199): network, timeouts, a
+#: workspace lock, a push rejected because the base moved (finalize rebases again on the next run)
+FINALIZE_TRANSIENT_CODES = frozenset({"GIT_NETWORK", "GIT_TIMEOUT", "GIT_LOCK_TIMEOUT", "PUSH_REJECTED"})
+#: step failures that did no work: the model host is down or the GPU lease was not granted in time
+STEP_OUTAGE_CODES = MODEL_OUTAGE_CODES | {ResourceUnavailable.code}
 
 
 def transient_db_error(exc: BaseException) -> bool:
@@ -185,6 +190,7 @@ class Scheduler:
         self._job_tasks: dict[uuid.UUID, _JobTask] = {}
         self._prepare_retries: dict[uuid.UUID, int] = {}
         self._outages: dict[uuid.UUID, _Outage] = {}
+        self._step_outages: dict[uuid.UUID, _Outage] = {}  # per step (BUG-197)
         self._stop = asyncio.Event()
         self._admission_reason: str | None = None
 
@@ -451,10 +457,29 @@ class Scheduler:
         outage = self._outages.get(job_id)
         return outage is not None and time.monotonic() < outage.until
 
-    async def _defer_on_model_outage(self, s: AsyncSession, job: Job, phase: str, code: str | None) -> bool:
-        """True when the phase failed only because the model host is unavailable: the job keeps its state and the
-        phase runs again after a backoff (BUG-176). After ``model_outage_max_wait_seconds`` the job fails as before."""
-        if code not in MODEL_OUTAGE_CODES:
+    def _step_outage_delay(self, step_id: uuid.UUID, code: str | None) -> int | None:
+        """Backoff for a step attempt that failed only because the model host / GPU lease was unavailable, ``None``
+        when the failure is something else or the outage lasts longer than ``model_outage_max_wait_seconds``."""
+        if code not in STEP_OUTAGE_CODES:
+            self._step_outages.pop(step_id, None)
+            return None
+        now = time.monotonic()
+        outage = self._step_outages.setdefault(step_id, _Outage(first=now))
+        if now - outage.first >= self.settings.model_outage_max_wait_seconds:
+            self._step_outages.pop(step_id, None)
+            return None
+        delays = self.settings.model_outage_retry_seconds
+        delay = delays[min(outage.retries, len(delays) - 1)]
+        outage.retries += 1
+        return delay
+
+    async def _defer_on_model_outage(
+        self, s: AsyncSession, job: Job, phase: str, code: str | None, *, codes: frozenset[str] = MODEL_OUTAGE_CODES
+    ) -> bool:
+        """True when the phase failed only because the model host (or, for finalize, the remote) is unavailable: the
+        job keeps its state and the phase runs again after a backoff (BUG-176, BUG-199). After
+        ``model_outage_max_wait_seconds`` the job fails as before."""
+        if code not in codes:
             return False
         now = time.monotonic()
         outage = self._outages.setdefault(job.id, _Outage(first=now))
@@ -472,7 +497,7 @@ class Scheduler:
         await emit_status(
             s,
             job.id,
-            f"Modell nicht erreichbar ({code}) – {phase} wird in {delay} s erneut versucht",
+            f"{'Modell' if code in MODEL_OUTAGE_CODES else 'Remote'} nicht erreichbar ({code}) – {phase} wird in {delay} s erneut versucht",
             severity=Severity.warning,
         )
         return True
@@ -804,6 +829,8 @@ class Scheduler:
             if out.result:
                 st.result = {**(st.result or {}), **out.result}
             sev = Severity.info if out.outcome == "completed" else Severity.warning
+            if out.outcome != "failed":
+                self._step_outages.pop(st.id, None)
             await append_event(
                 s,
                 EventType.ATTEMPT_FINISHED,
@@ -847,7 +874,20 @@ class Scheduler:
                     error_code=out.error_code,
                     error_message=out.error_message,
                 )
-                if out.retryable and st.attempt_count < st.max_attempts:
+                outage_delay = self._step_outage_delay(st.id, out.error_code) if out.retryable else None
+                if outage_delay is not None:
+                    # BUG-197: the model host or the GPU lease was unavailable – the attempt did no work, so it does not
+                    # use up the step's budget (the attempt number stays unique, the budget grows by one)
+                    st.max_attempts = max(st.max_attempts, st.attempt_count + 1)
+                    st.not_before = _now() + timedelta(seconds=outage_delay)
+                    await emit_status(
+                        s,
+                        ctx.job_id,
+                        f"Modell nicht verfügbar ({out.error_code}) – Step {st.step_key} wird in {outage_delay}s erneut versucht",
+                        step_id=st.id,
+                        severity=Severity.warning,
+                    )
+                elif out.retryable and st.attempt_count < st.max_attempts:
                     backoff = (
                         out.retry_delay_seconds
                         if out.retry_delay_seconds is not None
@@ -1039,6 +1079,7 @@ class Scheduler:
             job.lock_expires_at = None
             if job.status not in {j.value for j in JOB_TERMINAL}:
                 if ok:
+                    self._outages.pop(job_id, None)
                     if job.status in (JobStatus.deploying.value, JobStatus.committing.value):
                         await transition_job(
                             s,
@@ -1048,6 +1089,8 @@ class Scheduler:
                             actor=self.instance_id,
                             status_line="Job erfolgreich abgeschlossen",
                         )
+                elif await self._defer_on_model_outage(s, job, "Abschluss", code, codes=FINALIZE_TRANSIENT_CODES):
+                    pass  # the job stays committing; recovery runs finalize again after the backoff (push/report idempotent)
                 else:
                     await transition_job(
                         s,

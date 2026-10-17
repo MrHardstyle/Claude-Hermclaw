@@ -42,6 +42,7 @@ class FakeDriver:
     finalized: list[uuid.UUID] = field(default_factory=list)
     replan_calls: list[tuple[uuid.UUID, str, dict[str, Any]]] = field(default_factory=list)
     finalize_ok: bool = True
+    finalize_codes: list[str] = field(default_factory=list)  # error codes of the first finalize runs, then finalize_ok
     prepare_gate: asyncio.Event | None = None
 
     async def _insert(self, s: Any, job_id: uuid.UUID, specs: list[StepSpec]) -> None:
@@ -75,6 +76,8 @@ class FakeDriver:
 
     async def finalize(self, job_id: uuid.UUID, token: CancelToken) -> JobPhaseResult:
         self.finalized.append(job_id)
+        if self.finalize_codes:
+            return JobPhaseResult(ok=False, error_code=self.finalize_codes.pop(0), error_message="remote trouble")
         return JobPhaseResult(ok=self.finalize_ok, error_code=None if self.finalize_ok else "PUSH_FAILED")
 
     async def replan(self, job_id: uuid.UUID, reason: str, evidence: dict[str, Any], token: CancelToken) -> JobPhaseResult:
@@ -131,6 +134,8 @@ class FakeHandler:
                 return StepOutcome("failed", error_code="FLAKY", error_message="transient", retryable=True)
             if what == "fail":
                 return StepOutcome("failed", error_code="BROKEN", error_message="permanent")
+            if what == "model_down":
+                return StepOutcome("failed", error_code="MODEL_UNAVAILABLE", error_message="connection refused", retryable=True)
             if what == "blocked":
                 return StepOutcome("blocked", error_code="SCOPE", replan_reason="needs scope expansion", replan_evidence={"path": "x"})
             return StepOutcome("completed", summary=f"{ctx.step_key} done", result={"ok": True})
@@ -249,6 +254,29 @@ async def test_retry_with_backoff_then_success(sessionmaker: Any, clean_jobs: No
         (2, "failed", "HANDLER_CRASHED"),
         (3, "completed", None),
     ]
+
+
+async def test_model_outage_during_a_step_does_not_use_up_its_attempts(sessionmaker: Any, clean_jobs: None) -> None:
+    """BUG-197: a model-host restart during a long job failed attempt after attempt (3 per step, shared with the
+    corrections), then the step, then a replan – work lost to an outage. Outage attempts do no work and are free."""
+    sm = sessionmaker
+    driver = FakeDriver(sm)
+    h = FakeHandler({"test"}, script={"S1": ["fail_retry", "model_down", "model_down", "model_down", "model_down", "completed"]})
+    jid = await _new_job(sm)
+    driver.plans[jid] = [StepSpec("S1", max_attempts=3)]
+    sched = Scheduler(sm, get_config(), [h], driver, settings=_settings(model_outage_retry_seconds=(0,)))
+    jobs = await _run_until(sched, sm, [jid])
+    assert jobs[jid].status == "succeeded"
+    assert [c[1] for c in h.calls] == [1, 2, 3, 4, 5, 6]
+    st = (await _steps(sm, jid))["S1"]
+    assert st.status == "completed" and st.attempt_count == 6
+    # an outage longer than model_outage_max_wait_seconds is a failure again
+    h2 = FakeHandler({"test"}, script={"S1": ["model_down"]})
+    jid2 = await _new_job(sm)
+    driver.plans[jid2] = [StepSpec("S1", max_attempts=2)]
+    sched2 = Scheduler(sm, get_config(), [h2], driver, settings=_settings(model_outage_retry_seconds=(0,), model_outage_max_wait_seconds=0))
+    jobs2 = await _run_until(sched2, sm, [jid2])
+    assert jobs2[jid2].status == "failed" and len(h2.calls) == 2
 
 
 async def test_backoff_delays_redispatch(sessionmaker: Any, clean_jobs: None) -> None:
@@ -444,6 +472,25 @@ async def test_finalize_failure_fails_job(sessionmaker: Any, clean_jobs: None) -
     sched = Scheduler(sm, get_config(), [FakeHandler({"test"})], driver, settings=_settings())
     jobs = await _run_until(sched, sm, [jid])
     assert jobs[jid].status == "failed" and jobs[jid].error_code == "PUSH_FAILED"
+
+
+async def test_transient_remote_failure_in_finalize_runs_finalize_again(sessionmaker: Any, clean_jobs: None) -> None:
+    """BUG-199: after hours of work a DNS hiccup, a git timeout or a push rejected because the base moved failed the job
+    in finalize. Finalize is idempotent and rebases again, so it runs again after a backoff."""
+    sm = sessionmaker
+    driver = FakeDriver(sm, finalize_codes=["GIT_NETWORK", "GIT_TIMEOUT", "PUSH_REJECTED"])
+    jid = await _new_job(sm)
+    driver.plans[jid] = [StepSpec("S1")]
+    sched = Scheduler(sm, get_config(), [FakeHandler({"test"})], driver, settings=_settings(model_outage_retry_seconds=(0,)))
+    jobs = await _run_until(sched, sm, [jid])
+    assert jobs[jid].status == "succeeded" and driver.finalized == [jid] * 4
+    # a deterministic finalize error still fails at once
+    driver2 = FakeDriver(sm, finalize_codes=["MERGE_CONFLICT"])
+    jid2 = await _new_job(sm)
+    driver2.plans[jid2] = [StepSpec("S1")]
+    sched2 = Scheduler(sm, get_config(), [FakeHandler({"test"})], driver2, settings=_settings(model_outage_retry_seconds=(0,)))
+    jobs2 = await _run_until(sched2, sm, [jid2])
+    assert jobs2[jid2].status == "failed" and jobs2[jid2].error_code == "MERGE_CONFLICT" and len(driver2.finalized) == 1
 
 
 async def test_missing_handler_blocks_step_and_empty_plan_fails(sessionmaker: Any, clean_jobs: None) -> None:

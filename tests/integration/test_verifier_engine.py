@@ -187,7 +187,6 @@ async def test_generated_files_and_changed_file_limit(sessionmaker: Any, tmp_pat
     assert names["changed_file_count"].status == "fail" and names["changed_file_count"].evidence["changed_count"] == 4
 
 
-
 async def test_job_level_verification_does_not_apply_per_step_change_limits(sessionmaker: Any, tmp_path: Path) -> None:
     """BUG-195: the job-level review and the regression rerun verify the whole job change; a big job (> the per-step
     file limit) or a later step changing what an earlier step had to leave alone failed at the very end of the job."""
@@ -209,6 +208,20 @@ async def test_job_level_verification_does_not_apply_per_step_change_limits(sess
         (repo / f"docs/p{i}.md").unlink()
     job2, *_ = await run(sessionmaker, repo, dataclasses.replace(st, job_level=True), verifier=v, kind="documentation")
     assert by_name(job2.report)["acceptance[0]:diff"].status == "fail"  # must_change still holds at job level
+
+
+async def test_job_level_rerun_does_not_fail_on_text_evidence_a_later_step_changed(sessionmaker: Any, tmp_path: Path) -> None:
+    """BUG-200: the regression rerun after a base update re-checked an earlier step's presence/absence on the final tree;
+    a later step that renamed the function failed the job in finalize although tests were green."""
+    repo = py_repo(tmp_path)
+    write(repo, "calc.py", CALC.replace("def add(", "def add_numbers(") + "\nadd = add_numbers\n")
+    acceptance = [{"type": "presence", "path_glob": "calc.py", "pattern": r"^def add\("}]
+    st = step(acceptance=acceptance, scope_contract=scope(target_paths=["calc.py"]))
+    own, *_ = await run(sessionmaker, repo, st, kind="documentation")
+    assert by_name(own.report)["acceptance[0]:presence"].status == "fail"  # on the step's own change: enforced
+    job, *_ = await run(sessionmaker, repo, dataclasses.replace(st, job_level=True), kind="documentation")
+    check = by_name(job.report)["acceptance[0]:presence"]
+    assert check.status == "skip" and "held on the step's own change" in check.message
 
 
 # ------------------------------------------------------------------------------------------- 21.2 syntax

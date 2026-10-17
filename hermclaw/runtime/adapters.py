@@ -37,7 +37,9 @@ def merge_scopes(scopes: list[ScopeContract | None]) -> ScopeContract | None:
                     out.append(p)
         return out
 
-    allowed = set(union("target_paths")) | set(union("allowed_new_paths"))
+    # a step's "leave X alone" does not bind the other steps (BUG-196): only globs every step forbids stay forbidden.
+    # Nothing is opened up by that – a path no step allowed is still rejected, and policy.always_forbidden applies.
+    forbidden = [f for f in union("forbidden_paths") if all(f in s.forbidden_paths for s in present)]
     ops: list[str] = []
     for s in present:
         for op in s.allowed_operations:
@@ -47,7 +49,7 @@ def merge_scopes(scopes: list[ScopeContract | None]) -> ScopeContract | None:
         source="manual",
         target_paths=union("target_paths"),
         allowed_new_paths=union("allowed_new_paths"),
-        forbidden_paths=[f for f in union("forbidden_paths") if f not in allowed],
+        forbidden_paths=forbidden,
         allowed_operations=ops,  # type: ignore[arg-type]
         strict_target_paths=all(s.strict_target_paths for s in present),
         reason="union of the job's step scopes (regression rerun)",

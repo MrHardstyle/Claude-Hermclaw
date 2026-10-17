@@ -15,6 +15,7 @@ from sqlalchemy import select, update
 from hermclaw.api import jobs as jobs_api
 from hermclaw.api.auth import Principal
 from hermclaw.contracts.scope import ScopeContract
+from hermclaw.core import job_metadata
 from hermclaw.core.config import get_config
 from hermclaw.core.errors import ModelError
 from hermclaw.core.interfaces import RepoHit, WorkspaceHandle
@@ -351,6 +352,9 @@ async def test_replanner_question_makes_the_job_wait_and_the_answer_resumes_it(w
     assert asked and asked[0]["question"].startswith("The required package")
     async with world.sessionmaker() as s:
         await jobs_api._control(s, jid, "replan", Principal("operator", frozenset({"control"})), reason="Use the standard library.")
+        # a human-requested replan is never refused for an exhausted budget (BUG-201)
+        meta = (await s.execute(select(Job.metadata_).where(Job.id == jid))).scalar_one()
+        assert meta[job_metadata.REPLAN_BUDGET_BASE] == 0
     jobs = await _run(world, driver, handlers, [jid])
     assert jobs[jid].status == "succeeded", (jobs[jid].error_code, jobs[jid].error_message)
     assert jobs[jid].replan_count == 1 and jobs[jid].error_code is None

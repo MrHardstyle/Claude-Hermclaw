@@ -4,12 +4,18 @@ Format: [Keep a Changelog](https://keepachangelog.com/de/1.1.0/), Versionen nach
 
 ## [0.1.0rc19] – Release Candidate (2026-10-17)
 
-Fix aus Batterie-Lauf 1 auf 0.1.0rc18: J4 endete `succeeded` mit einem Merge Request, dessen Code ein erfundenes Paket importiert.
+Fix aus Batterie-Lauf 1 auf 0.1.0rc18 (J4 endete `succeeded` mit einem Merge Request, dessen Code ein erfundenes Paket importiert) sowie ein Audit auf Pfade, an denen lange Aufträge spät scheitern.
 
 ### Behoben
 - **Nicht auflösbare Importe (BUG-193):** Neue Verifier-Prüfung `imports:python`. Ein neu importiertes Modul muss Standardbibliothek, Teil des Repositories oder in der Sandbox installiert sein; sonst wird der Schritt nicht abgenommen. Vorher landete ein erfundenes Paket in einer ungetesteten Funktion im Merge Request.
 - **Interpreter der Import-Prüfung (BUG-194):** Die Prüfung nutzt den Interpreter, den die Test-Kriterien nennen, etwa ein Projekt-venv oder `uv run`. Beim Gesamt-Review nutzt sie den der Code-Schritte. Ein nur geratenes `python3` lässt den Schritt nicht scheitern.
 - **Große Jobs am Ende (BUG-195):** Gesamt-Review und Regressionslauf nach einem Base-Update wenden die Pro-Schritt-Grenzen nicht mehr auf die gesamte Job-Änderung an. Das betrifft die Dateianzahl und `must_not_change` früherer Schritte. Vorher scheiterte ein Job mit mehr als 40 geänderten Dateien erst ganz am Ende.
+- **Job-Scope (BUG-196):** Das Verbot eines Schritts („tests/ nicht anfassen“) gilt nicht mehr für die Dateien anderer Schritte im Gesamt-Review.
+- **Modell-Ausfall im Schritt (BUG-197):** Versuche, die am nicht erreichbaren Modell oder an der GPU-Lease scheitern, verbrauchen keine Versuche des Schritts mehr. Sie werden bis zu 4 h mit Backoff wiederholt.
+- **Review bei Ausfall des Modell-Hosts (BUG-198):** Ein solcher Ausfall ist kein Urteil über die Änderung, also keine Korrekturrunde und kein Replan. Der Schritt wird wiederholt.
+- **Abschluss bei Netzwerkproblemen (BUG-199):** Netzwerk-, Timeout- und Lock-Fehler sowie ein abgelehnter Push lösen einen späteren neuen Abschlussversuch aus, statt den Job scheitern zu lassen.
+- **Regressionslauf (BUG-200):** Text-Belege früherer Schritte, die ein späterer Schritt legitim geändert hat, lassen den Abschluss nicht mehr scheitern.
+- **Manuelles Replan (BUG-201):** Ein vom Menschen angefordertes Replan scheitert nicht mehr am aufgebrauchten Budget.
 
 ## [0.1.0rc18] – Release Candidate (2026-10-17)
 

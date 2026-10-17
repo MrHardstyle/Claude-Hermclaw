@@ -26,9 +26,10 @@ from hermclaw.contracts.review import ReviewContract
 from hermclaw.contracts.step import StepContract
 from hermclaw.contracts.tools import OPS_TOOLS
 from hermclaw.contracts.verification import VerificationReport
-from hermclaw.core.errors import HermclawError
+from hermclaw.core.errors import HermclawError, ResourceUnavailable
 from hermclaw.core.interfaces import GitReader, RepoContextProvider, RepoHit, WorkspaceHandle
 from hermclaw.core.logging import get_logger
+from hermclaw.models.gateway import MODEL_LOAD_FAILED, MODEL_UNAVAILABLE
 from hermclaw.persistence.models import CommandRun, Job, ToolCallRow
 from hermclaw.review.reviewer import HeavyReviewer
 from hermclaw.review.text import clip, one_line, redact
@@ -57,6 +58,10 @@ def _protected(path: str, globs: Sequence[str]) -> bool:
         return True
 
 
+#: review errors that say nothing about the change: the model host is down
+_HOST_DOWN = frozenset({MODEL_UNAVAILABLE, MODEL_LOAD_FAILED})
+
+
 class WorkspaceReviewer:
     """Collects the review input for a workspace and runs the heavy review (``ReviewerPort``)."""
 
@@ -78,8 +83,14 @@ class WorkspaceReviewer:
         step_id: uuid.UUID,
         attempt_id: uuid.UUID | None,
     ) -> ReviewContract:
-        """Effective (fail-closed) review contract – the summary carries the reason when the review errored."""
+        """Effective (fail-closed) review contract – the summary carries the reason when the review errored.
+
+        An unreachable model host is no verdict about the change (BUG-198): it raises :class:`ResourceUnavailable`, so
+        the step attempt is retried once the host is back instead of costing a correction round or a replan. It never
+        passes either."""
         outcome = await self.review_outcome(step, workspace, verification, job_id=job_id, step_id=step_id, attempt_id=attempt_id)
+        if outcome.fail_closed and outcome.error_code in _HOST_DOWN:
+            raise ResourceUnavailable(f"heavy review: model host unavailable ({outcome.error_code}): {outcome.reason[:300]}")
         return outcome.review
 
     async def review_outcome(

@@ -326,7 +326,13 @@ async def _control(session: AsyncSession, job_id: uuid.UUID, action: str, princi
     elif action == "replan":
         if status in JOB_TERMINAL:
             raise ConflictError(f"job already {status.value}")
-        job.metadata_ = {**(job.metadata_ or {}), jm.REPLAN_REQUESTED: reason or "manual replan via API"}
+        # a human asked for it (or answered the replanner's question): never refused for an exhausted budget, and the
+        # automatic budget starts again from here (BUG-201)
+        job.metadata_ = {
+            **(job.metadata_ or {}),
+            jm.REPLAN_REQUESTED: reason or "manual replan via API",
+            jm.REPLAN_BUDGET_BASE: job.replan_count,
+        }
         detail = "replan requested"
         if status == JobStatus.waiting_for_user:  # the reason is the user's answer to the replanner's question
             await transition_job(session, job, JobStatus.running, reason="answer of the user", actor=principal.name)

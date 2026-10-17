@@ -46,6 +46,39 @@ Noch keine.
 
 ## Behobene Bugs
 
+### BUG-201 – Manuelles Replan bei aufgebrauchtem Budget beendet den Job
+- Phase: Code-Audit lange Aufträge · Komponente: api/planner · Severity: P2 · blockierend: nein (behoben) · Status: **behoben** (`tests/integration/test_runtime_driver.py::test_replanner_question_makes_the_job_wait_and_the_answer_resumes_it`)
+- Ursache: Der Scheduler übersprang für ein angefordertes Replan die Budgetprüfung. `Replanner.replan` prüfte das Budget aber erneut und warf `ReplanLimitReached`. Ein Replan, das ein Mensch anforderte, endete so bei 2 verbrauchten Replans mit dem Scheitern des Jobs.
+- Fix: `POST /replan` setzt `REPLAN_BUDGET_BASE` auf die aktuelle Replan-Zahl, wie `retry` (BUG-189). Ein menschliches Eingreifen startet das automatische Budget neu.
+
+### BUG-200 – Regressionslauf nach Base-Update prüft Text-Belege früherer Schritte auf dem Endstand
+- Phase: Code-Audit lange Aufträge · Komponente: verifier · Severity: P1 · blockierend: ja (behoben) · Status: **behoben** (`tests/integration/test_verifier_engine.py::test_job_level_rerun_does_not_fail_on_text_evidence_a_later_step_changed`)
+- Reproduktion: Schritt S2 belegt `presence: ^def add\(`, Schritt S6 benennt die Funktion legitim um. Bewegt sich die Basis während des Jobs, verifiziert `finalize` alle Schritte erneut auf dem Endstand. S2 scheitert, der Job endet mit `REGRESSION_FAILED`, obwohl die Tests grün sind. Ohne Base-Update wäre der Job erfolgreich gewesen.
+- Fix: Auf Job-Ebene (`job_level`) wird ein fehlschlagender `presence`/`absence`-Beleg zu `skip` mit Hinweis. Tests, Commands, Syntax, Secrets und Importe entscheiden über den Gesamtstand.
+
+### BUG-199 – Netzwerk- oder Git-Fehler im Abschluss beenden den Job nach Stunden Arbeit
+- Phase: Code-Audit lange Aufträge · Komponente: runtime/scheduler · Severity: P1 · blockierend: ja (behoben) · Status: **behoben** (`tests/integration/test_scheduler.py::test_transient_remote_failure_in_finalize_runs_finalize_again`, `tests/unit/test_finalize_network.py`)
+- Ursache: Jeder `GitError` in `finalize` war terminal: Mirror-Fetch, `ls-remote`, Push-Timeout, Lock-Timeout, Push abgelehnt weil die Basis sich bewegte. Wiederholt wurden nur DB-Fehler.
+- Fix:
+  - Der Driver erkennt Netzwerkfehler am stderr (DNS, Connection refused/reset, TLS, HTTP 5xx, „remote end hung up“) als `GIT_NETWORK`.
+  - Für `GIT_NETWORK`, `GIT_TIMEOUT`, `GIT_LOCK_TIMEOUT` und `PUSH_REJECTED` bleibt der Job in `committing`. Der Scheduler startet `finalize` nach Backoff erneut (60/120/300/600 s, höchstens `model_outage_max_wait_seconds`). `finalize` ist idempotent; die Basis wird dabei neu geprüft.
+  - Deterministische Fehler wie `MERGE_CONFLICT` scheitern weiter sofort.
+
+### BUG-198 – Nicht erreichbarer Modell-Host im Review kostet eine Korrekturrunde oder ein Replan
+- Phase: Code-Audit lange Aufträge · Komponente: review · Severity: P1 · blockierend: ja (behoben) · Status: **behoben** (`tests/integration/test_review_workspace.py::test_unreachable_model_host_is_no_verdict_but_a_retry`)
+- Ursache: Das Review ist fail-closed. Auch `MODEL_UNAVAILABLE`/`MODEL_LOAD_FAILED` ergaben ein `fix_required` ohne Befunde. Im Implement-Schritt kostete das eine Korrektur; im Gesamt-Review blockierte der Schritt und löste ein Replan aus. Beides passierte, obwohl niemand die Änderung angesehen hatte.
+- Fix: `WorkspaceReviewer.review` wirft bei diesen Codes `ResourceUnavailable`. Beide Handler machen daraus einen wiederholbaren Fehlschlag, der nach BUG-197 kein Budget kostet. Alle anderen Fehler bleiben fail-closed, auch Timeouts und ungültige Ausgaben. Ein Pass entsteht nie.
+
+### BUG-197 – Modell-Ausfall während eines Schritts verbraucht dessen Versuche, dann ein Replan
+- Phase: Code-Audit lange Aufträge · Komponente: scheduler · Severity: P1 · blockierend: ja (behoben) · Status: **behoben** (`tests/integration/test_scheduler.py::test_model_outage_during_a_step_does_not_use_up_its_attempts`)
+- Ursache: Die Ausfall-Toleranz (BUG-176, bis 4 h) galt nur für Planung und Replan. Im Schritt zählte jeder `MODEL_UNAVAILABLE`/`MODEL_TIMEOUT`/`MODEL_LOAD_FAILED`/`RESOURCE_UNAVAILABLE`-Versuch gegen `max_attempts_per_step` (3, geteilt mit Korrekturen). Ein Neustart des Modell-Hosts von wenigen Minuten ließ den Schritt scheitern und verbrauchte ein Replan.
+- Fix: Solche Versuche haben keine Arbeit geleistet. Der Scheduler erhöht `max_attempts` um eins, die Versuchsnummer bleibt eindeutig. Der Schritt läuft nach Backoff (60/120/300/600 s) erneut, höchstens `model_outage_max_wait_seconds` lang je Schritt; danach gilt das alte Verhalten.
+
+### BUG-196 – Job-Scope übernimmt das „nicht anfassen“ eines Schritts für alle Schritte
+- Phase: Code-Audit lange Aufträge · Komponente: runtime · Severity: P1 · blockierend: ja (behoben) · Status: **behoben** (`tests/unit/test_merge_scopes.py`)
+- Reproduktion: S2 hat `forbidden_paths: ["tests/**"]`, S7 legt `tests/test_x.py` an. `merge_scopes` behielt `tests/**` als verboten, weil das Muster nur bei exakt gleichem String verworfen wurde. Gesamt-Review und Regressionslauf scheiterten deterministisch am Scope. Das führte zu Replans bis `REPLAN_LIMIT` bzw. zu `REGRESSION_FAILED`.
+- Fix: Im Job-Scope bleibt nur verboten, was *jeder* Schritt verbietet. Was kein Schritt erlaubt hat, wird weiterhin abgelehnt; `always_forbidden` gilt immer.
+
 ### BUG-195 – Gesamt-Review und Regressionslauf messen die ganze Job-Änderung an Pro-Schritt-Grenzen: große Jobs scheitern ganz am Ende
 - Phase: Code-Review nach BUG-194 (Ziel lange Aufträge) · Komponente: verifier/runtime · Severity: P1 · blockierend: ja (behoben) · Status: **behoben** (`tests/integration/test_verifier_engine.py::test_job_level_verification_does_not_apply_per_step_change_limits`)
 - Reproduktion: Ein Job ändert über mehrere Schritte zusammen mehr als `policies.verifier.max_changed_files` (40) Dateien, etwa eine Webseite oder ein Plugin-System. Oder ein späterer Schritt ändert eine Datei, die ein früherer Schritt per `must_not_change` nicht anfassen durfte. Das Gesamt-Review (`step_baseline=False`, Job-Basis) schlägt dann deterministisch mit `changed_file_count` bzw. `acceptance[i]:diff` fehl. Ebenso der Regressionslauf nach einem Base-Update in `finalize`. Beides passiert nach Stunden Arbeit.

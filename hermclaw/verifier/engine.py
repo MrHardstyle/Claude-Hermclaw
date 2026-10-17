@@ -337,12 +337,18 @@ class Verifier:
             CommandEvidence: lambda: acceptance.command_evidence(ctx, index, item),
         }
         try:
-            return await handlers[type(item)]()
+            check = await handlers[type(item)]()
         except asyncio.CancelledError:
             raise
         except Exception as exc:
             log.exception("acceptance check crashed", extra={"step_key": ctx.step.key, "criterion": item.type})
             return ctx.check(item.type, acceptance.label(index, item), "error", f"check crashed: {type(exc).__name__}: {exc}")
+        if ctx.step.job_level and check.status == "fail" and isinstance(item, (PresenceEvidence, AbsenceEvidence)):
+            # BUG-200: a step's text evidence held on its own change; on the whole job (regression rerun after a base
+            # update) a later step may legitimately have renamed or moved it – tests and commands judge the result
+            message = f"held on the step's own change; on the whole job: {check.message}"
+            return check.model_copy(update={"status": "skip", "message": message[:2000]})
+        return check
 
     @staticmethod
     async def _guarded(

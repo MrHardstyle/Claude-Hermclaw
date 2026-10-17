@@ -178,3 +178,23 @@ async def test_any_collection_error_fails_closed(sessionmaker: SM, tmp_repo: Pat
         make_step(job_id, step_id), handle(tmp_repo, job_id, base), report(), job_id=job_id, step_id=step_id, attempt_id=None
     )
     assert review.verdict == "fix_required" and "RuntimeError" in review.summary and chat.calls == []
+
+
+async def test_unreachable_model_host_is_no_verdict_but_a_retry(sessionmaker: SM, tmp_repo: Path) -> None:
+    """BUG-198: a model-host restart during the heavy review returned a fail-closed fix_required without findings –
+    a correction round (implement step) or a replan (job review) for a change nobody had looked at."""
+    from hermclaw.core.errors import ModelError, ResourceUnavailable
+
+    base = _change_repo(tmp_repo)
+    job_id, step_id = await make_job_step(sessionmaker)
+    chat = ScriptedChatModel([ModelError("connection refused", code="MODEL_UNAVAILABLE")])
+    adapter = WorkspaceReviewer(HeavyReviewer(chat, sessionmaker, config()), GitCliReader())
+    args = (make_step(job_id, step_id), handle(tmp_repo, job_id, base), report())
+    with pytest.raises(ResourceUnavailable, match="MODEL_UNAVAILABLE"):
+        await adapter.review(*args, job_id=job_id, step_id=step_id, attempt_id=None)
+    # still fail-closed for everything that is about the change or the model's answer
+    chat2 = ScriptedChatModel(["not json"] * 3)
+    review = await WorkspaceReviewer(HeavyReviewer(chat2, sessionmaker, config()), GitCliReader()).review(
+        *args, job_id=job_id, step_id=step_id, attempt_id=None
+    )
+    assert review.verdict == "fix_required"

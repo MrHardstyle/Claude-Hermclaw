@@ -10,6 +10,7 @@ orchestrator can call it again (scheduler startup recovery).
 
 from __future__ import annotations
 
+import re
 import uuid
 from dataclasses import dataclass
 from pathlib import Path
@@ -49,6 +50,22 @@ if TYPE_CHECKING:
 log = get_logger(__name__)
 
 _PREPARE_ORDER = (JobStatus.queued, JobStatus.inventory, JobStatus.discovering, JobStatus.researching, JobStatus.planning)
+#: finalize failed on the way to the remote (DNS, connection, TLS, HTTP 5xx): the scheduler runs finalize again later
+GIT_NETWORK = "GIT_NETWORK"
+_NETWORK_STDERR = re.compile(
+    r"could not resolve host|connection (refused|reset|timed out)|operation timed out|network is unreachable|"
+    r"unable to access|early eof|the remote end hung up|returned error: 5\d\d|\b50[234]\b|tls|ssl|gnutls",
+    re.IGNORECASE,
+)
+
+
+def _network_failure(exc: GitError) -> bool:
+    if exc.code != "GIT_COMMAND_FAILED":
+        return False
+    text = f"{exc.message} {(exc.details or {}).get('stderr', '')}"
+    return bool(_NETWORK_STDERR.search(text))
+
+
 _TEST_FRAMEWORKS = ("pytest", "unittest", "npm", "phpunit", "go", "cargo", "generic")
 
 
@@ -354,7 +371,8 @@ class RuntimeJobDriver:
             except MergeConflictError as exc:
                 result = JobPhaseResult(ok=False, error_code=exc.code, error_message=exc.message, detail=exc.details)
             except GitError as exc:
-                result = JobPhaseResult(ok=False, error_code=exc.code, error_message=DEFAULT_REDACTOR.text(exc.message), detail=exc.details)
+                code = GIT_NETWORK if _network_failure(exc) else exc.code
+                result = JobPhaseResult(ok=False, error_code=code, error_message=DEFAULT_REDACTOR.text(exc.message), detail=exc.details)
         extra["final_status"] = "succeeded" if result.ok else f"failed ({result.error_code})"
         async with self.sm() as s:
             data = await collect_report_data(s, job_id)
