@@ -272,3 +272,23 @@ def test_duplicate_criteria_are_dropped_from_the_enriched_plan_of_a_verify_step(
     result = enrich_plan(PlanContract.model_validate(data), _ctx(), RiskPolicy.effective({}, SETTINGS))
     verify = next(s for s in result.plan.steps if s.id == "S002")
     assert [a.type for a in verify.acceptance] == ["diff", "scope"]
+
+
+def test_a_verify_step_never_demands_changes_it_cannot_make() -> None:
+    """Live battery J1 on 0.1.0rc14: Gemma gave the verify step S002 the diff criterion of S001 (``must_change`` main.py,
+    test_main.py); a verify step changes nothing, so it failed after a correct implementation and cost a replan."""
+    copied = {"type": "diff", "allow_empty": False, "must_change": ["app/main.py"], "must_not_change": []}
+    guarded = {"type": "diff", "allow_empty": False, "must_change": ["app/main.py"], "must_not_change": ["app/db.py"]}
+    data = plan(
+        "Add the endpoint.",
+        [
+            step("S001", "implement", "coding", "Add the endpoint.", repo_hints=["app/main.py"], acceptance=[copied]),
+            step("S002", "verify", "testing", "Verify it.", depends_on=["S001"], acceptance=[{"type": "scope"}, copied, guarded]),
+        ],
+    )
+    result = enrich_plan(PlanContract.model_validate(data), _ctx(), RiskPolicy.effective({}, SETTINGS))
+    implement, verify = result.plan.steps
+    assert any(a.type == "diff" and a.must_change == ["app/main.py"] for a in implement.acceptance), "mutating steps keep it"
+    diffs = [a for a in verify.acceptance if a.type == "diff"]
+    assert verify.acceptance[0].type == "scope" and len(diffs) == 1
+    assert diffs[0].must_change == [] and diffs[0].allow_empty and diffs[0].must_not_change == ["app/db.py"]

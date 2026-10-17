@@ -179,6 +179,21 @@ def add_research_steps(
 
 
 # --------------------------------------------------------------------------------------------- acceptance (14.8)
+def _without_change_demands(acceptance: list[AcceptanceCriterion]) -> list[AcceptanceCriterion]:
+    """A step that changes no workspace files (verify, review, research, remote) can never satisfy a diff criterion that
+    demands changes: its own diff is always empty. Gemma copied S001's ``must_change`` into the verify step S002, which
+    failed after a correct implementation and cost a replan (live battery J1 on 0.1.0rc14, BUG-180). Only the parts
+    that can hold stay: ``must_not_change`` and ``max_changed_files``, with an empty change allowed."""
+    out: list[AcceptanceCriterion] = []
+    for item in acceptance:
+        if not isinstance(item, DiffEvidence) or (not item.must_change and item.allow_empty):
+            out.append(item)
+            continue
+        if item.must_not_change or item.max_changed_files is not None:
+            out.append(item.model_copy(update={"must_change": [], "allow_empty": True}))
+    return out
+
+
 def generate_acceptance(step: PlanStep, ctx: ValidationContext) -> tuple[list[AcceptanceCriterion], list[str]]:
     """Deterministic acceptance for a workspace-mutating step. Returns (acceptance, labels of added criteria)."""
     # identical criteria are dropped: models sometimes repeat one criterion until the list limit (live job 50784df5)
@@ -190,7 +205,7 @@ def generate_acceptance(step: PlanStep, ctx: ValidationContext) -> tuple[list[Ac
             seen.add(key)
             acceptance.append(item)
     if step.kind.value not in WORKSPACE_MUTATING_KINDS:
-        return acceptance, []
+        return _without_change_demands(acceptance), []
     added: list[str] = []
 
     def add(item: AcceptanceCriterion, label: str) -> None:

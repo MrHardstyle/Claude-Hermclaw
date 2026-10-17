@@ -52,6 +52,13 @@ _READ_ONLY = frozenset(
         ToolName.git_diff,
     }
 )
+# withheld after a refused repeat until something changes (BUG-181)
+_RUNNERS = frozenset({ToolName.run_test.value, ToolName.run_command.value})
+RUNNERS_WITHHELD = (
+    "run_test and run_command are withheld until something changes: nothing changed since the refused command, so "
+    "every check gives the same result. Edit the code or the tests now, or call complete_step if the step is done, "
+    "or block_step."
+)
 
 CoderOutcome = Literal["completed", "blocked", "replan", "budget_exhausted", "stagnated", "cancelled", "checkpointed", "model_failed"]
 
@@ -264,6 +271,7 @@ class CoderLoop:
         s = self.settings
         records = list(history)
         notice: str | None = None
+        runners_withheld = False
         invalid_streak = 0
         turn = start_turn - 1
         for turn in range(start_turn, s.max_turns + 1):
@@ -272,13 +280,16 @@ class CoderLoop:
             if token.checkpoint_requested:
                 return CoderResult("checkpointed", turn - 1, records, last_failure=last_failure, detail=token.reason)
             failure_text = "\n\n".join(x for x in (notice, last_failure) if x) or None
+            tools = self.engine.tool_catalog()
+            if runners_withheld:
+                tools = [t for t in tools if t.get("name") not in _RUNNERS]
             built = await self.builder.build(
                 TurnContextInput(
                     step=step,
                     workspace=workspace,
                     turn=turn,
                     max_turns=s.max_turns,
-                    tools=self.engine.tool_catalog(),
+                    tools=tools,
                     completion_contract=completion_contract,
                     history=records,
                     latest_failure=failure_text,
@@ -321,6 +332,14 @@ class CoderLoop:
             if not repeated and not (result.ok and action.tool in _READ_ONLY):
                 last_failure = None if result.ok else result.output
             notice = result.output if repeated else None
+            # after a refused repeat the coder re-proposed the same check up to four times (live battery J1 on
+            # 0.1.0rc14): the checks leave the catalogue until a file or the environment changes (BUG-181)
+            if repeated and action.tool.value in _RUNNERS:
+                runners_withheld = True
+            elif result.ok and action.tool not in _READ_ONLY and action.tool.value not in _RUNNERS:
+                runners_withheld = False
+            if runners_withheld:
+                notice = "\n".join(x for x in (notice, RUNNERS_WITHHELD) if x)
             if result.terminal and result.ok:
                 if action.tool == ToolName.complete_step:
                     return CoderResult("completed", turn, records, completion=dict(result.data), last_failure=None)

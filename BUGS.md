@@ -46,6 +46,18 @@ Noch keine.
 
 ## Behobene Bugs
 
+### BUG-181 – Coder schlägt nach einer verweigerten Wiederholung dieselbe Prüfung immer wieder vor
+- Phase: Batterie-Lauf 1 auf 0.1.0rc14 (J1) · Komponente: coder/loop · Severity: P2 · blockierend: nein (behoben) · Status: **behoben** (`tests/integration/test_coder_loop.py::test_checks_are_withheld_after_a_refused_repeat_until_a_file_changes`)
+- Reproduktion: Job `2adc4aec-ee1d-4995-b0dc-cedc6582a894` (J1, `succeeded` in 20,2 min, MR erstellt). Versuch 1: Nach einem `replace_text` ohne `path`/`old` (ARGS_INVALID) schlug der Coder `run_test` viermal in Folge vor, jedes Mal `COMMAND_REPEATED`; die Stagnationserkennung stoppte den Versuch nach Heavy Review. Versuch 2: Die Tests waren grün, trotzdem kamen drei verweigerte Wiederholungen vor `complete_step`. Das Batterie-Kriterium „repeats“ (4, max. 2) scheiterte.
+- Ursache: Die Verweigerung erklärt, dass sich nichts ändern kann, aber das Werkzeug blieb im Katalog, und das Modell griff weiter danach.
+- Fix: Nach einer verweigerten Wiederholung von `run_test`/`run_command` stehen beide nicht mehr im Werkzeugkatalog des nächsten Zuges. Ein Hinweis sagt, warum, und bietet Ändern, `complete_step` oder `block_step` an. Jede erfolgreiche ändernde Aktion (Datei, Installation) bringt sie zurück; Lesen nicht.
+
+### BUG-180 – Verify-Schritt mit übernommenem `must_change` scheitert nach korrekter Umsetzung
+- Phase: Batterie-Lauf 1 auf 0.1.0rc14 (J1) · Komponente: planner/enrich · Severity: P2 · blockierend: nein (behoben) · Status: **behoben** (`tests/unit/test_planner_enrich.py::test_a_verify_step_never_demands_changes_it_cannot_make`)
+- Reproduktion: Job `2adc4aec…`: Gemma gab dem Verify-Schritt S002 das diff-Kriterium von S001 (`must_change` main.py, test_main.py, `allow_empty` false). S001 war korrekt fertig; S002 scheiterte mit „expected changes … but none were found; the change is empty“ → Replan.
+- Ursache: Ein Schritt, der keine Workspace-Dateien ändert, kann ein diff-Kriterium mit geforderten Änderungen nie erfüllen; die Validierung prüft `must_change` nur bei ändernden Schritten.
+- Fix: Die Anreicherung entfernt bei nicht ändernden Schritten (verify, review, research, remote) geforderte Änderungen aus diff-Kriterien. Haltbare Teile bleiben: `must_not_change` und `max_changed_files`, mit leerer Änderung erlaubt. Kriterien ohne haltbaren Rest fallen weg.
+
 ### BUG-179 – Coder liest unveränderte Dateien wiederholt und hält einen eigenen falschen Testsollwert für einen Codefehler
 - Phase: Batterie-Lauf 1 auf 0.1.0rc13 (J6, J3, J5) · Komponente: tools/engine, stagnation · Severity: P2 · blockierend: nein (behoben) · Status: **behoben** (`tests/integration/test_tools_engine_read_write.py::test_identical_read_of_an_unchanged_file_is_refused_within_the_context_window`, `tests/unit/test_stagnation_actions.py::test_forced_diagnosis_and_strategy_switch`, `::test_none_and_warning_decisions`)
 - Reproduktion: Job `35ec82fa-54ea-46c7-b730-328dfa086a01` (J6 „Fehlerbericht Gesamtmenge“). Der Coder schrieb den Test `test_total_quantity_non_empty` mit Sollwert 9 für 5 + 3, korrigierte `total_quantity` richtig auf `sum(...)` und las danach `inventory/store.py` in vier Zügen hintereinander erneut („verify the fix“), ohne etwas zu ändern; zwei Replans, `REPLAN_LIMIT`. Ebenso J3 (dreimal derselbe `read_range`).

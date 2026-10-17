@@ -172,6 +172,31 @@ async def test_refused_repeat_keeps_the_real_failure_in_the_next_prompt(sessionm
     assert res.last_failure and "test_add3" in res.last_failure and "command refused" not in res.last_failure
 
 
+async def test_checks_are_withheld_after_a_refused_repeat_until_a_file_changes(sessionmaker: Any, tmp_repo: Path) -> None:
+    """Live battery J1 on 0.1.0rc14: after a refused repeat the coder proposed the same test command three more times.
+    run_test/run_command leave the tool catalogue until something changes; an edit brings them back (BUG-181)."""
+    cmd = f"{PY} -m pytest -q -p no:cacheprovider tests/test_app.py"
+    actions = [
+        act("write_file", "Test anlegen", path="tests/test_app.py", content=TEST_FILE),
+        act("run_test", "Test (rot)", command=cmd),
+        act("run_test", "nochmal", command=cmd),
+        act("read_file", path="app.py"),
+        act("write_file", "Fix", path="app.py", content="def add(a, b):\n    return a + b\n"),
+        act("read_file", path="app.py"),
+    ]
+    h, loop, chat = await _setup(sessionmaker, tmp_repo, actions, max_turns=6)
+    await _run(h, loop)
+
+    def prompt(turn: int) -> str:
+        return "\n".join(m.content for m in chat.prompts[turn - 1])
+
+    assert "- run_test(" in prompt(3), "a first repeat is still offered (the guard refuses it)"
+    for turn in (4, 5):
+        assert "- run_test(" not in prompt(turn) and "- run_command(" not in prompt(turn)
+        assert "withheld until something changes" in prompt(turn)
+    assert "- run_test(" in prompt(6) and "withheld" not in prompt(6), "the edit in turn 5 brings the checks back"
+
+
 async def test_out_of_scope_write_is_refused_and_reported_to_the_model(sessionmaker: Any, tmp_repo: Path) -> None:
     actions = [
         act("write_file", path="secrets.txt", content="nope"),
