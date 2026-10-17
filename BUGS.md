@@ -46,6 +46,16 @@ Noch keine.
 
 ## Behobene Bugs
 
+### BUG-213 – Festes Replan-Budget pro Job lässt lange Jobs an ihrem dritten unabhängigen Problem scheitern
+- Phase: Audit später Fehlerpfade (2026-10-17) · Komponente: scheduler · Severity: P1 · blockierend: ja für lange Aufträge (behoben) · Status: **behoben** (`tests/integration/test_scheduler.py::test_replans_that_make_progress_get_a_fresh_budget`)
+- Reproduktion: Ein Job, dessen Replans jeweils funktionieren (danach schließen weitere Schritte ab) und der später auf ein neues, unabhängiges Problem trifft. Mit `max_replans_per_job: 2` endet er beim dritten Problem mit `REPLAN_LIMIT`, egal ob nach 10 Minuten oder nach 3 Stunden und 25 abgeschlossenen Schritten.
+- Ursache: Das Budget zählte alle Replans des Jobs. Es unterschied nicht zwischen Replans, die nichts bringen (Schleife), und Replans, die den Job weiterbrachten.
+- Fix:
+  - `max_replans_per_job` zählt nur noch Replans in Folge ohne Fortschritt. Beim Start eines Replans merkt sich der Scheduler die Zahl abgeschlossener Schritte (`replan_progress_mark`). Sind beim nächsten Replan mehr Schritte abgeschlossen, beginnt das Budget neu (`replan_budget_base`, wie beim Retry).
+  - Neue harte Obergrenze `max_replans_total` (12) über den ganzen Job.
+  - Ein erneut ausgeführter Schritt zählt nicht als Fortschritt, denn die Zahl abgeschlossener Schritte muss die Marke übersteigen.
+- Selbstprüfung: echter Schritt nach vorn. Eine strukturelle Grenze, die genau die vom Nutzer beschriebenen späten Abbrüche verursacht. Der Schleifenschutz bleibt erhalten.
+
 ### BUG-212 – Coder kennt nur das Schrittziel, nicht den Auftrag, und baut am Auftrag vorbei
 - Phase: Erweiterte Batterie auf 0.1.0rc22 (X2) · Komponente: coder/context_builder · Severity: P1 · blockierend: ja (behoben) · Status: **behoben** (`tests/unit/test_context_builder_sections.py::test_step_goal_carries_the_job_request`)
 - Reproduktion: Job `20b80f9b-b56b-478d-9bab-a1f5cdc73fa9`.

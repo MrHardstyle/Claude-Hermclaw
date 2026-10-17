@@ -338,6 +338,36 @@ async def test_replan_budget_exhausted_fails_job(sessionmaker: Any, clean_jobs: 
     assert blocked.result["replan_reason"] == "needs scope expansion"
 
 
+async def test_replans_that_make_progress_get_a_fresh_budget(sessionmaker: Any, clean_jobs: None) -> None:
+    """A long job failed with REPLAN_LIMIT at its third unrelated problem, although each earlier replan had worked and
+    further steps had completed. The budget counts replans in a row without progress; a hard ceiling stays (BUG-213)."""
+    sm = sessionmaker
+    driver = FakeDriver(sm)
+    script = {"S1": ["blocked"], **{f"B{i}": ["blocked"] for i in range(1, 5)}}
+    h = FakeHandler({"test"}, script=script)
+    jid = await _new_job(sm)
+    driver.plans[jid] = [StepSpec("S1")]
+    driver.replans[jid] = [[StepSpec(f"P{i}"), StepSpec(f"B{i}", deps=(f"P{i}",))] for i in range(1, 5)] + [[StepSpec("Z")]]
+    sched = Scheduler(sm, get_config(), [h], driver, settings=_settings())
+    jobs = await _run_until(sched, sm, [jid])
+    assert jobs[jid].status == "succeeded", (jobs[jid].error_code, jobs[jid].error_message)
+    assert jobs[jid].replan_count == 5
+
+    # the ceiling over the whole job still holds
+    cfg = get_config()
+    capped = cfg.model_copy(
+        update={
+            "policies": cfg.policies.model_copy(update={"correction": cfg.policies.correction.model_copy(update={"max_replans_total": 3})})
+        }
+    )
+    driver2 = FakeDriver(sm)
+    jid2 = await _new_job(sm)
+    driver2.plans[jid2] = [StepSpec("S1")]
+    driver2.replans[jid2] = [[StepSpec(f"P{i}"), StepSpec(f"B{i}", deps=(f"P{i}",))] for i in range(1, 5)] + [[StepSpec("Z")]]
+    jobs2 = await _run_until(Scheduler(sm, capped, [FakeHandler({"test"}, script=script)], driver2, settings=_settings()), sm, [jid2])
+    assert jobs2[jid2].status == "failed" and jobs2[jid2].error_code == "REPLAN_LIMIT" and jobs2[jid2].replan_count == 3
+
+
 async def test_cancel_running_job(sessionmaker: Any, clean_jobs: None) -> None:
     sm = sessionmaker
     driver = FakeDriver(sm)

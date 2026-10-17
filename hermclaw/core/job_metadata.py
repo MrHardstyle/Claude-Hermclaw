@@ -38,6 +38,7 @@ REPLAN_REQUESTED = "replan_requested"
 REPLAN_REASON = "replan_reason"
 RETRY_REQUESTED = "retry_requested"
 REPLAN_BUDGET_BASE = "replan_budget_base"
+REPLAN_PROGRESS_MARK = "replan_progress_mark"
 RECOVERED_PREPARE_FROM = "recovered_prepare_from"
 # --- planner provenance (hermclaw/planner/) ----------------------------------------------------------------------
 PLANNER_MODEL_ALIAS = "planner_model_alias"
@@ -57,7 +58,8 @@ RESERVED_KEYS: Mapping[str, str] = MappingProxyType(
         REPLAN_REQUESTED: "manual replan request (POST /api/jobs/{id}/replan)",
         REPLAN_REASON: "reason of the running replan (scheduler, restart recovery)",
         RETRY_REQUESTED: "retry marker (POST /api/jobs/{id}/retry)",
-        REPLAN_BUDGET_BASE: "replan_count at the last retry; the replan budget counts from there",
+        REPLAN_BUDGET_BASE: "replan_count at the last retry or progress; the replan budget counts from there",
+        REPLAN_PROGRESS_MARK: "completed steps when the last replan started; more completed steps since grant a fresh budget",
         RECOVERED_PREPARE_FROM: "startup recovery marker (scheduler)",
         PLANNER_MODEL_ALIAS: "model alias that produced the current plan",
         PLANNER_MODEL_FALLBACK: "the technical fallback planner served",
@@ -131,6 +133,7 @@ __all__ = [
     "PLANNER_MODEL_FALLBACK",
     "RECOVERED_PREPARE_FROM",
     "REPLAN_BUDGET_BASE",
+    "REPLAN_PROGRESS_MARK",
     "REPLAN_REASON",
     "REPLAN_REQUESTED",
     "RESERVED_KEYS",

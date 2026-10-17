@@ -11,6 +11,7 @@ Fixes aus der erweiterten Batterie auf 0.1.0rc22 (X1 Datenanalyse-CLI) und dem A
 - **Tests in Prüfschritten (BUG-209):** Pläne, die Dateien in einen `test`-, `verify`- oder `review`-Schritt legen, werden abgelehnt, mit dem Hinweis, Code und Tests in einen Schritt zu legen. Vorher wurden die Tests nie geschrieben und der Code-Schritt scheiterte am Review.
 - **Base-Konflikt beim Abschluss (BUG-210):** Hat sich der Ziel-Branch während des Jobs konfliktbehaftet geändert, wird die verifizierte Arbeit als Draft-MR auf der alten Base geliefert, statt verworfen zu werden. Eine Regression nach dem Base-Update lässt den Job weiterhin scheitern, liefert den Branch aber ebenfalls als Draft.
 - **Auftrag im Coder-Kontext (BUG-212):** Der Coder sieht unter dem Schrittziel den Originalauftrag. Vorher kannte er nur die Zusammenfassung des Planners und baute bei X2 ein Benutzer-Registrierungsformular statt einer Veranstaltungsanmeldung.
+- **Replan-Budget nach Fortschritt (BUG-213):** `max_replans_per_job` zählt Replans in Folge ohne neu abgeschlossenen Schritt. Lange Jobs scheitern nicht mehr an ihrem dritten unabhängigen Problem. Neue Obergrenze `policies.correction.max_replans_total` (12).
 - **Wiederholungssperre (BUG-211):** Derselbe Befehl mit anderem `timeout_seconds` gilt auf unveränderten Dateien als Wiederholung.
 
 ## [0.1.0rc22] – Release Candidate (2026-10-17)

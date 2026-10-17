@@ -54,7 +54,7 @@ Errors (all `HermclawError`, stable codes):
 | Error | Code | When |
 |---|---|---|
 | `PlannerError` | `PLANNER_INVALID_OUTPUT` | output still invalid after 2 repair attempts; `details.history` holds every attempt's errors |
-| `ReplanLimitReached` | `REPLAN_LIMIT_REACHED` | `jobs.replan_count >= policies.correction.max_replans_per_job` |
+| `ReplanLimitReached` | `REPLAN_LIMIT_REACHED` | replans since the last retry or progress (`replan_budget_base`) `>= policies.correction.max_replans_per_job` |
 | `PlanConflict` | `PLAN_EXISTS` | second initial plan, or another planner persisted first (concurrent planning) |
 | `PlanConflict` | `PLAN_CHANGED` | the plan version, replan count or completed set changed while the model ran; stale failed step |
 | `PlanConflict` | `NO_PLAN` | replan for a job without a plan |

@@ -292,7 +292,11 @@ class StagnationPolicy(_Strict):
 class CorrectionPolicy(_Strict):
     max_corrections_per_step: int = 2
     max_attempts_per_step: int = 3
+    #: replans in a row without progress: a replan after which another step completed starts a fresh budget, so a long
+    #: job is not failed for its third unrelated problem hours after the first two (BUG-213)
     max_replans_per_job: int = 2
+    #: hard ceiling over the whole job, progress or not
+    max_replans_total: int = 12
 
 
 class VerifierPolicy(_Strict):

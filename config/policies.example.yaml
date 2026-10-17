@@ -60,7 +60,7 @@ coder:
   max_output_tokens: 6144
   tool_output_chars: 12000
 stagnation: {warn_after: 2, diagnose_after: 3, stop_after: 4, sequence_length: 3, max_diagnoses: 2, strip_line_numbers: true}
-correction: {max_corrections_per_step: 2, max_attempts_per_step: 3, max_replans_per_job: 2}
+correction: {max_corrections_per_step: 2, max_attempts_per_step: 3, max_replans_per_job: 2, max_replans_total: 12}  # per_job: replans in a row without a newly completed step (BUG-213)
 verifier:
   max_changed_files: 40
   allow_deletions: true

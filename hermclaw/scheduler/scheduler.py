@@ -20,6 +20,7 @@ import contextlib
 import os
 import time
 import uuid
+from collections.abc import Mapping
 from dataclasses import dataclass, field
 from datetime import UTC, datetime, timedelta
 from typing import Any
@@ -90,6 +91,15 @@ async def job_to(s: AsyncSession, job: Job, target: JobStatus, **kw: Any) -> Non
     ):
         await transition_job(s, job, JobStatus.running, reason="normalise macro state", actor=kw.get("actor", "runtime"))
     await transition_job(s, job, target, **kw)
+
+
+def progress_budget(replan_count: int, metadata: Mapping[str, Any] | None, completed_now: int) -> dict[str, int]:
+    """Metadata that grants a fresh replan budget: more steps completed since the last replan started means that replan
+    worked, so ``max_replans_per_job`` counts replans in a row without progress (BUG-213). ``{}`` when nothing changes."""
+    mark = (metadata or {}).get(job_metadata.REPLAN_PROGRESS_MARK)
+    if isinstance(mark, int) and completed_now > mark and replan_count > 0:
+        return {job_metadata.REPLAN_BUDGET_BASE: replan_count}
+    return {}
 
 
 @dataclass
@@ -980,8 +990,11 @@ class Scheduler:
                     in_flight == 0 and (counts.get(StepStatus.blocked.value, 0) or counts.get(StepStatus.failed.value, 0))
                 ):
                     reason = str(manual_replan) if manual_replan else "blocked_or_failed_steps"
-                    max_replans = self.config.policies.correction.max_replans_per_job
-                    if job_metadata.replans_used(job.replan_count, job.metadata_) >= max_replans and not manual_replan:
+                    policy = self.config.policies.correction
+                    completed_now = counts.get(StepStatus.completed.value, 0)
+                    budget_meta = progress_budget(job.replan_count, job.metadata_, completed_now)
+                    used = job_metadata.replans_used(job.replan_count, {**(job.metadata_ or {}), **budget_meta})
+                    if (used >= policy.max_replans_per_job or job.replan_count >= policy.max_replans_total) and not manual_replan:
                         failed_keys = [
                             k
                             for (k,) in (
@@ -1009,7 +1022,9 @@ class Scheduler:
                         continue
                     job.metadata_ = {
                         **{k: v for k, v in (job.metadata_ or {}).items() if k != job_metadata.REPLAN_REQUESTED},
+                        **budget_meta,
                         job_metadata.REPLAN_REASON: reason,
+                        job_metadata.REPLAN_PROGRESS_MARK: completed_now,
                     }
                     await job_to(s, job, JobStatus.replanning, reason=reason, actor=self.instance_id, status_line="Gemma plant neu")
                     spawn.append((job.id, "replan", reason))
