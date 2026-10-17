@@ -1,7 +1,8 @@
 """Parse test-runner output into counts (P17 17.6).
 
-Supported: pytest, unittest, jest, vitest, mocha, phpunit, go test, cargo test; everything else falls back to
-``generic`` (exit code only). Parsers only read the runner's own summary lines – no project-specific knowledge.
+Supported: pytest, unittest, jest, vitest, mocha, node:test (TAP and spec reporter), phpunit, go test, cargo test;
+everything else falls back to ``generic`` (exit code only).
+Parsers only read the runner's own summary lines – no project-specific knowledge.
 """
 
 from __future__ import annotations
@@ -13,9 +14,9 @@ from typing import Literal
 
 from hermclaw.tools.output import strip_ansi
 
-Framework = Literal["pytest", "unittest", "jest", "vitest", "mocha", "phpunit", "go", "cargo", "generic"]
+Framework = Literal["pytest", "unittest", "jest", "vitest", "mocha", "node", "phpunit", "go", "cargo", "generic"]
 TestStatus = Literal["passed", "failed", "error"]
-FRAMEWORKS: tuple[Framework, ...] = ("pytest", "unittest", "jest", "vitest", "mocha", "phpunit", "go", "cargo", "generic")
+FRAMEWORKS: tuple[Framework, ...] = ("pytest", "unittest", "jest", "vitest", "mocha", "node", "phpunit", "go", "cargo", "generic")
 
 
 @dataclass(frozen=True)
@@ -170,6 +171,27 @@ def parse_mocha(out: str) -> TestCounts | None:
     )
 
 
+# ---------------------------------------------------------------------------------------------- node:test
+# ``node --test`` ends with "# tests 2 / # pass 1 / # fail 1 ..." (TAP reporter, the default without a TTY) or the same
+# lines prefixed with "ℹ" (spec reporter). Without this parser a failing node run read "0 passed, 0 failed" (BUG-177).
+_NODE_LINE = re.compile(r"^(?:#|\u2139)\s+(tests|pass|fail|cancelled|skipped|todo)\s+(\d+)\s*$", re.M)
+
+
+def parse_node(out: str) -> TestCounts | None:
+    found: dict[str, int] = {}
+    for m in _NODE_LINE.finditer(out):
+        found[m.group(1)] = int(m.group(2))  # the last summary wins
+    if "tests" not in found or "pass" not in found:
+        return None
+    return TestCounts(
+        "node",
+        passed=found["pass"],
+        failed=found.get("fail", 0),
+        errors=found.get("cancelled", 0),
+        skipped=found.get("skipped", 0) + found.get("todo", 0),
+    )
+
+
 # ---------------------------------------------------------------------------------------------- phpunit
 _PHPUNIT_OK = re.compile(r"^OK \((\d+) tests?, \d+ assertions?\)", re.M)
 _PHPUNIT_SUMMARY = re.compile(r"^Tests: (\d+), Assertions: \d+(.*)$", re.M)
@@ -237,6 +259,7 @@ PARSERS: dict[Framework, Callable[[str], TestCounts | None]] = {
     "jest": parse_jest,
     "vitest": parse_vitest,
     "mocha": parse_mocha,
+    "node": parse_node,
 }
 
 

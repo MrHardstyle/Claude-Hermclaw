@@ -24,6 +24,7 @@ from hermclaw.persistence.models import (
     StepAttempt,
     StepDependency,
     TestRun,
+    ToolCallRow,
     VerificationCheckRow,
     VerificationRun,
 )
@@ -108,6 +109,20 @@ async def _planned_fastapi(sm: async_sessionmaker[AsyncSession], *, s003_running
             )
         )
         s.add(ResearchRun(job_id=job_id, question="pagination conventions", status="completed", synthesis="Use limit/offset with max 100."))
+        refusal = "error DEPENDENCY_NOT_REQUESTED: install refused: the job does not ask for any of flask"
+        for turn in (1, 2):  # the same refusal twice: reported once
+            s.add(
+                ToolCallRow(
+                    job_id=job_id,
+                    step_id=ids["S002"],
+                    turn=turn,
+                    tool="install_dependencies",
+                    status="failed",
+                    error_code="DEPENDENCY_NOT_REQUESTED",
+                    result_summary=refusal,
+                )
+            )
+        s.add(ToolCallRow(job_id=job_id, step_id=ids["S002"], turn=3, tool="run_test", status="failed", error_code="TESTS_FAILED"))
         await s.commit()
     return job_id, ids
 
@@ -265,6 +280,14 @@ async def test_failure_package_contents(sessionmaker: object) -> None:
     assert tail.endswith("FAILED tests/test_users.py::test_page - 1 failed") and "line(s) truncated]" in tail
     assert SECRET not in str(payload) and "***REDACTED***" in tail
     assert ev["scope_decision"]["status"] == "active" and ev["scope_decision"]["target_paths"] == ["README.md"]
+    # policy refusals reach the replanner, so it does not plan the refused dependency again (BUG-178)
+    assert ev["runtime_refusals"] == [
+        {
+            "tool": "install_dependencies",
+            "error_code": "DEPENDENCY_NOT_REQUESTED",
+            "message": "error DEPENDENCY_NOT_REQUESTED: install refused: the job does not ask for any of flask",
+        }
+    ]
     assert [s["id"] for s in payload["open_steps"]] == ["S003"]
     assert payload["research_evidence"][0]["synthesis"] == "Use limit/offset with max 100."
     assert payload["repository_inventory"]["test_command"] == "pytest -q"

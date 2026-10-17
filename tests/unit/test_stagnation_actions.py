@@ -13,6 +13,7 @@ from hermclaw.stagnation.actions import (
     SCOPE_ERROR_CODES,
     STOP_STRATEGY,
     STRATEGY_BLOCK_EXTERNAL,
+    STRATEGY_RECHECK_TEST,
     STRATEGY_REREAD,
     STRATEGY_RESEARCH,
     STRATEGY_SCOPE_EXPANSION,
@@ -141,7 +142,7 @@ def test_none_and_warning_decisions() -> None:
     assert w.kind is DirectiveKind.notice and w.strategy is None and w.recommendation is None
     assert "read_file app.py" in w.message and "Stagnation warning" in w.message
     after = decide(verdict(sig(SignalKind.failing_tests, after=True, count=2, tool="run_test"), level=L.warning))
-    assert "did not resolve" in after.message
+    assert "did not resolve" in after.message and "expected values of the failing test" in after.message
 
 
 @pytest.mark.parametrize(
@@ -156,7 +157,8 @@ def test_none_and_warning_decisions() -> None:
         ),
         (sig(SignalKind.error, code="TEXT_NOT_FOUND", tool="replace_text"), STRATEGY_REREAD, "read_range"),
         (sig(SignalKind.action, tool="read_file"), STRATEGY_SWITCH_APPROACH, "different action"),
-        (sig(SignalKind.failing_tests, after=True, tool="run_test"), STRATEGY_SWITCH_APPROACH, "different action"),
+        # BUG-179: still failing after a change – the test's own expectation may be what is wrong
+        (sig(SignalKind.failing_tests, after=True, tool="run_test"), STRATEGY_RECHECK_TEST, "expected value in the test"),
     ],
 )
 def test_forced_diagnosis_and_strategy_switch(signal: RepeatedSignal, strategy: str, phrase: str) -> None:

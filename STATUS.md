@@ -1,7 +1,7 @@
 # STATUS
 
 ## Aktueller Zustand (2026-10-16)
-- Projekt: Hermclaw Next · Branch: `claude/hermclaw-next-build` · Version `0.1.0rc13` (gebaut); **deployt: 0.1.0rc11** (rc13 folgt) auf .222–.225 (Deployment jetzt durch Claude, Become-Passwort per systemd-creds)
+- Projekt: Hermclaw Next · Branch: `claude/hermclaw-next-build` · Version `0.1.0rc14` (gebaut); **deployt: 0.1.0rc13** (rc14 folgt) auf .222–.225 (Deployment jetzt durch Claude, Become-Passwort per systemd-creds)
 - **Live-Abnahme nach Kapitel 12 durchgeführt** (2026-10-16): 396 Schritte erledigt, 34 mit offenem Live-Teil (`[~]`), 0 offen.
 - 0.1.0rc2 deployt (vom Betreiber, alle Hosts inkl. .224): doctor 19 ok, models 6/6 (Fallback, BUG-150 wirksam), workers 3/3.
 - Erster Testauftrag erneut eingereicht (Job `eadf1b6f…`): Die Erstplanung ist jetzt gültig (BUG-143 wirkt, Steps mit Scope),
@@ -128,8 +128,8 @@ Lint, mypy, ShellCheck, ansible-lint (production) sauber.
 - Embeddings: `embeddinggemma:300m` (768 dim; EmbeddingGemma 2 erst, wenn Ollama es unter Linux/CUDA ausführt, D-010)
 
 ## Bugs
-- 174 gefunden, **174 behoben** (P0 2, P1 38, P2 69, P3 55, P4 3) – `BUGS.md`. Live-Abnahme: BUG-143 bis BUG-174.
-  BUG-143–172 sind produktiv (0.1.0rc11); BUG-173–176 wirken nach dem Deployment von 0.1.0rc13.
+- 179 gefunden, **179 behoben** – `BUGS.md`. Live-Abnahme: BUG-143 bis BUG-179.
+  BUG-143–176 sind produktiv (0.1.0rc13); BUG-177–179 (Batterie-Lauf 1 auf rc13) wirken nach dem Deployment von 0.1.0rc14.
 - Externe Blocker: BLOCKER-002 (Tag-Push)
 
 ## Letzte Testresultate (2026-10-15, Build-Host)
@@ -154,9 +154,8 @@ Tests 2026-10-15, einzeln ausgeführt: `test_bootstrap_infra` 63, `test_bootstra
 bestanden; ansible-lint (production) sauber. `test_deploy_converge` ist angepasst; ihn führt der Integrator aus.
 
 ## Nächster Schritt
-1. 0.1.0rc13 ausrollen (`hermclaw_version: "0.1.0rc13"` im Inventar, `ansible-playbook … deploy.yml`), Fixtures pushen
-   (`scripts/ops/acceptance-fixtures.sh`) und die Auftragsbatterie `hermclaw acceptance-jobs` J1–J6 laufen lassen; danach Abbruch,
-   parallele Jobs und Worker-Neustart prüfen.
+1. 0.1.0rc14 ausrollen und die Auftragsbatterie `hermclaw acceptance-jobs` J1–J6 zweimal in Folge bestehen (Lauf 1 auf rc13:
+   J2 und J4 bestanden, J1/J3/J5/J6 `REPLAN_LIMIT` → BUG-177–179); danach Abbruch, parallele Jobs und Worker-Neustart prüfen.
 2. Wake-on-LAN einrichten (MACs, BIOS, Kapitel 13.1), danach `--suite wol --full-wol` und erst dann den Leerlauf-Suspend einschalten.
 3. Backup nach Terra einrichten (Kapitel 11), Backup-Suite; danach Soak-Test und Cutover (`docs/runbooks/cutover.md`).
 4. Drittabhängigkeiten eines Projekts installiert der Coder über `install_dependencies` (D-014); ein Projekt-Sandbox-Image

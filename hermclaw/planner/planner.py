@@ -58,7 +58,7 @@ from hermclaw.planner.prompt import (
     planner_system_prompt,
     planner_user_payload,
 )
-from hermclaw.planner.validation import ValidationContext, semantic_errors
+from hermclaw.planner.validation import AdviceOnce, ValidationContext, new_manifest_notes, semantic_errors
 
 log = get_logger(__name__)
 PLANNER_ROLE = "planner"
@@ -224,7 +224,8 @@ class Planner(PlannerBase):
                 raise PlanConflict(f"job {job_id} already has a plan; use the replanner", code=PLAN_EXISTS)
             job_doc = await job_document(session, job)
             constraints = await job_constraints(session, job, inputs.constraints)
-            vctx = ValidationContext.build(self.config, inputs, self.settings, extra_text="\n".join([job.title, job.prompt, *constraints]))
+            job_text = "\n".join([job.title, job.prompt, *constraints])
+            vctx = ValidationContext.build(self.config, inputs, self.settings, extra_text=job_text, job_text=job_text)
             prompt = self.build_prompt(job_doc, inputs, constraints, vctx, risk_policy)
             await append_event(
                 session,
@@ -237,9 +238,12 @@ class Planner(PlannerBase):
             )
             await session.commit()
 
+        advice = AdviceOnce()
+
         def validate(data: dict[str, Any]) -> EnrichmentResult:
             plan = validate_schema(PlanContract, data, limit=self.settings.max_errors_reported)
             errors = semantic_errors(plan, vctx, limit=self.settings.max_errors_reported)
+            errors += advice(new_manifest_notes(plan, vctx))
             if errors:
                 raise PlanInvalid("semantic", errors)
             return enrich_plan(plan, vctx, risk_policy)

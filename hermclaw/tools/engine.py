@@ -97,6 +97,7 @@ TIMEOUT_HINT = (
     "Commands must exit on their own: a server, watcher or REPL never does. Do not start one in the foreground or "
     "in the background; a test starts the app in-process (port 0) and closes it, or calls the handler directly."
 )
+READ_REPEAT_WINDOW = 6  # turns; the context shows the files of the last 6 reads (context_builder ``_read_paths``)
 IMAGE_CONSTRAINTS = "/tmp/hermclaw-image-constraints.txt"  # noqa: S108 - path inside the sandbox
 PYTHON_DEPS_DIR = "/deps/python"
 
@@ -279,6 +280,9 @@ class ToolEngine:
         # every finished command: (file-change count, turn, outcome). The coder gets a fresh context each turn and
         # re-ran identical commands on unchanged files again and again (analysis 2026-10-16, live job 50784df5)
         self._ran: dict[tuple[str, str, int], tuple[int, int, str]] = {}
+        # identical reads: (file-change count, turn). The context of every turn already shows the files read in this
+        # attempt; the coder still re-read the same unchanged file turn after turn instead of acting (BUG-179)
+        self._reads: dict[tuple[str, str], tuple[int, int]] = {}
         # manifest digest of the last successful install per (ecosystem, manifest): reinstalling it changes nothing
         self._installed: dict[tuple[str, str], str] = {}
         self._handlers: dict[ToolName, Handler] = {
@@ -652,8 +656,25 @@ class ToolEngine:
             data={"path": rel, "count": len(entries), "shown": len(shown), "recursive": args.recursive},
         )
 
+    def _check_read_repeat(self, tool: ToolName, key: str, turn: int) -> None:
+        """Refuse a read identical to one of the last ``READ_REPEAT_WINDOW`` turns while no file changed: its content is
+        already in this turn's context (files read in this attempt), so reading again only costs a turn."""
+        previous = self._reads.get((tool.value, key))
+        if previous is None or previous[0] != self._writes or turn - previous[1] > READ_REPEAT_WINDOW:
+            return
+        raise ToolError(
+            E.READ_REPEATED,
+            f"read refused: you already read exactly this in turn {previous[1]} and no file changed since; its content is "
+            "shown above among the files you read (read_range shows lines beyond those). Act on it now: edit the code or "
+            "the test, run a different check, or call complete_step/block_step.",
+            data={"previous_turn": previous[1], "repeated": True},
+        )
+
     async def _read_file(self, args: ReadFileArgs, ctx: CallContext, events: list[PendingEvent]) -> ToolResult:
+        key = self.fs.resolve(args.path)[0]
+        self._check_read_repeat(ToolName.read_file, key, ctx.turn)
         tf = await asyncio.to_thread(self.fs.read_text, args.path, max_bytes=self.max_read_bytes)
+        self._reads[(ToolName.read_file.value, key)] = (self._writes, ctx.turn)
         lines = tf.text.count("\n") + (1 if tf.text and not tf.text.endswith("\n") else 0)
         text, clipped = clip_head(tf.text, self.output_limit)
         if clipped:
@@ -663,11 +684,14 @@ class ToolEngine:
         return self._ok(ToolName.read_file, text, truncated=clipped, data={"path": tf.rel, "bytes": tf.size, "lines": lines})
 
     async def _read_range(self, args: ReadRangeArgs, ctx: CallContext, events: list[PendingEvent]) -> ToolResult:
+        key = f"{self.fs.resolve(args.path)[0]}:{args.start}-{args.end}"
+        self._check_read_repeat(ToolName.read_range, key, ctx.turn)
         rel, lines, total = await asyncio.to_thread(self.fs.read_lines, args.path, args.start, args.end)
+        if args.start > total > 0:
+            raise ToolError(E.RANGE_INVALID, f"'{rel}' has only {total} lines (start={args.start})", data={"total_lines": total})
+        self._reads[(ToolName.read_range.value, key)] = (self._writes, ctx.turn)
         if total == 0:
             return self._ok(ToolName.read_range, "(empty file)", data={"path": rel, "start": 0, "end": 0, "total_lines": 0})
-        if args.start > total:
-            raise ToolError(E.RANGE_INVALID, f"'{rel}' has only {total} lines (start={args.start})", data={"total_lines": total})
         end = min(args.end, total)
         width = len(str(end))
         body = "\n".join(f"{n:>{width}}| {line}" for n, line in enumerate(lines, start=args.start))

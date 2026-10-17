@@ -2,6 +2,23 @@
 
 Format: [Keep a Changelog](https://keepachangelog.com/de/1.1.0/), Versionen nach PEP 440.
 
+## [0.1.0rc14] – Release Candidate (2026-10-17)
+
+Fixes aus Batterie-Lauf 1 auf 0.1.0rc13 (J1, J3, J5, J6 mit `REPLAN_LIMIT`, kein Infrastrukturfehler).
+
+### Behoben
+- **Node-Testausgabe (BUG-177):** `node --test` (TAP und Spec-Reporter) wird gezählt; vorher „0 passed, 0 failed“.
+- **Unverlangte Abhängigkeiten im Plan (BUG-178):** Ein Plan, der in einem Repository ohne Manifest eines anlegt, bekommt
+  einmalig den Hinweis „nur Pakete, die der Auftrag nennt, sonst Standardbibliothek“. Das Replan-Paket enthält die
+  Policy-Verweigerungen der Runtime (`runtime_refusals`).
+- **Lesen statt Handeln (BUG-179):** Identische Lesezugriffe auf unveränderte Dateien innerhalb von 6 Zügen werden mit
+  `READ_REPEATED` verweigert. Bleiben Tests nach einer Änderung rot, verlangt die Stagnationsstrategie, auch den Sollwert
+  des eigenen Tests zu prüfen.
+
+### Betrieb
+- tower3: VM 224 (Snapshot als interner qcow2-Snapshot) liegt auf `hdd`; Thin-Pool von 98,5 % auf 27,5 %. Die Disk von
+  VM 104 (.224) ist 300 GB groß; Partition und Dateisystem im Gast sind noch nicht vergrößert.
+
 ## [0.1.0rc13] – Release Candidate (2026-10-17)
 
 Fixes aus dem Batterie-Lauf auf 0.1.0rc11 (J2–J6); enthält 0.1.0rc12 (nicht separat ausgerollt).

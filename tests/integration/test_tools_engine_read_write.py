@@ -75,6 +75,24 @@ async def test_read_file_and_range(sessionmaker: SM, repo: Path) -> None:
     assert (await h.call("read_file", path="src")).error_code == E.NOT_A_FILE
 
 
+async def test_identical_read_of_an_unchanged_file_is_refused_within_the_context_window(sessionmaker: SM, repo: Path) -> None:
+    """Live battery J6/J3: the coder re-read the same unchanged file 3-4 turns in a row although every turn's context
+    already shows the files read in the attempt (BUG-179)."""
+    h = await make_harness(sessionmaker, repo, contract=scope(target_paths=["src/calc.py"]))
+    assert (await h.call("read_file", path="src/calc.py")).ok
+    again = await h.call("read_file", path="./src//calc.py")
+    assert again.error_code == E.READ_REPEATED and again.data["repeated"] is True and "turn 1" in again.output
+    assert (await h.call("read_range", path="src/calc.py", start=1, end=3)).ok, "a different read runs"
+    assert (await h.call("read_range", path="src/calc.py", start=1, end=3)).error_code == E.READ_REPEATED
+    assert (await h.call("read_file", path="missing.py")).error_code == E.NOT_FOUND
+    assert (await h.call("read_file", path="missing.py")).error_code == E.NOT_FOUND, "failed reads are not remembered"
+    assert (await h.call("replace_text", path="src/calc.py", old="a * b", new="b * a")).ok
+    assert (await h.call("read_file", path="src/calc.py")).ok, "a file changed: reading again is allowed"
+    for _ in range(6):
+        await h.call("list_files", path=".")
+    assert (await h.call("read_file", path="src/calc.py")).ok, "outside the window the file may have left the context"
+
+
 async def test_read_output_budget_sets_truncated(sessionmaker: SM, repo: Path) -> None:
     (repo / "big.txt").write_text("".join(f"line {i:05d} " + "x" * 60 + "\n" for i in range(2000)))
     h = await make_harness(sessionmaker, repo)

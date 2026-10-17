@@ -65,7 +65,7 @@ from hermclaw.planner.persist import (
 from hermclaw.planner.planner import PlannerBase, model_facing_schema
 from hermclaw.planner.prompt import PromptBuild, build_messages, fit_to_budget, replan_user_payload, replanner_system_prompt
 from hermclaw.planner.replan_contract import APPROACH_FAILURE_REASONS, ReplanContract, ReplanTrigger
-from hermclaw.planner.validation import ValidationContext, normalise_text, semantic_errors
+from hermclaw.planner.validation import AdviceOnce, ValidationContext, new_manifest_notes, normalise_text, semantic_errors
 from hermclaw.runtime.transitions import transition_step
 
 STEP_FINAL_STATES = frozenset({StepStatus.completed.value, StepStatus.failed.value, StepStatus.cancelled.value})
@@ -193,7 +193,9 @@ class Replanner(PlannerBase):
                     [job.title, job.prompt, *constraints, trigger.detail, json.dumps(trigger.evidence, default=str)]
                     + [s.goal for s in state.completed.values()]
                 )
-                vctx = ValidationContext.build(self.config, vctx_inputs, self.settings, extra_text=extra)
+                vctx = ValidationContext.build(
+                    self.config, vctx_inputs, self.settings, extra_text=extra, job_text="\n".join([job.title, job.prompt, *constraints])
+                )
                 prompt = self.build_prompt(job_doc, inputs, constraints, vctx, risk_policy, package=package)
                 snapshot = self._snapshot(job, state)
                 completed_rows = sorted(state.completed.values(), key=lambda r: r.step_key)
@@ -335,6 +337,7 @@ class Replanner(PlannerBase):
     ) -> Callable[[dict[str, Any]], ReplanValidated]:
         limit = self.settings.max_errors_reported
         completed_keys = snapshot.completed_keys
+        advice = AdviceOnce()
 
         def validate(data: dict[str, Any]) -> ReplanValidated:
             contract = validate_schema(ReplanContract, data, limit=limit)
@@ -364,6 +367,7 @@ class Replanner(PlannerBase):
             except PlanInvalid as invalid:
                 raise PlanInvalid("replan" if errors else invalid.phase, (errors + invalid.errors)[:limit]) from None
             sem = semantic_errors(merged, vctx, preserved=kept_keys, limit=limit)
+            sem += advice(new_manifest_notes(merged, vctx, kept_keys))
             if errors or sem:
                 raise PlanInvalid("replan" if errors else "semantic", (errors + sem)[:limit])
             enriched = enrich_plan(merged, vctx, risk_policy, preserved=kept_keys, reserved_ids=set(snapshot.active_keys))

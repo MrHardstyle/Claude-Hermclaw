@@ -53,6 +53,7 @@ class DirectiveKind(StrEnum):
 # strategy labels (strategy.changed events) -------------------------------------------------------------------
 STRATEGY_SWITCH_APPROACH = "switch_approach"
 STRATEGY_REREAD = "reread_before_edit"
+STRATEGY_RECHECK_TEST = "recheck_test_expectation"
 STRATEGY_SCOPE_EXPANSION = "request_scope_expansion"
 STRATEGY_RESEARCH = "switch_to_research"
 STRATEGY_BLOCK_EXTERNAL = "block_external_failure"
@@ -237,6 +238,8 @@ def in_loop_strategy(cause: StagnationCause, ctx: LadderContext) -> str:
         return STRATEGY_RESEARCH
     if cause is StagnationCause.edit_mechanics:
         return STRATEGY_REREAD
+    if cause is StagnationCause.test_after_change:
+        return STRATEGY_RECHECK_TEST
     return STRATEGY_SWITCH_APPROACH
 
 
@@ -260,6 +263,13 @@ _STRATEGY_TEXT: dict[str, str] = {
         "Your edits are not being applied. Re-read the exact current content with read_range first, then edit with "
         "text copied exactly from it, or use a different edit tool."
     ),
+    # live battery J6 (2026-10-17): the coder fixed the code, but the test it had written itself expected 5 + 3 == 9; it
+    # re-read the correct code and re-ran the test until the attempt ended (BUG-179)
+    STRATEGY_RECHECK_TEST: (
+        "The tests still fail after your change. Compare the failing assertion with the STEP GOAL: if the code now does "
+        "what the goal asks and the expected value in the test is wrong (e.g. a test written in this step), correct the "
+        "test; otherwise change the fix. Do not re-read or re-run anything without an edit first."
+    ),
     STRATEGY_SWITCH_APPROACH: (
         "Repeating the same action will produce the same result. Take a different action: inspect a different "
         "part of the code or the failing test itself, change the fix, or finish with complete_step/block_step."
@@ -276,7 +286,10 @@ def warning_message(verdict: StagnationVerdict) -> str:
     """20.4 warning notice for the next turn (worded after the dominant signal)."""
     dom = verdict.dominant
     if dom is not None and dom.kind in (SignalKind.failing_tests, SignalKind.error, SignalKind.changed_files) and dom.after_code_change:
-        advice = "Your last change did not resolve it; re-check the root cause before the next edit."
+        advice = (
+            "Your last change did not resolve it; re-check the root cause before the next edit – and the expected values "
+            "of the failing test, if it was written in this step."
+        )
     elif dom is not None and dom.kind is SignalKind.no_diff_progress:
         advice = "Your edits did not change the workspace; check that the edit applies to the current file content."
     else:

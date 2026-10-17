@@ -19,7 +19,14 @@ from hermclaw.planner.inputs import (
     infer_framework,
 )
 from hermclaw.planner.parsing import extract_json_object, validate_schema
-from hermclaw.planner.validation import ValidationContext, ancestors, open_research_requests, semantic_errors
+from hermclaw.planner.validation import (
+    AdviceOnce,
+    ValidationContext,
+    ancestors,
+    new_manifest_notes,
+    open_research_requests,
+    semantic_errors,
+)
 from tests.unit.test_planner_support import FASTAPI, LINUX_ADMIN, PHP, REACT, plan, step
 
 
@@ -489,3 +496,34 @@ def test_must_change_has_to_match_the_files_of_the_step() -> None:
     assert not any("must_change" in e for e in _errors(plan("goal", [ok2])))
     bad = _impl("S001", allowed_new_paths=["src/"], acceptance=[{"type": "diff", "must_change": ["lib/util.py"]}])
     assert any("must_change 'lib/util.py' matches none of the files" in e for e in _errors(plan("goal", [bad])))
+
+
+# ------------------------------------------------------------------------------ new dependency manifest (BUG-178)
+def _health_plan(*new_paths: str) -> PlanContract:
+    data = step(
+        "S001",
+        "implement",
+        "coding",
+        "Implement a Flask application with a /health endpoint and a test.",
+        allowed_new_paths=list(new_paths),
+        acceptance=[{"type": "diff", "must_change": list(new_paths)}],
+    )
+    return PlanContract.model_validate(plan("Health endpoint with a test.", [data]))
+
+
+def test_a_new_manifest_in_a_repository_without_one_gets_advice_once() -> None:
+    """Live battery J1: Gemma planned Flask plus requirements.txt for a job that names no package; every install was
+    refused and the job failed. The planner hears once that such packages are refused; the same plan again is fine."""
+    empty = ValidationContext.build(get_config(), PlannerInput(), PlannerSettings(), job_text="Erstelle einen Health-Endpunkt mit Test.")
+    notes = new_manifest_notes(_health_plan("app.py", "test_app.py", "requirements.txt"), empty)
+    assert len(notes) == 1 and "S001" in notes[0] and "requirements.txt" in notes[0] and "standard-library" in notes[0]
+    assert new_manifest_notes(_health_plan("app.py", "test_app.py"), empty) == []
+    assert new_manifest_notes(_health_plan("/abs/requirements.txt"), empty) == [], "invalid paths are the validator's job"
+    advice = AdviceOnce()
+    assert advice(notes) == notes and advice(notes) == [], "the same plan after the advice is accepted"
+    # the repository already has the manifest, or the job itself names it: nothing to advise
+    has_manifest = ValidationContext.build(get_config(), PlannerInput(known_paths=["requirements.txt", "app.py"]), PlannerSettings())
+    assert new_manifest_notes(_health_plan("requirements.txt"), has_manifest) == []
+    named = ValidationContext.build(get_config(), PlannerInput(), PlannerSettings(), job_text="Add Flask; list it in requirements.txt.")
+    assert new_manifest_notes(_health_plan("requirements.txt"), named) == []
+    assert new_manifest_notes(_health_plan("app.py", "requirements.txt"), empty, frozenset({"S001"})) == [], "kept steps"

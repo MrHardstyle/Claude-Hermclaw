@@ -361,7 +361,7 @@ async def test_unknown_tool_and_malformed_actions_are_rejected_and_recorded(sess
 async def test_turn_budget_allows_only_terminal_tools(sessionmaker: SM, repo: Path) -> None:
     h = await make_harness(sessionmaker, repo, permissions=ToolPermissions(max_turns=2))
     assert (await h.call("read_file", path="app.py")).ok
-    assert (await h.call("read_file", path="app.py")).ok
+    assert (await h.call("read_range", path="app.py", start=1, end=2)).ok
     assert (await h.call("read_file", path="app.py")).error_code == E.TURN_BUDGET_EXHAUSTED
     assert (await h.call("block_step", reason_code="other", message="out of turns")).ok
 

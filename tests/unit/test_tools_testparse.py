@@ -1,4 +1,4 @@
-"""P17 17.6: test-runner output parsing from recorded outputs (pytest, unittest, jest, vitest, mocha, phpunit, go, cargo)."""
+"""P17 17.6: test-runner output parsing from recorded outputs (pytest, unittest, jest, vitest, mocha, node:test, phpunit, go, cargo)."""
 
 from __future__ import annotations
 
@@ -73,6 +73,43 @@ test result: ok. 2 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; fini
 """
 
 
+# node --test, TAP reporter (no TTY) – recorded from live job J5 (BUG-177)
+NODE_TAP = """TAP version 13
+# Subtest: slugify converts a string to a URL-friendly slug
+ok 1 - slugify converts a string to a URL-friendly slug
+  ---
+  duration_ms: 0.962748
+  ...
+# Subtest: slugify handles special characters
+not ok 2 - slugify handles special characters
+  ---
+  error: "'café-münchén' == 'cafe-munchen'"
+  code: 'ERR_ASSERTION'
+  ...
+1..2
+# tests 2
+# suites 0
+# pass 1
+# fail 1
+# cancelled 0
+# skipped 0
+# todo 0
+# duration_ms 51.2
+"""
+
+NODE_SPEC = """\u2714 adds (0.5ms)
+\u2716 subtracts (0.7ms)
+\u2139 tests 3
+\u2139 suites 0
+\u2139 pass 2
+\u2139 fail 1
+\u2139 cancelled 0
+\u2139 skipped 0
+\u2139 todo 1
+\u2139 duration_ms 40.1
+"""
+
+
 @pytest.mark.parametrize(
     ("output", "framework", "expected"),
     [
@@ -86,6 +123,8 @@ test result: ok. 2 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; fini
         (JEST, "jest", (10, 1, 0, 2)),
         (VITEST, "vitest", (4, 1, 0, 1)),
         (MOCHA, "mocha", (7, 2, 0, 1)),
+        (NODE_TAP, "node", (1, 1, 0, 0)),
+        (NODE_SPEC, "node", (2, 1, 0, 1)),
         (PHPUNIT_OK, "phpunit", (5, 0, 0, 0)),
         (PHPUNIT_FAIL, "phpunit", (6, 2, 1, 1)),
         (GO, "go", (1, 1, 0, 1)),
@@ -105,6 +144,13 @@ def test_explicit_framework_and_generic() -> None:
     assert parse_counts(PYTEST_PASS, "jest") is None
     assert parse_counts(PYTEST_PASS, "generic") is None
     assert parse_counts("random build log\nall good\n") is None
+
+
+def test_failing_node_test_run_reports_its_counts() -> None:
+    """A failing ``node --test`` run said "0 passed, 0 failed" and the coder could not tell what failed (BUG-177)."""
+    summary = summarise(NODE_TAP, 1)
+    assert (summary.framework, summary.status, summary.passed, summary.failed) == ("node", "failed", 1, 1)
+    assert summarise(NODE_TAP.replace("# fail 1", "# fail 0").replace("# pass 1", "# pass 2"), 0).status == "passed"
 
 
 def test_summarise_verdicts() -> None:

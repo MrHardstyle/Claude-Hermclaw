@@ -79,12 +79,16 @@ class ValidationContext:
     test_framework: TestFramework = "generic"
     has_existing_tests: bool = False
     capability_network: dict[str, bool] = field(default_factory=dict)
+    job_text: str = ""
     _known_set: frozenset[str] = frozenset()
     _known_dirs: frozenset[str] = frozenset()
 
     @classmethod
-    def build(cls, config: HermclawConfig, inputs: PlannerInput, settings: PlannerSettings, *, extra_text: str = "") -> ValidationContext:
-        """``extra_text`` (job goal, constraints, failure evidence) also counts as context symbols may come from."""
+    def build(
+        cls, config: HermclawConfig, inputs: PlannerInput, settings: PlannerSettings, *, extra_text: str = "", job_text: str = ""
+    ) -> ValidationContext:
+        """``extra_text`` (job goal, constraints, failure evidence) also counts as context symbols may come from;
+        ``job_text`` is what the user asked for (title, prompt, constraints)."""
         caps_cfg = config.capabilities
         config_caps = tuple(c.name for c in caps_cfg.capabilities)
         if inputs.capabilities is None:
@@ -124,6 +128,7 @@ class ValidationContext:
             test_framework=framework,
             has_existing_tests=bool(inputs.existing_tests),
             capability_network={c.name: c.network for c in caps_cfg.capabilities},
+            job_text=job_text,
             _known_set=frozenset(known),
             _known_dirs=frozenset(_parent_dirs(known)),
         )
@@ -464,6 +469,52 @@ def _must_change_errors(step: PlanStep, ctx: ValidationContext) -> list[str]:
                     f"step may change ({', '.join(paths[:8])}); use those paths"
                 )
     return errors
+
+
+DEPENDENCY_MANIFESTS = ("requirements.txt", "package.json")
+
+
+def new_manifest_notes(plan: PlanContract, ctx: ValidationContext, preserved: frozenset[str] = frozenset()) -> list[str]:
+    """Steps that add a dependency manifest the repository does not have. The runtime installs third-party packages
+    there only when the job names them (BUG-174); Gemma still planned Flask for a job that names no framework and the
+    whole job failed on refused installs (live battery 2026-10-17, J1, BUG-178). Which packages the plan means is only
+    in its prose, so this is advice for one repair turn, not a hard rule (see ``AdviceOnce``)."""
+    notes: list[str] = []
+    job = ctx.job_text.lower()
+    for step in plan.steps:
+        if step.id in preserved or step.kind.value not in WORKSPACE_MUTATING_KINDS:
+            continue
+        named = [*step.allowed_new_paths, *step.repo_hints]
+        named += [g for c in step.acceptance if isinstance(c, DiffEvidence) for g in c.must_change]
+        for raw in dict.fromkeys(named):
+            try:
+                path = normalise_path(raw)
+            except ValueError:
+                continue  # invalid paths are reported by the semantic validation
+            name = path.rsplit("/", 1)[-1]
+            if name not in DEPENDENCY_MANIFESTS or ctx.path_exists(path) or name in job:
+                continue
+            notes.append(
+                f"step {step.id}: adds {path}, but the repository has no dependency manifest, and the runtime installs "
+                "third-party packages there only if the job names them. If the job names every package this step "
+                f"needs, answer again unchanged; otherwise plan the standard-library solution without {path} and "
+                "without third-party imports (the sandbox already has the test runner: pytest/unittest, node --test)."
+            )
+            break
+    return notes
+
+
+class AdviceOnce:
+    """Advice the planner gets in one repair turn; repeating the same plan afterwards is accepted."""
+
+    def __init__(self) -> None:
+        self.given = False
+
+    def __call__(self, notes: list[str]) -> list[str]:
+        if self.given or not notes:
+            return []
+        self.given = True
+        return notes
 
 
 def _literal_prefix(pattern: str) -> str:

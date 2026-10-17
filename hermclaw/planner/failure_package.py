@@ -30,6 +30,7 @@ from hermclaw.persistence.models import (
     Step,
     StepAttempt,
     TestRun,
+    ToolCallRow,
     VerificationCheckRow,
     VerificationRun,
 )
@@ -42,6 +43,16 @@ MAX_COMMANDS = 5
 MAX_ATTEMPTS = 3
 MAX_FINDINGS = 10
 MAX_RESEARCH_RUNS = 5
+MAX_REFUSALS = 5
+# runtime policy decisions a new plan cannot get around by retrying: the replanner must plan without them (BUG-178)
+POLICY_REFUSAL_CODES = (
+    "DEPENDENCY_NOT_REQUESTED",
+    "PACKAGE_INSTALL_REFUSED",
+    "COMMAND_FORBIDDEN",
+    "COMMAND_DESTRUCTIVE",
+    "PATH_FORBIDDEN",
+    "SCOPE_EXPANSION_DENIED",
+)
 TEST_OUTPUT_CHARS = 2500
 STDERR_CHARS = 800
 STDOUT_CHARS = 400
@@ -191,6 +202,30 @@ async def command_evidence(session: AsyncSession, step_id: uuid.UUID) -> list[di
     ]
 
 
+async def policy_refusals(session: AsyncSession, job_id: uuid.UUID) -> list[dict[str, Any]]:
+    """The runtime's policy refusals in this job, one per (tool, code), newest message. Without them the replanner only
+    saw the downstream symptom (a ModuleNotFoundError) and planned the refused dependency again (BUG-178)."""
+    rows = (
+        await session.execute(
+            select(ToolCallRow)
+            .where(ToolCallRow.job_id == job_id, ToolCallRow.error_code.in_(POLICY_REFUSAL_CODES))
+            .order_by(ToolCallRow.started_at.desc(), ToolCallRow.id)
+            .limit(200)
+        )
+    ).scalars()
+    out: list[dict[str, Any]] = []
+    seen: set[tuple[str, str]] = set()
+    for r in rows:
+        key = (r.tool, r.error_code or "")
+        if key in seen:
+            continue
+        seen.add(key)
+        out.append({"tool": r.tool, "error_code": r.error_code, "message": _text(r.result_summary, MESSAGE_CHARS)})
+        if len(out) >= MAX_REFUSALS:
+            break
+    return out
+
+
 async def scope_evidence(session: AsyncSession, step_id: uuid.UUID) -> dict[str, Any] | None:
     row = (
         await session.execute(
@@ -310,6 +345,7 @@ async def build_failure_package(session: AsyncSession, state: ReplanState, trigg
         evidence["failing_commands"] = await command_evidence(session, state.failed.id)
         evidence["scope_decision"] = await scope_evidence(session, state.failed.id)
         evidence["review"] = await review_evidence(session, state.failed.id)
+    evidence["runtime_refusals"] = await policy_refusals(session, state.job.id)
     open_steps = [
         _step_brief(s, state.dependencies.get(s.id, [])) for s in state.open_steps if state.failed is None or s.id != state.failed.id
     ]
