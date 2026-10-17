@@ -46,6 +46,15 @@ Noch keine.
 
 ## Behobene Bugs
 
+### BUG-195 – Gesamt-Review und Regressionslauf messen die ganze Job-Änderung an Pro-Schritt-Grenzen: große Jobs scheitern ganz am Ende
+- Phase: Code-Review nach BUG-194 (Ziel lange Aufträge) · Komponente: verifier/runtime · Severity: P1 · blockierend: ja (behoben) · Status: **behoben** (`tests/integration/test_verifier_engine.py::test_job_level_verification_does_not_apply_per_step_change_limits`)
+- Reproduktion: Ein Job ändert über mehrere Schritte zusammen mehr als `policies.verifier.max_changed_files` (40) Dateien, etwa eine Webseite oder ein Plugin-System. Oder ein späterer Schritt ändert eine Datei, die ein früherer Schritt per `must_not_change` nicht anfassen durfte. Das Gesamt-Review (`step_baseline=False`, Job-Basis) schlägt dann deterministisch mit `changed_file_count` bzw. `acceptance[i]:diff` fehl. Ebenso der Regressionslauf nach einem Base-Update in `finalize`. Beides passiert nach Stunden Arbeit.
+- Ursache: Die Grenzen begrenzen die Änderung *eines* Schritts. Sie wurden auf die Summe aller Schritte angewandt.
+- Fix:
+  - `VerificationStep.job_level` ist für Gesamt-Review und Regressionslauf gesetzt.
+  - Dort werden `changed_file_count`, `max_changed_files` und `must_not_change` der Diff-Kriterien nicht erneut erzwungen; sie galten bereits für die Änderung jedes Schritts.
+  - `must_change`, Scope (Vereinigung), Secrets, Syntax, Tests und Import-Prüfung bleiben aktiv.
+
 ### BUG-194 – Import-Prüfung mit dem falschen Interpreter: grüne Schritte mit Projekt-venv als „nicht auflösbar“ abgelehnt
 - Phase: Full-Suite vor 0.1.0rc19 · Komponente: verifier · Severity: P1 · blockierend: ja (behoben) · Status: **behoben** (`tests/unit/test_verifier_imports.py::test_imports_resolve_with_the_interpreter_the_tests_use`, e2e `test_37_1`, `test_37_13`, `test_37_14`, `test_37_15`)
 - Reproduktion: Die e2e-Szenarien testen mit `<venv>/bin/python -m pytest`. `imports:python` (BUG-193) prüfte dagegen mit dem nackten `python3`, in dem fastapi fehlt. Der Implement-Schritt scheiterte deshalb mit `VERIFIER_FAILED`. Das Gesamt-Review (eigener Schritt ohne Test-Kriterien) scheiterte ebenso.

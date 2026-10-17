@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import dataclasses
 from pathlib import Path
 from typing import Any
 
@@ -184,6 +185,30 @@ async def test_generated_files_and_changed_file_limit(sessionmaker: Any, tmp_pat
     names = by_name(outcome.report)
     assert names["generated_files"].status == "fail" and names["generated_files"].evidence["paths"] == ["dist/bundle.js"]
     assert names["changed_file_count"].status == "fail" and names["changed_file_count"].evidence["changed_count"] == 4
+
+
+
+async def test_job_level_verification_does_not_apply_per_step_change_limits(sessionmaker: Any, tmp_path: Path) -> None:
+    """BUG-195: the job-level review and the regression rerun verify the whole job change; a big job (> the per-step
+    file limit) or a later step changing what an earlier step had to leave alone failed at the very end of the job."""
+    repo = init_repo(tmp_path / "repo", {"README.md": "x\n"})
+    for i in range(4):
+        write(repo, f"docs/p{i}.md", f"page {i}\n")
+    write(repo, "README.md", "changed by a later step\n")
+    acceptance = [{"type": "diff", "must_change": ["docs/**"], "must_not_change": ["README.md"], "max_changed_files": 2}]
+    st = step("documentation", acceptance=acceptance, scope_contract=scope(target_paths=["README.md"], allowed_new_paths=["docs/**"]))
+    v = make_verifier(sessionmaker, max_changed_files=3)
+    outcome, *_ = await run(sessionmaker, repo, st, verifier=v, kind="documentation")
+    names = by_name(outcome.report)
+    assert names["changed_file_count"].status == "fail" and names["acceptance[0]:diff"].status == "fail"  # one step: enforced
+    job, *_ = await run(sessionmaker, repo, dataclasses.replace(st, job_level=True), verifier=v, kind="documentation")
+    names = by_name(job.report)
+    assert names["changed_file_count"].status == "pass" and names["acceptance[0]:diff"].status == "pass", job.report.summary
+    write(repo, "docs/p0.md", "page 0\n")
+    for i in range(4):
+        (repo / f"docs/p{i}.md").unlink()
+    job2, *_ = await run(sessionmaker, repo, dataclasses.replace(st, job_level=True), verifier=v, kind="documentation")
+    assert by_name(job2.report)["acceptance[0]:diff"].status == "fail"  # must_change still holds at job level
 
 
 # ------------------------------------------------------------------------------------------- 21.2 syntax

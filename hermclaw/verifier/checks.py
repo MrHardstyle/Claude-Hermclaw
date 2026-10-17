@@ -105,6 +105,9 @@ def changed_count_check(ctx: VerifyContext) -> VerificationCheck:
     limit = ctx.policies.verifier.max_changed_files
     count = len(ctx.changes.paths)
     evidence = {"changed_count": count, "max_changed_files": limit}
+    if ctx.step.job_level:
+        message = f"{count} file(s) changed by the whole job (limit {limit} applies per step)"
+        return ctx.check("changed_files", "changed_file_count", "pass", message, evidence)
     if count > limit:
         return ctx.check("changed_files", "changed_file_count", "fail", f"{count} files changed, policy allows at most {limit}", evidence)
     return ctx.check("changed_files", "changed_file_count", "pass", f"{count} file(s) changed (limit {limit})", evidence)

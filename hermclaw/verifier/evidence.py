@@ -243,10 +243,12 @@ def diff_evidence(ctx: VerifyContext, index: int, ev: DiffEvidence) -> Verificat
     missing = [g for g in ev.must_change if not acceptance_matching(paths, [g])]
     if missing:
         problems.append(f"expected changes matching {missing} but none were found")
-    touched = acceptance_matching(paths, ev.must_not_change)
+    # job level (BUG-195): other steps of the job may legitimately change what this step had to leave alone, and the
+    # sum of all steps exceeds one step's file limit; both were enforced on this step's own change
+    touched = [] if ctx.step.job_level else acceptance_matching(paths, ev.must_not_change)
     if touched:
         problems.append(f"files that must not change were changed: {touched[:10]}")
-    if ev.max_changed_files is not None and len(paths) > ev.max_changed_files:
+    if not ctx.step.job_level and ev.max_changed_files is not None and len(paths) > ev.max_changed_files:
         problems.append(f"{len(paths)} files changed, at most {ev.max_changed_files} allowed")
     if not paths and not ev.allow_empty:
         problems.append("the change is empty")

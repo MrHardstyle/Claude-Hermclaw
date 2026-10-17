@@ -47,6 +47,9 @@ class VerificationStep:
     #: commands of related steps (the job's code steps for a job-level review) that tell which interpreter the
     #: project runs with when the step's own criteria do not
     command_hints: tuple[str, ...] = ()
+    #: verifies the whole job change against the job base (job-level review, regression rerun after a base update):
+    #: the per-step change limits were enforced on each step's own change and do not apply to the sum (BUG-195)
+    job_level: bool = False
 
     @property
     def is_implement(self) -> bool:
@@ -63,6 +66,7 @@ class VerificationStep:
         network: bool = False,
         title: str = "",
         command_hints: Sequence[str] = (),
+        job_level: bool = False,
     ) -> VerificationStep:
         contract = scope if isinstance(scope, ScopeContract) or scope is None else ScopeContract.model_validate(dict(scope))
         return cls(
@@ -73,6 +77,7 @@ class VerificationStep:
             network=network,
             title=title,
             command_hints=tuple(command_hints),
+            job_level=job_level,
         )
 
     @classmethod

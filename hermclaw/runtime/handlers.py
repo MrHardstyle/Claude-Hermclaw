@@ -157,6 +157,7 @@ class ReviewStepHandler:
             step_id=ctx.step_id,
             attempt_id=ctx.attempt_id,
             command_hints=await self._job_commands(ctx.job_id),
+            job_level=True,
         )
         async with self.sm() as s:
             await emit_status(s, ctx.job_id, f"Heavy Review {row.step_key} (gesamte Änderung)", step_id=ctx.step_id)

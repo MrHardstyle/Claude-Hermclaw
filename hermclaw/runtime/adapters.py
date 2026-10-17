@@ -86,6 +86,7 @@ class VerifierAdapter:
         step_id: uuid.UUID,
         attempt_id: uuid.UUID,
         command_hints: Sequence[str] = (),
+        job_level: bool = False,
     ) -> VerificationOutcome:
         vstep = VerificationStep.build(
             key=step.step_key,
@@ -94,6 +95,7 @@ class VerifierAdapter:
             scope=step.scope,
             network=step.network,
             command_hints=command_hints,
+            job_level=job_level,
         )
         out = await (await self._verifier(workspace, step)).run(vstep, workspace, job_id=job_id, step_id=step_id, attempt_id=attempt_id)
         return VerificationOutcome(report=out.report, run_id=out.run_id)
@@ -121,7 +123,8 @@ class VerifierAdapter:
         merged = merge_scopes([v.scope for v in vsteps])
         failed: list[dict[str, Any]] = []
         for sid, vstep in zip(step_ids, vsteps, strict=True):
-            out = await verifier.run(dataclasses.replace(vstep, scope=merged), workspace, job_id=job_id, step_id=sid, attempt_id=None)
+            job_step = dataclasses.replace(vstep, scope=merged, job_level=True)
+            out = await verifier.run(job_step, workspace, job_id=job_id, step_id=sid, attempt_id=None)
             if not out.report.passed:
                 failed.append(
                     {"step_key": vstep.key, "summary": out.report.summary, "failures": [c.name for c in out.report.failures][:20]}

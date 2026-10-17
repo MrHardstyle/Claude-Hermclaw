@@ -9,6 +9,7 @@ Fix aus Batterie-Lauf 1 auf 0.1.0rc18: J4 endete `succeeded` mit einem Merge Req
 ### Behoben
 - **Nicht auflösbare Importe (BUG-193):** Neue Verifier-Prüfung `imports:python`. Ein neu importiertes Modul muss Standardbibliothek, Teil des Repositories oder in der Sandbox installiert sein; sonst wird der Schritt nicht abgenommen. Vorher landete ein erfundenes Paket in einer ungetesteten Funktion im Merge Request.
 - **Interpreter der Import-Prüfung (BUG-194):** Die Prüfung nutzt den Interpreter, den die Test-Kriterien nennen, etwa ein Projekt-venv oder `uv run`. Beim Gesamt-Review nutzt sie den der Code-Schritte. Ein nur geratenes `python3` lässt den Schritt nicht scheitern.
+- **Große Jobs am Ende (BUG-195):** Gesamt-Review und Regressionslauf nach einem Base-Update wenden die Pro-Schritt-Grenzen nicht mehr auf die gesamte Job-Änderung an. Das betrifft die Dateianzahl und `must_not_change` früherer Schritte. Vorher scheiterte ein Job mit mehr als 40 geänderten Dateien erst ganz am Ende.
 
 ## [0.1.0rc18] – Release Candidate (2026-10-17)
 
