@@ -547,6 +547,29 @@ def test_existing_manifest_may_change_but_is_not_required_to() -> None:
     assert none == [] and named.steps[0].acceptance == PlanContract.model_validate(plan("goal", [data])).steps[0].acceptance
 
 
+def test_must_not_change_on_the_steps_own_files_is_dropped() -> None:
+    """rc19 battery J6: a degenerate answer forbade the step's own files; every attempt and two replans failed on
+    'files that must not change were changed' until REPLAN_LIMIT (BUG-204)."""
+    data = _impl(
+        "S001",
+        repo_hints=["app/routers/users.py", "tests/test_users.py"],
+        acceptance=[
+            {"type": "diff", "must_change": ["app/routers/users.py", "tests/test_users.py"]},
+            {"type": "diff", "must_not_change": ["app/main.py", "README.md"]},
+            {"type": "diff", "must_not_change": ["app/routers/users.py", "tests/test_users.py"]},
+            {"type": "diff", "must_not_change": ["tests/*.py", "app/models.py"]},
+        ],
+    )
+    pruned, notes = prune_unreachable_must_change(PlanContract.model_validate(plan("goal", [data])), _ctx())
+    diffs = [c for c in pruned.steps[0].acceptance if c.type == "diff"]
+    assert [(d.must_change, d.must_not_change) for d in diffs] == [
+        (["app/routers/users.py", "tests/test_users.py"], []),
+        ([], ["app/main.py", "README.md"]),  # other files stay protected
+        ([], ["app/models.py"]),
+    ]
+    assert notes == ["step S001: dropped must_not_change on the step's own files: app/routers/users.py, tests/test_users.py, tests/*.py"]
+
+
 # ------------------------------------------------------------------------------ new dependency manifest (BUG-178)
 def _health_plan(*new_paths: str) -> PlanContract:
     data = step(

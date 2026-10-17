@@ -129,7 +129,7 @@ Lint, mypy, ShellCheck, ansible-lint (production) sauber.
 - Embeddings: `embeddinggemma:300m` (768 dim; EmbeddingGemma 2 erst, wenn Ollama es unter Linux/CUDA ausführt, D-010)
 
 ## Bugs
-- 203 gefunden, **203 behoben** – `BUGS.md`. Live-Abnahme: BUG-143 bis BUG-203.
+- 204 gefunden, **204 behoben** – `BUGS.md`. Live-Abnahme: BUG-143 bis BUG-204.
   BUG-143–192 sind produktiv (0.1.0rc18); BUG-193–201 (Batterie-Lauf 1 auf rc18, Full-Suite, Audit auf späte Fehlschläge langer Jobs) wirken nach dem Deployment von 0.1.0rc19.
 - Externe Blocker: BLOCKER-002 (Tag-Push)
 
@@ -164,6 +164,9 @@ bestanden; ansible-lint (production) sauber. `test_deploy_converge` ist angepass
 3. Batterie-Lauf 1 auf rc18 (`20261017T162518Z-jobs.md`): J1/J2/J3/J5/J6 erfolgreich (2,6/3,8/8,2/9,1/2,5 min);
    J4 lieferte nach 5,4 min Code mit einem Lazy-Import eines nicht existierenden Pakets in `main()`, den kein Test
    aufrief → BUG-193 (Verifier-Check `imports:python`).
+4. Batterie-Lauf 1 auf rc19 (`20261017T181154Z-jobs.md`): J1/J3 erfolgreich (5,8/15,3 min), J4 korrekte Rückfrage nach
+   2,5 min; J2 ohne MR (GitLab-Race, BUG-202), J5 unnötige Manifest-Änderung (BUG-203), J6 `REPLAN_LIMIT` durch
+   widersprüchliches `must_not_change` (BUG-204).
 3. 0.1.0rc18 ausrollen, J1–J6 zweimal in Folge bestehen, dann die erweiterte Batterie X1–X5
    (`config/acceptance-jobs-extended.example.yaml`); danach Abbruch, parallele Jobs und Worker-Neustart prüfen.
 4. Wake-on-LAN einrichten (MACs, BIOS, Kapitel 13.1), danach `--suite wol --full-wol` und erst dann den Leerlauf-Suspend einschalten.

@@ -46,6 +46,16 @@ Noch keine.
 
 ## Behobene Bugs
 
+### BUG-204 – Plan verbietet die eigenen Dateien des Schritts (`must_not_change`): Bugfix-Job endet mit REPLAN_LIMIT
+- Phase: Batterie-Lauf 1 auf 0.1.0rc19 (J6) · Komponente: planner · Severity: P1 · blockierend: ja (behoben) · Status: **behoben** (`tests/unit/test_planner_validation.py::test_must_not_change_on_the_steps_own_files_is_dropped`)
+- Reproduktion: Job `1fc45bb9-fd09-4ed6-8b27-d2735d98c370`.
+  - Gemmas Plan-Antwort wiederholte ihre Acceptance-Blöcke (entartete Ausgabe) und enthielt `must_not_change: ["inventory/store.py", "tests/test_store.py"]`. Genau diese beiden Dateien musste der Schritt laut `must_change` ändern.
+  - Jeder Versuch scheiterte mit „files that must not change were changed“. Der Replanner übernahm das Kriterium zweimal, der Job endete nach 10,3 min mit `REPLAN_LIMIT`.
+  - Code und Test waren schon im ersten Versuch korrekt.
+- Ursache: Die Validierung erkannte den Selbstwiderspruch nicht. Reparaturrunden helfen bei entarteter Ausgabe nicht, sie wiederholen sie.
+- Fix: Die Plan-Validierung (Planner und Replanner) streicht `must_not_change`-Globs, die eine eigene konkrete Datei des Schritts treffen oder in seinem `must_change` stehen, und vermerkt das als Notiz. Andere geschützte Dateien bleiben geschützt.
+- Selbstprüfung: Das ist der dritte Fix an planner-erzeugten Diff-Kriterien (BUG-188, BUG-203, BUG-204). Jeder deckt eine eigene, statisch erkennbare Fehlerklasse ab; es wird also nicht dasselbe Symptom erneut kompensiert. Die Häufung wird in den nächsten Läufen beobachtet.
+
 ### BUG-203 – Planner verlangt eine Änderung an einem korrekten Manifest: der Coder ändert package.json nur fürs Kriterium
 - Phase: Batterie-Lauf 1 auf 0.1.0rc19 (J5) · Komponente: planner · Severity: P2 · blockierend: ja für die Abnahme (behoben) · Status: **behoben** (`tests/unit/test_planner_validation.py::test_existing_manifest_may_change_but_is_not_required_to`)
 - Reproduktion: Job `e15dac33-285f-4208-a0cb-4a14b6978b25` (slugify mit `node --test`).

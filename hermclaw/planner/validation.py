@@ -481,6 +481,8 @@ def prune_unreachable_must_change(
     change those files anyway, so dropping them narrows nothing it can do. A step whose ``must_change`` globs ALL miss
     keeps them: that is a wrong path the planner has to fix (``_must_change_errors``)."""
     plan, notes = _drop_existing_manifest_must_change(plan, ctx, preserved)
+    plan, contradicting = _drop_self_contradicting_must_not_change(plan, ctx, preserved)
+    notes += contradicting
     steps: list[PlanStep] = []
     for step in plan.steps:
         paths = _step_paths(step, ctx) if step.id not in preserved and step.kind.value in WORKSPACE_MUTATING_KINDS else []
@@ -533,6 +535,44 @@ EXISTING_MANIFEST_NAMES = frozenset(
         "Gemfile.lock",
     }
 )
+
+
+def _drop_self_contradicting_must_not_change(
+    plan: PlanContract, ctx: ValidationContext, preserved: frozenset[str]
+) -> tuple[PlanContract, list[str]]:
+    """``must_not_change`` on a file the step itself must change or is pointed at can never pass. A degenerate planner
+    answer repeated its acceptance blocks and forbade the step's own store.py/test_store.py; the replanner copied the
+    criterion twice and the bug-fix job ended with REPLAN_LIMIT (rc19 battery J6, BUG-204). Dropped, with a note –
+    repair turns on such an answer only repeat it."""
+    notes: list[str] = []
+    steps: list[PlanStep] = []
+    for step in plan.steps:
+        if step.id in preserved or step.kind.value not in WORKSPACE_MUTATING_KINDS:
+            steps.append(step)
+            continue
+        concrete = [p for p in _step_paths(step, ctx) if not any(c in GLOB_CHARS for c in p) and not p.endswith("/")]
+        required = {g for c in step.acceptance if isinstance(c, DiffEvidence) for g in c.must_change}
+        dropped: list[str] = []
+        acceptance: list[AcceptanceCriterion] = []
+        for crit in step.acceptance:
+            if not isinstance(crit, DiffEvidence) or not crit.must_not_change:
+                acceptance.append(crit)
+                continue
+            keep = [g for g in crit.must_not_change if g not in required and not any(acceptance_glob_matches(p, g) for p in concrete)]
+            dropped += [g for g in crit.must_not_change if g not in keep]
+            if len(keep) == len(crit.must_not_change):
+                acceptance.append(crit)
+            elif keep or crit.must_change or crit.max_changed_files is not None:
+                acceptance.append(crit.model_copy(update={"must_not_change": keep}))
+        if dropped:
+            steps.append(step.model_copy(update={"acceptance": acceptance}))
+            shown = ", ".join(dict.fromkeys(g[:80] for g in dropped))
+            notes.append(f"step {step.id}: dropped must_not_change on the step's own files: {shown}")
+        else:
+            steps.append(step)
+    if not notes:
+        return plan, []
+    return plan.model_copy(update={"steps": steps}), notes
 
 
 def _drop_existing_manifest_must_change(

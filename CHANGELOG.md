@@ -4,11 +4,12 @@ Format: [Keep a Changelog](https://keepachangelog.com/de/1.1.0/), Versionen nach
 
 ## [0.1.0rc20] – Release Candidate (2026-10-17)
 
-Fixes aus Batterie-Lauf 1 auf 0.1.0rc19. J1 und J3 waren erfolgreich, J4 stellte nach 2,5 min die richtige Rückfrage. J2 endete ohne MR, J5 änderte package.json unnötig.
+Fixes aus Batterie-Lauf 1 auf 0.1.0rc19. J1 und J3 waren erfolgreich, J4 stellte nach 2,5 min die richtige Rückfrage. J2 endete ohne MR, J5 änderte package.json unnötig, J6 scheiterte an einem widersprüchlichen Plan.
 
 ### Behoben
 - **Merge Request direkt nach dem Push (BUG-202):** Kennt GitLab den gerade gepushten Branch noch nicht, wird die MR-Anlage nach kurzer Wartezeit wiederholt. Vorher endete ein Job gelegentlich ohne Merge Request.
 - **Bestehende Manifeste (BUG-203):** Der Plan verlangt keine Änderung mehr an einem vorhandenen `package.json`, `pyproject.toml` usw., wenn der Auftrag die Datei nicht nennt. Vorher änderte der Coder eine korrekte Datei nur, um das Kriterium zu erfüllen.
+- **Widersprüchliche Diff-Kriterien (BUG-204):** Ein Plan, der die eigenen Dateien eines Schritts als „darf sich nicht ändern“ markiert, wird bereinigt. Vorher endete ein korrekt gelöster Bugfix-Job mit `REPLAN_LIMIT`.
 
 ## [0.1.0rc19] – Release Candidate (2026-10-17)
 
