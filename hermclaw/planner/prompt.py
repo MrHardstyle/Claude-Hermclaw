@@ -413,6 +413,10 @@ def _base_rules(kind_capability: dict[str, str], capability_names: Sequence[str]
         "library, or the repository already uses one. Every external dependency is an extra failure source: a "
         "repository without a dependency manifest gets third-party packages only when the job names them (the runtime "
         "refuses to install others), so plan the standard-library solution unless the job asks for a package.",
+        "Deliver complete work: when the job adds a program, command, command-line options, configuration or "
+        "environment variables and the repository has a README, the step that implements it also documents their "
+        "use there (README in its repo_hints, or in allowed_new_paths when the repository has none and the job "
+        "creates a new program).",
         f"Every mutating step (kinds: {MUTATING_KINDS_TEXT}) MUST have machine-checkable acceptance criteria. "
         f"Use only these evidence types: {', '.join(EVIDENCE_TYPES)}. Examples:\n{_evidence_examples()}",
         "Test evidence uses the repository's own test command as given in repository_inventory/existing_tests. "
