@@ -480,7 +480,7 @@ def prune_unreachable_must_change(
     the whole plan made the repair turns repeat it until the job failed (rc16 battery J5, BUG-188). The step could not
     change those files anyway, so dropping them narrows nothing it can do. A step whose ``must_change`` globs ALL miss
     keeps them: that is a wrong path the planner has to fix (``_must_change_errors``)."""
-    notes: list[str] = []
+    plan, notes = _drop_existing_manifest_must_change(plan, ctx, preserved)
     steps: list[PlanStep] = []
     for step in plan.steps:
         paths = _step_paths(step, ctx) if step.id not in preserved and step.kind.value in WORKSPACE_MUTATING_KINDS else []
@@ -508,6 +508,77 @@ def prune_unreachable_must_change(
 
 
 DEPENDENCY_MANIFESTS = ("requirements.txt", "package.json")
+#: dependency manifests and lockfiles of the supported ecosystems (job metrics count changes to them as new dependencies)
+EXISTING_MANIFEST_NAMES = frozenset(
+    {
+        "requirements.txt",
+        "requirements-dev.txt",
+        "pyproject.toml",
+        "setup.py",
+        "setup.cfg",
+        "Pipfile",
+        "Pipfile.lock",
+        "poetry.lock",
+        "package.json",
+        "package-lock.json",
+        "yarn.lock",
+        "pnpm-lock.yaml",
+        "go.mod",
+        "go.sum",
+        "Cargo.toml",
+        "Cargo.lock",
+        "composer.json",
+        "composer.lock",
+        "Gemfile",
+        "Gemfile.lock",
+    }
+)
+
+
+def _drop_existing_manifest_must_change(
+    plan: PlanContract, ctx: ValidationContext, preserved: frozenset[str]
+) -> tuple[PlanContract, list[str]]:
+    """``must_change`` on an existing dependency manifest the job does not name: the step *may* change it (it stays in
+    the scope), but demanding a change made the coder edit a correct package.json just to satisfy the criterion
+    (rc19 battery J5, BUG-203). Whether a dependency is really needed is shown by the tests and the import check."""
+    job = ctx.job_text.lower()
+    notes: list[str] = []
+    steps: list[PlanStep] = []
+    for step in plan.steps:
+        if step.id in preserved or step.kind.value not in WORKSPACE_MUTATING_KINDS:
+            steps.append(step)
+            continue
+        dropped: list[str] = []
+        acceptance: list[AcceptanceCriterion] = []
+        for crit in step.acceptance:
+            if not isinstance(crit, DiffEvidence):
+                acceptance.append(crit)
+                continue
+            keep = []
+            for glob in crit.must_change:
+                name = glob.rstrip("/").rsplit("/", 1)[-1]
+                try:
+                    exists = ctx.path_exists(normalise_path(glob))
+                except ValueError:
+                    exists = False
+                if name in EXISTING_MANIFEST_NAMES and exists and name.lower() not in job:
+                    dropped.append(glob)
+                else:
+                    keep.append(glob)
+            if len(keep) == len(crit.must_change):
+                acceptance.append(crit)
+            elif keep or crit.must_not_change or crit.max_changed_files is not None:
+                acceptance.append(crit.model_copy(update={"must_change": keep}))
+        if dropped:
+            steps.append(step.model_copy(update={"acceptance": acceptance}))
+            notes.append(f"step {step.id}: {', '.join(dropped[:5])} may change but is not required to (existing manifest)")
+        else:
+            steps.append(step)
+    if not notes:
+        return plan, []
+    return plan.model_copy(update={"steps": steps}), notes
+
+
 # a name the job quotes literally ("…", „…“, `…`, '…', «…»): a package it asks for by name
 _QUOTED_NAME = re.compile(r"[\"'`\u201e\u201c\u201d\u00ab\u00bb]([A-Za-z0-9@][A-Za-z0-9@/._-]{1,100})[\"'`\u201c\u201d\u00ab\u00bb]")
 

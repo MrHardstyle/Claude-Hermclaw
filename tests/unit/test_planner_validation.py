@@ -525,6 +525,28 @@ def test_invented_must_change_files_are_dropped_when_the_step_keeps_a_reachable_
     assert none == [] and any("matches none of the files" in e for e in semantic_errors(kept, _ctx()))
 
 
+def test_existing_manifest_may_change_but_is_not_required_to() -> None:
+    """rc19 battery J5: Gemma demanded a change to the repository's correct package.json; the coder added a
+    description field only to satisfy the criterion and the job counted as adding a dependency (BUG-203)."""
+    data = _impl(
+        "S001",
+        repo_hints=["app/routers/users.py", "pyproject.toml"],
+        acceptance=[
+            {"type": "diff", "must_change": ["pyproject.toml"]},
+            {"type": "diff", "must_change": ["app/routers/users.py", "pyproject.toml"], "must_not_change": ["README.md"]},
+        ],
+    )
+    pruned, notes = prune_unreachable_must_change(PlanContract.model_validate(plan("goal", [data])), _ctx())
+    diffs = [c for c in pruned.steps[0].acceptance if c.type == "diff"]
+    assert [d.must_change for d in diffs] == [["app/routers/users.py"]] and diffs[0].must_not_change == ["README.md"]
+    assert notes == ["step S001: pyproject.toml, pyproject.toml may change but is not required to (existing manifest)"]
+    assert "pyproject.toml" in pruned.steps[0].repo_hints  # still allowed to change
+    # the job names the manifest: the change is what it asks for
+    job = ValidationContext.build(get_config(), FASTAPI.inputs, PlannerSettings(), job_text="Add a ruff section to pyproject.toml.")
+    named, none = prune_unreachable_must_change(PlanContract.model_validate(plan("goal", [data])), job)
+    assert none == [] and named.steps[0].acceptance == PlanContract.model_validate(plan("goal", [data])).steps[0].acceptance
+
+
 # ------------------------------------------------------------------------------ new dependency manifest (BUG-178)
 def _health_plan(*new_paths: str) -> PlanContract:
     data = step(

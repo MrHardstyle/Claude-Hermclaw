@@ -46,6 +46,16 @@ Noch keine.
 
 ## Behobene Bugs
 
+### BUG-203 – Planner verlangt eine Änderung an einem korrekten Manifest: der Coder ändert package.json nur fürs Kriterium
+- Phase: Batterie-Lauf 1 auf 0.1.0rc19 (J5) · Komponente: planner · Severity: P2 · blockierend: ja für die Abnahme (behoben) · Status: **behoben** (`tests/unit/test_planner_validation.py::test_existing_manifest_may_change_but_is_not_required_to`)
+- Reproduktion: Job `e15dac33-285f-4208-a0cb-4a14b6978b25` (slugify mit `node --test`).
+  - Plan v1 enthielt `diff must_change: ["package.json"]`, obwohl `package.json` schon `"test": "node --test"` hatte.
+  - Versuch 1 scheiterte nur daran. Versuch 2 fügte ein `description`-Feld ein, nur um das Kriterium zu erfüllen.
+  - Die Metrik `no_new_dependencies` schlug an (FAIL).
+- Ursache: Gemma setzt Ziel-Dateien vorsorglich als `must_change`. Bei einem bestehenden Manifest erzwingt das eine sinnlose Änderung.
+- Fix: Die Plan-Validierung (Planner und Replanner, `prune_unreachable_must_change`) streicht `must_change` auf bestehende Dependency-Manifeste und Lockfiles, sofern der Auftrag die Datei nicht nennt. Die Datei bleibt im Scope änderbar. Ob eine Abhängigkeit nötig ist, zeigen Tests und Import-Prüfung (BUG-193).
+- Beobachtung (nicht blockierend): Nach einem grünen Testlauf versuchte der Coder denselben Befehl noch zweimal, statt `complete_step` zu rufen. Der Guard verweigerte beide Male mit dem Hinweis auf `complete_step` (BUG-175/181). Kosten etwa 20 s je Vorkommen, kein Fehlschlag.
+
 ### BUG-202 – Merge Request direkt nach dem Push: GitLab kennt den Branch noch nicht, der Job endet ohne MR
 - Phase: Batterie-Lauf 1 auf 0.1.0rc19 (J2) · Komponente: gitops · Severity: P2 · blockierend: ja für die Abnahme (behoben) · Status: **behoben** (`tests/unit/test_gitops_units.py::test_merge_request_waits_until_gitlab_knows_the_pushed_branch`)
 - Reproduktion: Job `ee3bd92c-f3a2-4beb-939b-566268717dea`. Push um 19:31:49.36, MR-Anlage um 19:31:49.86. GitLab antwortete `HTTP 400 {'source_branch': ['does not exist']}`. Der Job war `succeeded`, aber ohne Merge Request; die Batterie wertete FAIL.
