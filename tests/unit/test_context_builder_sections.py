@@ -81,6 +81,24 @@ async def test_full_context_has_all_sections_in_order() -> None:
     assert "17 turn(s) remain" in system
 
 
+async def test_step_goal_carries_the_job_request() -> None:
+    """rc22 battery X2: the step goal said "registration form" and lost "event, 1-10 persons" of the job; the coder built
+    a user sign-up form and the review rejected it. The coder now sees the user's own request below the goal (BUG-212)."""
+    request = "Event registration page: form with name, e-mail and number of persons 1-10; validateRegistration(data)."
+    builder, _, _ = make_builder()
+    built = await builder.build(make_input(step=make_step(job_request=request)))
+    user = built.messages[1].content
+    goal = user.split("## SCOPE")[0]
+    assert "Job request" in goal and "number of persons 1-10" in goal
+    assert goal.index("Goal:") < goal.index("Job request")
+    # a huge request is cut, never the goal
+    huge = await builder.build(make_input(step=make_step(job_request="x" * 200_000)))
+    head = huge.messages[1].content.split("## SCOPE")[0]
+    assert "Fix the off-by-one error in f3" in head and len(head) < 20_000
+    plain = await builder.build(make_input())
+    assert "Job request" not in plain.messages[1].content
+
+
 async def test_response_protocol_is_single_json_action() -> None:
     builder, _, _ = make_builder()
     built = await builder.build(make_input())

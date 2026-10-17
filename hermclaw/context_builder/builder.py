@@ -88,6 +88,9 @@ class StepBrief:
     acceptance: Sequence[Any] = ()  # AcceptanceCriterion models (or equivalent mappings)
     scope: ScopeContract | None = None
     repo_hints: Sequence[str] = ()
+    #: the user's own request for the whole job: the planner's step goal summarises it and lost details such as
+    #: domain, field names and ranges, which the review then demanded (rc22 battery X2, BUG-212)
+    job_request: str = ""
 
     @classmethod
     def from_contract(cls, step: StepContract) -> StepBrief:
@@ -296,6 +299,7 @@ class ContextBuilder:
             title=self._red(step.title),
             step_key=step.step_key,
             repo_hints=[self._red(h) for h in step.repo_hints],
+            job_request=self._red(step.job_request),
             turn=inp.turn,
             max_turns=inp.max_turns,
             budget=cost[SectionName.STEP_GOAL],

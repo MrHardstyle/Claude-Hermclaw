@@ -239,6 +239,12 @@ class ImplementStepHandler:
             return ""
         return "\n".join([job.title, job.prompt, *(str(i) for i in inputs)])
 
+    async def _job_request(self, job_id: uuid.UUID) -> str:
+        """The user's request for the whole job (title and prompt) for the coder's STEP GOAL section (BUG-212)."""
+        async with self.sm() as s:
+            job = await s.get(Job, job_id)
+        return "" if job is None else "\n".join(p for p in (job.title, job.prompt) if p)
+
     async def _workspace(self, job_id: uuid.UUID) -> tuple[Any, WorkspaceHandle] | None:
         for ws in await self.deps.git.list_workspaces(job_id):
             if ws.status not in ("archived", "cleaned", "removed", "failed"):
@@ -367,7 +373,7 @@ class ImplementStepHandler:
         try:
             async with self._model(ctx, "coder", preemptible=True):
                 result = await loop.run(
-                    step=StepBrief.from_contract(step),
+                    step=dataclasses.replace(StepBrief.from_contract(step), job_request=await self._job_request(ctx.job_id)),
                     workspace=handle,
                     job_id=ctx.job_id,
                     step_id=ctx.step_id,

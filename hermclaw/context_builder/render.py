@@ -113,7 +113,16 @@ def _bullets(items: Sequence[str], limit: int, item_chars: int) -> str:
 
 # ---------------------------------------------------------------------------------------------- STEP GOAL
 def render_goal(
-    *, goal: str, kind: str, title: str, step_key: str, repo_hints: Sequence[str], turn: int, max_turns: int, budget: int
+    *,
+    goal: str,
+    kind: str,
+    title: str,
+    step_key: str,
+    repo_hints: Sequence[str],
+    turn: int,
+    max_turns: int,
+    budget: int,
+    job_request: str = "",
 ) -> RenderedSection:
     sec = RenderedSection(SectionName.STEP_GOAL)
     head_parts = [p for p in (f"Step {step_key}" if step_key else "", f"kind: {kind}" if kind else "", title) if p]
@@ -125,12 +134,29 @@ def render_goal(
     if fixed + hint_cost > budget:
         hints, hint_cost = "", 0
         sec.truncated = bool(repo_hints)
-    goal_text = truncate_middle(goal.strip(), max(0, budget - fixed - hint_cost))
+    request = ""
+    if job_request.strip():
+        # the step goal comes first; the job request gets what is left, but never more than half of the section
+        label = f"\n\n{JOB_REQUEST_LABEL}\n"
+        room = min(budget // 2, budget - fixed - hint_cost - char_cost(goal.strip())) - char_cost(label)
+        if room > 40:
+            text = truncate_middle(job_request.strip(), room)
+            sec.truncated = sec.truncated or text != job_request.strip()
+            request = f"{label}{text}"
+        else:
+            sec.truncated = True
+    goal_text = truncate_middle(goal.strip(), max(0, budget - fixed - hint_cost - char_cost(request)))
     if goal_text != goal.strip():
         sec.truncated = True
-    sec.body = clip_to_cost(f"{meta}Goal:\n{goal_text}{hints}", budget)
+    sec.body = clip_to_cost(f"{meta}Goal:\n{goal_text}{hints}{request}", budget)
     sec.items_included = 1
     return sec
+
+
+JOB_REQUEST_LABEL = (
+    "Job request (the user's own words for the whole job; this step delivers its part of it – take names, fields, "
+    "ranges, formats and messages from here when the goal above leaves them out):"
+)
 
 
 # ---------------------------------------------------------------------------------------------- SCOPE

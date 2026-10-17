@@ -62,6 +62,8 @@ Dependencies: only the shared protocols `RepoContextProvider` (`inventory_summar
 * **user**: `STEP GOAL`, `SCOPE`, `CONSTRAINTS`, `ACCEPTANCE`, `CURRENT REPO FACTS`, `RELEVANT CODE`,
   `RELEVANT TESTS`, `CURRENT DIFF`, `LATEST FAILURE`, `SHORT STEP HISTORY`, then the closing line
   "Respond now with exactly one JSON action for turn N of M."
+  `STEP GOAL` also carries the job request (job title and prompt, at most half of the section, cut in the middle)
+  below the step goal: the planner's goal summarises the job and may lose details the review checks (BUG-212).
 
 Mandatory sections (always rendered): SYSTEM CONTRACT, STEP GOAL, SCOPE (read-only notice without a scope),
 AVAILABLE TOOLS, COMPLETION CONDITIONS. All others are omitted when empty (`omitted_reason="empty"` in the

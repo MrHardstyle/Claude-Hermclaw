@@ -46,6 +46,19 @@ Noch keine.
 
 ## Behobene Bugs
 
+### BUG-212 – Coder kennt nur das Schrittziel, nicht den Auftrag, und baut am Auftrag vorbei
+- Phase: Erweiterte Batterie auf 0.1.0rc22 (X2) · Komponente: coder/context_builder · Severity: P1 · blockierend: ja (behoben) · Status: **behoben** (`tests/unit/test_context_builder_sections.py::test_step_goal_carries_the_job_request`)
+- Reproduktion: Job `20b80f9b-b56b-478d-9bab-a1f5cdc73fa9`.
+  - Auftrag: Veranstaltungsanmeldung mit Name, E-Mail, Anzahl Personen 1–10.
+  - Schrittziel des Planners: „Create the static website files … validateRegistration function“, ohne Domäne, Felder und Bereich.
+  - Der Coder baute ein Benutzer-Registrierungsformular mit Passwortprüfung. Das Review (sieht den Auftrag) lehnte ab: „user registration form with password validation instead of an event registration form with participant count“. Folge: Korrekturversuch.
+- Ursache: Der Kontext des Coders enthielt nur Schrittziel, Scope und Kriterien. Der Auftragstext erreichte ihn nie, nur die Paketprüfung. Jede Zusammenfassung des Planners verliert Details, die das Review dann prüft.
+- Fix:
+  - `StepBrief.job_request` enthält Titel und Prompt des Jobs. Der Abschnitt STEP GOAL zeigt ihn unter dem Schrittziel mit dem Hinweis, Namen, Felder, Bereiche und Formate von dort zu nehmen.
+  - Der Auftrag bekommt höchstens die Hälfte des Abschnitts und wird in der Mitte gekürzt, nie das Schrittziel.
+  - Budgetanteil STEP GOAL von 5 % auf 7 %. Ungenutztes Budget fließt wie bisher in RELEVANT CODE/TESTS.
+- Selbstprüfung: echter Schritt nach vorn. Eine Informationslücke zwischen Coder und Reviewer, die jede Job-Art trifft, keine Kompensation eines Modellverhaltens.
+
 ### BUG-211 – Wiederholungssperre umgangen, sobald derselbe Befehl ein Timeout angibt
 - Phase: Erweiterte Batterie auf 0.1.0rc22 (X2) · Komponente: tools · Severity: P3 · blockierend: nein (behoben) · Status: **behoben** (`tests/integration/test_tools_engine_exec.py::test_identical_command_on_unchanged_files_is_not_rerun`)
 - Reproduktion: Job `20b80f9b-b56b-478d-9bab-a1f5cdc73fa9`, Versuch 2. Turn 3 `node --test app.test.js 2>&1` war grün. Turn 4 lief derselbe Befehl mit `timeout_seconds: 30` erneut, statt als Wiederholung verweigert zu werden. Erst Turn 5 wurde verweigert.
