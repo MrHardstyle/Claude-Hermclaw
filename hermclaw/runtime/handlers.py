@@ -109,6 +109,23 @@ class ReviewStepHandler:
         self.resources = resources
         self.lease_wait_seconds = lease_wait_seconds
 
+    async def _job_commands(self, job_id: uuid.UUID) -> list[str]:
+        """Test/command criteria of the job's code steps: which interpreter the project runs with (BUG-194)."""
+        async with self.sm() as s:
+            acceptance = (
+                await s.execute(
+                    select(Step.acceptance)
+                    .where(Step.job_id == job_id, Step.superseded.is_(False), Step.kind.in_(list(TOOL_STEP_KINDS)))
+                    .order_by(Step.created_at, Step.step_key)
+                )
+            ).scalars()
+            return [
+                str(c["command"])
+                for items in acceptance
+                for c in items or []
+                if isinstance(c, dict) and c.get("type") in ("test", "command") and c.get("command")
+            ]
+
     async def _job_scope(self, job_id: uuid.UUID) -> ScopeContract | None:
         from hermclaw.contracts.scope import ScopeContract
 
@@ -133,7 +150,14 @@ class ReviewStepHandler:
         if handle is None:
             return StepOutcome("completed", summary="nothing to review (job without repository changes)")
         step = step_contract(row, await self._job_scope(ctx.job_id))
-        verification = await self.verifier.verify(step, handle, job_id=ctx.job_id, step_id=ctx.step_id, attempt_id=ctx.attempt_id)
+        verification = await self.verifier.verify(
+            step,
+            handle,
+            job_id=ctx.job_id,
+            step_id=ctx.step_id,
+            attempt_id=ctx.attempt_id,
+            command_hints=await self._job_commands(ctx.job_id),
+        )
         async with self.sm() as s:
             await emit_status(s, ctx.job_id, f"Heavy Review {row.step_key} (gesamte Änderung)", step_id=ctx.step_id)
             await s.commit()

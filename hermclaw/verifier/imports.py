@@ -8,8 +8,9 @@ and the merge request then ships code that crashes at runtime (rc18 battery J4: 
    broader handler) and ``if TYPE_CHECKING:`` blocks are optional by design and skipped;
 2. the standard library and modules of the repository (repository root, ``src/``, the importing file's directory)
    resolve without the sandbox;
-3. the rest is resolved in the sandbox with ``importlib.util.find_spec`` – the same interpreter and installed
-   dependencies the tests use. A module that does not resolve fails the check with what to do next.
+3. the rest is resolved in the sandbox with ``importlib.util.find_spec`` – with the interpreter the step's test and
+   command criteria use (``.venv/bin/python -m pytest``, ``uv run pytest`` …; plain ``python3`` otherwise), so a
+   project virtualenv counts as installed. A module that does not resolve fails the check with what to do next.
 
 Parse-only on the verifier host; nothing of the project is executed outside the sandbox.
 """
@@ -17,9 +18,11 @@ Parse-only on the verifier host; nothing of the project is executed outside the 
 from __future__ import annotations
 
 import ast
+import posixpath
+import re
 import shlex
 import sys
-from collections.abc import Iterable
+from collections.abc import Iterable, Sequence
 from pathlib import Path
 
 from hermclaw.verifier.types import AddedContent
@@ -35,6 +38,11 @@ RESOLVE_SCRIPT = (
     "sys.exit(3 if missing else 0)\n"
 )
 MISSING_EXIT_CODE = 3
+_PYTHON = re.compile(r"python(\d+(\.\d+)*)?")
+#: launchers that run their arguments inside the project environment
+_RUNNERS = {"uv": "run", "poetry": "run", "pipenv": "run", "pdm": "run", "hatch": "run", "rye": "run"}
+#: test tools that run in the interpreter they are installed in (``tox``/``nox`` build their own environments)
+_PYTHON_TOOLS = frozenset({"pytest", "py.test", "coverage"})
 
 
 def _optional_try(node: ast.Try) -> bool:
@@ -108,6 +116,42 @@ def new_unresolved_candidates(root: Path, added: AddedContent) -> dict[str, list
     return out
 
 
-def resolve_command(modules: Iterable[str]) -> str:
+def _interpreter(command: str) -> list[str] | None:
+    """The Python launcher a command runs with, or ``None`` when it does not visibly run Python."""
+    try:
+        words = shlex.split(command)
+    except ValueError:
+        return None
+    while words and re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*=.*", words[0]):
+        words = words[1:]  # FOO=bar prefixes
+    if words and words[0] == "env":
+        words = words[1:]
+    if len(words) >= 2 and _RUNNERS.get(posixpath.basename(words[0])) == words[1]:
+        return [*words[:2], "python"]
+    if not words:
+        return None
+    head, base = posixpath.split(words[0])
+    if _PYTHON.fullmatch(base):
+        return [words[0]]
+    if base in _PYTHON_TOOLS:
+        # .venv/bin/pytest -> .venv/bin/python; a bare pytest from PATH runs in the default python3
+        return [posixpath.join(head, "python")] if head else ["python3"]
+    return None
+
+
+def interpreter_for(commands: Iterable[str]) -> tuple[list[str], bool]:
+    """``(launcher, named)``: the interpreter of the first command that names one, else a guessed ``python3``.
+
+    Only a named interpreter may fail the check: a project whose tests run through ``make``/``tox``/``npm`` keeps its
+    packages somewhere a guessed ``python3`` does not see, and failing such a step would be a false alarm (BUG-194)."""
+    for command in commands:
+        found = _interpreter(command)
+        if found:
+            return found, True
+    return ["python3"], False
+
+
+def resolve_command(modules: Iterable[str], interpreter: Sequence[str] = ("python3",)) -> str:
     names = " ".join(shlex.quote(m) for m in sorted(set(modules)))
-    return f"python3 -c {shlex.quote(RESOLVE_SCRIPT)} {names}"
+    launcher = " ".join(shlex.quote(w) for w in interpreter)
+    return f"{launcher} -c {shlex.quote(RESOLVE_SCRIPT)} {names}"

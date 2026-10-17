@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from hermclaw.verifier.imports import imported_modules, new_unresolved_candidates, resolve_command
+from hermclaw.verifier.imports import imported_modules, interpreter_for, new_unresolved_candidates, resolve_command
 from hermclaw.verifier.types import AddedContent, AddedLine
 
 SOURCE = """\
@@ -43,3 +43,16 @@ def test_standard_library_and_repository_modules_need_no_sandbox(tmp_path: Path)
     added = AddedContent(lines={"tools/run.py": [AddedLine(i, t) for i, t in enumerate(code.splitlines(), start=1)]})
     assert new_unresolved_candidates(root, added) == {"missing_zz9": ["tools/run.py:5"]}
     assert "find_spec" in resolve_command(["b", "a"]) and resolve_command(["b", "a"]).endswith(" a b")
+
+
+def test_imports_resolve_with_the_interpreter_the_tests_use() -> None:
+    # e2e/rc19 suite: tests ran with a project virtualenv, the check with the bare system python3
+    assert interpreter_for([".venv/bin/python -m pytest -q"]) == ([".venv/bin/python"], True)
+    assert interpreter_for(["PYTHONPATH=src python3.12 -m unittest"]) == (["python3.12"], True)
+    assert interpreter_for([".venv/bin/pytest -q"]) == ([".venv/bin/python"], True)
+    assert interpreter_for(["uv run pytest"]) == (["uv", "run", "python"], True)
+    assert interpreter_for(["node --test", "pytest"]) == (["python3"], True)
+    # nothing names the interpreter: a guess, which must not fail the step
+    assert interpreter_for(["make test", "tox -e py"]) == (["python3"], False)
+    assert interpreter_for([]) == (["python3"], False)
+    assert resolve_command(["requests"], [".venv/bin/python"]).startswith(".venv/bin/python -c ")

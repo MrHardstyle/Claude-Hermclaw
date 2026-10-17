@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import dataclasses
 import uuid
-from collections.abc import Awaitable, Callable
+from collections.abc import Awaitable, Callable, Sequence
 from typing import Any
 
 from sqlalchemy import select
@@ -78,10 +78,22 @@ class VerifierAdapter:
         )
 
     async def verify(
-        self, step: StepContract, workspace: WorkspaceHandle, *, job_id: uuid.UUID, step_id: uuid.UUID, attempt_id: uuid.UUID
+        self,
+        step: StepContract,
+        workspace: WorkspaceHandle,
+        *,
+        job_id: uuid.UUID,
+        step_id: uuid.UUID,
+        attempt_id: uuid.UUID,
+        command_hints: Sequence[str] = (),
     ) -> VerificationOutcome:
         vstep = VerificationStep.build(
-            key=step.step_key, kind=str(step.kind), acceptance=list(step.acceptance), scope=step.scope, network=step.network
+            key=step.step_key,
+            kind=str(step.kind),
+            acceptance=list(step.acceptance),
+            scope=step.scope,
+            network=step.network,
+            command_hints=command_hints,
         )
         out = await (await self._verifier(workspace, step)).run(vstep, workspace, job_id=job_id, step_id=step_id, attempt_id=attempt_id)
         return VerificationOutcome(report=out.report, run_id=out.run_id)

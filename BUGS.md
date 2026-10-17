@@ -46,6 +46,15 @@ Noch keine.
 
 ## Behobene Bugs
 
+### BUG-194 – Import-Prüfung mit dem falschen Interpreter: grüne Schritte mit Projekt-venv als „nicht auflösbar“ abgelehnt
+- Phase: Full-Suite vor 0.1.0rc19 · Komponente: verifier · Severity: P1 · blockierend: ja (behoben) · Status: **behoben** (`tests/unit/test_verifier_imports.py::test_imports_resolve_with_the_interpreter_the_tests_use`, e2e `test_37_1`, `test_37_13`, `test_37_14`, `test_37_15`)
+- Reproduktion: Die e2e-Szenarien testen mit `<venv>/bin/python -m pytest`. `imports:python` (BUG-193) prüfte dagegen mit dem nackten `python3`, in dem fastapi fehlt. Der Implement-Schritt scheiterte deshalb mit `VERIFIER_FAILED`. Das Gesamt-Review (eigener Schritt ohne Test-Kriterien) scheiterte ebenso.
+- Ursache: Der Interpreter der Prüfung war fest `python3`. Er war nicht der, mit dem das Projekt seine Tests ausführt (venv, `python3.12`, `uv run`, `.venv/bin/pytest`). Projekte, die ihre Tests über `make` oder `tox` starten, wären produktiv genauso fälschlich gescheitert, oft spät in einem langen Job.
+- Fix:
+  - Der Interpreter kommt aus den Test- und Command-Kriterien des Schritts. Beim Gesamt-Review kommen die Kriterien aus den Code-Schritten des Jobs (`command_hints`).
+  - Ein Fehlschlag gilt nur, wenn ein Kriterium den Interpreter benennt.
+  - Ein nur geratenes `python3` meldet nicht gefundene Module als `skip` mit Hinweis, nicht als Fehler.
+
 ### BUG-193 – Erfundenes Paket per Import in einer Funktion: Tests grün, Merge Request mit Code, der beim Start abstürzt
 - Phase: Batterie-Lauf 1 auf 0.1.0rc18 (J4) · Komponente: verifier · Severity: P1 · blockierend: ja (behoben) · Status: **behoben** (`tests/integration/test_verifier_engine.py::test_new_import_that_does_not_resolve_fails`, `tests/unit/test_verifier_imports.py`)
 - Reproduktion: Job `cee8d8e8-dd4f-4d9e-bbf3-94f8a0ed91e1` (J4, „Binde das Python-Paket "hermclaw-nonexistent-sdk-zz9" ein …“).

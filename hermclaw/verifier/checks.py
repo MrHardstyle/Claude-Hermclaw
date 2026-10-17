@@ -12,11 +12,12 @@ from collections.abc import Sequence
 from pathlib import Path
 from typing import Any
 
+from hermclaw.contracts.acceptance import CommandEvidence, TestEvidence
 from hermclaw.contracts.verification import VerificationCheck
 from hermclaw.verifier.changes import matching, read_bytes, read_text
 from hermclaw.verifier.conflicts import scan_conflicts
 from hermclaw.verifier.context import VerifyContext
-from hermclaw.verifier.imports import MISSING_EXIT_CODE, new_unresolved_candidates, resolve_command
+from hermclaw.verifier.imports import MISSING_EXIT_CODE, interpreter_for, new_unresolved_candidates, resolve_command
 from hermclaw.verifier.languages import CODE_LANGUAGES, detect_language, repo_has_tests
 from hermclaw.verifier.secrets import SecretScanner
 from hermclaw.verifier.syntax import (
@@ -316,10 +317,16 @@ async def import_checks(ctx: VerifyContext, added: AddedContent | None) -> list[
     candidates = await asyncio.to_thread(new_unresolved_candidates, ctx.root, added)
     if not candidates:
         return [ctx.check("imports", "imports:python", "pass", "no new third-party import")]
-    command = resolve_command(candidates)
+    own = [c.command for c in ctx.step.acceptance if isinstance(c, (TestEvidence, CommandEvidence))]
+    interpreter, named = interpreter_for([*own, *ctx.step.command_hints])
+    command = resolve_command(candidates, interpreter)
     timeout = ctx.policies.sandbox.default_timeout_seconds or COMPILE_TIMEOUT_FALLBACK
     res = await ctx.runner.run(command, purpose="verifier", timeout_seconds=min(timeout, 120), network=False)
-    evidence: dict[str, Any] = {"modules": {m: locs[:5] for m, locs in candidates.items()}, "exit_code": res.exit_code}
+    evidence: dict[str, Any] = {
+        "modules": {m: locs[:5] for m, locs in candidates.items()},
+        "interpreter": " ".join(interpreter),
+        "exit_code": res.exit_code,
+    }
     if res.failed_to_run or res.timed_out or res.exit_code in (126, 127):
         return [
             ctx.check(
@@ -333,6 +340,17 @@ async def import_checks(ctx: VerifyContext, added: AddedContent | None) -> list[
         evidence["output"] = ctx.runner.clip(res.output, 2000)
         return [ctx.check("imports", "imports:python", "error", f"import resolution failed with exit code {res.exit_code}", evidence)]
     where = "; ".join(f"{m} ({', '.join(candidates[m][:3])})" for m in missing)
+    if not named:
+        return [
+            ctx.check(
+                "imports",
+                "imports:python",
+                "skip",
+                f"new import(s) not found by python3: {where}; no criterion names the project's interpreter, so this is "
+                "not treated as a failure",
+                evidence,
+            )
+        ]
     return [
         ctx.check(
             "imports",
