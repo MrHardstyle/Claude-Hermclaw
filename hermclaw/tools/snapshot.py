@@ -44,6 +44,18 @@ DEFAULT_GENERATED_GLOBS: tuple[str, ...] = (
     "**/.coverage",
     "**/node_modules/**",
     "**/.hypothesis/**",
+    # runtime data a program or its tests create while running (rc23 battery X3: every green test run of a SQLite
+    # store created inventory.db, was reported as a scope violation and the coder re-ran it again and again, BUG-214);
+    # untracked ones the scope does not allow are removed after the command instead of failing it
+    "**/*.db",
+    "**/*.sqlite",
+    "**/*.sqlite3",
+    "**/*.db-journal",
+    "**/*.db-wal",
+    "**/*.db-shm",
+    "**/*.sqlite-journal",
+    "**/*.log",
+    "**/.nyc_output/**",
 )
 GIT_META_FILES = ("HEAD", "config", "packed-refs", "shallow", "commondir")
 GIT_META_DIRS = ("refs", "info", "hooks")

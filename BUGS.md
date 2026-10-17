@@ -46,6 +46,15 @@ Noch keine.
 
 ## Behobene Bugs
 
+### BUG-214 – Laufzeitdaten eines Testlaufs (SQLite-Datei) gelten als Scope-Verstoß
+- Phase: Erweiterte Batterie auf 0.1.0rc23 (X3) · Komponente: tools/snapshot · Severity: P2 · blockierend: nein (behoben) · Status: **behoben** (`tests/integration/test_tools_engine_exec.py::test_runtime_data_files_a_command_creates_are_cleaned_not_violations`)
+- Reproduktion: Job `1dbe5ea5-ca00-4938-8cfd-9215976b5098` (Inventar-Server auf SQLite).
+  - Jeder Testlauf legte über den Standardpfad `inventory.db` an. Die Runtime meldete `COMMAND_SCOPE_VIOLATION` („creating 'inventory.db' is outside allowed_new_paths“), machte die Datei rückgängig und markierte auch grüne Läufe als Fehler.
+  - Der Coder wiederholte die Läufe: Wiederholungs-Metrik 5 (max. 2), der Job brauchte 22 Minuten und drei Versuche pro Schritt. Ergebnis trotzdem `succeeded`.
+- Ursache: Nur Caches (`__pycache__`, `.pytest_cache` …) galten als generiert und wurden still aufgeräumt. Datenbank-, Journal- und Log-Dateien, die ein Programm beim Laufen erzeugt, galten als Arbeit des Coders.
+- Fix: `*.db`, `*.sqlite`, `*.sqlite3`, deren Journal-, WAL- und SHM-Dateien, `*.log` und `.nyc_output/` gehören zu den generierten Dateien. Nicht versionierte Exemplare, die der Scope nicht erlaubt, werden nach dem Befehl entfernt (`[cleanup]`), statt den Lauf scheitern zu lassen. Erlaubt der Scope die Datei, bleibt sie erhalten.
+- Selbstprüfung: echter Schritt nach vorn. Die Ursache der Wiederholungen liegt in der Runtime-Rückmeldung, nicht im Modell; es ist keine weitere Wiederholungssperre.
+
 ### BUG-213 – Festes Replan-Budget pro Job lässt lange Jobs an ihrem dritten unabhängigen Problem scheitern
 - Phase: Audit später Fehlerpfade (2026-10-17) · Komponente: scheduler · Severity: P1 · blockierend: ja für lange Aufträge (behoben) · Status: **behoben** (`tests/integration/test_scheduler.py::test_replans_that_make_progress_get_a_fresh_budget`)
 - Reproduktion: Ein Job, dessen Replans jeweils funktionieren (danach schließen weitere Schritte ab) und der später auf ein neues, unabhängiges Problem trifft. Mit `max_replans_per_job: 2` endet er beim dritten Problem mit `REPLAN_LIMIT`, egal ob nach 10 Minuten oder nach 3 Stunden und 25 abgeschlossenen Schritten.

@@ -2,6 +2,13 @@
 
 Format: [Keep a Changelog](https://keepachangelog.com/de/1.1.0/), Versionen nach PEP 440.
 
+## [0.1.0rc24] – Release Candidate (2026-10-18)
+
+Fixes aus der erweiterten Batterie auf 0.1.0rc23.
+
+### Behoben
+- **Laufzeitdaten von Testläufen (BUG-214):** SQLite-Dateien, Journale und Logs, die ein Programm beim Laufen anlegt, werden nach dem Befehl aufgeräumt, statt den Lauf als Scope-Verstoß scheitern zu lassen.
+
 ## [0.1.0rc23] – Release Candidate (2026-10-17)
 
 Fixes aus der erweiterten Batterie auf 0.1.0rc22 (X1 Datenanalyse-CLI) und dem Audit später Fehlerpfade.

@@ -390,6 +390,17 @@ async def test_generated_caches_that_are_not_ignored_are_cleaned(sessionmaker: S
     assert git(repo, "status", "--porcelain") == ""  # ... and they never leak into the change set
 
 
+async def test_runtime_data_files_a_command_creates_are_cleaned_not_violations(sessionmaker: SM, repo: Path) -> None:
+    """rc23 battery X3: every green test run of a SQLite store created inventory.db outside the scope; the run was
+    reported as COMMAND_SCOPE_VIOLATION and the coder re-ran it five times. Runtime data is cleaned up (BUG-214)."""
+    h = await make_harness(sessionmaker, repo, contract=scope(**SCOPE))
+    script = "import sqlite3; sqlite3.connect('inventory.db').execute('create table t(x)'); open('run.log','w').write('x')"
+    res = await h.call("run_command", command=f'{PY} -c "{script}"')
+    assert res.ok and res.error_code is None, res.output
+    assert sorted(res.data["cleaned"]) == ["inventory.db", "run.log"]
+    assert not (repo / "inventory.db").exists() and git(repo, "status", "--porcelain") == ""
+
+
 async def test_run_test_invalid_cwd_is_refused_before_start(sessionmaker: SM, repo: Path) -> None:
     h = await make_harness(sessionmaker, repo)
     assert (await h.call("run_test", command="pytest", cwd="nope")).error_code == E.NOT_A_DIRECTORY
