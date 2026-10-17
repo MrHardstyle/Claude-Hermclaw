@@ -2,6 +2,21 @@
 
 Format: [Keep a Changelog](https://keepachangelog.com/de/1.1.0/), Versionen nach PEP 440.
 
+## [0.1.0rc16] – Release Candidate (2026-10-17)
+
+Modell- und Runtime-Wechsel nach Messung (D-015, `docs/research/20261017-032-model-runtime.md`).
+
+### Neu
+- **llama.cpp-Backend:** Chat-Profile mit `backend: llamacpp` laufen auf einem residenten `llama-server` des Modellhosts
+  (OpenAI-kompatibel über LiteLLM `openai/`, Denken über `chat_template_kwargs`, JSON-Schema per Grammatik erzwungen).
+  Gemessen auf der GTX 1080 mit `--n-cpu-moe 30`: kalter 10,7k-Prompt 39 s statt 75 s (Ollama), Decode 30 statt 14 tok/s.
+- Die Rolle `ollama` installiert `hermclaw-llamacpp.service` neben Ollama (`ollama_llamacpp_enabled`); der Port liegt in
+  derselben Firewall-Tabelle wie Ollamas. `scripts/ops/build-llamacpp.sh` baut die Binärdateien aus dem Quell-Tag im
+  CUDA-12.8-Image (sm_61). `hermclaw doctor` prüft `llamacpp:<host>`.
+
+### Behoben
+- **Abbruch während eines Modellaufrufs (BUG-184):** Ein Abbruch beendet den laufenden Coder-Modellaufruf sofort.
+
 ## [0.1.0rc15] – Release Candidate (2026-10-17)
 
 Fixes aus Batterie-Lauf 1 auf 0.1.0rc14 (J1 erfolgreich, aber zu viele Wiederholungen; J2–J5 mit `REPLAN_LIMIT`; J6 wegen

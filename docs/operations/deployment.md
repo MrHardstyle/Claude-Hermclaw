@@ -208,9 +208,23 @@ hermclaw_config_host_overrides:
 hermclaw_config_unmanaged: [databases]       # created once, then yours (validated as it is)
 ```
 
-The model roles are fixed by the architecture: Gemma planner, Qwen3-Coder 30B coder, Qwen3.8 27B heavy reviewer,
-Qwen3 8B fast router, EmbeddingGemma. `hermclaw doctor` fails when a role has no enabled profile. Change tags, not
-roles.
+The architecture names a model per role: Gemma planner, Qwen3-Coder 30B coder, Qwen3.8 27B heavy reviewer,
+Qwen3 8B fast router, EmbeddingGemma. `hermclaw doctor` fails when a role has no enabled profile.
+
+A profile may name another model only with a documented decision, `deviation: "<D-xxx: reason>"` (D-015). The
+architecture check then reports a warning instead of an error.
+
+**llama.cpp backend (D-015).** A chat profile with `backend: llamacpp` is served by the resident `llama-server` of its
+host (`hermclaw-llamacpp.service`, port 18080 or the `llamacpp` service of `hosts.yaml`). One server serves one model,
+so all llamacpp profiles of a host name the same model. Embeddings stay on Ollama.
+
+To switch, the inventory needs three things:
+1. The archive and its checksum on the model host (`ollama_llamacpp_enabled: true`, `ollama_llamacpp_archive_src`,
+   `ollama_llamacpp_archive_sha256`, printed by `scripts/ops/build-llamacpp.sh`).
+2. `bootstrap.yml --limit model_workers --tags ollama` to install the server.
+3. A `models` override with the profiles (see section 8, .224).
+
+Rollback: remove the `models` override, run deploy.yml, and set `ollama_llamacpp_enabled: false`.
 
 ## 6. Upgrade
 
@@ -288,7 +302,20 @@ grep NoNewPrivs /proc/$(systemctl show -p MainPID --value hermclaw-exec-worker)/
 systemctl status hermclaw-model-worker ollama; curl -s http://192.168.178.224:8787/health
 OLLAMA_HOST=127.0.0.1:11434 /usr/local/bin/ollama list
 journalctl -u hermclaw-model-pull.service       # the transient unit of the last model pull
+systemctl status hermclaw-llamacpp; curl -s http://127.0.0.1:18080/health; curl -s http://127.0.0.1:18080/v1/models
+nvidia-smi --query-gpu=memory.used --format=csv   # llama-server qwen3.6:35b, -c 32768, --n-cpu-moe 30: ~7.4 GB
 ```
+
+`hermclaw-llamacpp.service` reads the GGUF of `ollama_llamacpp_model` from Ollama's blob store. The role pulls the
+tag with Ollama when it is missing.
+
+`--n-cpu-moe` sets how many layers keep their MoE experts in RAM. On the 8 GB GTX 1080 at 32K context:
+- 30 is the measured best value;
+- 26 runs out of GPU memory;
+- every layer moved to the GPU speeds up decode.
+
+Measure a change with `/opt/llamacpp/current/bin/llama-bench -m <blob> -ngl 99 -ncmoe 34,30 -fa 1 -p 4096 -n 128 -d 8192`,
+with the service stopped.
 
 The pull runs in the transient unit `hermclaw-model-pull.service`, and Ansible polls it, so a dropped SSH session
 does not abort a multi-hour download (`hermclaw_worker_model_pull_timeout`, default 6 h). It only runs when a tag of
