@@ -797,3 +797,30 @@ async def test_compile_typescript_with_tsc(sessionmaker: Any, tmp_path: Path) ->
     outcome2, *_ = await run(sessionmaker, repo, st, kind="documentation")
     assert by_name(outcome2.report)["compile:typescript"].status == "pass"
     assert by_name(outcome2.report)["syntax:src/a.ts"].status == "skip"
+
+
+async def test_new_import_that_does_not_resolve_fails(sessionmaker: Any, tmp_path: Path) -> None:
+    """rc18 battery J4: an invented package imported inside main() passed the tests (main is never called) and was
+    shipped in a merge request; new imports must resolve (BUG-193)."""
+    repo = py_repo(tmp_path)
+    write(repo, "helpers.py", "VALUE = 1\n")
+    write(
+        repo,
+        "calc.py",
+        CALC
+        + "\n\ndef main():\n    import json\n    import helpers\n    import hermclaw_nonexistent_sdk_zz9\n"
+        + "    try:\n        import optional_speedups_zz9\n    except ImportError:\n        optional_speedups_zz9 = None\n"
+        + "    hermclaw_nonexistent_sdk_zz9.connect()\n",
+    )
+    st = step(scope_contract=scope(allowed_new_paths=["helpers.py"], target_paths=["calc.py"]))
+    outcome, *_ = await run(sessionmaker, repo, st)
+    check = by_name(outcome.report)["imports:python"]
+    assert check.status == "fail" and not outcome.report.passed
+    assert "hermclaw_nonexistent_sdk_zz9 (calc.py:8)" in check.message and "block the step" in check.message
+    assert set(check.evidence["modules"]) == {"hermclaw_nonexistent_sdk_zz9"}  # stdlib, local and optional skipped
+    write(repo, "calc.py", CALC + "\n\ndef main():\n    import pytest\n    return pytest\n")
+    outcome2, *_ = await run(sessionmaker, repo, st)
+    assert by_name(outcome2.report)["imports:python"].status == "pass"
+    write(repo, "calc.py", CALC)
+    outcome3, *_ = await run(sessionmaker, repo, st)
+    assert by_name(outcome3.report)["imports:python"].message == "no new third-party import"

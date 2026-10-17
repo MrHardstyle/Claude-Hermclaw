@@ -2,6 +2,13 @@
 
 Format: [Keep a Changelog](https://keepachangelog.com/de/1.1.0/), Versionen nach PEP 440.
 
+## [0.1.0rc19] – Release Candidate (2026-10-17)
+
+Fix aus Batterie-Lauf 1 auf 0.1.0rc18: J4 endete `succeeded` mit einem Merge Request, dessen Code ein erfundenes Paket importiert.
+
+### Behoben
+- **Nicht auflösbare Importe (BUG-193):** Neue Verifier-Prüfung `imports:python`. Ein neu importiertes Modul muss Standardbibliothek, Teil des Repositories oder in der Sandbox installiert sein; sonst wird der Schritt nicht abgenommen. Vorher landete ein erfundenes Paket in einer ungetesteten Funktion im Merge Request.
+
 ## [0.1.0rc18] – Release Candidate (2026-10-17)
 
 Fixes aus Batterie-Lauf 1 auf 0.1.0rc17: J1/J2/J3/J5 erfolgreich (3,4/3,7/9,6/11,5 min). J4 stellte nach 3,1 min korrekt eine Rückfrage, wurde aber als FAIL gewertet.

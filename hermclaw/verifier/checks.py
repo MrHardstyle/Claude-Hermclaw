@@ -16,6 +16,7 @@ from hermclaw.contracts.verification import VerificationCheck
 from hermclaw.verifier.changes import matching, read_bytes, read_text
 from hermclaw.verifier.conflicts import scan_conflicts
 from hermclaw.verifier.context import VerifyContext
+from hermclaw.verifier.imports import MISSING_EXIT_CODE, new_unresolved_candidates, resolve_command
 from hermclaw.verifier.languages import CODE_LANGUAGES, detect_language, repo_has_tests
 from hermclaw.verifier.secrets import SecretScanner
 from hermclaw.verifier.syntax import (
@@ -305,6 +306,44 @@ async def compile_checks(ctx: VerifyContext) -> list[VerificationCheck]:
             ctx.check("compile", "compile", "skip", "repository has no compile toolchain marker (tsconfig.json, go.mod, Cargo.toml)")
         )
     return out
+
+
+# ------------------------------------------------------------------------------------------- new imports (BUG-193)
+async def import_checks(ctx: VerifyContext, added: AddedContent | None) -> list[VerificationCheck]:
+    """Every module the change newly imports must resolve: standard library, repository or installed."""
+    if added is None:
+        return [ctx.check("imports", "imports:python", "skip", "added lines unavailable")]
+    candidates = await asyncio.to_thread(new_unresolved_candidates, ctx.root, added)
+    if not candidates:
+        return [ctx.check("imports", "imports:python", "pass", "no new third-party import")]
+    command = resolve_command(candidates)
+    timeout = ctx.policies.sandbox.default_timeout_seconds or COMPILE_TIMEOUT_FALLBACK
+    res = await ctx.runner.run(command, purpose="verifier", timeout_seconds=min(timeout, 120), network=False)
+    evidence: dict[str, Any] = {"modules": {m: locs[:5] for m, locs in candidates.items()}, "exit_code": res.exit_code}
+    if res.failed_to_run or res.timed_out or res.exit_code in (126, 127):
+        return [
+            ctx.check(
+                "imports", "imports:python", "skip", f"imports not resolvable in the sandbox: {res.problem or res.exit_code}", evidence
+            )
+        ]
+    if res.exit_code == 0:
+        return [ctx.check("imports", "imports:python", "pass", f"new imports resolve: {', '.join(sorted(candidates))}", evidence)]
+    missing = [m for m in res.output.split() if m in candidates] if res.exit_code == MISSING_EXIT_CODE else []
+    if not missing:
+        evidence["output"] = ctx.runner.clip(res.output, 2000)
+        return [ctx.check("imports", "imports:python", "error", f"import resolution failed with exit code {res.exit_code}", evidence)]
+    where = "; ".join(f"{m} ({', '.join(candidates[m][:3])})" for m in missing)
+    return [
+        ctx.check(
+            "imports",
+            "imports:python",
+            "fail",
+            f"new import(s) do not resolve: {where}. They are neither standard library, a module of this repository nor "
+            "installed, so the code fails when it runs. Declare the package in the dependency manifest and install it, "
+            "use what the repository already has, or block the step if the package cannot be obtained.",
+            evidence,
+        )
+    ]
 
 
 # ------------------------------------------------------------------------------------------- 21.4 lint

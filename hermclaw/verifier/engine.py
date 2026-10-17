@@ -62,7 +62,7 @@ from hermclaw.verifier.context import VerifyContext, make_check
 from hermclaw.verifier.report import build_report, run_status
 from hermclaw.verifier.secrets import SecretScanner
 from hermclaw.verifier.store import abort_run, finish_run, start_run, stored_changed_files
-from hermclaw.verifier.types import ArtifactLookup, VerificationOutcome, VerificationStep, db_artifact_lookup
+from hermclaw.verifier.types import AddedContent, ArtifactLookup, VerificationOutcome, VerificationStep, db_artifact_lookup
 
 log = get_logger(__name__)
 
@@ -253,6 +253,7 @@ class Verifier:
         checks.extend(await self._guarded(ctx, "deletions", "deleted_files", lambda: _sync([generic.deletions_check(ctx)])))
         secret_checks: list[VerificationCheck]
         conflict_checks: list[VerificationCheck]
+        added: AddedContent | None = None
         try:
             added = await added_content(workspace, ctx.changes, self.git, lgit)
         except Exception as exc:
@@ -274,7 +275,7 @@ class Verifier:
         # ---- checks that may run sandbox commands (serialised; side effects reverted afterwards, also on errors)
         integrity: VerificationCheck | None = None
         try:
-            checks.extend(await self._command_phase(ctx, criteria, test_outcomes))
+            checks.extend(await self._command_phase(ctx, criteria, test_outcomes, added))
         finally:
             if runner.used:
                 integrity = await asyncio.shield(side_effects.restore(ctx))
@@ -299,10 +300,12 @@ class Verifier:
         ctx: VerifyContext,
         criteria: dict[int, VerificationCheck],
         test_outcomes: list[tuple[VerificationCheck, bool | None, bool]],
+        added: AddedContent | None = None,
     ) -> list[VerificationCheck]:
         out: list[VerificationCheck] = []
         out.extend(await self._guarded(ctx, "syntax", "syntax", lambda: generic.syntax_checks(ctx)))
         out.extend(await self._guarded(ctx, "compile", "compile", lambda: generic.compile_checks(ctx)))
+        out.extend(await self._guarded(ctx, "imports", "imports:python", lambda: generic.import_checks(ctx, added)))
         out.extend(await self._guarded(ctx, "lint", "lint", lambda: generic.lint_checks(ctx)))
         for index, item in enumerate(ctx.step.acceptance):
             if isinstance(item, CommandEvidence):

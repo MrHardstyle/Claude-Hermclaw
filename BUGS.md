@@ -46,6 +46,20 @@ Noch keine.
 
 ## Behobene Bugs
 
+### BUG-193 – Erfundenes Paket per Import in einer Funktion: Tests grün, Merge Request mit Code, der beim Start abstürzt
+- Phase: Batterie-Lauf 1 auf 0.1.0rc18 (J4) · Komponente: verifier · Severity: P1 · blockierend: ja (behoben) · Status: **behoben** (`tests/integration/test_verifier_engine.py::test_new_import_that_does_not_resolve_fails`, `tests/unit/test_verifier_imports.py`)
+- Reproduktion: Job `cee8d8e8-dd4f-4d9e-bbf3-94f8a0ed91e1` (J4, „Binde das Python-Paket "hermclaw-nonexistent-sdk-zz9" ein …“).
+  - Der Coder setzte `import hermclaw_nonexistent_sdk_zz9` und `connect()` in `main()`.
+  - Die Tests rufen `main()` nie auf; deshalb bestanden 3/3, Verifier und Review bestanden.
+  - Der Job endete `succeeded` mit Merge Request. Der Server stürzt beim Start mit `ModuleNotFoundError` ab.
+- Ursache: Keine Prüfung stellte fest, ob neu importierte Module überhaupt existieren. Syntax, Compile und Tests decken einen Import in einer nicht getesteten Funktion nicht ab. Ein erfundenes oder nicht installiertes Paket ist ein typischer Modellfehler.
+- Fix: Neue Verifier-Prüfung `imports:python`.
+  - Geprüft werden absolute Importe auf hinzugefügten Zeilen geänderter `.py`-Dateien.
+  - Übersprungen werden Importe in `try/except ImportError` und unter `if TYPE_CHECKING`, außerdem die Standardbibliothek und Module des Repositories (Root, `src/`, Verzeichnis der Datei).
+  - Der Rest muss in der Sandbox per `importlib.util.find_spec` auflösbar sein, mit denselben installierten Abhängigkeiten wie die Tests.
+  - Sonst schlägt die Prüfung fehl, mit Ort und Anweisung: deklarieren und installieren, Vorhandenes nutzen oder den Schritt blockieren.
+  - Damit führt ein unbeschaffbares Paket zu Blockade und Rückfrage (BUG-187) statt zu kaputtem Code im MR.
+
 ### BUG-192 – Research: Bei inhaltsgleichen Quellen gewinnt die schnellere statt der maßgeblichen
 - Phase: Full-Suite für 0.1.0rc18 · Komponente: research/engine · Severity: P2 · blockierend: nein (behoben) · Status: **behoben** (`tests/integration/test_research_engine.py::test_duplicate_text_keeps_the_authoritative_source_even_when_the_mirror_answers_first`)
 - Reproduktion: `test_run_links_job_and_identical_claims_from_two_sources_are_merged` war flaky. Einzeln wiederholt schlug er etwa jeden dritten Lauf fehl, weil die Doku statt des Mirrors als Duplikat übersprungen wurde.
