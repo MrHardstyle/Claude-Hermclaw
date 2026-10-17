@@ -2,6 +2,21 @@
 
 Format: [Keep a Changelog](https://keepachangelog.com/de/1.1.0/), Versionen nach PEP 440.
 
+## [0.1.0rc13] – Release Candidate (2026-10-17)
+
+Fixes aus dem Batterie-Lauf auf 0.1.0rc11 (J2–J6); enthält 0.1.0rc12 (nicht separat ausgerollt).
+
+### Behoben
+- **Verlorener Testfehler (BUG-175):** Verweigerte Wiederholungen und erfolgreiche Lesezugriffe ersetzen den letzten
+  echten Fehler im Coder-Kontext nicht mehr; die Verweigerung sagt, ob der Befehl grün oder rot war. Doppelte
+  Akzeptanzkriterien werden in jedem Step-Typ entfernt.
+- **Modell-Host-Ausfall (BUG-176):** Planung und Neuplanung warten bei `MODEL_UNAVAILABLE`/`MODEL_TIMEOUT`/
+  `MODEL_LOAD_FAILED` mit Backoff (bis 4 h), statt den Auftrag zu beenden. Batterie-Kriterium `infrastructure`.
+
+### Betrieb
+- tower3: LVM-thin-Pool `local-lvm` war voll und pausierte VM 104. Die gestoppten VMs 101 und 224 liegen jetzt auf der
+  HDD (Storage `hdd`, `/mnt/hdd`, vorher Durchreich-Disk von VM 224); VM 104 hat Discard aktiviert.
+
 ## [0.1.0rc12] – Release Candidate (2026-10-17)
 
 Erster erfolgreicher Auftrag der Batterie (J1 auf 0.1.0rc11 mit AVX2-fähigen VMs: `succeeded` in 10,3 min, 2 Steps, kein

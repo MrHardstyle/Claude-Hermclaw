@@ -41,11 +41,13 @@ async def world(sessionmaker: Any, tmp_path: Path) -> World:
 
 # ----------------------------------------------------------------------------------------------- 35.1
 async def test_planner_timeout_fails_preparation_with_a_timeout_code(world: World, tmp_path: Path) -> None:
-    """Gemma (and its gateway-side fallback) time out on every attempt: the job fails cleanly, nothing runs."""
+    """Gemma (and its gateway-side fallback) time out on every attempt: once the bounded wait for the model host is
+    over (BUG-176: a timeout first defers the preparation), the job fails cleanly, nothing runs."""
     timeout = ModelTimeout("planner-gemma did not answer within 60s")
     chat = Chat([timeout, timeout, timeout, timeout])
     jid = await _job(world)
-    jobs = await _run(world, _driver(world, chat, tmp_path, triage_enabled=False), [], [jid])
+    driver = _driver(world, chat, tmp_path, triage_enabled=False)
+    jobs = await _run(world, driver, [], [jid], model_outage_max_wait_seconds=0)
     assert jobs[jid].status == "failed", jobs[jid].status
     assert "TIMEOUT" in (jobs[jid].error_code or "") or "timeout" in (jobs[jid].error_message or "").lower(), (
         jobs[jid].error_code,

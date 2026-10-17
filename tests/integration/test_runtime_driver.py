@@ -203,10 +203,14 @@ def _driver(world: World, chat: Chat, tmp_path: Path, **kw: Any) -> RuntimeJobDr
 
 
 async def _run(
-    world: World, driver: RuntimeJobDriver, handlers: list[Any], job_ids: list[uuid.UUID], timeout: float = 60
+    world: World, driver: RuntimeJobDriver, handlers: list[Any], job_ids: list[uuid.UUID], timeout: float = 60, **settings: Any
 ) -> dict[uuid.UUID, Job]:
     sched = Scheduler(
-        world.sessionmaker, get_config(), handlers, driver, settings=SchedulerSettings(poll_seconds=0.01, retry_backoff_seconds=(0,))
+        world.sessionmaker,
+        get_config(),
+        handlers,
+        driver,
+        settings=SchedulerSettings(poll_seconds=0.01, retry_backoff_seconds=(0,), **settings),
     )
     async with asyncio.timeout(timeout):
         while True:
