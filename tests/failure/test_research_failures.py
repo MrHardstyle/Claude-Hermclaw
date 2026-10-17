@@ -82,7 +82,8 @@ async def test_prompt_injection_in_source_cannot_close_the_data_fence() -> None:
 
     await extractor.extract(QUESTION, title="t", url="http://h.example/", text=hostile, ctx=CallContext(purpose="research_claims"))
     prompt: list[ChatMessage] = chat.calls[0].messages
-    assert prompt[-1].content.count("</source>") == 1 and prompt[-1].content.rstrip().endswith("</source>")
+    assert prompt[-1].content.count("</source>") == 1
+    assert prompt[-1].content.rsplit("</source>", 1)[1].strip().startswith("Write every claim")  # only the language rule (BUG-222)
 
 
 # ----------------------------------------------------------------------------------------------- misbehaving collaborators

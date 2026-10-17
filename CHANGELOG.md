@@ -2,7 +2,9 @@
 
 Format: [Keep a Changelog](https://keepachangelog.com/de/1.1.0/), Versionen nach PEP 440.
 
-## [Unreleased]
+## [0.1.0rc25] – Release Candidate (2026-10-18)
+
+Fixes aus dem Großauftrag G1 (Windows-Widget für Proxmox VE und Unraid) auf 0.1.0rc24.
 
 ### Behoben
 - **Große Dateien (BUG-223):** Antworten, die am Output-Limit abgeschnitten werden, werden erkannt (`MODEL_OUTPUT_TRUNCATED`) statt sinnlos repariert. Der Coder schreibt große Dateien in Teilen (`write_file` mit `append`) und bekommt nach einem Abbruch eine konkrete Anleitung.
