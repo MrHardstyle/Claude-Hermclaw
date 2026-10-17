@@ -18,7 +18,7 @@ from hermclaw.review import (
 )
 from hermclaw.review.severity import MAX_FINDINGS, normalise_verdict, redact_review
 from hermclaw.review.text import clip, clip_lines, fence, strip_reasoning
-from hermclaw.review.types import OVERRIDE_BLOCKING_FINDING, OVERRIDE_VERIFIER_FAILED
+from hermclaw.review.types import OVERRIDE_BLOCKING_FINDING, OVERRIDE_MINOR_ONLY, OVERRIDE_VERIFIER_FAILED
 
 
 @pytest.mark.parametrize(
@@ -205,6 +205,21 @@ def test_invariant_keeps_consistent_verdicts() -> None:
     assert res.review.verdict == "fix_required" and not res.overridden
     # fix_required without blocking findings is respected (a reviewer may be stricter than the invariant)
     assert apply_review_invariants(_review("fix_required"), verifier_passed=True).review.verdict == "fix_required"
+
+
+def test_fix_required_with_only_minor_findings_passes() -> None:
+    """rc17 battery J5: "functionally correct and tests pass, but the test file contains a duplicate test case" as
+    fix_required cost a whole correction attempt; minor does not block acceptance (BUG-191)."""
+    res = apply_review_invariants(_review("fix_required", FindingSeverity.minor), verifier_passed=True)
+    assert res.review.verdict == "pass" and res.raw_verdict == "fix_required" and res.reasons == (OVERRIDE_MINOR_ONLY,)
+    assert [f.severity for f in res.review.findings] == [FindingSeverity.minor]  # kept as notes
+    # never when the verifier failed, never when a blocking finding is named
+    failed = apply_review_invariants(_review("fix_required", FindingSeverity.minor), verifier_passed=False)
+    assert failed.review.verdict == "fix_required" and not failed.overridden
+    assert (
+        apply_review_invariants(_review("fix_required", FindingSeverity.minor, FindingSeverity.major), verifier_passed=True).review.verdict
+        == "fix_required"
+    )
 
 
 # ----------------------------------------------------------------------------------------------- policy

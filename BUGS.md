@@ -46,6 +46,18 @@ Noch keine.
 
 ## Behobene Bugs
 
+### BUG-191 – Review verlangt eine Korrekturrunde für Kleinigkeiten („minor“)
+- Phase: Batterie-Lauf 1 auf 0.1.0rc17 (J5) · Komponente: review/invariant · Severity: P2 · blockierend: nein (behoben) · Status: **behoben** (`tests/unit/test_review_severity.py::test_fix_required_with_only_minor_findings_passes`)
+- Reproduktion: Job `0532105b-2b1e-4a85-9a0f-3726d8aa8196` (J5), Versuch 2 von S001.
+  - Der Verifier bestand (15/17, 2 übersprungen).
+  - Das Review urteilte trotzdem `fix_required`: „The implementation is functionally correct and tests pass, but the test file contains a duplicate test case which is a minor code quality issue.“
+  - Es folgte ein ganzer Korrekturversuch; die Korrekturbudgets sind auf 2 pro Schritt begrenzt.
+- Ursache: Der Review-Prompt definiert `minor` als „does not block acceptance“. Die deterministische Invariante setzte aber nur die Gegenrichtung durch: major/blocker → kein `pass`.
+- Fix:
+  - Urteilt das Modell `fix_required` und nennt nur Minor-Befunde, wird daraus `pass` (`only_minor_findings`); die Befunde bleiben als Hinweise.
+  - Nicht betroffen: ein fehlgeschlagener Verifier, ein `fix_required` ohne Befund (Fail-Closed- und Runtime-Entscheidungen) und jeder major/blocker-Befund.
+  - In 7 Tagen trat der Fall einmal auf (J5); alle anderen `fix_required` nannten major oder blocker.
+
 ### BUG-190 – Batterie wertet eine korrekte Rückfrage als FAIL („None min“); Rückfrage mitten im Satz abgeschnitten
 - Phase: Batterie-Lauf 1 auf 0.1.0rc17 (J4) · Komponente: acceptance/job_metrics, planner/replan_contract · Severity: P2 · blockierend: ja für die Abnahme (behoben) · Status: **behoben** (`tests/integration/test_acceptance_jobs.py::test_a_job_waiting_for_the_user_gets_a_duration`)
 - Reproduktion: Job `f50ee894-4e8c-423e-80ab-724e0dfa0a4e` (J4).

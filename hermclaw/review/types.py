@@ -32,6 +32,7 @@ REVIEW_PROFILE_MISSING = "REVIEW_PROFILE_MISSING"
 # invariant override reasons (22.5)
 OVERRIDE_BLOCKING_FINDING = "major_or_blocker_finding"
 OVERRIDE_VERIFIER_FAILED = "verifier_not_passed"
+OVERRIDE_MINOR_ONLY = "only_minor_findings"
 
 SEVERITY_RANK: dict[FindingSeverity, int] = {FindingSeverity.blocker: 0, FindingSeverity.major: 1, FindingSeverity.minor: 2}
 BLOCKING_SEVERITIES = frozenset({FindingSeverity.major, FindingSeverity.blocker})
