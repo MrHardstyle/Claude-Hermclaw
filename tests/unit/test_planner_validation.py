@@ -25,6 +25,7 @@ from hermclaw.planner.validation import (
     ancestors,
     new_manifest_notes,
     open_research_requests,
+    quoted_names,
     semantic_errors,
 )
 from tests.unit.test_planner_support import FASTAPI, LINUX_ADMIN, PHP, REACT, plan, step
@@ -527,3 +528,13 @@ def test_a_new_manifest_in_a_repository_without_one_gets_advice_once() -> None:
     named = ValidationContext.build(get_config(), PlannerInput(), PlannerSettings(), job_text="Add Flask; list it in requirements.txt.")
     assert new_manifest_notes(_health_plan("requirements.txt"), named) == []
     assert new_manifest_notes(_health_plan("app.py", "requirements.txt"), empty, frozenset({"S001"})) == [], "kept steps"
+    # BUG-183 (J4): the job quotes the package the step adds (spelt with _ instead of -): the manifest is wanted
+    quoting = ValidationContext.build(
+        get_config(), PlannerInput(), PlannerSettings(), job_text='Binde das Python-Paket "acme-sdk-zz9" ein und rufe connect() auf.'
+    )
+    sdk = step(
+        "S001", "implement", "coding", "Add acme_sdk_zz9 to requirements.txt and call connect().", allowed_new_paths=["requirements.txt"]
+    )
+    assert new_manifest_notes(PlanContract.model_validate(plan("SDK", [sdk])), quoting) == []
+    assert len(new_manifest_notes(_health_plan("requirements.txt"), quoting)) == 1, "a package the job does not quote still gets advice"
+    assert quoted_names("Nutze „Left-Pad“ und `lodash.merge`, nicht 'x'.") == ["left-pad", "lodash-merge"]

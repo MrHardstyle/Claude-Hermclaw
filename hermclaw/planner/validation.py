@@ -472,6 +472,17 @@ def _must_change_errors(step: PlanStep, ctx: ValidationContext) -> list[str]:
 
 
 DEPENDENCY_MANIFESTS = ("requirements.txt", "package.json")
+# a name the job quotes literally ("…", „…“, `…`, '…', «…»): a package it asks for by name
+_QUOTED_NAME = re.compile(r"[\"'`\u201e\u201c\u201d\u00ab\u00bb]([A-Za-z0-9@][A-Za-z0-9@/._-]{1,100})[\"'`\u201c\u201d\u00ab\u00bb]")
+
+
+def _name_key(text: str) -> str:
+    return re.sub(r"[-_.]+", "-", text.lower())
+
+
+def quoted_names(job_text: str) -> list[str]:
+    """Names the job quotes, normalised like package names (``-``/``_``/``.`` are equivalent)."""
+    return list(dict.fromkeys(_name_key(m.group(1)) for m in _QUOTED_NAME.finditer(job_text)))
 
 
 def new_manifest_notes(plan: PlanContract, ctx: ValidationContext, preserved: frozenset[str] = frozenset()) -> list[str]:
@@ -481,8 +492,15 @@ def new_manifest_notes(plan: PlanContract, ctx: ValidationContext, preserved: fr
     in its prose, so this is advice for one repair turn, not a hard rule (see ``AdviceOnce``)."""
     notes: list[str] = []
     job = ctx.job_text.lower()
+    quoted = quoted_names(ctx.job_text)
     for step in plan.steps:
         if step.id in preserved or step.kind.value not in WORKSPACE_MUTATING_KINDS:
+            continue
+        # the step adds a package the job quotes by name: the manifest is what the job asks for. The advice made Gemma
+        # drop requirements.txt for a job that quoted its package, and the job never reached the install that would
+        # have shown the package does not exist (live battery J4 on 0.1.0rc14, BUG-183)
+        step_text = _name_key(f"{step.title} {step.goal}")
+        if any(q in step_text for q in quoted):
             continue
         named = [*step.allowed_new_paths, *step.repo_hints]
         named += [g for c in step.acceptance if isinstance(c, DiffEvidence) for g in c.must_change]
