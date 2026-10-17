@@ -93,10 +93,13 @@ async def test_regression_rerun_checks_completed_code_steps(world: World) -> Non
     ws = await world.engine.create_workspace(job_id, world.repo)
     handle = await world.engine.handle(ws)
     async with world.sessionmaker() as s:
-        await s.execute(update(Step).where(Step.id == step_id).values(status="completed"))
+        # a command judges the combined tree; text evidence alone is only a hint at job level (BUG-200)
+        command = {"type": "command", "command": "grep -q 'VALUE = 2' src/module.py"}
+        await s.execute(update(Step).where(Step.id == step_id).values(status="completed", acceptance=[*ACCEPT, command]))
         await s.commit()
     ok, info = await adapter.rerun(job_id, handle)
     assert not ok and info["checked_steps"] == 1 and info["failed"][0]["step_key"] == "S001"
+    assert info["failed"][0]["failures"] == ["acceptance[1]:command"], info
     write(Path(ws.path), "src/module.py", "VALUE = 2\n")
     ok, info = await adapter.rerun(job_id, handle)
     assert ok and info == {"checked_steps": 1, "failed": []}, info

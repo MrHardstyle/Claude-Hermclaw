@@ -7,6 +7,7 @@ import socket
 import subprocess
 import uuid
 from collections.abc import Iterator
+from pathlib import Path
 
 import pytest
 
@@ -86,7 +87,8 @@ async def test_live_port_collision_with_owner_info(listener: int) -> None:
     assert report.live_checked and not report.ok
     (collision,) = report.collisions
     assert collision.kind == "live" and collision.port == listener
-    assert collision.owner.startswith("python") and collision.pid  # ss -p as root shows the owning process
+    # ss -p as root shows the owning process: this test process (python or the pytest entry point)
+    assert collision.owner == Path("/proc/self/comm").read_text().strip() and collision.pid
     owned = await checker.check(text, owner=collision.owner)
     assert owned.ok, owned.render()
     free = await checker.check("services:\n  web:\n    image: nginx:1.28\n    ports: ['127.0.0.1:1:80']\n")

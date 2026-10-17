@@ -850,7 +850,8 @@ async def test_new_import_that_does_not_resolve_fails(sessionmaker: Any, tmp_pat
         + "    try:\n        import optional_speedups_zz9\n    except ImportError:\n        optional_speedups_zz9 = None\n"
         + "    hermclaw_nonexistent_sdk_zz9.connect()\n",
     )
-    st = step(scope_contract=scope(allowed_new_paths=["helpers.py"], target_paths=["calc.py"]))
+    tests = [{"type": "test", "command": "python3 -m pytest -q -p no:cacheprovider tests", "framework": "pytest"}]
+    st = step(acceptance=tests, scope_contract=scope(allowed_new_paths=["helpers.py"], target_paths=["calc.py"]))
     outcome, *_ = await run(sessionmaker, repo, st)
     check = by_name(outcome.report)["imports:python"]
     assert check.status == "fail" and not outcome.report.passed
@@ -862,3 +863,8 @@ async def test_new_import_that_does_not_resolve_fails(sessionmaker: Any, tmp_pat
     write(repo, "calc.py", CALC)
     outcome3, *_ = await run(sessionmaker, repo, st)
     assert by_name(outcome3.report)["imports:python"].message == "no new third-party import"
+    # no criterion names the interpreter: a guessed python3 must not fail the step (BUG-194)
+    write(repo, "calc.py", CALC + "\n\ndef main():\n    import hermclaw_nonexistent_sdk_zz9\n")
+    guessed, *_ = await run(sessionmaker, repo, step(scope_contract=st.scope))
+    check = by_name(guessed.report)["imports:python"]
+    assert check.status == "skip" and "no criterion names" in check.message
