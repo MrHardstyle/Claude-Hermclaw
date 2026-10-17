@@ -1010,7 +1010,8 @@ class ToolEngine:
 
     def _timeout(self, requested: int | None) -> int:
         limit = self.permissions.max_command_timeout_seconds or self.policies.sandbox.default_timeout_seconds
-        return max(1, min(requested or limit, limit))
+        default = min(self.policies.coder.default_command_timeout_seconds, limit)
+        return max(1, min(requested or default, limit))
 
     async def _sandbox_run(
         self,

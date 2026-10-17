@@ -10,6 +10,7 @@ Fixes aus Batterie-Lauf 1 auf 0.1.0rc19. J1 und J3 waren erfolgreich, J4 stellte
 - **Merge Request direkt nach dem Push (BUG-202):** Kennt GitLab den gerade gepushten Branch noch nicht, wird die MR-Anlage nach kurzer Wartezeit wiederholt. Vorher endete ein Job gelegentlich ohne Merge Request.
 - **Bestehende Manifeste (BUG-203):** Der Plan verlangt keine Änderung mehr an einem vorhandenen `package.json`, `pyproject.toml` usw., wenn der Auftrag die Datei nicht nennt. Vorher änderte der Coder eine korrekte Datei nur, um das Kriterium zu erfüllen.
 - **Widersprüchliche Diff-Kriterien (BUG-204):** Ein Plan, der die eigenen Dateien eines Schritts als „darf sich nicht ändern“ markiert, wird bereinigt. Vorher endete ein korrekt gelöster Bugfix-Job mit `REPLAN_LIMIT`.
+- **Hängende Tests (BUG-205):** Coder-Befehle ohne eigenes Timeout enden nach 180 s statt nach 600 s (`policies.coder.default_command_timeout_seconds`).
 
 ## [0.1.0rc19] – Release Candidate (2026-10-17)
 

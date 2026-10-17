@@ -129,7 +129,7 @@ Lint, mypy, ShellCheck, ansible-lint (production) sauber.
 - Embeddings: `embeddinggemma:300m` (768 dim; EmbeddingGemma 2 erst, wenn Ollama es unter Linux/CUDA ausführt, D-010)
 
 ## Bugs
-- 204 gefunden, **204 behoben** – `BUGS.md`. Live-Abnahme: BUG-143 bis BUG-204.
+- 205 gefunden, **205 behoben** – `BUGS.md`. Live-Abnahme: BUG-143 bis BUG-205.
   BUG-143–192 sind produktiv (0.1.0rc18); BUG-193–201 (Batterie-Lauf 1 auf rc18, Full-Suite, Audit auf späte Fehlschläge langer Jobs) wirken nach dem Deployment von 0.1.0rc19.
 - Externe Blocker: BLOCKER-002 (Tag-Push)
 

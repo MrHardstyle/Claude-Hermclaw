@@ -275,6 +275,9 @@ class CoderPolicy(_Strict):
     max_turns: int = 20
     max_output_tokens: int = 6144
     tool_output_chars: int = 12000
+    # a command the coder starts without timeout_seconds: a hanging test (a server it never stops) blocked a turn for
+    # the full sandbox limit of 600 s (rc19 battery J1, BUG-205); longer suites ask for more, up to that limit
+    default_command_timeout_seconds: int = Field(default=180, ge=10, le=7200)
 
 
 class StagnationPolicy(_Strict):

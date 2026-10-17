@@ -639,3 +639,13 @@ def test_manifest_packages_and_mentions() -> None:
     assert package_mentioned("@nestjs/core", "use NestJS")
     assert not package_mentioned("express", "expressly simple endpoint")
     assert not package_mentioned("httpx", "Erstelle einen Health-Endpunkt mit Test.")
+
+
+async def test_commands_without_a_timeout_get_the_short_coder_default(sessionmaker: SM, repo: Path) -> None:
+    """rc19 battery J1: a test that never returned blocked the turn for the full sandbox limit of 600 s (BUG-205).
+    Without timeout_seconds a command gets the coder default; an explicit longer timeout is still honoured."""
+    rec = InstallRecorder("ok\n")
+    h = await make_harness(sessionmaker, repo, executor=rec)
+    assert (await h.call("run_command", command="python -m pytest -q")).ok
+    assert (await h.call("run_test", command="python -m pytest -q tests", timeout_seconds=500)).ok
+    assert [r.timeout_seconds for r in rec.requests] == [180, 500]

@@ -97,16 +97,19 @@ class ApplyPatchArgs(ToolArgs):
     patch: str = Field(min_length=1, max_length=MAX_PATCH_CHARS, description="unified diff ('--- a/x' '+++ b/x' '@@ ... @@')")
 
 
+_TIMEOUT_DOC = "the default is a few minutes; set it higher only for a test suite known to run longer"
+
+
 class RunCommandArgs(ToolArgs):
     command: str = Field(min_length=1, max_length=8000)
     cwd: str = Field(default=".", max_length=1000, description="working directory relative to the repository root")
-    timeout_seconds: int | None = Field(default=None, ge=1, le=7200)
+    timeout_seconds: int | None = Field(default=None, ge=1, le=7200, description=_TIMEOUT_DOC)
 
 
 class RunTestArgs(ToolArgs):
     command: str = Field(min_length=1, max_length=8000, description="test command, e.g. 'pytest -q tests/test_x.py'")
     cwd: str = Field(default=".", max_length=1000)
-    timeout_seconds: int | None = Field(default=None, ge=1, le=7200)
+    timeout_seconds: int | None = Field(default=None, ge=1, le=7200, description=_TIMEOUT_DOC)
     framework: Framework | None = Field(default=None, description="output parser; auto-detected when omitted")
 
 

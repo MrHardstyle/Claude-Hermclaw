@@ -46,6 +46,15 @@ Noch keine.
 
 ## Behobene Bugs
 
+### BUG-205 – Hängender Test blockiert einen Coder-Turn für das volle Sandbox-Limit von 600 s
+- Phase: Batterie-Lauf 2 auf 0.1.0rc19 (J1, abgebrochener Lauf) · Komponente: tools · Severity: P2 · blockierend: nein (behoben) · Status: **behoben** (`tests/integration/test_tools_engine_exec.py::test_commands_without_a_timeout_get_the_short_coder_default`)
+- Reproduktion: Job `f6af3249-155a-4fc0-a504-c44ecf199c95`. Der Coder schrieb einen Test, der einen `BaseHTTPRequestHandler` auf einem `BytesIO` aufruft und nie zurückkehrt. Turn 3 `python -m pytest -q` lief bis zum Timeout nach 600,2 s (20:14 → 20:24).
+- Ursache: Ohne `timeout_seconds` bekam ein Coder-Befehl das Maximum (`sandbox.default_timeout_seconds` = 600 s) als Standard.
+- Fix:
+  - Neuer Standard `policies.coder.default_command_timeout_seconds` (180 s) für `run_command`/`run_test` ohne Angabe; das Maximum bleibt.
+  - Die Tool-Beschreibung sagt, dass der Standard kurz ist und längere Suiten ihn erhöhen.
+  - Installationen behalten ihr eigenes Limit von 900 s.
+
 ### BUG-204 – Plan verbietet die eigenen Dateien des Schritts (`must_not_change`): Bugfix-Job endet mit REPLAN_LIMIT
 - Phase: Batterie-Lauf 1 auf 0.1.0rc19 (J6) · Komponente: planner · Severity: P1 · blockierend: ja (behoben) · Status: **behoben** (`tests/unit/test_planner_validation.py::test_must_not_change_on_the_steps_own_files_is_dropped`)
 - Reproduktion: Job `1fc45bb9-fd09-4ed6-8b27-d2735d98c370`.
