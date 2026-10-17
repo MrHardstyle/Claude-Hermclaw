@@ -46,6 +46,13 @@ Noch keine.
 
 ## Behobene Bugs
 
+### BUG-221 – Doppelte Recherche-Schritte, wenn research_needed eine geplante Recherche umformuliert
+- Phase: Großauftrag G1 auf 0.1.0rc24 · Komponente: planner/validation · Severity: P3 · blockierend: nein (behoben) · Status: **behoben** (`tests/unit/test_planner_validation.py::test_research_request_rephrasing_an_existing_research_step_is_covered`)
+- Reproduktion: Job `b3441414-9422-4887-8cb1-b0f7c43e5ced`, Plan v1. Der Planner schrieb eigene Recherche-Schritte (S001 „Recherchiere die aktuelle Proxmox VE REST-API-Dokumentation …“, S002 Unraid) und stellte dieselben Themen anders formuliert unter `research_needed`. Die Anreicherung erzeugte daraus S009/S010. Vier Recherchen statt zwei, alle parallel auf dem Research-Worker; zwei Schritte des 20-Schritte-Budgets verbraucht.
+- Ursache: `find_research_step` erkannte eine Abdeckung nur über Teilstring-Gleichheit der normalisierten Texte. Eine Umformulierung desselben Themas galt als offene Frage.
+- Fix: Eine Frage gilt auch dann als abgedeckt, wenn ein Recherche-Schritt mindestens 60 % ihrer Inhaltswörter nennt. Gezählt werden mindestens 4 Inhaltswörter, ohne deutsche/englische Funktionswörter; gewählt wird der beste Treffer. Beim G1-Plan: 0,85/0,81 für das richtige Thema gegenüber 0,46/0,44 für das andere System.
+- Selbstprüfung: echter Schritt nach vorn. Die Deduplizierung war bisher nur für wörtliche Wiederholungen gebaut. Das ist keine Kompensation eines früheren Fixes.
+
 ### BUG-220 – Merge Request fehlt, weil GitLab den Branch nach 30 s noch nicht kannte
 - Phase: Erweiterte Batterie auf 0.1.0rc23 (X5) · Komponente: gitops/gitlab · Severity: P1 · blockierend: nein (behoben) · Status: **behoben** (`tests/unit/test_gitops_units.py`, Wartebudget ≥ 180 s)
 - Reproduktion: Job `3992cff9-0117-41f6-a970-2f90ed9bdb98`. Push um 00:51:50. Die MR-Anlage wurde nach BUG-202 fünfmal wiederholt (30 s) und scheiterte um 00:52:23 mit `HTTP 400 {'source_branch': ['does not exist']}`. Der Job endete `succeeded` ohne MR.

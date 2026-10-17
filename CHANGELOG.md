@@ -2,6 +2,11 @@
 
 Format: [Keep a Changelog](https://keepachangelog.com/de/1.1.0/), Versionen nach PEP 440.
 
+## [Unreleased]
+
+### Behoben
+- **Keine doppelten Recherchen (BUG-221):** Eine `research_needed`-Frage, die einen geplanten Recherche-Schritt nur umformuliert, erzeugt keinen zweiten Recherche-Schritt mehr.
+
 ## [0.1.0rc24] – Release Candidate (2026-10-18)
 
 Fixes aus der erweiterten Batterie auf 0.1.0rc23.

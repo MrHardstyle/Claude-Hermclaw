@@ -253,6 +253,43 @@ def test_open_research_requests_skip_covered_and_duplicates() -> None:
     assert [r.question for r in reqs] == ["Is bcrypt cost 12 still adequate?"]
 
 
+def test_research_request_rephrasing_an_existing_research_step_is_covered() -> None:
+    """BUG-221: the planner's own research step and its research_needed entry name the same topic in other words."""
+    data = plan(
+        "goal",
+        [
+            step(
+                "S001",
+                "research",
+                "research",
+                "Recherchiere die aktuelle Proxmox VE REST-API-Dokumentation: Authentifizierung, "
+                "Endpunkte für Nodes, VMs, LXC-Container, Storages, CPU/RAM/GPU/Temperaturen.",
+            ),
+            step(
+                "S002",
+                "research",
+                "research",
+                "Recherchiere die aktuelle Unraid GraphQL-API-Dokumentation: API-Key, Schema für "
+                "VMs, Docker-Container, Array/Cache/Pools, CPU/RAM/GPU/Temperaturen.",
+            ),
+            _impl("S003", depends_on=["S001", "S002"]),
+        ],
+        research_needed=[
+            {
+                "question": "Was sind die exakten Endpunkte und Antwortformate der Proxmox VE REST-API für VMs, LXC, Storages, "
+                "CPU/RAM/GPU/Temperaturen?"
+            },
+            {
+                "question": "Was sind die exakten GraphQL-Queries und Antwortformate der Unraid-API für VMs, Docker-Container, "
+                "Array/Cache/Pools, CPU/RAM/GPU/Temperaturen?"
+            },
+            {"question": "Which TOML parser ships with the Python standard library since which version?"},
+        ],
+    )
+    reqs = open_research_requests(PlanContract.model_validate(data))
+    assert [r.question for r in reqs] == ["Which TOML parser ships with the Python standard library since which version?"]
+
+
 def test_remote_steps_need_substantive_acceptance_and_valid_checks() -> None:
     data = plan(
         "goal",

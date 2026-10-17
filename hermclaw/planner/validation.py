@@ -61,6 +61,22 @@ def normalise_text(text: str) -> str:
     return _WS_RE.sub(" ", _PUNCT_RE.sub(" ", text.lower())).strip()
 
 
+# function words of the languages jobs are written in; they say nothing about what a research question is about
+_FILLER_TEXT = (
+    "the and for with what which how are does there this that from into about can should all any its was "
+    "research answer sources reason recherchiere recherche sind ist wie welche welcher welches gibt die "
+    "der das den dem des und oder für mit von zur zum aus auf bei ein eine einer eines nicht auch "
+    "aktuelle aktuellen"
+)
+_FILLER_WORDS = frozenset(_FILLER_TEXT.split())
+RESEARCH_COVERAGE = 0.6
+_MIN_COVERAGE_TOKENS = 4
+
+
+def _content_tokens(text: str) -> set[str]:
+    return {t for t in normalise_text(text).split() if len(t) >= 3 and not t.isdigit() and t not in _FILLER_WORDS}
+
+
 @dataclass(frozen=True)
 class ValidationContext:
     """Everything the semantic validator and the deterministic enrichment need (built once per planner run)."""
@@ -730,17 +746,26 @@ def _globs_overlap(glob: str, path: str) -> bool:
 
 
 def find_research_step(question: str, steps: Sequence[PlanStep]) -> PlanStep | None:
-    """An existing research step that already covers ``question`` (normalised containment, deterministic)."""
+    """An existing research step that already covers ``question`` (deterministic): normalised containment, or the step
+    names at least ``RESEARCH_COVERAGE`` of the question's content words. The planner often writes its own research
+    step *and* lists the same question, phrased differently, under research_needed; containment alone then generated
+    a duplicate research step per topic (live grand job G1 on 0.1.0rc24, BUG-221)."""
     q = normalise_text(question)
     if not q:
         return None
+    q_tokens = _content_tokens(question)
+    best: tuple[float, PlanStep] | None = None
     for step in steps:
         if step.kind.value != StepKind.research.value:
             continue
         goal, title = normalise_text(step.goal), normalise_text(step.title)
         if q in goal or q in title or (len(goal) >= 12 and goal in q):
             return step
-    return None
+        if len(q_tokens) >= _MIN_COVERAGE_TOKENS:
+            covered = len(q_tokens & (_content_tokens(step.goal) | _content_tokens(step.title))) / len(q_tokens)
+            if covered >= RESEARCH_COVERAGE and (best is None or covered > best[0]):
+                best = (covered, step)
+    return best[1] if best else None
 
 
 def open_research_requests(plan: PlanContract) -> list[ResearchRequest]:
