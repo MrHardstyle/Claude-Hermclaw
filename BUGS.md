@@ -46,6 +46,13 @@ Noch keine.
 
 ## Behobene Bugs
 
+### BUG-220 – Merge Request fehlt, weil GitLab den Branch nach 30 s noch nicht kannte
+- Phase: Erweiterte Batterie auf 0.1.0rc23 (X5) · Komponente: gitops/gitlab · Severity: P1 · blockierend: nein (behoben) · Status: **behoben** (`tests/unit/test_gitops_units.py`, Wartebudget ≥ 180 s)
+- Reproduktion: Job `3992cff9-0117-41f6-a970-2f90ed9bdb98`. Push um 00:51:50. Die MR-Anlage wurde nach BUG-202 fünfmal wiederholt (30 s) und scheiterte um 00:52:23 mit `HTTP 400 {'source_branch': ['does not exist']}`. Der Job endete `succeeded` ohne MR.
+- Ursache: GitLab registriert gepushte Branches asynchron über Sidekiq. Bei Last auf .226 dauerte das länger als das Wartefenster von BUG-202.
+- Fix: Wartefenster mit wachsenden Abständen auf rund 3,5 Minuten verlängert (1, 2, 4, 8, 15, 30, 30, 30, 45, 45 s). Jeder Versuch ist ein billiger POST, der beim ersten Erfolg endet. Die Finalisierung hat kein eigenes Zeitlimit, das kollidieren könnte.
+- Selbstprüfung: Fortsetzung von BUG-202, dieselbe Ursache mit zu knapper Grenze. Ich erhöhe die Grenze und baue keinen neuen Mechanismus, weil das Signal (400 mit „does not exist“) eindeutig bleibt.
+
 ### BUG-219 – Programme werden nie wie vom Nutzer ausgeführt; das Review sieht keine echte Ausgabe
 - Phase: Qualitätsprüfung der gelieferten Dateien, Batterie auf 0.1.0rc23 (X4) · Komponente: planner/review · Severity: P2 · blockierend: nein (behoben) · Status: **behoben** (`tests/unit/test_review_prompt.py::test_passing_command_checks_show_their_output`, Planner-Regel in `tests/unit/test_planner_prompt.py`; Live-Nachweis: Review mit der echten X4-Ausgabe → major „prints the function object instead of the plugin name“, Fix `module.name()`)
 - Reproduktion: Job `8ed97532-ab1b-4ee3-ae7a-310313c99835` (Plugin-System, `succeeded`, PASS). `python plugin_tool.py --list` gibt `- uppercase: <function name at 0x7fa1…>` aus, weil `module.name` nicht aufgerufen wird. 8 Unit-Tests grün, Verifier und Review pass. Außerdem sucht das Tool `plugins/` relativ zum Arbeitsverzeichnis.

@@ -427,6 +427,10 @@ async def test_merge_request_waits_until_gitlab_knows_the_pushed_branch():
         assert len(posts) == 2
     finally:
         await client.aclose()
+    # a busy GitLab needed more than 30 s (rc23 battery X5): the default budget waits minutes, not seconds (BUG-220)
+    from hermclaw.gitops.gitlab import BRANCH_SETTLE_DELAYS
+
+    assert sum(BRANCH_SETTLE_DELAYS) >= 180
 
 
 async def test_gitlab_client_lazy_token_ref(tmp_path):

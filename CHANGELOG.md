@@ -7,6 +7,7 @@ Format: [Keep a Changelog](https://keepachangelog.com/de/1.1.0/), Versionen nach
 Fixes aus der erweiterten Batterie auf 0.1.0rc23.
 
 ### Behoben
+- **Merge Request bei langsamem GitLab (BUG-220):** Die MR-Anlage wartet bis zu etwa 3,5 Minuten darauf, dass GitLab den gepushten Branch kennt.
 - **Programme werden wie vom Nutzer ausgeführt (BUG-219):** Pläne prüfen ausführbare Programme mit einem echten Aufruf samt Beispieldaten. Das Review sieht die tatsächliche Ausgabe und bewertet sie gegen den Auftrag.
 - **Vollständige Lieferung (BUG-218):** Neue Programme, Optionen und Umgebungsvariablen werden in der vorhandenen README dokumentiert, im selben Schritt.
 - **Review gegen Werkzeug-Fakten (BUG-217):** Behauptet das Review einen Syntaxfehler in einer Datei, die der Verifier fehlerfrei geparst hat, blockiert das Finding nicht mehr.

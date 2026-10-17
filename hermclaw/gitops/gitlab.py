@@ -24,8 +24,9 @@ from hermclaw.gitops.types import MergeRequestInfo
 log = get_logger(__name__)
 RETRY_STATUS = frozenset({429, 500, 502, 503, 504})
 #: GitLab registers a pushed branch asynchronously: right after the push the MR API can answer 400
-#: {"source_branch": ["does not exist"]} (BUG-202). Waits between the creation attempts, in seconds.
-BRANCH_SETTLE_DELAYS = (1.0, 2.0, 4.0, 8.0, 15.0)
+#: {"source_branch": ["does not exist"]} (BUG-202). Waits between the creation attempts, in seconds: about 3.5 min in
+#: total – a busy GitLab needed more than the first 30 s (rc23 battery X5, BUG-220).
+BRANCH_SETTLE_DELAYS = (1.0, 2.0, 4.0, 8.0, 15.0, 30.0, 30.0, 30.0, 45.0, 45.0)
 
 
 def _project(project_id: str | int) -> str:
