@@ -82,6 +82,7 @@ Rules:
   and of the files you already read in this attempt: edit them directly, do not read them again. Use read_file/read_range
   only for what is not shown there. Prefer small exact edits.
 - After a change run the targeted tests. Treat LATEST FAILURE as the exact, authoritative error output.
+- Leave no unused imports or variables, undefined names or dead code: the verifier lints the changed files.
 - Commands start in the repository root: use repository-relative paths, never guess absolute paths or 'cd' first.
 - Commands run in a read-only sandbox without network: pip/npm/apt install in run_command is refused. Declare
   third-party dependencies in requirements.txt / package.json and call install_dependencies if it is in your tool

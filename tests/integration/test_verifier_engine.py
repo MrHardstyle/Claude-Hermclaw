@@ -342,6 +342,28 @@ async def test_lint_commands_run_only_for_changed_languages(sessionmaker: Any, t
     assert by_name(outcome2.report)["lint:python"].status == "pass"
 
 
+async def test_default_python_lint_reports_defects_only(sessionmaker: Any, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """rc23 battery: delivered code carried unused variables and imports that no check reported. The default lint runs
+    ruff with defect rules only (pyflakes F, E9): style is never a failure, and an image without ruff skips it (BUG-215)."""
+    import os
+    import sys
+
+    from hermclaw.core.config import DEFAULT_LINT_COMMANDS
+
+    monkeypatch.setenv("PATH", f"{Path(sys.executable).parent}{os.pathsep}{os.environ.get('PATH', '')}")
+    repo = py_repo(tmp_path)
+    write(repo, "calc.py", CALC + "\n\ndef parse(x):\n    try:\n        return int(x)\n    except ValueError as e:\n        return None\n")
+    v = make_verifier(sessionmaker, WorkspaceShellExecutor(), lint_commands=dict(DEFAULT_LINT_COMMANDS))
+    st = step("documentation", scope_contract=scope(target_paths=["calc.py"]))
+    outcome, *_ = await run(sessionmaker, repo, st, verifier=v, kind="documentation")
+    lint = by_name(outcome.report)["lint:python"]
+    assert lint.status == "fail" and "F841" in lint.evidence["output"], lint.evidence
+    # long lines, missing docstrings, odd spacing: style only, passes
+    write(repo, "calc.py", CALC + "\n\ndef parse(x):   \n    return int(x)  # " + "x" * 150 + "\n")
+    outcome2, *_ = await run(sessionmaker, repo, st, verifier=v, kind="documentation")
+    assert by_name(outcome2.report)["lint:python"].status == "pass", by_name(outcome2.report)["lint:python"].evidence
+
+
 # ------------------------------------------------------------------------------------------- 21.5 / 21.6 / 21.12 tests
 async def test_failing_and_insufficient_tests(sessionmaker: Any, tmp_path: Path) -> None:
     repo = py_repo(tmp_path)

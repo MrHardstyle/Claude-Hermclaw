@@ -68,7 +68,10 @@ verifier:
   generated_file_globs: ["**/node_modules/**", "**/__pycache__/**", "**/*.pyc", "**/dist/**"]
   # language id -> lint command; {files} is replaced by the changed files of that language (ids: hermclaw/verifier/languages.py)
   # example: {python: "ruff check {files}", javascript: "npx eslint {files}", php: "php -l {files}"}
-  lint_commands: {}
+  # python: defects only (pyflakes F – undefined names, unused imports/variables, redefinitions – and E9 syntax), no
+  # style rules; skipped where the sandbox image has no ruff (BUG-215)
+  lint_commands:
+    python: 'command -v ruff >/dev/null 2>&1 || exit 0; ruff check --no-cache --quiet --output-format concise --select F,E9 --ignore F403,F405 --per-file-ignores "__init__.py:F401" {files}'
 review:
   required_for_kinds: [implement, database, docker, deploy, ssh]
   timeout_seconds: 1500

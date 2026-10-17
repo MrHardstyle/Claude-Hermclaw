@@ -46,6 +46,16 @@ Noch keine.
 
 ## Behobene Bugs
 
+### BUG-215 – Gelieferter Code mit unbenutzten Variablen und Importen; kein Lint aktiv
+- Phase: Qualitätsprüfung der gelieferten Dateien, Batterie auf 0.1.0rc23 (X1) · Komponente: verifier/config · Severity: P3 · blockierend: nein (behoben) · Status: **behoben** (`tests/integration/test_verifier_engine.py::test_default_python_lint_reports_defects_only`)
+- Reproduktion: Job `47d60d3e-c914-4101-9e47-4741d974efab`. `sales_analyzer.py:64` `except (ValueError, KeyError) as e` mit unbenutztem `e`, `test_sales_analyzer.py:22` importiert `main` ohne Nutzung. Verifier und Review meldeten nichts.
+- Ursache: `policies.verifier.lint_commands` war leer (Standard `{}`). Der Lint-Mechanismus (P21 21.4) lief in Produktion nie, obwohl das Python-Sandbox-Image ruff mitbringt.
+- Fix:
+  - Standard-Lint für Python: `ruff check --select F,E9`, nur Defekte (undefinierte Namen, unbenutzte Importe und Variablen, Neudefinitionen, Syntax), keine Stilregeln. Ausgenommen sind Re-Exporte in `__init__.py` und Stern-Importe.
+  - Fehlt ruff im Image (z. B. Node-Image), wird der Lint übersprungen.
+  - System-Contract des Coders: keine unbenutzten Importe oder Variablen, keine undefinierten Namen, kein toter Code, weil der Verifier lintet.
+- Selbstprüfung: echter Schritt nach vorn. Ein vorhandener, deterministischer Mechanismus wird aktiviert; nur Defektregeln, damit keine Korrekturschleifen um Stilfragen entstehen.
+
 ### BUG-214 – Laufzeitdaten eines Testlaufs (SQLite-Datei) gelten als Scope-Verstoß
 - Phase: Erweiterte Batterie auf 0.1.0rc23 (X3) · Komponente: tools/snapshot · Severity: P2 · blockierend: nein (behoben) · Status: **behoben** (`tests/integration/test_tools_engine_exec.py::test_runtime_data_files_a_command_creates_are_cleaned_not_violations`)
 - Reproduktion: Job `1dbe5ea5-ca00-4938-8cfd-9215976b5098` (Inventar-Server auf SQLite).

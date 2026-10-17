@@ -299,11 +299,21 @@ class CorrectionPolicy(_Strict):
     max_replans_total: int = 12
 
 
+#: defect-only lint of changed files (pyflakes F + E9 syntax, no style rules); skipped where the image has no ruff. The
+#: delivered code of rc23 battery jobs carried unused variables and dead code that no check reported (BUG-215).
+DEFAULT_LINT_COMMANDS: dict[str, str] = {
+    "python": (
+        "command -v ruff >/dev/null 2>&1 || exit 0; ruff check --no-cache --quiet --output-format concise "
+        '--select F,E9 --ignore F403,F405 --per-file-ignores "__init__.py:F401" {files}'
+    ),
+}
+
+
 class VerifierPolicy(_Strict):
     max_changed_files: int = 40
     allow_deletions: bool = True
     generated_file_globs: list[str] = Field(default_factory=lambda: ["**/node_modules/**", "**/__pycache__/**", "**/*.pyc", "**/dist/**"])
-    lint_commands: dict[str, str] = Field(default_factory=dict)
+    lint_commands: dict[str, str] = Field(default_factory=lambda: dict(DEFAULT_LINT_COMMANDS))
 
 
 class ReviewPolicy(_Strict):

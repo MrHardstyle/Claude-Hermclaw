@@ -123,7 +123,7 @@ findings. Findings carry path, line, rule and a masked preview only.
 
 ## Configuration
 
-`policies.verifier`: `max_changed_files` (40), `allow_deletions` (true), `generated_file_globs`, `lint_commands`
+`policies.verifier`: `max_changed_files` (40), `allow_deletions` (true), `generated_file_globs`, `lint_commands` (default: python → ruff with defect rules F/E9 only, skipped where the image has no ruff; BUG-215)
 (`{language: command}`; languages: `python`, `javascript`, `typescript`, `json`, `yaml`, `toml`, `shell`, `php`,
 `go`, `rust`, … see `languages.LANGUAGE_BY_EXTENSION`). `policies.scope` (forbidden globs), `policies.sandbox.
 default_timeout_seconds` (compile/lint timeout). Evidence timeouts come from the criteria.
