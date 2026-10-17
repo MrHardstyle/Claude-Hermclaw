@@ -46,6 +46,13 @@ Noch keine.
 
 ## Behobene Bugs
 
+### BUG-207 – Grüner Check wird nach der Verweigerung immer wieder vorgeschlagen, statt den Schritt abzuschließen
+- Phase: Batterie-Lauf 1 auf 0.1.0rc21 (J5) · Komponente: coder · Severity: P2 · blockierend: ja für die Abnahme (behoben) · Status: **behoben** (`tests/integration/test_coder_loop.py::test_a_passing_check_proposed_again_after_the_refusal_completes_the_step`)
+- Reproduktion: Job `78c08cc2-5706-4c28-963c-bae59ddc1acb`. Nach grünem `node --test src/slugify.test.js 2>&1` schlug der Coder denselben Befehl noch dreimal vor. Der Guard verweigerte jedes Mal mit „It succeeded … call complete_step“. Metrik `repeats` 4 (max 2), FAIL. Dasselbe passierte bei rotem Test, dort mit Stagnation und Korrekturversuch als Folge.
+- Ursache: Modellschwäche (qwen3.6, Mehrturn-Zustand). Hinweis (BUG-175) und Katalogentzug (BUG-181) halfen nicht zuverlässig, denn das Modell ruft das zurückgehaltene Tool trotzdem auf.
+- Fix: Schlägt der Coder einen bestandenen Check nach der ersten Verweigerung erneut vor, ohne dass sich seither etwas geändert hat, meldet die Runtime `complete_step` für ihn. Das ist ein echter Tool-Aufruf über die Engine mit Zusammenfassung „Completed by the runtime …“. Verifier und Review prüfen den Schritt danach wie sonst. Rote Checks werden nie so abgeschlossen.
+- Selbstprüfung: dritte Maßnahme gegen dasselbe Modellverhalten (nach BUG-175, BUG-181). Anders als die früheren ist sie kein weiterer Hinweis an das Modell, sondern die deterministische Konsequenz: grün und unverändert heißt fertig. Keine Heuristik.
+
 ### BUG-206 – Liegengebliebene Änderungen eines abgebrochenen Schritts gelten als Scope-Verstoß des nächsten Schritts
 - Phase: Batterie-Lauf 1 auf 0.1.0rc20 (J1) · Komponente: scope/coder · Severity: P1 · blockierend: ja (behoben) · Status: **behoben** (`tests/integration/test_scope_engine.py::test_uncommitted_changes_of_an_unfinished_step_are_adopted`)
 - Reproduktion: Job `a71399e6-e15f-486c-ad1e-73dcb0ad068a`.

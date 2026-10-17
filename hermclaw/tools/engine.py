@@ -1051,7 +1051,7 @@ class ToolEngine:
                 E.COMMAND_REPEATED,
                 f"command refused: it already ran in turn {previous[1]} and no file changed since ({previous[2]}); running it "
                 f"again gives the same result. {follow_up}",
-                data={"previous_turn": previous[1], "repeated": True},
+                data={"previous_turn": previous[1], "repeated": True, "passed": passed, "command": command.strip()},
             )
         req = ExecutionRequest(
             command=full,

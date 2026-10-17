@@ -199,6 +199,39 @@ async def test_checks_are_withheld_after_a_refused_repeat_until_a_file_changes(s
     assert "- run_test(" in prompt(7) and "withheld" not in prompt(7), "the edit in turn 6 brings the checks back"
 
 
+async def test_a_passing_check_proposed_again_after_the_refusal_completes_the_step(sessionmaker: Any, tmp_repo: Path) -> None:
+    """rc21 battery J5: the tests were green, the repeat guard told the coder to call complete_step, and it proposed
+    the same command three more times. The second re-proposal completes the step on its behalf (BUG-207); a failing
+    check is never completed this way."""
+    fixed = '"""Adds."""\n\n\ndef add(*numbers):\n    return sum(numbers)\n'
+    cmd = f"{PY} -m pytest -q -p no:cacheprovider tests/test_app.py"
+    actions = [
+        act("write_file", "Fix", path="app.py", content=fixed),
+        act("write_file", "Test", path="tests/test_app.py", content=TEST_FILE),
+        act("run_test", "Test (grün)", command=cmd),
+        act("run_test", "nochmal", command=cmd),
+        act("run_test", "und nochmal", command=cmd),
+        act("read_file", path="app.py"),
+    ]
+    h, loop, chat = await _setup(sessionmaker, tmp_repo, actions, max_turns=6)
+    res = await _run(h, loop)
+    assert res.outcome == "completed" and res.turns == 5 and len(chat.prompts) == 5
+    assert [r.tool for r in res.history][-3:] == ["run_test", "run_test", "complete_step"]
+    assert "Completed by the runtime" in str(res.completion)
+    # red check proposed again: never completed by the runtime
+    broken = '"""Adds."""\n\n\ndef add(a, b):\n    return a + b\n'
+    actions = [
+        act("write_file", "kaputt", path="app.py", content=broken),
+        act("write_file", "Test", path="tests/test_app.py", content=TEST_FILE),
+        act("run_test", "rot", command=cmd),
+        act("run_test", "nochmal", command=cmd),
+        act("run_test", "und nochmal", command=cmd),
+    ]
+    h2, loop2, _ = await _setup(sessionmaker, tmp_repo, actions, max_turns=5)
+    res2 = await _run(h2, loop2)
+    assert res2.outcome != "completed" and "complete_step" not in [r.tool for r in res2.history]
+
+
 class HangingCoder(ScriptedCoder):
     """A model call that never answers on its own (a long generation with repairs)."""
 

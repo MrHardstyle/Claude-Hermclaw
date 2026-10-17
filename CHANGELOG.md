@@ -2,6 +2,13 @@
 
 Format: [Keep a Changelog](https://keepachangelog.com/de/1.1.0/), Versionen nach PEP 440.
 
+## [0.1.0rc22] – Release Candidate (2026-10-17)
+
+Fix aus Batterie-Lauf 1 auf 0.1.0rc21 (J1–J4 bestanden, J5 nur an der Wiederholungs-Metrik gescheitert).
+
+### Behoben
+- **Wiederholte grüne Checks (BUG-207):** Schlägt der Coder einen bestandenen Check ohne zwischenzeitliche Änderung erneut vor, schließt die Runtime den Schritt für ihn ab. Verifier und Review prüfen danach wie sonst.
+
 ## [0.1.0rc21] – Release Candidate (2026-10-17)
 
 Fix aus Batterie-Lauf 1 auf 0.1.0rc20.

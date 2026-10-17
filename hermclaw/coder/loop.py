@@ -214,6 +214,28 @@ class CoderLoop:
             mutated_paths=tuple(result.mutated_paths),
         )
 
+    async def _runtime_completion(
+        self, repeated: CoderAction, refusal: ToolResult, *, job_id: uuid.UUID, step_id: uuid.UUID, attempt_id: uuid.UUID, turn: int
+    ) -> tuple[CoderAction, ToolResult]:
+        """``complete_step`` on the coder's behalf after it re-proposed a check that passed with nothing changed since."""
+        command = str(refusal.data.get("command") or repeated.args.get("command") or "")
+        action = CoderAction(
+            tool=ToolName.complete_step,
+            args={
+                "summary": (
+                    f"Completed by the runtime: '{command[:200]}' passed and was proposed again without any change "
+                    f"since turn {refusal.data.get('previous_turn')}."
+                ),
+                "tests_run": [command[:500]] if command else [],
+                "changed_files": [],
+            },
+            status="Check passed and nothing changed since – the runtime reports the step as complete",
+            decision="runtime-complete",
+        )
+        result = await self.engine.execute(action, job_id=job_id, step_id=step_id, attempt_id=attempt_id, turn=turn)
+        await self._status(job_id=job_id, step_id=step_id, attempt_id=attempt_id, turn=turn, action=action, result=result)
+        return action, result
+
     async def _persist(self, attempt_id: uuid.UUID, turn: int, history: Sequence[TurnRecord]) -> None:
         if self.sm is None:
             return
@@ -357,6 +379,15 @@ class CoderLoop:
             notice = result.output if repeated else None
             # after a refused repeat the coder re-proposed the same check up to four times (live battery J1 on
             # 0.1.0rc14): the checks leave the catalogue until a file or the environment changes (BUG-181)
+            if repeated and action.tool.value in _RUNNERS and runners_withheld and result.data.get("passed"):
+                # BUG-207: the check passed, nothing changed since, and the coder re-proposes it after the refusal
+                # told it to finish (rc21 battery J5: three more turns each time). The runtime reports the completion
+                # for it; the verifier and the review still judge the step as after any complete_step.
+                done = await self._runtime_completion(action, result, job_id=job_id, step_id=step_id, attempt_id=attempt_id, turn=turn)
+                records.append(self._record(turn, done[0], done[1]))
+                await self._persist(attempt_id, turn, records)
+                if done[1].terminal and done[1].ok:
+                    return CoderResult("completed", turn, records, completion=dict(done[1].data), last_failure=None)
             if repeated and action.tool.value in _RUNNERS:
                 runners_withheld = True
             elif (
