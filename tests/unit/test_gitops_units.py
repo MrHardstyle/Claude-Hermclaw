@@ -400,6 +400,35 @@ async def test_gitlab_client_retries_and_errors():
         GitLabClient("http://gitlab.test")
 
 
+async def test_merge_request_waits_until_gitlab_knows_the_pushed_branch():
+    """BUG-202 (rc19 battery J2): the MR was requested 0.5 s after the push and GitLab answered 400
+    {"source_branch": ["does not exist"]} – the job succeeded without its merge request."""
+    posts: list[int] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        if request.method == "GET":
+            return httpx.Response(200, json=[], headers={"X-Next-Page": ""})
+        posts.append(1)
+        if len(posts) < 3:
+            return httpx.Response(400, json={"message": {"source_branch": ["does not exist"]}})
+        return httpx.Response(
+            201, json={"id": 40, "iid": 4, "web_url": "http://gitlab.test/grp/demo/-/merge_requests/4", "state": "opened"}
+        )
+
+    client = GitLabClient("http://gitlab.test", token="glpat-unit-token-0000000000", transport=httpx.MockTransport(handler))
+    client.branch_settle_delays = (0.0, 0.0, 0.0)
+    try:
+        mr = await client.create_merge_request("grp/demo", source_branch="hermclaw/x", target_branch="main", title="t")
+        assert mr.iid == 4 and len(posts) == 3
+        posts.clear()
+        client.branch_settle_delays = (0.0,)
+        with pytest.raises(GitLabError, match="does not exist"):  # GitLab never learns the branch: still reported
+            await client.create_merge_request("grp/demo", source_branch="hermclaw/x", target_branch="main", title="t")
+        assert len(posts) == 2
+    finally:
+        await client.aclose()
+
+
 async def test_gitlab_client_lazy_token_ref(tmp_path):
     tok = tmp_path / "t"
     tok.write_text("glpat-lazy-token-11111111111111")

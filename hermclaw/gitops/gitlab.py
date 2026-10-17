@@ -23,6 +23,9 @@ from hermclaw.gitops.types import MergeRequestInfo
 
 log = get_logger(__name__)
 RETRY_STATUS = frozenset({429, 500, 502, 503, 504})
+#: GitLab registers a pushed branch asynchronously: right after the push the MR API can answer 400
+#: {"source_branch": ["does not exist"]} (BUG-202). Waits between the creation attempts, in seconds.
+BRANCH_SETTLE_DELAYS = (1.0, 2.0, 4.0, 8.0, 15.0)
 
 
 def _project(project_id: str | int) -> str:
@@ -65,6 +68,7 @@ class GitLabClient:
             DEFAULT_REDACTOR.add_literal(token)
         self._retries = max(0, retries)
         self._backoff = backoff_seconds
+        self.branch_settle_delays: tuple[float, ...] = BRANCH_SETTLE_DELAYS
         self._client = httpx.AsyncClient(timeout=timeout, verify=verify, transport=transport, follow_redirects=False)
 
     @classmethod
@@ -197,6 +201,11 @@ class GitLabClient:
         if labels:
             body["labels"] = ",".join(labels)
         resp = await self._request("POST", f"/projects/{_project(project_id)}/merge_requests", json=body)
+        for delay in self.branch_settle_delays:
+            if not _branch_not_yet_known(resp):
+                break
+            await asyncio.sleep(delay)
+            resp = await self._request("POST", f"/projects/{_project(project_id)}/merge_requests", json=body)
         if resp.status_code == 201:
             data = resp.json()
             if not isinstance(data, dict):
@@ -213,3 +222,15 @@ class GitLabClient:
         if resp.status_code in (204, 404):
             return resp.status_code == 204
         raise self._error(resp, "branch deletion")
+
+
+def _branch_not_yet_known(resp: httpx.Response) -> bool:
+    if resp.status_code != 400:
+        return False
+    with contextlib.suppress(ValueError):
+        body = resp.json()
+        message = body.get("message") if isinstance(body, dict) else None
+        if isinstance(message, dict):
+            return any("does not exist" in str(v) for k, v in message.items() if k == "source_branch")
+        return "source_branch" in str(message) and "does not exist" in str(message)
+    return False

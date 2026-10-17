@@ -2,6 +2,13 @@
 
 Format: [Keep a Changelog](https://keepachangelog.com/de/1.1.0/), Versionen nach PEP 440.
 
+## [0.1.0rc20] – Release Candidate (2026-10-17)
+
+Fix aus Batterie-Lauf 1 auf 0.1.0rc19.
+
+### Behoben
+- **Merge Request direkt nach dem Push (BUG-202):** Kennt GitLab den gerade gepushten Branch noch nicht, wird die MR-Anlage nach kurzer Wartezeit wiederholt. Vorher endete ein Job gelegentlich ohne Merge Request.
+
 ## [0.1.0rc19] – Release Candidate (2026-10-17)
 
 Fix aus Batterie-Lauf 1 auf 0.1.0rc18 (J4 endete `succeeded` mit einem Merge Request, dessen Code ein erfundenes Paket importiert) sowie ein Audit auf Pfade, an denen lange Aufträge spät scheitern.

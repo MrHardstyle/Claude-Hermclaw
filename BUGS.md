@@ -46,6 +46,12 @@ Noch keine.
 
 ## Behobene Bugs
 
+### BUG-202 – Merge Request direkt nach dem Push: GitLab kennt den Branch noch nicht, der Job endet ohne MR
+- Phase: Batterie-Lauf 1 auf 0.1.0rc19 (J2) · Komponente: gitops · Severity: P2 · blockierend: ja für die Abnahme (behoben) · Status: **behoben** (`tests/unit/test_gitops_units.py::test_merge_request_waits_until_gitlab_knows_the_pushed_branch`)
+- Reproduktion: Job `ee3bd92c-f3a2-4beb-939b-566268717dea`. Push um 19:31:49.36, MR-Anlage um 19:31:49.86. GitLab antwortete `HTTP 400 {'source_branch': ['does not exist']}`. Der Job war `succeeded`, aber ohne Merge Request; die Batterie wertete FAIL.
+- Ursache: GitLab registriert gepushte Branches asynchron. Der Client wiederholte nur 429/5xx und Transportfehler; die 400 in diesem Zeitfenster ist aber vorübergehend.
+- Fix: `GitLabClient.create_merge_request` wiederholt die Anlage bei genau dieser Antwort mit 1/2/4/8/15 s Abstand. Danach wird der Fehler wie bisher gemeldet.
+
 ### BUG-201 – Manuelles Replan bei aufgebrauchtem Budget beendet den Job
 - Phase: Code-Audit lange Aufträge · Komponente: api/planner · Severity: P2 · blockierend: nein (behoben) · Status: **behoben** (`tests/integration/test_runtime_driver.py::test_replanner_question_makes_the_job_wait_and_the_answer_resumes_it`)
 - Ursache: Der Scheduler übersprang für ein angefordertes Replan die Budgetprüfung. `Replanner.replan` prüfte das Budget aber erneut und warf `ReplanLimitReached`. Ein Replan, das ein Mensch anforderte, endete so bei 2 verbrauchten Replans mit dem Scheitern des Jobs.
