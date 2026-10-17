@@ -279,7 +279,8 @@ class ToolEngine:
         self._timed_out: dict[tuple[str, str, int], int] = {}
         # every finished command: (file-change count, turn, outcome). The coder gets a fresh context each turn and
         # re-ran identical commands on unchanged files again and again (analysis 2026-10-16, live job 50784df5)
-        self._ran: dict[tuple[str, str, int], tuple[int, int, str]] = {}
+        # keyed without the timeout: a command that finished is not changed by another timeout (BUG-211)
+        self._ran: dict[tuple[str, str], tuple[int, int, str]] = {}
         # identical reads: (file-change count, turn). The context of every turn already shows the files read in this
         # attempt; the coder still re-read the same unchanged file turn after turn instead of acting (BUG-179)
         self._reads: dict[tuple[str, str], tuple[int, int]] = {}
@@ -1038,7 +1039,8 @@ class ToolEngine:
                 f"would block for {effective_timeout}s again. {TIMEOUT_HINT}",
                 data={"timeout_seconds": effective_timeout, "repeated": True},
             )
-        previous = self._ran.get(repeat_key) if not egress else None
+        ran_key = (cwd, command.strip())
+        previous = self._ran.get(ran_key) if not egress else None
         if previous is not None and previous[0] == self._writes:
             passed = previous[2] == "exit code 0"
             follow_up = (
@@ -1093,7 +1095,7 @@ class ToolEngine:
             self._timed_out[repeat_key] = self._writes
         elif result is not None and error is None:
             outcome = f"exit code {exit_code}"
-            self._ran[repeat_key] = (self._writes, ctx.turn, outcome)
+            self._ran[ran_key] = (self._writes, ctx.turn, outcome)
         await self.recorder.command_run(
             ctx,
             command=command,

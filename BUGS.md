@@ -46,6 +46,13 @@ Noch keine.
 
 ## Behobene Bugs
 
+### BUG-211 – Wiederholungssperre umgangen, sobald derselbe Befehl ein Timeout angibt
+- Phase: Erweiterte Batterie auf 0.1.0rc22 (X2) · Komponente: tools · Severity: P3 · blockierend: nein (behoben) · Status: **behoben** (`tests/integration/test_tools_engine_exec.py::test_identical_command_on_unchanged_files_is_not_rerun`)
+- Reproduktion: Job `20b80f9b-b56b-478d-9bab-a1f5cdc73fa9`, Versuch 2. Turn 3 `node --test app.test.js 2>&1` war grün. Turn 4 lief derselbe Befehl mit `timeout_seconds: 30` erneut, statt als Wiederholung verweigert zu werden. Erst Turn 5 wurde verweigert.
+- Ursache: Der Schlüssel der Sperre enthielt das effektive Timeout (180 s Standard gegenüber 30 s).
+- Fix: Abgeschlossene Läufe werden ohne Timeout geschlüsselt. Ein beendeter Befehl ändert sein Ergebnis nicht durch ein anderes Timeout. Für Timeouts bleibt der Schlüssel mit Timeout, denn ein längeres Timeout ist ein echter neuer Versuch.
+- Selbstprüfung: Lücke in der vorhandenen Sperre (BUG-179/207), keine neue Kompensation.
+
 ### BUG-210 – Konflikt mit geänderter Base verwirft beim Abschluss die gesamte verifizierte Arbeit
 - Phase: Audit später Fehlerpfade (2026-10-17) · Komponente: runtime/finalize · Severity: P1 · blockierend: nein (behoben) · Status: **behoben** (`tests/integration/test_runtime_driver.py::test_conflicting_base_change_delivers_the_work_on_its_old_base`, `::test_failed_regression_fails_job_but_delivers_a_draft`)
 - Reproduktion: Während ein Job läuft, ändert jemand auf dem Ziel-Branch dieselbe Datei. Beim Abschluss scheitert `update_to_base` mit `MERGE_CONFLICT`, der Job endet `failed` und nichts wird gepusht. Ebenso bei `REGRESSION_FAILED` nach einem erfolgreichen Rebase.

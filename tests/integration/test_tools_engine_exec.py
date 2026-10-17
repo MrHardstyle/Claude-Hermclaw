@@ -588,6 +588,8 @@ async def test_identical_command_on_unchanged_files_is_not_rerun(sessionmaker: S
     again = await h.call("run_test", command="python -m unittest")
     assert again.error_code == E.COMMAND_REPEATED and "already ran in turn" in again.output and "complete_step" in again.output
     assert len(rec.requests) == 1
+    # rc22 battery X2: the same green command with an explicit timeout ran again (BUG-211)
+    assert (await h.call("run_test", command="python -m unittest", timeout_seconds=30)).error_code == E.COMMAND_REPEATED
     assert (await h.call("run_command", command="python -m unittest -v")).ok  # a different command runs
     assert (await h.call("write_file", path="src/gen_new.py", content="X = 1\n")).ok
     assert (await h.call("run_test", command="python -m unittest")).ok  # after a file change it runs again
