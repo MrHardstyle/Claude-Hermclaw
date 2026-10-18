@@ -4,6 +4,9 @@ Format: [Keep a Changelog](https://keepachangelog.com/de/1.1.0/), Versionen nach
 
 ## [Unreleased]
 
+### Behoben
+- **Befehle im Node-Image laufen wieder (BUG-275):** Der `pipefail`-Präfix wird nur gesetzt, wo die Shell die Option kennt. In dash von Debian bookworm beendete er jedes Skript mit Exit-Code 2 und ohne Ausgabe.
+
 ## [0.1.0rc59] – Release Candidate (2026-10-18)
 
 ### Behoben

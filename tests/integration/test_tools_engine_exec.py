@@ -87,6 +87,19 @@ async def test_a_failing_command_piped_into_tail_is_a_failed_run(sessionmaker: S
     assert (await h.call("run_command", command="echo ok | tail -1")).ok
 
 
+@pytest.mark.parametrize("shell", ["sh", "bash"])
+def test_the_pipefail_prefix_never_ends_a_shell_that_lacks_the_option(shell: str) -> None:
+    """Live K2 (BUG-275): in the Node image (dash of Debian bookworm) 'set -o pipefail' is an unknown option, a failing
+    special builtin ends the script with exit code 2 and no output, so every command failed silently. The prefix applies
+    the option only where the shell knows it."""
+    import subprocess
+
+    unknown = PIPEFAIL.replace("pipefail", "hermclaw-no-such-option")
+    for prefix, piped_exit in ((unknown, "0"), (PIPEFAIL, "1")):
+        run = subprocess.run([shell, "-c", f"{prefix}\necho ran; false | true; echo $?"], capture_output=True, text=True)
+        assert run.returncode == 0 and run.stdout.split() == ["ran", piped_exit], (prefix, run)
+
+
 async def test_run_command_cwd_and_timeout(sessionmaker: SM, repo: Path) -> None:
     h = await make_harness(sessionmaker, repo, permissions=ToolPermissions(max_command_timeout_seconds=1))
     res = await h.call("run_command", command="pwd", cwd="src")

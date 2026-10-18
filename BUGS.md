@@ -46,6 +46,19 @@ Noch keine.
 
 ## Behobene Bugs
 
+### BUG-275 – Im Node-Image endet jeder Befehl mit Exit-Code 2 und ohne Ausgabe (Regression aus BUG-267)
+- Phase: Testzyklus 1 auf rc59 (K2, Job `f78edfa6…`, S001 Versuche 1–2) · Komponente: tools (engine) · Severity: P1 · blockierend: ja (behoben) · Status: **behoben** (`tests/integration/test_tools_engine_exec.py::test_the_pipefail_prefix_never_ends_a_shell_that_lacks_the_option`)
+- Reproduktion:
+  - `node --test`, `node --test tests/form.test.js 2>&1; echo "EXIT:$?"` und `… || true` enden alle mit „exit code 2 · (no output)“. Selbst das `echo` am Ende erscheint nicht.
+  - Der Coder wiederholt den Befehl, die Stagnation eskaliert zum Heavy Review. Dieses rät einen Fehler in `validateAge`, danach folgt ein Replan.
+- Ursache:
+  - Seit BUG-267 beginnt jedes Sandbox-Skript mit `set -o pipefail 2>/dev/null`.
+  - Das Node-Image basiert auf Debian bookworm. Dessen dash (0.5.12-2) kennt `pipefail` nicht. Ein fehlschlagendes Spezial-Builtin beendet eine nicht-interaktive POSIX-Shell sofort mit Exit-Code 2. `2>/dev/null` versteckt nur die Meldung.
+  - Die Python- und Generic-Images (trixie, dash 0.5.12-12 mit pipefail) waren nicht betroffen. Der Kommentar „every sandbox image shell knows it“ war ungeprüft.
+- Fix: Der Präfix lautet jetzt `(set -o pipefail) 2>/dev/null && set -o pipefail`. Die Option wird in einer Subshell geprobt und nur gesetzt, wo die Shell sie kennt.
+- Selbstprüfung: echte Runtime-Regression, keine Modellschwäche. Der Test prüft den Präfix in `sh` und `bash` mit einer unbekannten Option (Skript läuft weiter) und mit `pipefail` (Pipeline meldet den Fehler). Ohne Fix schlägt er in dash fehl.
+- Folge für die Messung: K2 auf rc59 ist durch diese Regression ungültig. Der Fix kommt mit dem Fixpaket nach Zyklus 1 (rc60), K2 wird dort erneut gemessen.
+
 ### BUG-274 – Das Heavy Review sieht von fehlschlagenden Tests nur den Exit-Code und erfindet als Blocker ein fehlendes `__init__.py`
 - Phase: G1 auf rc56–rc58 (Job `0f3f2a32…`, S003 Versuch 2, S008 Versuch 3) · Komponente: review (prompt) · Severity: P1 · blockierend: ja (behoben) · Status: **behoben** (`tests/unit/test_review_prompt.py::test_failing_checks_show_why_they_failed`)
 - Reproduktion:

@@ -97,7 +97,9 @@ TIMEOUT_HINT = (
     "Commands must exit on their own: a server, watcher or REPL never does. Do not start one in the foreground or "
     "in the background; a test starts the app in-process (port 0) and closes it, or calls the handler directly."
 )
-PIPEFAIL = "set -o pipefail 2>/dev/null"  # every sandbox image shell (dash, bash) knows it; older shells ignore it
+# only where the shell knows the option: in a shell without it (dash of Debian bookworm, the Node image) 'set -o pipefail'
+# is a failing special builtin and ends the whole script with exit code 2 and no output (live K2, BUG-275)
+PIPEFAIL = "(set -o pipefail) 2>/dev/null && set -o pipefail"
 
 READ_REPEAT_WINDOW = 6  # turns; the context shows the files of the last 6 reads (context_builder ``_read_spans``)
 READ_VISIBLE_LINES = 400  # the context shows at most this many lines of one read (context_builder ``max_snippet_lines``)
