@@ -362,9 +362,16 @@ class ImplementStepHandler:
             capability=row.capability,
             artifacts_dir=self.deps.artifacts_dir,
         )
-        builder = ContextBuilder(self.deps.repo, self.deps.git.reader(), ContextBuilderConfig.from_config(self.config))
+        builder_cfg = ContextBuilderConfig.from_config(self.config)
+        builder = ContextBuilder(self.deps.repo, self.deps.git.reader(), builder_cfg)
         settings = CoderSettings(
-            **{**self.deps.coder_settings.__dict__, "max_turns": min(row.turn_budget, self.config.policies.coder.max_turns)}
+            **{
+                **self.deps.coder_settings.__dict__,
+                "max_turns": min(row.turn_budget, self.config.policies.coder.max_turns),
+                # request exactly the output the context budget reserves: the loop's default (6144) cut answers off at
+                # 6144 tokens although the profile allowed and the budget reserved 8192 (live G1, BUG-235)
+                "max_output_tokens": builder_cfg.max_output_tokens,
+            }
         )
         stagnation = await self.deps.stagnation_factory(ctx) if self.deps.stagnation_factory else None
         loop = CoderLoop(self.deps.chat, builder, engine, settings=settings, stagnation=stagnation, sessionmaker=self.sm)

@@ -17,6 +17,7 @@ from pydantic import BaseModel
 from sqlalchemy import select, update
 
 from hermclaw.coder.handler import ImplementDeps, ImplementStepHandler, VerificationOutcome
+from hermclaw.context_builder import ContextBuilderConfig
 from hermclaw.contracts.review import ReviewContract, ReviewFinding
 from hermclaw.contracts.step import StepContract
 from hermclaw.contracts.verification import VerificationCheck, VerificationReport
@@ -62,9 +63,10 @@ class Models(ScriptedChat):
         super().__init__(plans)
         self.coder = list(coder)
         self.coder_prompts: list[list[ChatMessage]] = []
+        self.coder_max_tokens: list[Any] = []
 
     async def structured(  # type: ignore[override]
-        self, alias: str, messages: list[ChatMessage], schema: type[T], *, ctx: CallContext, **_: Any
+        self, alias: str, messages: list[ChatMessage], schema: type[T], *, ctx: CallContext, **kw: Any
     ) -> StructuredResult[T]:
         if alias == "fast-router":
             return StructuredResult(
@@ -72,6 +74,7 @@ class Models(ScriptedChat):
             )
         assert alias == "coder-main", alias
         self.coder_prompts.append(list(messages))
+        self.coder_max_tokens.append(kw.get("max_tokens"))
         if not self.coder:
             raise AssertionError("no scripted coder action left")
         return StructuredResult(
@@ -205,6 +208,10 @@ async def test_implement_step_happy_path_commits_and_pushes(world: World, tmp_pa
     assert s1.result["commit"] and s1.result["files"] == ["src/module.py"]
     # the scope engine created an explicit scope from the planner hint before the coder ran
     assert any("src/module.py" in m.content for m in models.coder_prompts[0])
+    # BUG-235: the coder requests exactly the output the context budget reserves (profile vs. policy, the larger)
+    cfg = get_config()
+    expected = max(cfg.models.by_role("coder").max_output_tokens, cfg.policies.coder.max_output_tokens)
+    assert set(models.coder_max_tokens) == {ContextBuilderConfig.from_config(cfg).max_output_tokens} == {expected}
 
 
 async def test_verifier_failure_triggers_correction_with_evidence(world: World, tmp_path: Path) -> None:

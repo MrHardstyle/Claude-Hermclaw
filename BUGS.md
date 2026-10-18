@@ -46,6 +46,13 @@ Noch keine.
 
 ## Behobene Bugs
 
+### BUG-235 – Der Coder fordert nur 6144 Ausgabe-Tokens an, obwohl Profil und Kontextbudget 8192 vorsehen
+- Phase: G1 auf rc31 (Job `364a9c3c…`, S003 Turn 1) · Komponente: coder (handler) · Severity: P2 · blockierend: nein (behoben) · Status: **behoben** (`tests/integration/test_coder_handler.py::test_implement_step_happy_path_commits_and_pushes`, erweitert)
+- Reproduktion: `model.invocation.finished` mit `completion: 6144`, `status: invalid` (abgeschnitten), etwa 4 min Modellzeit verloren. Der Kontextbericht desselben Turns nennt `max_output: 8192`. `/etc/hermclaw/models.yaml` setzt `coder-main.max_output_tokens: 8192` (Inventory-Override aus BUG-223).
+- Ursache: Zwei Quellen für denselben Wert. Der Kontext-Builder reserviert `max(Profil, policies.coder.max_output_tokens)` = 8192. Der Coder-Loop fordert `CoderSettings.max_output_tokens` an, dessen Klassenvorgabe 6144 der Handler nie überschrieb. Die Anhebung auf 8192 für BUG-223 kam deshalb nie beim Modell an.
+- Fix: Der Handler setzt `CoderSettings.max_output_tokens` aus der Kontext-Builder-Konfiguration. Angefordert wird genau, was das Budget reserviert; eine einzige Quelle.
+- Selbstprüfung: echter Schritt nach vorn. Ein Konfigurationswert wirkte nicht; der Fix beseitigt die doppelte Quelle, statt eine Zahl zu erhöhen.
+
 ### BUG-234 – Frontend und Backend aus verschiedenen Schritten passen nicht zusammen; Tests prüfen nichts
 - Phase: Qualitätsprüfung der G1-Lieferung (rc26–rc28) · Komponente: planner (prompt), review (prompt) · Severity: P2 · blockierend: nein (behoben) · Status: **behoben** (`tests/unit/test_planner_prompt.py` Nadel „need one written interface“, `tests/unit/test_review_prompt.py::test_system_prompt_rules` Nadeln „Hollow tests“, „real network connections“)
 - Reproduktion: Job `8e7c4b65…`, Lieferung unter `/var/lib/hermclaw/workspaces/8e7c4b65-…/hermclaw-test`.
