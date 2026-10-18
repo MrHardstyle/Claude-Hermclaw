@@ -46,6 +46,22 @@ Noch keine.
 
 ## Behobene Bugs
 
+### BUG-279 – Gemeldete Beispiel-Tokens bleiben stehen: maskierte Zeilen werden unverändert zurückgeschrieben und als „ersetzt“ quittiert
+- Phase: Testzyklus 1 auf rc59 (M3, Job `37213799…`, S001 Versuche 2–3) · Komponente: tools (engine), verifier (secrets), coder (handler) · Severity: P1 · blockierend: ja (behoben) · Status: **behoben** (`tests/integration/test_tools_engine_read_write.py::test_a_flagged_secret_stays_until_a_placeholder_replaces_it`, `tests/unit/test_verifier_secrets.py::test_secret_findings_in_docs_ask_for_a_placeholder_the_scanner_accepts`)
+- Reproduktion:
+  - Die REST-API mit Bearer-Token ist fertig, 11 Tests sind grün. Der Verifier meldet mögliche Geheimnisse: README Zeile 20 (`secret_assignment`) und Zeilen 36/43/52/59 (`bearer_token`), `tests/test_api.py` Zeilen 17 und 128.
+  - Versuch 2 tauscht in elf Turns nur Zeile 20 zwischen `<your-token>` und `<your-secret-token>` hin und her. Die vier anderen Zeilen bleiben, es folgt Stagnation.
+  - Versuch 3 schreibt `token="***REDACTED***"` in den Tests unverändert zurück. Die Engine meldet „masked secret replaced“, obwohl sich nichts geändert hat. Es folgt ein Replan.
+- Ursache:
+  - Der Coder sieht die gemeldeten Werte nur maskiert. Ein unverändert kopierter Marker behält den echten Wert (BUG-270), die Erfolgsmeldung sagte aber das Gegenteil.
+  - Für die README lautete die Abhilfe „aus der Umgebung laden“, das passt nicht zu Dokumentation.
+  - Ob eine gemeldete Zeile weiter auffällt, erfuhr der Coder erst nach dem nächsten vollständigen Verifier-Lauf.
+- Fix:
+  - Ein maskiertes `replace_text`, das nichts ändert, wird abgelehnt (`NO_CHANGE`) mit der Anweisung, an Stelle des Markers einen Platzhalter zu schreiben. Bleibt ein Marker stehen, sagt die Erfolgsmeldung das („kept their real value“). Die Ablehnung identischer Ersetzungen nennt den Fall ebenfalls.
+  - Für Dokumentation (`.md/.rst/.txt/.adoc`) rät der Verifier zu `<your-token>` oder `$AUTH_TOKEN`, beides akzeptiert der Scanner.
+  - In einer Korrektur mit Geheimnis-Befunden scannt `complete_step` die gemeldeten Dateien erneut (Zeilen, die nicht in der Basisversion stehen, mit dem Scanner des Verifiers). Solange noch Zeilen auffallen, wird abgelehnt (`CHECK_STILL_FAILING`), mit Zeilennummer, Regel und maskierter Vorschau.
+- Selbstprüfung: Die Runtime gab falsche und fehlende Rückmeldungen, das ist keine reine Modellschwäche. Kein Sonderfall: gilt für jede Datei mit gemeldeten Geheimnissen. Aufträge mit Authentifizierung treffen das regelmäßig.
+
 ### BUG-278 – Der Plan verlangt Änderungen an Dateien, die der Schritt nur liest; der richtige Code scheitert daran zweimal bis zum Replan-Limit
 - Phase: Testzyklus 1 auf rc59 (M2, Job `a4a95ec2…`, S001 in Plan v1 und v2) · Komponente: coder (handler), planner (Kriterien) · Severity: P1 · blockierend: ja (behoben) · Status: **behoben** (`tests/integration/test_coder_handler.py::test_a_change_demand_on_a_file_the_step_only_reads_is_judged_by_the_review`, `…::test_a_change_demand_the_review_upholds_goes_to_a_correction`)
 - Reproduktion:

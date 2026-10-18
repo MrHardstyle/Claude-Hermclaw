@@ -26,6 +26,7 @@ import shlex
 import stat
 import time
 import uuid
+from collections import Counter
 from collections.abc import Awaitable, Callable, Iterable, Mapping
 from dataclasses import dataclass
 from datetime import UTC, datetime
@@ -300,6 +301,7 @@ class ToolEngine:
         # once while a named file is untouched (BUG-258)
         self._correction_paths: list[str] = []
         self._recheck_commands: list[str] = []  # failed lint/test checks a correction must resolve (BUG-276)
+        self._recheck_secrets: list[str] = []  # files whose secret check failed (BUG-279)
         self._changed_now: set[str] = set()
         self._correction_reminded = False
         self._handlers: dict[ToolName, Handler] = {
@@ -941,6 +943,12 @@ class ToolEngine:
                 if present
                 else f"this text is not in {rel} either; copy the current lines into 'old' and write the changed lines in 'new'."
             )
+            if present and REDACTED in args.old:  # the masked value stays as it is (BUG-279)
+                state += (
+                    f" A {REDACTED} line keeps its real value; to remove a flagged value, put a placeholder where "
+                    f"{REDACTED} stands (docs: <your-token> or $AUTH_TOKEN; tests: a value containing 'dummy', 'fake' or "
+                    "'example')."
+                )
             raise ToolError(
                 E.NO_CHANGE,
                 f"replace refused: 'old' and 'new' are identical, so nothing would change. {state}",
@@ -956,15 +964,26 @@ class ToolEngine:
                 old, new, count = crlf_old, crlf_new, text.count(crlf_old)
         masked = self._masked_replace(text, old, new) if count == 0 and REDACTED in old and args.count == 1 else None
         if masked is not None:
-            updated, first_line = masked
+            updated, first_line, kept_masked = masked
+            if updated == text:
+                # live M3: the coder re-wrote a masked test token unchanged twice; "masked secret replaced" told it the
+                # flagged value was gone while the file stayed the same (BUG-279)
+                raise ToolError(
+                    E.NO_CHANGE,
+                    f"replace refused: nothing would change in {rel} – the line with {REDACTED} keeps its real value when "
+                    f"the marker is copied unchanged. To remove a flagged value, put a placeholder where {REDACTED} stands "
+                    "(docs: <your-token> or $AUTH_TOKEN; tests: a value containing 'dummy', 'fake' or 'example').",
+                    data={"path": rel, "changed": False},
+                )
             data = updated.encode("utf-8")
             await asyncio.to_thread(self.fs.atomic_write, target, data, mode=tf.mode)
             self._file_changed(ToolName.replace_text, [{"path": rel, "operation": "modify", "replacements": 1}], events)
+            what = f"the {REDACTED} line(s) kept their real value" if kept_masked else "the masked value is replaced by the new text"
             return self._ok(
                 ToolName.replace_text,
-                f"replaced 1 occurrence(s) in {rel} (first at line {first_line}, masked secret replaced); file now has {len(data)} bytes",
+                f"replaced 1 occurrence(s) in {rel} (first at line {first_line}; {what}); file now has {len(data)} bytes",
                 mutated_paths=[rel],
-                data={"path": rel, "operation": "modify", "replacements": 1, "first_line": first_line},
+                data={"path": rel, "operation": "modify", "replacements": 1, "first_line": first_line, "kept_masked": kept_masked},
             )
         if count == 0:
             raise ToolError(E.TEXT_NOT_FOUND, self._not_found_hint(rel, text, old))
@@ -988,7 +1007,7 @@ class ToolEngine:
             data={"path": rel, "operation": "modify", "replacements": count, "first_line": first_line},
         )
 
-    def _masked_replace(self, text: str, old: str, new: str) -> tuple[str, int] | None:
+    def _masked_replace(self, text: str, old: str, new: str) -> tuple[str, int, bool] | None:
         """Replace ``old`` as the coder saw it – with a secret masked as the redaction marker – by ``new``: the match
         runs on the redacted view of the file, line by line, and must be unique; the text around it on the matched
         lines must contain no masked part, so nothing masked is written back. The verifier demanded the removal of a
@@ -1010,6 +1029,7 @@ class ToolEngine:
         real = "".join(lines[a : b + 1])
         if REDACTED in prefix or REDACTED in suffix or not real.startswith(prefix) or not real.endswith(suffix):
             return None
+        kept_masked = False
         if REDACTED in new:
             # a masked line the coder left as it was keeps its real content: the coder changed a call around a fixture
             # password and every edit was refused for the marker it copied unchanged (live G1 S014, BUG-270)
@@ -1017,9 +1037,10 @@ class ToolEngine:
             actual = real[len(prefix) : len(real) - len(suffix)].splitlines(keepends=True)
             if len(shown) == len(actual):
                 kept = {v: r for v, r in zip(shown, actual, strict=True) if REDACTED in v}
+                kept_masked = any(ln in kept for ln in new.splitlines(keepends=True))
                 new = "".join(kept.get(ln, ln) for ln in new.splitlines(keepends=True))
             self._check_placeholder(new, None)
-        return "".join(lines[:a]) + prefix + new + suffix + "".join(lines[b + 1 :]), a + 1
+        return "".join(lines[:a]) + prefix + new + suffix + "".join(lines[b + 1 :]), a + 1, kept_masked
 
     @staticmethod
     def _not_found_hint(rel: str, text: str, old: str) -> str:
@@ -1763,6 +1784,38 @@ class ToolEngine:
         """The commands of the lint/test checks whose failure the correction attempt must resolve (BUG-276)."""
         self._recheck_commands = list(dict.fromkeys(c.strip() for c in commands if c and c.strip()))
 
+    def expect_secret_rechecks(self, paths: Iterable[str]) -> None:
+        """The files whose secret check failed: complete_step scans their added lines again (BUG-279)."""
+        self._recheck_secrets = list(dict.fromkeys(canonical_path(p) for p in paths if p))
+
+    async def _secrets_left(self) -> list[str]:
+        """Lines of the flagged files, not in their base version, on which the verifier's scanner still finds a
+        secret – as the verifier shows them (masked)."""
+        from hermclaw.verifier.languages import detect_language, is_lock_or_data_file
+        from hermclaw.verifier.secrets import SecretScanner
+
+        scanner, out = SecretScanner(), []
+        for rel in self._recheck_secrets:
+            if not (self.fs.root / rel).is_file():
+                continue
+            text = (await asyncio.to_thread(self.fs.read_text, rel, max_bytes=self.max_read_bytes)).text
+            try:
+                base = await self.git.show_base_file(self.workspace, rel) or ""
+            except Exception as exc:  # a scan that cannot run here leaves the judgement to the verifier
+                log.warning("secret recheck skipped", extra={"path": rel, "error_type": type(exc).__name__})
+                continue
+            before = Counter(base.splitlines())  # the base comes redacted: compare redacted lines
+            language, noisy = detect_language(rel), is_lock_or_data_file(rel)
+            for n, line in enumerate(text.splitlines(), start=1):
+                key = self.redactor.text(line)
+                if before[key] > 0:
+                    before[key] -= 1
+                    continue
+                out.extend(
+                    f"{rel}:{n} ({f.rule}): {f.preview}" for f in scanner.scan_line(rel, n, line, language=language, entropy=not noisy)
+                )
+        return out
+
     async def _still_failing(self, ctx: CallContext, events: list[PendingEvent]) -> tuple[str, str] | None:
         """The first failed check of the correction that still fails, run as the verifier ran it – on the last turn
         nothing is re-run (a refusal there would only exhaust the budget); a check that cannot run here is skipped."""
@@ -1780,6 +1833,15 @@ class ToolEngine:
             if run.sandbox_failed or run.result is None or run.result.timed_out or run.result.exit_code == 0:
                 continue
             return command, self._render_run(command, run, budget=self.output_limit, head_ratio=0.3)[0]
+        left = await self._secrets_left() if self._recheck_secrets else []
+        if left:
+            # live M3: the coder swapped one README placeholder for another for eleven turns while four other flagged
+            # lines stayed, and re-wrote a masked test token unchanged; nothing told it which lines still failed (BUG-279)
+            shown = "\n".join(left[:20]) + (f"\n(+{len(left) - 20} more)" if len(left) > 20 else "")
+            return "secret scan", (
+                f"{shown}\nReplace each value (shown as {REDACTED} where it is masked) with an obvious placeholder: in docs "
+                "<your-token> or $AUTH_TOKEN, in tests a value containing 'dummy', 'fake' or 'example'."
+            )
         return None
 
     def _untouched_corrections(self, turn: int) -> list[str]:
@@ -1803,7 +1865,7 @@ class ToolEngine:
                 "again.",
                 data={"untouched": untouched},
             )
-        failing = await self._still_failing(ctx, events) if self._recheck_commands else None
+        failing = await self._still_failing(ctx, events) if self._recheck_commands or self._recheck_secrets else None
         if failing is not None:
             # live K1: the correction named ruff findings, the coder re-ran only pytest and the runtime completed the step
             # for it; the verifier failed on the same lint output twice and the plan was replaced (BUG-276)

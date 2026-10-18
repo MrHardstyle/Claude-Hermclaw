@@ -150,7 +150,11 @@ def secret_checks(ctx: VerifyContext, added: AddedContent, scanner: SecretScanne
                 "Tests must not carry real-looking credentials: use an obvious placeholder value containing "
                 "'dummy', 'fake' or 'example' (e.g. 'dummy-token'); never read real secrets in tests."
                 if is_test_path(path)
-                else "Remove the value and load it from the environment or a secret store."
+                else (
+                    "Documentation shows placeholders, never values: write <your-token> or $AUTH_TOKEN where the value is."
+                    if path.lower().endswith((".md", ".rst", ".txt", ".adoc"))
+                    else "Remove the value and load it from the environment or a secret store."
+                )
             )
             out.append(
                 ctx.check(

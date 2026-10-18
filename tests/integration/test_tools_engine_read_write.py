@@ -499,3 +499,23 @@ async def test_contract_forbidden_paths_and_removing_own_new_files(sessionmaker:
     # deleting base content still requires the delete operation
     patch = "diff --git a/src/util.py b/src/util.py\ndeleted file mode 100644\n--- a/src/util.py\n+++ /dev/null\n@@ -1,2 +0,0 @@\n-X = 1\n-X = 1\n"
     assert (await h.call("apply_patch", patch=patch)).error_code == E.SCOPE_VIOLATION
+
+
+async def test_a_flagged_secret_stays_until_a_placeholder_replaces_it(sessionmaker: SM, repo: Path) -> None:
+    """Live M3 (BUG-279): the verifier flagged a token in a test the coder wrote and bearer tokens in the README; the
+    coder re-wrote the masked token line unchanged ("masked secret replaced", nothing changed) and swapped one README
+    placeholder for another while four flagged lines stayed. An unchanged masked replace is refused; complete_step
+    rescans the flagged files and names the lines that still carry a secret until placeholders replace them."""
+    (repo / "tests" / "test_api.py").write_text("def call(token='zq81vkpw3mxt5'):\n    return token\n")
+    h = await make_harness(sessionmaker, repo, contract=scope(target_paths=["tests/test_api.py"]))
+    h.engine.expect_secret_rechecks(["tests/test_api.py"])
+    masked = "def call(token='" + REDACTED + "'):"
+    same = await h.call("replace_text", path="tests/test_api.py", old=masked, new=masked)
+    assert same.error_code == E.NO_CHANGE and "keeps its real value" in same.output and "placeholder" in same.output
+    around = await h.call("replace_text", path="tests/test_api.py", old=masked + "\n    return token", new=masked + "\n    return token\n")
+    assert around.ok and "kept their real value" in around.output and "zq81vkpw3mxt5" in (repo / "tests" / "test_api.py").read_text()
+    left = await h.call("complete_step", summary="secrets removed")
+    assert left.error_code == E.CHECK_STILL_FAILING and "tests/test_api.py:1" in left.output and "zq81vkpw3mxt5" not in left.output
+    fixed = await h.call("replace_text", path="tests/test_api.py", old=masked, new="def call(token='dummy-token'):")
+    assert fixed.ok and "replaced by the new text" in fixed.output
+    assert (await h.call("complete_step", summary="secrets removed")).ok

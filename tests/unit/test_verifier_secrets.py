@@ -174,3 +174,22 @@ def test_secret_findings_in_tests_ask_for_a_placeholder_not_the_environment() ->
     assert "load it from the environment" in out["secrets:client.py"]
     fixed = AddedContent(lines={"tests/test_client.py": [AddedLine(1, "    client = Client(api_key='dummy-token')")]})
     assert not any(name.startswith("secrets:tests/") for name, _ in secret_checks(Ctx(), fixed, SecretScanner()))  # type: ignore[arg-type]
+
+
+def test_secret_findings_in_docs_ask_for_a_placeholder_the_scanner_accepts() -> None:
+    """Live M3 (BUG-279): the README of a token-protected API showed example tokens; the advice "load it from the
+    environment" fits code, not documentation, and the coder swapped one wording for another. Docs get placeholder
+    advice, and the placeholders it names pass the scanner."""
+    from hermclaw.verifier.checks import secret_checks
+    from hermclaw.verifier.types import AddedContent
+
+    class Ctx:
+        def check(self, check_type: str, name: str, status: str, message: str = "", evidence: object = None) -> tuple[str, str]:
+            return name, message
+
+    line = 'curl -H "Authorization: Bearer s3cr3tT0k3nV4lu3xyz" http://localhost:8000/notes'
+    out = dict(secret_checks(Ctx(), AddedContent(lines={"README.md": [AddedLine(1, line)]}), SecretScanner()))  # type: ignore[arg-type]
+    assert "<your-token>" in out["secrets:README.md"] and "environment or a secret store" not in out["secrets:README.md"]
+    for placeholder in ("<your-token>", "$AUTH_TOKEN"):
+        fixed = AddedContent(lines={"README.md": [AddedLine(1, line.replace("s3cr3tT0k3nV4lu3xyz", placeholder))]})
+        assert not any(name.startswith("secrets:README") for name, _ in secret_checks(Ctx(), fixed, SecretScanner()))  # type: ignore[arg-type]

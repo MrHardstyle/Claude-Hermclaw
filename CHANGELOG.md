@@ -5,6 +5,7 @@ Format: [Keep a Changelog](https://keepachangelog.com/de/1.1.0/), Versionen nach
 ## [Unreleased]
 
 ### Behoben
+- **Gemeldete Beispiel-Tokens werden wirklich ersetzt (BUG-279):** Unverändert zurückgeschriebene maskierte Zeilen werden abgelehnt statt als „ersetzt“ gemeldet. Dokumentation bekommt Platzhalter-Hinweise (`<your-token>`, `$AUTH_TOKEN`), und `complete_step` nennt in einer Korrektur die Zeilen, die noch auffallen.
 - **Unerfüllbare Änderungsforderungen des Plans entscheidet das Review (BUG-278):** Scheitert ein Schritt nur daran, dass vom Plan geforderte Dateien unverändert blieben, prüft das Heavy Review den Schritt ohne diese Forderung. Bei `pass` wird sie protokolliert fallen gelassen (`acceptance.waived`), statt in Korrekturen und Replans zu enden.
 - **Testkriterium für spätere Schritte im leeren Repository (BUG-277):** Tests, die ein vorgelagerter Schritt anlegt, zählen bei der Planung wie vorhandene Tests. Ein späterer Schritt wird nicht mehr am fehlenden Testnachweis blockiert.
 - **Korrekturen enden erst, wenn die gescheiterte Prüfung besteht (BUG-276):** `complete_step` führt in einem Korrekturversuch die Lint- und Testbefehle der gescheiterten Prüfungen erneut aus und lehnt ab, solange einer fehlschlägt. Das gilt auch, wenn die Runtime den Schritt für den Coder abschließt.

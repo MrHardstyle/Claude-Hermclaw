@@ -515,6 +515,9 @@ class ImplementStepHandler:
             corrections = await self._fresh_verifier_items(ctx, step, handle, corrections)
         engine.expect_corrections(c.path for c in corrections)  # complete_step reminds of untouched files (BUG-258)
         engine.expect_rechecks(c.command for c in corrections if c.source == "verifier")  # and re-runs failed checks (BUG-276)
+        engine.expect_secret_rechecks(  # and re-scans files with flagged secrets (BUG-279)
+            c.path for c in corrections if c.source == "verifier" and c.label.startswith(("secrets:", "security:"))
+        )
         await self._status(ctx, f"Coder startet {row.step_key} ({ctx.attempt_kind}, max {settings.max_turns} Turns)")
         try:
             async with self._model(ctx, "coder", preemptible=True):

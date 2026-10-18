@@ -72,6 +72,10 @@ class GitReader(Protocol):
         """Paths changed relative to base_sha (committed + uncommitted + untracked, excluding ignored)."""
         ...
 
+    async def show_base_file(self, workspace: WorkspaceHandle, file_path: str, *, max_bytes: int = 200_000) -> str | None:
+        """Content of ``file_path`` at base_sha, redacted (``None`` if it did not exist there)."""
+        ...
+
 
 @dataclass
 class RepoHit:

@@ -23,6 +23,7 @@ from hermclaw.contracts.scope import ScopeContract, ScopeExpansionRequest
 from hermclaw.contracts.tools import CoderAction, ToolName, ToolResult
 from hermclaw.core.config import PoliciesConfig, load_config
 from hermclaw.core.interfaces import CommandExecutor, GitStatusEntry, RepoHit, WorkspaceHandle
+from hermclaw.core.redaction import DEFAULT_REDACTOR
 from hermclaw.core.settings import Settings
 from hermclaw.persistence.models import CommandRun, Event, Job, Step, TestRun, ToolCallRow
 from hermclaw.scope.guard import ScopeGuard
@@ -84,6 +85,12 @@ class GitCliReader:
         tracked = git(workspace.path, "diff", "--name-only", workspace.base_sha).splitlines()
         untracked = git(workspace.path, "ls-files", "--others", "--exclude-standard").splitlines()
         return sorted({p for p in [*tracked, *untracked] if p})
+
+    async def show_base_file(self, workspace: WorkspaceHandle, file_path: str, *, max_bytes: int = 200_000) -> str | None:
+        try:
+            return DEFAULT_REDACTOR.text(git(workspace.path, "show", f"{workspace.base_sha}:{file_path}"))[:max_bytes]
+        except Exception:
+            return None
 
 
 class BrokenGitReader(GitCliReader):
