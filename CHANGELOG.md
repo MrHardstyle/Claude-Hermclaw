@@ -4,6 +4,8 @@ Format: [Keep a Changelog](https://keepachangelog.com/de/1.1.0/), Versionen nach
 
 ## [Unreleased]
 
+## [0.1.0rc49] – Release Candidate (2026-10-18)
+
 ### Behoben
 - **Remote-Ausfall in der Vorbereitung (BUG-263):** Ist GitLab kurz nicht erreichbar (Netzwerk, HTTP 5xx, „Internal API unreachable“), bleibt der Job in der Vorbereitung und versucht es nach Backoff erneut, statt sofort zu scheitern.
 
