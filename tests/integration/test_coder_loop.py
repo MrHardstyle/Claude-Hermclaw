@@ -323,6 +323,34 @@ async def test_cut_off_answer_asks_for_writing_in_parts_and_gets_one_extra_turn(
     assert (await _run(h2, loop2)).turns == 2  # a plain invalid answer keeps the normal limit
 
 
+async def test_a_cut_off_write_file_keeps_its_complete_lines(sessionmaker: Any, tmp_repo: Path) -> None:
+    """Live G1 on rc39 (BUG-252): the coder wrote a whole module in one answer, was cut off at 8192 tokens after 5.5
+    minutes and lost all of it, twice. A cut-off write_file is salvaged: its complete lines are written and the model
+    continues with append after the shown last line."""
+    import json as _json
+
+    body = "".join(f"def f{i}():\n    return {i}\n" for i in range(20))  # 40 lines, then "def f20():" completes the 41st
+    partial = _json.dumps({"tool": "write_file", "args": {"path": "app.py", "content": body + "def f20():\n    ret"}})[:-4]
+    cut = ModelOutputTruncated("hit the output limit", code="MODEL_OUTPUT_TRUNCATED")
+    cut.partial = partial
+    rest = act("write_file", path="app.py", content="    return 20\n", append=True)  # continues after the shown tail
+    done = act("complete_step", summary="module written in parts", changed_files=["app.py"])
+    h, loop, chat = await _setup(sessionmaker, tmp_repo, [cut, rest, done])
+    res = await _run(h, loop)
+    assert res.outcome == "completed", res
+    assert (tmp_repo / "app.py").read_text() == body + "def f20():\n    return 20\n"
+    note = "\n".join(m.content for m in chat.prompts[1])
+    assert "first 41 complete lines of app.py were written" in note and "    return 19\ndef f20():" in note and '"append": true' in note
+    assert res.history[0].tool == "write_file" and res.history[0].ok
+    # too little to salvage, or no write_file: the old handling (cut-off note, no file change)
+    tiny = ModelOutputTruncated("hit the output limit", code="MODEL_OUTPUT_TRUNCATED")
+    tiny.partial = '{"tool": "write_file", "args": {"path": "app.py", "content": "x = 1\\ny'
+    before = (tmp_repo / "app.py").read_text()
+    h2, loop2, chat2 = await _setup(sessionmaker, tmp_repo, [tiny, tiny, tiny])
+    assert (await _run(h2, loop2)).error_code == "MODEL_OUTPUT_TRUNCATED"
+    assert (tmp_repo / "app.py").read_text() == before
+
+
 async def test_cancel_and_checkpoint_resume(sessionmaker: Any, tmp_repo: Path) -> None:
     token = CancelToken()
     token.cancel("job cancelled")

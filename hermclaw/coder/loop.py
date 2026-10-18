@@ -20,6 +20,7 @@ from typing import Any, Literal, Protocol
 from sqlalchemy import update
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
+from hermclaw.coder.salvage import salvage_write
 from hermclaw.context_builder import (
     ContextBuilder,
     CorrectionItem,
@@ -61,6 +62,12 @@ TRUNCATED_NOTE = (
     "Your last answer hit the output limit of {max_tokens} tokens and was cut off, so nothing was executed. Write at most "
     "about 250 lines per answer: create a large file with its first part, then add each further part with write_file "
     'and "append": true (or split the code into several modules).'
+)
+# a cut-off write_file keeps its complete lines; the model continues after them (BUG-252)
+SALVAGED_NOTE = (
+    "Your last answer hit the output limit of {max_tokens} tokens. Its first {lines} complete lines of {path} were "
+    "written; the file now ends with:\n{tail}\nContinue right after that line with write_file path={path!r} and "
+    '"append": true, at most about 250 lines per answer.'
 )
 RUNNERS_WITHHELD = (
     "run_test and run_command are withheld until something changes: nothing changed since the refused command, so "
@@ -361,6 +368,24 @@ class CoderLoop:
                 if res is None:
                     return CoderResult("cancelled", turn - 1, records, last_failure=last_failure, detail=token.reason)
             except ModelOutputInvalid as exc:
+                salvaged = salvage_write(exc.partial) if isinstance(exc, ModelOutputTruncated) else None
+                if salvaged is not None:
+                    action = CoderAction(
+                        tool=ToolName.write_file,
+                        args={"path": salvaged.path, "content": salvaged.content, "append": salvaged.append},
+                        status=f"{salvaged.path}: {salvaged.lines} Zeilen geschrieben (Ausgabelimit erreicht)",
+                        decision="salvage-cut-off-write",
+                    )
+                    result = await self.engine.execute(action, job_id=job_id, step_id=step_id, attempt_id=attempt_id, turn=turn)
+                    if result.ok:
+                        tail = "\n".join(salvaged.content.rstrip("\n").splitlines()[-3:])
+                        note = SALVAGED_NOTE.format(max_tokens=s.max_output_tokens, lines=salvaged.lines, path=salvaged.path, tail=tail)
+                        records.append(self._record(turn, action, result, note=note))
+                        await self._persist(attempt_id, turn, records)
+                        await self._status(job_id=job_id, step_id=step_id, attempt_id=attempt_id, turn=turn, action=action, result=result)
+                        invalid_streak = 0
+                        notice = note
+                        continue
                 invalid_streak += 1
                 if isinstance(exc, ModelOutputTruncated):
                     note = TRUNCATED_NOTE.format(max_tokens=s.max_output_tokens)

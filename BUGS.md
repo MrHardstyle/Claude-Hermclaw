@@ -46,6 +46,17 @@ Noch keine.
 
 ## Behobene Bugs
 
+### BUG-252 – Eine am Ausgabelimit abgeschnittene `write_file`-Antwort geht samt aller fertigen Zeilen verloren
+- Phase: G1 auf rc39 (Job `3d90ec7b…`, S002 Versuch 1) · Komponente: coder (loop), models (gateway) · Severity: P1 · blockierend: ja (behoben) · Status: **behoben** (`tests/integration/test_coder_loop.py::test_a_cut_off_write_file_keeps_its_complete_lines`, `tests/unit/test_coder_salvage.py`)
+- Reproduktion: Der Coder schreibt `collector.py` in einer Antwort. Zweimal hintereinander bricht sie nach 8192 Tokens ab (je ~5,5 min, `finish_reason=length`), trotz Hinweis aus BUG-223 und der 250-Zeilen-Regel. Nichts wird geschrieben. Ein dritter Abbruch beendet den Versuch mit `model_failed`.
+- Ursache: Eine abgeschnittene Antwort ist ungültiges JSON und wurde ganz verworfen. Bei `write_file` lagen die fertigen Zeilen aber vollständig vor. Das Modell befolgt „in Teilen schreiben“ nicht verlässlich.
+- Fix:
+  - `ModelOutputTruncated` trägt den abgeschnittenen Text (`partial`). Er steht nicht in den `details`, die in Events landen.
+  - `salvage_write` liest daraus Pfad, `append` und die vollständigen Zeilen des `content`-Strings, robust gegen abgeschnittene Escapes, und verlangt mindestens 20 Zeilen.
+  - Der Coder-Loop schreibt sie über die Engine (Scope, Redaktion und Prüfungen wie bei jedem Schreibzugriff). Der nächste Turn erfährt die letzten geschriebenen Zeilen und setzt mit `"append": true` danach fort.
+  - Andere abgeschnittene Antworten behalten das bisherige Verhalten.
+- Selbstprüfung: echter Schritt nach vorn. Statt eine weitere Prompt-Regel einzuführen, nutzt die Runtime die bereits erzeugte Arbeit und macht aus dem Abbruch das gewünschte Schreiben in Teilen.
+
 ### BUG-251 – Schritte, die eine Komponente eines anderen Schritts nutzen, laufen ohne Abhängigkeit davor und raten deren Schnittstelle
 - Phase: G1 auf rc39 (Job `3d90ec7b…`, Plan v1, S003/S004) · Komponente: planner (validation) · Severity: P1 · blockierend: nein (behoben) · Status: **behoben** (`tests/unit/test_planner_validation.py::test_a_step_naming_another_steps_component_must_be_ordered_with_it`)
 - Reproduktion:

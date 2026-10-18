@@ -486,7 +486,7 @@ class LiteLLMGateway:
                 # cut off at the output limit: a plain repair under the same limit is cut off again. The coder spent
                 # three 4-minute calls per turn on one oversized write_file (grand job G1 on 0.1.0rc24, BUG-223); the
                 # caller has to make the answer smaller instead
-                raise ModelOutputTruncated(
+                truncated_error = ModelOutputTruncated(
                     f"'{last.result.alias}' hit the output limit of {max_tokens or 'the profile'} tokens; the answer was cut off",
                     details={
                         "alias": last.result.alias,
@@ -499,6 +499,8 @@ class LiteLLMGateway:
                         "fallback_used": last.result.fallback_used,
                     },
                 )
+                truncated_error.partial = last.result.content
+                raise truncated_error
             conversation = self._repair_conversation(
                 messages,
                 last.result.content,

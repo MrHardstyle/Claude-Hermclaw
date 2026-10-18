@@ -86,6 +86,8 @@ class ModelOutputTruncated(ModelOutputInvalid):
     """The answer hit the output token limit and was cut off; a repair with the same limit is cut off again."""
 
     code = "MODEL_OUTPUT_TRUNCATED"
+    #: the cut-off answer text (never part of ``details``, which reach events): a caller may salvage it (BUG-252)
+    partial: str = ""
 
 
 class WorkerError(ExternalServiceError):

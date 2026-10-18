@@ -5,6 +5,7 @@ Format: [Keep a Changelog](https://keepachangelog.com/de/1.1.0/), Versionen nach
 ## [Unreleased]
 
 ### Behoben
+- **Abgeschnittene Schreibzugriffe gerettet (BUG-252):** Bricht eine `write_file`-Antwort am Ausgabelimit ab, schreibt der Coder ihre vollständigen Zeilen und setzt im nächsten Turn mit `"append": true` fort, statt minutenlange Arbeit zu verwerfen.
 - **Komponenten-Verweise brauchen Reihenfolge (BUG-251):** Nennt ein Schritt eine Komponente, die ein anderer Schritt schreibt, verlangt die Plan-Validierung eine Abhängigkeit zwischen beiden, damit der nutzende Schritt die echte Schnittstelle sieht.
 - **Fremde Tests und Nachbar-Dateien (BUG-250):** Die Plan-Validierung lehnt Testdateien für den Code eines anderen Schritts auch in Schritten mit eigenem Code ab; ein Schritt sieht neben den Dateien seiner Abhängigkeiten auch die der übrigen abgeschlossenen Schritte des Jobs.
 
