@@ -4,6 +4,8 @@ Format: [Keep a Changelog](https://keepachangelog.com/de/1.1.0/), Versionen nach
 
 ## [Unreleased]
 
+## [0.1.0rc59] – Release Candidate (2026-10-18)
+
 ### Behoben
 - **Heavy Review sieht, warum Tests scheitern (BUG-274):** Fehlgeschlagene Prüfungen zeigen im Review einen Auszug ihrer Ausgabe (Assertion-, FAILED- und Fehlerzeilen) statt nur des Exit-Codes.
 
