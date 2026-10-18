@@ -4,6 +4,8 @@ Format: [Keep a Changelog](https://keepachangelog.com/de/1.1.0/), Versionen nach
 
 ## [Unreleased]
 
+## [0.1.0rc37] – Release Candidate (2026-10-18)
+
 ### Behoben
 - **Verweigerte Befehlswiederholung mit Beleg (BUG-246):** Die Verweigerung eines wiederholten fehlgeschlagenen Befehls enthält dessen frühere Ausgabe, auch wenn ein anderer Befehl LATEST FAILURE inzwischen ersetzt hat.
 - **Keine handgeschriebenen Parser (BUG-245):** Der Coder liest JSON/TOML/CSV/INI/XML mit dem Parser der Sprache und prüft selbst geschriebene Formate durch Zurücklesen; der Reviewer stuft handgeschriebene Parser als major ein.
