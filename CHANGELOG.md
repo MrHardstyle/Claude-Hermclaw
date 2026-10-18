@@ -4,6 +4,8 @@ Format: [Keep a Changelog](https://keepachangelog.com/de/1.1.0/), Versionen nach
 
 ## [Unreleased]
 
+## [0.1.0rc53] – Release Candidate (2026-10-18)
+
 ### Behoben
 - **Pipelines verschweigen keine Fehler (BUG-267):** Befehle laufen mit `set -o pipefail`; `pytest … | tail -80` mit fehlschlagenden Tests ist ein fehlgeschlagener Lauf statt eines Erfolgs, den die Runtime als Abschluss meldet.
 
