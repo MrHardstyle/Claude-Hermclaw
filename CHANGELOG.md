@@ -5,6 +5,7 @@ Format: [Keep a Changelog](https://keepachangelog.com/de/1.1.0/), Versionen nach
 ## [Unreleased]
 
 ### Behoben
+- **Größeres Antwortbudget des Coders (BUG-223, Nachtrag):** `coder-main.max_output_tokens` 8192 statt 6144.
 - **Redaction lässt Code lesbar (BUG-225):** Code, der Geheimnisse liest (`api_key = config["x"]`), und offensichtliche Platzhalter (`"your-secret-here"`) werden nicht mehr maskiert. Vorher kopierte der Coder den Marker in neue Dateien, und jeder Schreibversuch wurde abgelehnt.
 - **Replan erhält den Auftragsumfang (BUG-224):** Offene Schritte, die ein Replan weder wiederholt noch ersetzt, werden mit umgehängten Abhängigkeiten übernommen. Vorher konnte ein Replan nach einem gescheiterten Schritt Frontend, Tests und README still verwerfen.
 

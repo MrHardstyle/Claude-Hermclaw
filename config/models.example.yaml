@@ -52,7 +52,8 @@ profiles:
     role: coder
     model: qwen3-coder:30b
     context_tokens: 32768
-    max_output_tokens: 6144
+    # a complete module of ~400 lines fits one answer; larger files are written in parts (BUG-223)
+    max_output_tokens: 8192
     temperature: 0.15
     think: false
     timeout_seconds: 900

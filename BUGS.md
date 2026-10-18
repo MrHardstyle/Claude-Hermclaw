@@ -87,6 +87,7 @@ Noch keine.
   - Coder: keine Reparatur (`truncation_repairs=0`). Stattdessen sagt der nächste Turn konkret, dass die Antwort am Limit abgeschnitten wurde und große Dateien in Teilen geschrieben werden. Nach einem Abbruch gibt es einen Turn zusätzlich.
   - `write_file` hat `append`, um eine Datei Teil für Teil zu schreiben. Scope, Platzhalter-Prüfung und Events gelten wie bisher.
   - Systemkontrakt des Coders: höchstens etwa 250 Zeilen pro Antwort, größere Dateien in Teilen oder als Module.
+  - Nachtrag (live S011 auf rc25): Das Modell hielt die 250-Zeilen-Regel im ersten Turn nicht ein. Der Hinweis-Turn half erst im Zusatz-Turn, dort mit einer vollständigen Antwort von 5751 Tokens. `coder-main.max_output_tokens` steigt deshalb von 6144 auf 8192 (etwa 340 s bei rund 24 Tokens/s, Timeout 900 s, über 20k Tokens Eingabebudget bleiben). Ein vollständiges Modul passt damit meist in eine Antwort; größere Dateien laufen über `append`.
 - Selbstprüfung: echter Schritt nach vorn. Bisher gab es keine Behandlung des Output-Limits. Das Limit wird bewusst nicht einfach erhöht: Das verschiebt das Problem nur zur nächstgrößeren Datei und verlängert jeden Fehlversuch.
 
 ### BUG-222 – Recherche verwirft fast alle Claims, wenn die Frage nicht in der Sprache der Quelle gestellt ist
