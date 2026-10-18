@@ -4,6 +4,8 @@ Format: [Keep a Changelog](https://keepachangelog.com/de/1.1.0/), Versionen nach
 
 ## [Unreleased]
 
+## [0.1.0rc43] – Release Candidate (2026-10-18)
+
 ### Behoben
 - **PowerShell-Befehle sind keine Secrets (BUG-256):** `$token = Get-Content $file -Raw` in `.ps1`-Dateien gilt als Ausdruck statt als Literal; gequotete Werte werden weiter gemeldet.
 
