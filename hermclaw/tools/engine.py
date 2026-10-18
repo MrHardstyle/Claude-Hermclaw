@@ -872,7 +872,15 @@ class ToolEngine:
             data = content.encode("utf-8")
         lines = content.count("\n") + (1 if content and not content.endswith("\n") else 0)
         if old == data:
-            return self._ok(ToolName.write_file, f"{rel} already has this content; nothing written", data={"path": rel, "changed": False})
+            # a refused no-op, not a success: the coder rewrote the same start script four times in a row while the
+            # review findings stayed open, and the "success" cleared LATEST FAILURE each time (live G1, BUG-253)
+            raise ToolError(
+                E.NO_CHANGE,
+                f"write refused: {rel} already has exactly this content, so writing it again changes nothing. If the "
+                "correction or LATEST FAILURE asks for a change in this file, change those lines (replace_text) to "
+                "different content; if the file is complete, run its check or call complete_step.",
+                data={"path": rel, "changed": False, "repeated": True},
+            )
         mode = stat.S_IMODE(target.stat().st_mode) if exists else None
         await asyncio.to_thread(self.fs.atomic_write, target, data, mode=mode)
         self._note_created([(rel, op)])

@@ -268,9 +268,10 @@ async def test_write_file_create_modify_scope_and_events(sessionmaker: SM, repo:
     assert res.ok and res.data["operation"] == "create"
     res = await h.call("write_file", path="docs/guide/intro.md", content="# intro\n")
     assert res.ok and (repo / "docs" / "guide" / "intro.md").exists()
-    # same content -> no write
+    # same content -> no write, refused as a no-op repeat that keeps the latest failure (BUG-253)
     res = await h.call("write_file", path="src/new_feature.py", content="VALUE = 3\n")
-    assert res.ok and res.mutated_paths == [] and res.data["changed"] is False
+    assert not res.ok and res.error_code == E.NO_CHANGE and res.mutated_paths == []
+    assert res.data["changed"] is False and res.data["repeated"] is True and "changes nothing" in res.output
     # out of scope: modify of a non-target, create outside allowed_new_paths, forbidden secret file
     for path, op in (("src/util.py", "modify"), ("src/other.py", "create"), (".env", "modify")):
         res = await h.call("write_file", path=path, content="nope\n")

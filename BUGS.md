@@ -46,6 +46,15 @@ Noch keine.
 
 ## Behobene Bugs
 
+### BUG-253 – Ein Schreibzugriff ohne Änderung gilt als Erfolg; der Coder schreibt dieselbe Datei viermal und löscht dabei LATEST FAILURE
+- Phase: G1 auf rc39 (Job `3d90ec7b…`, S004 Versuche 2/3) · Komponente: tools (engine) · Severity: P2 · blockierend: nein (behoben) · Status: **behoben** (`tests/integration/test_tools_engine_read_write.py::test_write_file_create_modify_scope_and_events`)
+- Reproduktion: Nach Review-Befunden schreibt der Coder `start_homelab_widget.ps1` viermal hintereinander mit identischem Inhalt. Antwort jeweils `ok`: „already has this content; nothing written“. Die Stagnationserkennung bricht ab; S004 endet `blocked` (STAGNATION).
+- Ursache:
+  - Ein No-op-Schreibzugriff war ein Erfolg. Damit löschte er `LATEST FAILURE`, denn ein erfolgreicher Befehl ersetzt die letzte Fehlermeldung.
+  - Die Meldung sagte nicht, dass die offenen Befunde so nicht behoben werden.
+- Fix: Ein Schreibzugriff, der die Datei nicht ändert, wird verweigert (`NO_CHANGE`, `repeated`). Damit bleibt `LATEST FAILURE` erhalten (Logik aus BUG-175). Die Meldung nennt den Ausweg: die Zeilen, die Korrektur oder Fehlermeldung nennen, mit anderem Inhalt ändern, oder prüfen bzw. abschließen.
+- Selbstprüfung: echter Schritt nach vorn. Gleiches Muster wie bei Lese- und Befehlswiederholungen (BUG-179/181): Eine wirkungslose Aktion ist kein Erfolg. Kein Ausgleich eines Symptoms, sondern eine fehlende Fallunterscheidung.
+
 ### BUG-252 – Eine am Ausgabelimit abgeschnittene `write_file`-Antwort geht samt aller fertigen Zeilen verloren
 - Phase: G1 auf rc39 (Job `3d90ec7b…`, S002 Versuch 1) · Komponente: coder (loop), models (gateway) · Severity: P1 · blockierend: ja (behoben) · Status: **behoben** (`tests/integration/test_coder_loop.py::test_a_cut_off_write_file_keeps_its_complete_lines`, `tests/unit/test_coder_salvage.py`)
 - Reproduktion: Der Coder schreibt `collector.py` in einer Antwort. Zweimal hintereinander bricht sie nach 8192 Tokens ab (je ~5,5 min, `finish_reason=length`), trotz Hinweis aus BUG-223 und der 250-Zeilen-Regel. Nichts wird geschrieben. Ein dritter Abbruch beendet den Versuch mit `model_failed`.

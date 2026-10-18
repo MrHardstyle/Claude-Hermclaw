@@ -4,6 +4,9 @@ Format: [Keep a Changelog](https://keepachangelog.com/de/1.1.0/), Versionen nach
 
 ## [Unreleased]
 
+### Behoben
+- **Wirkungslose Schreibzugriffe (BUG-253):** Ein `write_file`, der die Datei nicht ändert, wird als Wiederholung verweigert, statt als Erfolg die letzte Fehlermeldung zu löschen.
+
 ## [0.1.0rc40] – Release Candidate (2026-10-18)
 
 ### Behoben
