@@ -46,6 +46,20 @@ Noch keine.
 
 ## Behobene Bugs
 
+### BUG-274 – Das Heavy Review sieht von fehlschlagenden Tests nur den Exit-Code und erfindet als Blocker ein fehlendes `__init__.py`
+- Phase: G1 auf rc56–rc58 (Job `0f3f2a32…`, S003 Versuch 2, S008 Versuch 3) · Komponente: review (prompt) · Severity: P1 · blockierend: ja (behoben) · Status: **behoben** (`tests/unit/test_review_prompt.py::test_failing_checks_show_why_they_failed`)
+- Reproduktion:
+  - Die Unraid-Tests scheitern an `KeyError: 'Content-Type'` (urllib schreibt Header als `Content-type`) und an Mocks ohne `status`.
+  - Das Heavy Review nennt als Blocker „no `__init__.py` in collector package, `import collector` fails“. Belegt ist das nur mit „exited with code 1“. Der Import funktioniert jedoch (Namespace-Paket, nachgeprüft).
+  - Die Korrektur verlangt eine Datei, die einem späteren Schritt gehört. Die echten Ursachen werden nicht genannt.
+- Ursache:
+  - Die Belege einer fehlschlagenden Prüfung wurden als kompaktes JSON mit 600 Zeichen gezeigt.
+  - `output` steht dort zuletzt (bis 4000 Zeichen) und wurde abgeschnitten. Das Review urteilte ohne Fehlermeldung.
+- Fix:
+  - Fehlschlagende Prüfungen zeigen ihre Belege ohne `output`.
+  - Die ersten drei zeigen zusätzlich einen Auszug („failure output (why it failed)“): `E …`-, `FAILED`/`ERROR`- und Fehlerzeilen plus das Ende, höchstens 1800 Zeichen je Prüfung.
+- Selbstprüfung: Die Ursache liegt bei der Datenbasis des Reviews, nicht beim Coder. Ein Review ohne die Fehlermeldung muss raten. Die Begrenzung auf drei Auszüge hält den Prompt im Budget.
+
 ### BUG-273 – Das Frontend „ruft Daten von der lokalen API ab“, hängt aber nicht vom Schritt ab, der `collector/api.py` schreibt; drei Reviews verwerfen es nacheinander
 - Phase: G1 auf rc56/rc57 (Job `0f3f2a32…`, Plan v1, S005 Versuche 1–3) · Komponente: planner (validation) · Severity: P1 · blockierend: ja (behoben) · Status: **behoben** (`tests/unit/test_planner_validation.py::test_an_acronym_names_a_short_component`)
 - Reproduktion:

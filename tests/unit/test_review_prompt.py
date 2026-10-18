@@ -288,3 +288,25 @@ def test_passing_command_checks_show_their_output() -> None:
     assert "<function name at 0x7f>" in user and "judge it against the JOB GOAL" in user
     plain, _ = _user(_file("export.py", 2))
     assert "judge it against the JOB GOAL" not in plain
+
+
+def test_failing_checks_show_why_they_failed() -> None:
+    """Live G1 (BUG-274): the test output came last in a 600-character evidence excerpt and was cut; the heavy review
+    saw only "exit 1" and named a missing __init__.py as the blocker while the tests failed on header and mock values.
+    A failing check shows the lines that say why it failed."""
+    noise = "".join(f"tests/test_unraid.py:{i}: in test_case\n    call()\n" for i in range(200))
+    output = noise + "E       KeyError: 'Content-Type'\nFAILED tests/test_unraid.py::TestBuildRequest::test_headers\n6 failed, 9 passed\n"
+    report = _report()
+    report.checks.append(
+        VerificationCheck(
+            check_type="unit",
+            name="acceptance[3]:test",
+            status="fail",
+            blocking=True,
+            message="pytest: failed – 9 passed, 6 failed",
+            evidence={"command": "python -m pytest -q", "exit_code": 1, "output": output},
+        )
+    )
+    user, _ = _user(_file("collector/unraid.py", 2), verification=report)
+    assert "failure output (why it failed)" in user and "KeyError: 'Content-Type'" in user
+    assert "FAILED tests/test_unraid.py::TestBuildRequest::test_headers" in user

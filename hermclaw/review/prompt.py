@@ -11,6 +11,7 @@ not fit, the budget shrinks and the prompt is rebuilt.
 from __future__ import annotations
 
 import json
+import re
 from collections.abc import Sequence
 from dataclasses import dataclass, field, replace
 
@@ -170,12 +171,32 @@ def render_scope(scope: ScopeContract | None, settings: ReviewSettings) -> str:
 
 
 # ----------------------------------------------------------------------------------------------- variable sections
-def _check_line(c: VerificationCheck, settings: ReviewSettings, *, with_evidence: bool) -> str:
+MAX_FAILURE_OUTPUTS = 3
+_FAILURE_LINE = re.compile(r"^(?:E\s|FAILED|ERROR)|Error\b|assert", re.IGNORECASE)
+
+
+def failure_excerpt(output: str, budget: int) -> str:
+    """The lines of a failed run that say why it failed (``E …`` assertion lines, ``FAILED …``, errors), then its end."""
+    lines = output.splitlines()
+    picked = [ln for ln in lines if _FAILURE_LINE.search(ln)]
+    tail = lines[-8:]
+    body = "\n".join(dict.fromkeys([*picked, "…", *tail])) if picked else "\n".join(lines[-40:])
+    return clip(body, budget)
+
+
+def _check_line(c: VerificationCheck, settings: ReviewSettings, *, with_evidence: bool, with_output: bool = False) -> str:
     flag = "blocking" if c.blocking else "advisory"
     msg = clip(one_line(redact(c.message)), settings.check_message_chars) if c.message else ""
     line = f"- [{c.status.upper()}][{flag}] {c.check_type}:{clip(one_line(redact(c.name)), 200)}" + (f" – {msg}" if msg else "")
     if with_evidence and c.evidence:
-        line += f"\n  evidence: {compact_json(c.evidence, settings.evidence_excerpt_chars)}"
+        output = c.evidence.get("output")
+        rest = {k: v for k, v in c.evidence.items() if k != "output"}
+        line += f"\n  evidence: {compact_json(rest, settings.evidence_excerpt_chars)}"
+        if with_output and isinstance(output, str) and output.strip():
+            # the output came last in a 600-character evidence excerpt and was cut: the heavy review saw only "exit 1"
+            # and named a missing __init__.py as the blocker while the tests failed on header and mock values (BUG-274)
+            shown = fence(failure_excerpt(redact(output), settings.evidence_excerpt_chars * 3))
+            line += f"\n  failure output (why it failed):\n{shown}"
     return line
 
 
@@ -195,7 +216,8 @@ def render_verifier(report: VerificationReport, changed_files: Sequence[str], se
     lines.append(_list_line(f"changed_files ({len(changed_files)})", list(changed_files), settings))
     if failing:
         lines.append("failed checks:")
-        lines.extend(_check_line(c, settings, with_evidence=True) for c in failing)
+        # the output of the first failing checks (each excerpt up to 3x evidence_excerpt_chars) keeps the section bounded
+        lines.extend(_check_line(c, settings, with_evidence=True, with_output=i < MAX_FAILURE_OUTPUTS) for i, c in enumerate(failing))
     if others:
         lines.append("other checks:")
         for c in others:
