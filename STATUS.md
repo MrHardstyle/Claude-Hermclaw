@@ -239,6 +239,15 @@ bestanden; ansible-lint (production) sauber. `test_deploy_converge` ist angepass
     - Replan 1 gab S008 ein Ziel in collector.py ohne die Datei im Scope (BUG-268). Gefunden wurden außerdem `pytest | tail` als bestanden gewertet (BUG-267) und verrutschte Felder (BUG-269); Replan 2.
     - In Replan 2 las S014 in vier Versuchen nur. Eine Änderung wurde am maskierten Passwort abgelehnt (BUG-270), danach forderte der Coder gezeigte Zeilen immer wieder an (BUG-271).
     - Neustart von G1 auf rc56.
+16. G1 auf rc56–rc59 (Job `0f3f2a32…`) auf Wunsch des Betreibers abgebrochen (Replan 1; S002/S003/S008 an Testfehlern blockiert, S005 an der fehlenden API-Abhängigkeit → BUG-272–274).
+17. **Strategiewechsel (Betreiber, 2026-10-18):** keine Einzel-Patches nach jedem Fehlschlag. Ablauf je Zyklus:
+    - eine feste Version ausrollen;
+    - darauf die Testzyklus-Batterie K1–K3/M1–M3 laufen lassen (`config/acceptance-jobs-cycle.example.yaml`, Fixtures `acceptance/form` und `acceptance/legacy`);
+    - Fehler sammeln und gemeinsame Ursachen analysieren;
+    - ein gebündeltes Fixpaket mit Regressionstests bauen;
+    - die neue Version mit denselben Aufträgen erneut prüfen.
+    - Gemessen wird die Erfolgsquote je Version. G1 läuft erst wieder, wenn kurze und mittlere Aufträge zuverlässig laufen. Sofortreaktion nur bei Datenverlust oder Sicherheitsproblemen.
+    - Zyklus 1 läuft auf rc59.
 3. 0.1.0rc18 ausrollen, J1–J6 zweimal in Folge bestehen, dann die erweiterte Batterie X1–X5
    (`config/acceptance-jobs-extended.example.yaml`); danach Abbruch, parallele Jobs und Worker-Neustart prüfen.
 4. Wake-on-LAN einrichten (MACs, BIOS, Kapitel 13.1), danach `--suite wol --full-wol` und erst dann den Leerlauf-Suspend einschalten.

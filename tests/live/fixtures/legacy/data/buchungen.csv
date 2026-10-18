@@ -1,0 +1,10 @@
+datum;konto;betrag;text
+03.01.2026;Giro;1250,00;Gehalt
+05.01.2026;Giro;-89,90;Strom
+12.01.2026;Bar;-20,00;Markt
+01.02.2026;Giro;1250,00;Gehalt
+14.02.2026;Giro;-0,10;Gebühr
+14.02.2026;Giro;-0,20;Gebühr
+28.02.2026;Bar;-15,50;Bäcker
+02.03.2026;Giro;1250,00;Gehalt
+31.03.2026;Giro;-450,00;Miete

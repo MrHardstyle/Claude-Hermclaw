@@ -166,6 +166,7 @@ def test_spec_rejects_unknown_expectations(tmp_path: Path) -> None:
         "acceptance-jobs-extended.example.yaml",
         "acceptance-jobs-long.example.yaml",
         "acceptance-jobs-grand.example.yaml",
+        "acceptance-jobs-cycle.example.yaml",
     ],
 )
 def test_shipped_batteries_load(name: str) -> None:

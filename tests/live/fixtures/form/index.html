@@ -1,0 +1,30 @@
+<!doctype html>
+<html lang="de">
+<head>
+  <meta charset="utf-8">
+  <title>Kontakt</title>
+  <style>
+    .error { color: #b00020; font-size: 0.9em; }
+    .ok { color: #1b5e20; }
+  </style>
+</head>
+<body>
+  <h1>Kontakt</h1>
+  <form id="contact" novalidate>
+    <label>Name <input name="name"></label>
+    <div class="error" data-error-for="name"></div>
+    <label>E-Mail <input name="email" type="email"></label>
+    <div class="error" data-error-for="email"></div>
+    <label>Alter <input name="age"></label>
+    <div class="error" data-error-for="age"></div>
+    <label>Nachricht <textarea name="message"></textarea></label>
+    <div class="error" data-error-for="message"></div>
+    <button type="submit">Senden</button>
+    <p id="result"></p>
+  </form>
+  <script type="module">
+    import { attachForm } from "./form.js";
+    attachForm(document.getElementById("contact"));
+  </script>
+</body>
+</html>

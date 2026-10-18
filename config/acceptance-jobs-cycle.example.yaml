@@ -1,0 +1,76 @@
+# Test cycle battery (strategy of 2026-10-18): short (K) and medium (M) jobs of different kinds, all run on one fixed
+# release. Failures are collected over the whole cycle, analysed for common causes and fixed as one package; the next
+# release runs the same jobs again. The grand job G1 runs again only when this battery passes reliably.
+#
+#   sudo -u hermclaw hermclaw acceptance-jobs /etc/hermclaw/acceptance-jobs-cycle.yaml [--only K1] [--out DIR]
+#
+# Fixture branches of the test repository (scripts/ops/acceptance-fixtures.sh):
+#   acceptance/empty   README only
+#   acceptance/form    contact form (HTML + ES module) with faulty validation, node --test
+#   acceptance/legacy  inherited Python tool (CSV ledger) with several bugs, unittest
+# The runner measures the process (status, merge request, duration, replans, plan size, repeats); the delivered code
+# is reviewed separately for correctness against the job.
+repository: hermclaw-test
+defaults:
+  max_minutes: 30
+  max_replans: 1
+  max_first_plan_steps: 3
+  allow_dependencies: false
+  max_repeats: 2
+  require_merge_request: true
+  timeout_minutes: 120
+jobs:
+  - id: K1
+    title: Python – evaluate CSV files, handle bad input
+    base_branch: acceptance/empty
+    prompt: >-
+      Schreibe ein Python-Kommandozeilenwerkzeug, das eine CSV-Datei mit Messwerten (Spalten: zeitpunkt, sensor, wert)
+      auswertet und je Sensor Anzahl, Minimum, Maximum und Mittelwert ausgibt. Fehlerhafte Zeilen (fehlende Spalten,
+      kein Zahlenwert, leere Datei, fehlende Datei) sollen das Programm nicht abbrechen lassen: Sie werden mit
+      Zeilennummer als Warnung gemeldet, die übrigen Zeilen werden ausgewertet. Nur Standardbibliothek, mit Tests.
+
+  - id: K2
+    title: JavaScript – repair an existing form and test edge cases
+    base_branch: acceptance/form
+    prompt: >-
+      Das Kontaktformular prüft die Eingaben nicht so, wie es die Regeln im README verlangen, und nach dem Absenden
+      verhält sich die Seite falsch. Repariere die Prüfung und das Absenden und teste die Randfälle der Regeln mit dem
+      eingebauten Test-Runner von Node.
+
+  - id: K3
+    title: PowerShell – read Windows services and output JSON
+    base_branch: acceptance/empty
+    expect: {max_minutes: 30}
+    prompt: >-
+      Schreibe ein PowerShell-Skript für Windows, das die installierten Dienste ausliest und als JSON ausgibt (Name,
+      Anzeigename, Status, Starttyp). Optional soll nach Status gefiltert werden können (z. B. nur laufende Dienste),
+      und die Ausgabe soll wahlweise in eine Datei geschrieben werden. Beschreibe die Verwendung im README.
+
+  - id: M1
+    title: web application – small task manager with SQLite and web UI
+    base_branch: acceptance/empty
+    expect: {max_minutes: 60, max_first_plan_steps: 4}
+    prompt: >-
+      Baue eine kleine Aufgabenverwaltung als Webanwendung: Aufgaben anlegen, als erledigt markieren, löschen und
+      gefiltert anzeigen (alle, offen, erledigt). Daten in SQLite, Server mit der Python-Standardbibliothek, eine
+      schlichte Weboberfläche (HTML/CSS/JavaScript ohne externe Ressourcen). Mit Tests für Datenhaltung und HTTP-Schnittstelle.
+
+  - id: M2
+    title: foreign project – find and fix bugs in existing code
+    base_branch: acceptance/legacy
+    expect: {max_minutes: 60, max_first_plan_steps: 4}
+    prompt: >-
+      Fehlerberichte zum Werkzeug ledger: Mit der beiliegenden Datei data/buchungen.csv bricht es ab. Nutzer berichten
+      außerdem, dass Salden krumme Werte wie 2390.0000000000005 zeigen, dass im Monatsbericht der letzte Monat fehlt
+      und dass beim zweiten Einlesen innerhalb eines Programmlaufs Buchungen doppelt gezählt werden. Finde die Ursachen,
+      behebe sie und sichere jede Korrektur mit einem Test ab.
+
+  - id: M3
+    title: API – REST API with authentication, tests and documentation
+    base_branch: acceptance/empty
+    expect: {max_minutes: 60, max_first_plan_steps: 4}
+    prompt: >-
+      Entwickle eine REST-API für Notizen mit der Python-Standardbibliothek: Notizen anlegen, auflisten, abrufen,
+      ändern und löschen, als JSON. Jeder Zugriff braucht einen Bearer-Token aus einer Umgebungsvariable; ohne oder
+      mit falschem Token antwortet die API mit 401. Ungültige Eingaben ergeben 400, unbekannte Notizen 404. Mit Tests
+      und einer Dokumentation der Endpunkte in docs/api.md.
