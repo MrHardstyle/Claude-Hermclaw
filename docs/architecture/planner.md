@@ -222,3 +222,10 @@ Linux administration task without a repository. Everything else is production co
 - `tests/unit/test_planner_enrich.py`: acceptance generation, risk floor and path counting, risk policy, research steps.
 - `tests/integration/test_planner_repos.py`: plans for all five fixtures, DB rows and events, the repair loop, failure after 2 repairs, fallback, conflicts and races.
 - `tests/integration/test_planner_replan.py`: preservation and supersede, failure package, rerun reason, no blind repeat, research in replans, limit, conflicts and races, fallback.
+
+### Open steps survive a replan (BUG-224)
+
+A replan replaces the remaining work, but it never loses scope silently: every open (not final) step of the old plan
+other than the failed one is carried over unless a new step reuses its id, creates one of its files, names ≥ 60 % of
+its content words, or – for review/verify/test steps – is a check step of the same kind. Dependencies on steps that
+are gone point to the replanner's new steps. Each carry-over is listed in the notes of `replan.created`.

@@ -73,7 +73,7 @@ RESEARCH_COVERAGE = 0.6
 _MIN_COVERAGE_TOKENS = 4
 
 
-def _content_tokens(text: str) -> set[str]:
+def content_tokens(text: str) -> set[str]:
     return {t for t in normalise_text(text).split() if len(t) >= 3 and not t.isdigit() and t not in _FILLER_WORDS}
 
 
@@ -753,7 +753,7 @@ def find_research_step(question: str, steps: Sequence[PlanStep]) -> PlanStep | N
     q = normalise_text(question)
     if not q:
         return None
-    q_tokens = _content_tokens(question)
+    q_tokens = content_tokens(question)
     best: tuple[float, PlanStep] | None = None
     for step in steps:
         if step.kind.value != StepKind.research.value:
@@ -762,7 +762,7 @@ def find_research_step(question: str, steps: Sequence[PlanStep]) -> PlanStep | N
         if q in goal or q in title or (len(goal) >= 12 and goal in q):
             return step
         if len(q_tokens) >= _MIN_COVERAGE_TOKENS:
-            covered = len(q_tokens & (_content_tokens(step.goal) | _content_tokens(step.title))) / len(q_tokens)
+            covered = len(q_tokens & (content_tokens(step.goal) | content_tokens(step.title))) / len(q_tokens)
             if covered >= RESEARCH_COVERAGE and (best is None or covered > best[0]):
                 best = (covered, step)
     return best[1] if best else None

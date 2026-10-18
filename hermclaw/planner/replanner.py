@@ -64,10 +64,12 @@ from hermclaw.planner.persist import (
 )
 from hermclaw.planner.planner import PlannerBase, model_facing_schema
 from hermclaw.planner.prompt import PromptBuild, build_messages, fit_to_budget, replan_user_payload, replanner_system_prompt
-from hermclaw.planner.replan_contract import APPROACH_FAILURE_REASONS, ReplanContract, ReplanTrigger
+from hermclaw.planner.replan_contract import APPROACH_FAILURE_REASONS, ReplanContract, ReplanStep, ReplanTrigger
 from hermclaw.planner.validation import (
+    CHECK_ONLY_KINDS,
     AdviceOnce,
     ValidationContext,
+    content_tokens,
     new_manifest_notes,
     normalise_text,
     prune_unreachable_must_change,
@@ -162,6 +164,60 @@ def merge_plan(contract: ReplanContract, kept: list[PlanStep]) -> dict[str, Any]
     }
 
 
+OPEN_STEP_COVERAGE = 0.6
+
+
+def _step_paths(step: PlanStep) -> set[str]:
+    """Files the step creates: shared hints such as README.md say nothing about which work a step does."""
+    return set(step.allowed_new_paths)
+
+
+def carry_over_open_steps(
+    new_steps: list[ReplanStep], open_steps: list[PlanStep], completed_keys: frozenset[str]
+) -> tuple[list[ReplanStep], list[str]]:
+    """Open steps of the old plan that no new step covers, re-added with their dependencies remapped.
+
+    The replan replaces the remaining work. The replanner answered a failed collector step with one fallback step and
+    silently dropped the five steps after it (frontend, scripts, tests, README, test run): the job would have ended
+    ``succeeded`` with a fraction of the order (grand job G1 on 0.1.0rc25, BUG-224). An open step counts as covered
+    when a new step reuses its id, shares a created path with it, names ≥ 60 % of its content words, or – for a
+    review/verify/test step – is a check step of the same kind. Dependencies on steps
+    that are gone (the failed step) point to the model's new steps instead."""
+    new_ids = {s.id for s in new_steps}
+    used = new_ids | set(completed_keys)
+    replacement = [s.id for s in new_steps if s.id not in completed_keys]
+    carried: list[ReplanStep] = []
+    notes: list[str] = []
+    for old in open_steps:
+        if old.id in used:
+            continue
+        old_paths, old_tokens = _step_paths(old), content_tokens(f"{old.title} {old.goal}")
+        covered = False
+        for new in new_steps:
+            if old.kind.value in CHECK_ONLY_KINDS and new.kind == old.kind:
+                covered = True  # a review/verify/test step checks the work of the whole plan, whatever its wording
+            elif old_paths & _step_paths(new):
+                covered = True
+            elif old_tokens:
+                share = len(old_tokens & content_tokens(f"{new.title} {new.goal}")) / len(old_tokens)
+                covered = share >= OPEN_STEP_COVERAGE
+            if covered:
+                break
+        if covered:
+            continue
+        carried.append(ReplanStep.model_validate({**old.model_dump(mode="json"), "depends_on": list(old.depends_on)}))
+        used.add(old.id)
+    carried_ids = {c.id for c in carried}
+    for step in carried:
+        deps: list[str] = []
+        for dep in step.depends_on:
+            targets = [dep] if dep in used or dep in carried_ids else replacement
+            deps.extend(t for t in targets if t not in deps and t != step.id)
+        step.depends_on = deps
+        notes.append(f"open step {step.id} ({step.title}) carried over: the replan did not cover it")
+    return carried, notes
+
+
 def work_signature(*, kind: str, capability: str, goal: str, hints: list[str], deps: list[str], acceptance: list[Any]) -> tuple[Any, ...]:
     return (
         kind,
@@ -217,6 +273,11 @@ class Replanner(PlannerBase):
                 snapshot = self._snapshot(job, state)
                 completed_rows = sorted(state.completed.values(), key=lambda r: r.step_key)
                 completed_steps = [step_from_row(row, state.dependencies.get(row.id, [])) for row in completed_rows]
+                open_steps = [
+                    step_from_row(row, state.dependencies.get(row.id, []))
+                    for row in sorted(state.open_steps, key=lambda r: r.step_key)
+                    if row.status not in STEP_FINAL_STATES and (state.failed is None or row.id != state.failed.id)
+                ]
                 await append_event(
                     session,
                     EventType.REPLAN_STARTED,
@@ -237,7 +298,7 @@ class Replanner(PlannerBase):
                 )
                 await session.commit()
 
-            validate = self._validator(vctx, risk_policy, snapshot, completed_steps, trigger)
+            validate = self._validator(vctx, risk_policy, snapshot, completed_steps, trigger, open_steps=open_steps)
 
             async def on_repair(record: AttemptRecord, remaining: int) -> None:
                 await self.record_repair(job_id, "replan", record, remaining)
@@ -353,6 +414,8 @@ class Replanner(PlannerBase):
         snapshot: ReplanSnapshot,
         completed_steps: list[PlanStep],
         trigger: ReplanTrigger,
+        *,
+        open_steps: list[PlanStep] | None = None,
     ) -> Callable[[dict[str, Any]], ReplanValidated]:
         limit = self.settings.max_errors_reported
         completed_keys = snapshot.completed_keys
@@ -383,7 +446,9 @@ class Replanner(PlannerBase):
             kept = [s for s in completed_steps if s.id in kept_keys]
             # Report the merged-plan and semantic errors together with the replan-rule errors: one phase per repair
             # turn used up the repair budget before the model ever saw the scope errors (BUG-153).
-            candidate = contract.model_copy(update={"steps": [s for s in contract.steps if s.id not in unreasoned]})
+            model_steps = [s for s in contract.steps if s.id not in unreasoned]
+            carried, carried_notes = carry_over_open_steps(model_steps, open_steps or [], completed_keys)
+            candidate = contract.model_copy(update={"steps": model_steps + carried})
             try:
                 merged = validate_schema(PlanContract, merge_plan(candidate, kept), limit=limit)
             except PlanInvalid as invalid:
@@ -394,7 +459,7 @@ class Replanner(PlannerBase):
             if errors or sem:
                 raise PlanInvalid("replan" if errors else "semantic", (errors + sem)[:limit])
             enriched = enrich_plan(merged, vctx, risk_policy, preserved=kept_keys, reserved_ids=set(snapshot.active_keys))
-            enriched.notes[:0] = pruned
+            enriched.notes[:0] = [*carried_notes, *pruned]
             if question:
                 # A question next to a complete plan asks for confirmation, not for a decision the plan cannot do
                 # without: the job goes on with the plan instead of waiting for the user (BUG-208).

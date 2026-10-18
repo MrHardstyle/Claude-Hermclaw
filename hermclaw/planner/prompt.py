@@ -486,6 +486,8 @@ def replanner_system_prompt(kind_capability: dict[str, str], capability_names: S
         "those old steps are superseded by your new plan.",
         "Address the failure evidence (failed_step, evidence) directly: change the approach instead of repeating "
         "the failed step unchanged.",
+        "open_steps are still part of the job. Plan the remaining work completely: repeat every open step (its id "
+        "may be reused) unless one of your steps does its work. Open steps you leave out are carried over unchanged.",
         "deterministic_evidence.runtime_refusals are runtime policy decisions (e.g. a dependency the job does not "
         "name, a forbidden command): they will be refused again. Plan the remaining work so it does not need the "
         "refused action – for a refused dependency, the standard-library solution without that package or manifest.",

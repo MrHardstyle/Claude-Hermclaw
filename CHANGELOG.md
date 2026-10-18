@@ -2,6 +2,11 @@
 
 Format: [Keep a Changelog](https://keepachangelog.com/de/1.1.0/), Versionen nach PEP 440.
 
+## [Unreleased]
+
+### Behoben
+- **Replan erhält den Auftragsumfang (BUG-224):** Offene Schritte, die ein Replan weder wiederholt noch ersetzt, werden mit umgehängten Abhängigkeiten übernommen. Vorher konnte ein Replan nach einem gescheiterten Schritt Frontend, Tests und README still verwerfen.
+
 ## [0.1.0rc25] – Release Candidate (2026-10-18)
 
 Fixes aus dem Großauftrag G1 (Windows-Widget für Proxmox VE und Unraid) auf 0.1.0rc24.

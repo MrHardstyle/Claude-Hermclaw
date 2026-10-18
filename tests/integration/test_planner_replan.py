@@ -237,6 +237,24 @@ async def test_replan_preserves_completed_steps_and_supersedes_the_rest(sessionm
     assert types.count(EventType.STEP_CREATED) == 3 + 2
 
 
+async def test_open_steps_the_replan_leaves_out_are_carried_over(sessionmaker: object) -> None:
+    """BUG-224: the replanner answered a failed step with one replacement and silently dropped the open steps after it;
+    the job would have ended succeeded with a fraction of the order."""
+    sm = _sm(sessionmaker)
+    job_id, ids = await _planned_fastapi(sm)
+    only_docs = _replan_answer()
+    only_docs["steps"] = only_docs["steps"][:1]  # S002 again, without any review step: open S003 is not covered
+    result = await Replanner(ScriptedChat([only_docs]), sm, get_config()).replan(job_id, _trigger(ids), FASTAPI.inputs)
+    async with sm() as s:
+        version = (await s.execute(select(PlanVersion).where(PlanVersion.job_id == job_id, PlanVersion.version == 2))).scalar_one()
+    merged = PlanContract.model_validate(version.plan_json)
+    assert [st.id for st in merged.steps] == ["S001", "S002", "S003"]
+    assert next(st for st in merged.steps if st.id == "S003").depends_on == ["S001", "S002"]
+    assert result.created_step_keys == ["S002", "S003"]
+    created = next(p for t, p in await _events(sm, job_id) if t == EventType.REPLAN_CREATED)
+    assert any("open step S003" in n and "carried over" in n for n in created["notes"])
+
+
 async def test_failure_package_contents(sessionmaker: object) -> None:
     sm = _sm(sessionmaker)
     job_id, ids = await _planned_fastapi(sm)

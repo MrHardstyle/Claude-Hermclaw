@@ -6,7 +6,7 @@ from typing import Any
 
 import pytest
 
-from hermclaw.contracts.plan import PlanContract
+from hermclaw.contracts.plan import PlanContract, PlanStep
 from hermclaw.core.config import get_config
 from hermclaw.planner.errors import PlanInvalid
 from hermclaw.planner.inputs import (
@@ -668,3 +668,38 @@ def test_a_new_manifest_in_a_repository_without_one_gets_advice_once() -> None:
     assert new_manifest_notes(PlanContract.model_validate(plan("SDK", [sdk])), quoting) == []
     assert len(new_manifest_notes(_health_plan("requirements.txt"), quoting)) == 1, "a package the job does not quote still gets advice"
     assert quoted_names("Nutze „Left-Pad“ und `lodash.merge`, nicht 'x'.") == ["left-pad", "lodash-merge"]
+
+
+def test_open_steps_without_a_replacement_are_carried_over_with_remapped_dependencies() -> None:
+    """BUG-224 (grand job G1): a fallback for the failed collector step S003 must not drop frontend, tests and README."""
+    from hermclaw.planner.replan_contract import ReplanStep
+    from hermclaw.planner.replanner import carry_over_open_steps
+
+    def ps(sid: str, kind: str, goal: str, deps: list[str], new: list[str] | None = None) -> PlanStep:
+        cap = {"implement": "coding", "documentation": "documentation", "test": "testing"}[kind]
+        return PlanStep.model_validate(step(sid, kind, cap, goal, depends_on=deps, allowed_new_paths=new or []))
+
+    open_steps = [
+        ps("S004", "implement", "Implementiere das Widget-Frontend (index.html, styles.css, app.js).", ["S003"], ["index.html"]),
+        ps("S006", "implement", "Implementiere unittest-Tests für Collector und Parser.", ["S003"], ["test_collector.py"]),
+        ps("S007", "documentation", "Aktualisiere README.md auf Deutsch: Installation, Bedienung, Autostart.", ["S003", "S004"]),
+        ps("S008", "test", "Führe die unittest-Tests aus.", ["S006"]),
+        ps("S009", "implement", "Write the collector core with config handling.", ["S001"], ["collector_core.py"]),
+    ]
+    fallback = ReplanStep.model_validate(
+        step(
+            "S011",
+            "implement",
+            "coding",
+            "Implementiere den Python-Collector (collector.py) mit TOML-Konfiguration.",
+            depends_on=["S001"],
+            allowed_new_paths=["collector.py", "collector_core.py"],
+        )
+    )
+    carried, notes = carry_over_open_steps([fallback], open_steps, frozenset({"S001"}))
+    by_id = {c.id: c.depends_on for c in carried}
+    assert by_id == {"S004": ["S011"], "S006": ["S011"], "S007": ["S011", "S004"], "S008": ["S006"]}  # S009: same created file
+    assert len(notes) == 4 and all("carried over" in n for n in notes)
+    review = ReplanStep.model_validate(step("S012", "test", "testing", "Run the whole suite once more.", depends_on=["S011"]))
+    carried, _ = carry_over_open_steps([fallback, review], open_steps, frozenset({"S001"}))
+    assert "S008" not in {c.id for c in carried}  # a new test step covers the open one

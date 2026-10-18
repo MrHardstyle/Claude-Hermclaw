@@ -212,6 +212,7 @@ def test_replanner_system_prompt_adds_rerun_rules() -> None:
     kc = _kc()
     system = replanner_system_prompt(kc, sorted(set(kc.values())), 30)
     assert "REPLANNER" in system and "rerun_reason" in system and "completed_steps are already done" in system
+    assert "open_steps are still part of the job" in system and "carried over unchanged" in system  # BUG-224
 
 
 def test_repair_message_lists_every_error() -> None:

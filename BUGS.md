@@ -46,6 +46,19 @@ Noch keine.
 
 ## Behobene Bugs
 
+### BUG-224 – Replan verwirft offene Schritte stillschweigend; der Job würde mit einem Bruchteil des Auftrags „succeeded“ enden
+- Phase: Großauftrag G1 auf 0.1.0rc25 · Komponente: planner/replanner · Severity: P0 · blockierend: ja (behoben) · Status: **behoben** (`tests/unit/test_planner_validation.py::test_open_steps_without_a_replacement_are_carried_over_with_remapped_dependencies`, `tests/integration/test_planner_replan.py::test_open_steps_the_replan_leaves_out_are_carried_over`, Prompt-Regel in `tests/unit/test_planner_prompt.py`; Simulation mit den echten Plänen v1/v2 von G1: S004–S008 übernommen, Abhängigkeiten von S003 auf S011 umgehängt)
+- Reproduktion: Job `b3441414-9422-4887-8cb1-b0f7c43e5ced`. S003 (Collector) scheiterte an BUG-223, Replan `step_failed` um 01:55. Der Replanner lieferte einen einzigen Schritt S011 „Implement Collector Core and Config (Fallback)“ (608 Completion-Tokens). Die Runtime brach S004 bis S008 (Frontend, PowerShell-Skripte, Tests, README, Testlauf) als „superseded by plan version 2“ ab. Plan v2 enthält nur noch die Recherchen und S011. Nach S011 wäre der Job ohne Widget, Skripte, Tests und README erfolgreich beendet worden.
+- Ursache: Ein Replan ersetzt die gesamte restliche Arbeit. Die offenen Schritte standen zwar im Prompt, aber nichts stellte sicher, dass sie im neuen Plan wieder auftauchen. Ein Modell, das sich auf den gescheiterten Schritt konzentriert, lässt den Rest weg, und die Runtime übernahm das ungeprüft. Das trifft genau die langen Aufträge: Jeder Replan kann still Umfang verlieren.
+- Fix: `carry_over_open_steps` übernimmt deterministisch jeden offenen, nicht finalen Schritt des alten Plans (außer dem gescheiterten), den kein neuer Schritt abdeckt. Abgedeckt heißt:
+  - gleiche ID;
+  - eine gemeinsame neu angelegte Datei;
+  - mindestens 60 % seiner Inhaltswörter;
+  - bei review/verify/test: ein neuer Prüfschritt derselben Art.
+
+  Abhängigkeiten auf weggefallene Schritte zeigen auf die neuen Schritte des Modells. Jede Übernahme steht als Notiz im `replan.created`-Event. Die Replanner-Regel sagt außerdem, dass offene Schritte zum Auftrag gehören und ausgelassene übernommen werden.
+- Selbstprüfung: echter Schritt nach vorn. Bisher gab es keine Garantie, dass ein Replan den Auftragsumfang erhält. Die Übernahme ist deterministisch und beruht nicht auf einem weiteren Prompt-Appell.
+
 ### BUG-223 – Coder scheitert an großen Dateien: Antwort am Output-Limit abgeschnitten, Reparaturen wiederholen es
 - Phase: Großauftrag G1 auf 0.1.0rc24 (S003 Collector) · Komponente: models/gateway, coder/loop, tools · Severity: P1 · blockierend: ja für große Module (behoben) · Status: **behoben** (`tests/unit/test_models_gateway.py::test_structured_cut_off_answers_get_a_concise_repair_then_raise`, `tests/integration/test_coder_loop.py::test_cut_off_answer_asks_for_writing_in_parts_and_gets_one_extra_turn`, `tests/integration/test_tools_engine_read_write.py::test_write_file_append_writes_large_files_in_parts`, Kontrakt-Regel in `tests/unit/test_planner_prompt.py`)
 - Reproduktion: Job `b3441414-9422-4887-8cb1-b0f7c43e5ced`, S003. Nach README und `config.example.toml` wollte der Coder `collector.py` in einem `write_file` schreiben. Vier Aufrufe in Folge endeten mit `finish_reason=length` bei 6144/6144 Tokens, Status `invalid`, je 240–262 s (01:11–01:28). Zwei davon waren Reparaturen mit identischem Request-Hash.
