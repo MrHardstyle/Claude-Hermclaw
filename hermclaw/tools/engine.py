@@ -926,10 +926,23 @@ class ToolEngine:
         if not target.exists():
             raise ToolError(E.NOT_FOUND, f"'{rel}' does not exist; use write_file to create it")
         await self._authorise(ToolName.replace_text, [(rel, "modify")], events)
-        if args.old == args.new:
-            raise ToolError(E.NO_CHANGE, "'old' and 'new' are identical")
         tf = await asyncio.to_thread(self.fs.read_text, rel, max_bytes=self.max_read_bytes)
         text = tf.text
+        if args.old == args.new:
+            # the coder sent the same 2 KB replace four times: its fix was already in the file from an earlier write,
+            # and the bare "identical" refusal never said so (live G1 S005, BUG-272)
+            present = args.old in text or args.old in self.redactor.text(text)
+            state = (
+                f"{rel} already contains this text, so the change it stands for is already made. Do not send it again: "
+                "go on with the next open point of the correction or LATEST FAILURE, run the check, or call complete_step."
+                if present
+                else f"this text is not in {rel} either; copy the current lines into 'old' and write the changed lines in 'new'."
+            )
+            raise ToolError(
+                E.NO_CHANGE,
+                f"replace refused: 'old' and 'new' are identical, so nothing would change. {state}",
+                data={"path": rel, "changed": False, "repeated": True, "present": present},
+            )
         if not (REDACTED in args.old and REDACTED not in text):  # a masked 'old' is resolved by _masked_replace
             self._check_placeholder(args.new, text)
         old, new = args.old, args.new

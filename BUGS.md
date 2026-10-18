@@ -46,6 +46,21 @@ Noch keine.
 
 ## Behobene Bugs
 
+### BUG-272 – Der Coder sendet viermal dasselbe `replace_text` mit `old == new`; die Ablehnung sagt nicht, dass die Änderung schon in der Datei steht
+- Phase: G1 auf rc56 (Job `0f3f2a32…`, S005 Versuch 2, Turns 8–14) · Komponente: tools (engine) · Severity: P2 · blockierend: nein (behoben) · Status: **behoben** (`tests/integration/test_tools_engine_read_write.py::test_an_identical_replace_says_whether_the_change_is_already_made`)
+- Reproduktion:
+  - S005 hat `app.js` in Turn 5 neu geschrieben. Danach sendet der Coder viermal `replace_text` mit identischem, 2038 Zeichen langem `old`/`new` für `renderConfigInputs`.
+  - Die Antwort lautet jedes Mal nur „'old' and 'new' are identical“.
+  - Die Stagnationserkennung stoppt mit `edit_mechanics`, die Heavy-Review-Stufe ist verbraucht.
+- Ursache:
+  - Die Ablehnung prüfte nur die Argumente, nicht die Datei. Dass die gewünschte Fassung schon drinsteht, erfuhr der Coder nicht.
+  - Ohne die Markierung `repeated` ersetzte die Ablehnung außerdem die maßgebliche letzte Rückmeldung.
+- Fix:
+  - Die Prüfung läuft nach dem Lesen der Datei.
+  - Die Ablehnung sagt, ob die Datei den Text enthält („change … already made … go on with the next open point“) oder nicht („copy the current lines“).
+  - Sie ist als `repeated` markiert (wie `NO_CHANGE` bei `write_file`, BUG-253).
+- Selbstprüfung: Eine Rückmeldung, die den tatsächlichen Zustand nennt, ist ein echter Schritt nach vorn. Kein Sonderfall: gilt für jedes identische `replace_text`.
+
 ### BUG-271 – Der Coder fordert nach verweigerten Wiederholungen immer wieder dieselben Zeilen an; drei Versuche ohne eine einzige Änderung, G1 scheitert mit `REPLAN_LIMIT`
 - Phase: G1 auf rc50–rc55 (Job `5c3d40a5…`, S008 Versuche 1–3, S014 Versuche 1–4) · Komponente: coder (loop) · Severity: P1 · blockierend: ja (behoben; G1 FAIL nach 2 Replans) · Status: **behoben** (`tests/integration/test_coder_loop.py::test_reads_are_withheld_after_a_refused_re_read_until_a_file_changes`)
 - Reproduktion:

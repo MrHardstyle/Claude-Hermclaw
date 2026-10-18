@@ -74,7 +74,7 @@ per-attempt state: the active `ScopeGuard` (swapped after a granted expansion), 
 | `search_repo` / `search_symbol` | read | `RepoContextProvider.search` / `find_symbol`; hits on hidden paths are dropped |
 | `git_status` / `git_diff` | git | `GitReader.status` / `diff` (diff sections of protected files are omitted) |
 | `write_file` | write | create/overwrite or `append` a part (large files are written in parts, BUG-223), scope-checked, atomic (temp file + fsync + rename), mode preserved, redaction marker refused; a write that leaves the file unchanged is refused (`NO_CHANGE`, a repeat that keeps LATEST FAILURE, BUG-253) |
-| `replace_text` | write | exact match, `count` must equal the number of occurrences (default 1), CRLF-aware, helpful not-found hints |
+| `replace_text` | write | exact match, `count` must equal the number of occurrences (default 1), CRLF-aware, helpful not-found hints; `old == new` is refused as `NO_CHANGE` (marked `repeated`), saying whether the file already contains the text, so the change is already made, or not (BUG-272) |
 | `apply_patch` | write | unified diff (`-p1` git style or `-p0`); every target validated → numstat cross-check → `git apply --check` → `git apply` (worktree only) inside a tracker audit |
 | `run_command` | exec | classified, executed via `CommandExecutor`, side effects audited (see below); an identical command on unchanged files is refused (`COMMAND_REPEATED`), and the refusal of a failed one repeats its earlier output (BUG-246); every command (also `run_test` and installs) runs after `set -o pipefail`, so a pipeline such as `pytest | tail -80` exits with its first failing command (BUG-267) |
 | `run_test` | exec | like `run_command` + parsed counts, `test_runs` row, `test.*` events |

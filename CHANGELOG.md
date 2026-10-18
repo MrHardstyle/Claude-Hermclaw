@@ -4,6 +4,9 @@ Format: [Keep a Changelog](https://keepachangelog.com/de/1.1.0/), Versionen nach
 
 ## [Unreleased]
 
+### Behoben
+- **Identisches replace_text erklärt sich (BUG-272):** Die Ablehnung nennt, ob die Datei den Text schon enthält (Änderung bereits gemacht → weiter mit dem nächsten Punkt) oder nicht.
+
 ## [0.1.0rc56] – Release Candidate (2026-10-18)
 
 ### Behoben

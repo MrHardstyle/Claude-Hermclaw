@@ -197,6 +197,18 @@ async def test_a_masked_line_left_unchanged_keeps_its_content(sessionmaker: SM, 
     assert bad.error_code == E.REDACTED_PLACEHOLDER and "qwzrtvkplm" in (repo / "tests" / "test_client.py").read_text()
 
 
+async def test_an_identical_replace_says_whether_the_change_is_already_made(sessionmaker: SM, repo: Path) -> None:
+    """Live G1 (BUG-272): the coder sent the same 2 KB replace_text with old == new four times; its fix was already in
+    the file from an earlier write, and the bare "identical" refusal never said so until stagnation stopped the step."""
+    (repo / "src" / "util.py").write_text("def f():\n    return 1\n")
+    h = await make_harness(sessionmaker, repo, contract=scope(target_paths=["src/util.py"]))
+    done = await h.call("replace_text", path="src/util.py", old="    return 1\n", new="    return 1\n")
+    assert done.error_code == E.NO_CHANGE and done.data["present"] is True and done.data["repeated"] is True
+    assert "already contains this text" in done.output and "complete_step" in done.output
+    missing = await h.call("replace_text", path="src/util.py", old="return 2", new="return 2")
+    assert missing.error_code == E.NO_CHANGE and missing.data["present"] is False and "copy the current lines" in missing.output
+
+
 async def test_read_output_budget_sets_truncated(sessionmaker: SM, repo: Path) -> None:
     (repo / "big.txt").write_text("".join(f"line {i:05d} " + "x" * 60 + "\n" for i in range(2000)))
     h = await make_harness(sessionmaker, repo)
