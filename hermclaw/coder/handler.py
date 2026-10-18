@@ -37,7 +37,7 @@ from hermclaw.core.logging import get_logger
 from hermclaw.core.redaction import DEFAULT_REDACTOR
 from hermclaw.events.store import append_event
 from hermclaw.models.protocols import ChatModel
-from hermclaw.persistence.models import Job, JobInput, Step, StepAttempt, StepDependency
+from hermclaw.persistence.models import Event, Job, JobInput, Step, StepAttempt, StepDependency
 from hermclaw.research.findings import research_findings
 from hermclaw.runtime.transitions import emit_status
 from hermclaw.scheduler.handlers import StepOutcome, StepRunContext
@@ -246,6 +246,15 @@ class ImplementStepHandler:
             job = await s.get(Job, job_id)
         return "" if job is None else "\n".join(p for p in (job.title, job.prompt) if p)
 
+    async def _own_changes(self, step_id: uuid.UUID) -> set[str]:
+        """Paths this step's own attempts changed (``file.changed`` events): never adopted as another step's leftovers,
+        so an out-of-scope change of its own stays a violation."""
+        async with self.sm() as s:
+            payloads = (
+                await s.execute(select(Event.payload).where(Event.step_id == step_id, Event.event_type == EventType.FILE_CHANGED))
+            ).scalars()
+            return {str(c.get("path")) for p in payloads for c in (p or {}).get("changes") or [] if isinstance(c, dict) and c.get("path")}
+
     async def _dependency_files(self, step_id: uuid.UUID, limit: int = 12) -> list[str]:
         """Files the completed steps ``step_id`` depends on (transitively, nearest first) committed – the interfaces
         this step builds on (BUG-242) – then those of the job's other completed steps, newest first: they share the
@@ -370,9 +379,12 @@ class ImplementStepHandler:
                     replan_evidence={"reason_code": decision.reason_code, **(decision.evidence or {})},
                 )
             contract = decision.contract
-            # uncommitted changes of an earlier unfinished step are this step's to finish, not a scope violation
-            adopted = await self.deps.scope_engine.adopt_leftovers(ctx.step_id, await self.deps.git.changed_files(handle))
-            contract = adopted or contract
+        # uncommitted changes of an earlier unfinished step are this step's to finish, not a scope violation – checked on
+        # every attempt: another step can run (and be blocked) between two attempts of this one (live G1, BUG-255)
+        own = await self._own_changes(ctx.step_id)
+        leftovers = [p for p in await self.deps.git.changed_files(handle) if p not in own]
+        adopted = await self.deps.scope_engine.adopt_leftovers(ctx.step_id, leftovers) if leftovers else None
+        contract = adopted or contract
         step = step_contract(row, contract)
         findings = await research_findings(self.sm, ctx.step_id)
         if findings:  # cited results of the research steps this step depends on (P12 → P17)

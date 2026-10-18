@@ -24,7 +24,7 @@ from hermclaw.contracts.verification import VerificationCheck, VerificationRepor
 from hermclaw.core.config import get_config
 from hermclaw.core.interfaces import WorkspaceHandle
 from hermclaw.models.protocols import CallContext, ChatMessage, ChatResult, StructuredResult
-from hermclaw.persistence.models import Job, Step, StepAttempt, VerificationRun
+from hermclaw.persistence.models import Event, Job, Step, StepAttempt, VerificationRun
 from hermclaw.planner import Planner, Replanner
 from hermclaw.runtime.driver import DriverSettings, RuntimeJobDriver
 from hermclaw.scope.audit import ScopeAuditor
@@ -591,3 +591,28 @@ async def test_dependency_files_fall_back_to_the_jobs_other_completed_steps(worl
     handler = _handler(world, Models([], []), ScriptedVerifier(world, []), None)
     files = await handler._dependency_files(frontend.id)
     assert files == ["lib/base.py", "collector.py", "config.example.toml", "start.ps1"]
+
+
+async def test_leftovers_of_a_step_that_ran_between_two_attempts_are_adopted(world: World, tmp_path: Path) -> None:
+    """Live G1 (BUG-255): S003 had started when S002 ran, left collector.py/README.md uncommitted and was blocked; the
+    resumed S003 failed with SCOPE_VIOLATION for files it never touched. Leftovers are adopted on every attempt, not
+    only the first – files the step changed itself are never adopted."""
+
+    class LeftoverVerifier(ScriptedVerifier):
+        async def verify(self, step: StepContract, workspace: WorkspaceHandle, **kw: Any) -> VerificationOutcome:
+            if self.calls == 0:  # another step runs between the attempts and leaves a file behind
+                (workspace.path / "notes.md").write_text("left by another step\n")
+            return await super().verify(step, workspace, **kw)
+
+    models = Models([_plan()], [EDIT, DONE, DONE])
+    verifier = LeftoverVerifier(world, [False, True])
+    jid = await _job(world)
+    jobs = await _run(world, _driver(world, models, tmp_path), [_handler(world, models, verifier, None), ReviewHandler()], [jid])
+    assert jobs[jid].status == "succeeded", (jobs[jid].error_code, jobs[jid].error_message)
+    async with world.sessionmaker() as s:
+        adopted = [
+            e.payload.get("adopted_leftovers")
+            for e in (await s.execute(select(Event).where(Event.job_id == jid, Event.event_type == "scope.expanded"))).scalars()
+        ]
+    assert ["notes.md"] in adopted, adopted
+    assert all("src/module.py" not in (a or []) for a in adopted), "the step's own change is never adopted"

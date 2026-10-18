@@ -46,6 +46,18 @@ Noch keine.
 
 ## Behobene Bugs
 
+### BUG-255 – Liegengebliebene Dateien eines Schritts, der zwischen zwei Versuchen eines anderen lief, gelten als dessen Scope-Verstoß
+- Phase: G1 auf rc40/41 (Job `3d90ec7b…`, S003 Versuch 5) · Komponente: coder (handler), scope · Severity: P1 · blockierend: ja (behoben) · Status: **behoben** (`tests/integration/test_coder_handler.py::test_leftovers_of_a_step_that_ran_between_two_attempts_are_adopted`)
+- Reproduktion:
+  - S003 (Frontend) startet und wird beim Deploy checkpointed.
+  - Danach läuft S002 (Collector), legt `collector.py`, `README.md` und `requirements.txt` an und wird blockiert.
+  - S003 setzt fort und scheitert nach 20 Turns mit `SCOPE_VIOLATION` (3 out-of-scope changes) für Dateien, die es nie geändert hat.
+- Ursache: `adopt_leftovers` (BUG-206) lief nur beim ersten Versuch eines Schritts. Läuft ein anderer Schritt zwischen zwei Versuchen und bleibt unfertig, wurden seine Dateien dem fortgesetzten Schritt zugeschrieben.
+- Fix:
+  - Vor jedem Versuch übernimmt der Handler liegengebliebene Änderungen in den Scope.
+  - Ausgenommen sind Dateien, die der Schritt selbst geändert hat (seine `file.changed`-Ereignisse). Ein eigener Scope-Verstoß bleibt also ein Verstoß.
+- Selbstprüfung: echter Schritt nach vorn. Erweiterung von BUG-206 auf einen Fall, den die Annahme „ein Schritt nach dem anderen“ übersah: Checkpoints und blockierte Schritte verschränken die Versuche zweier Schritte.
+
 ### BUG-254 – Das Schrittziel bietet ein nicht angefordertes Drittpaket an („tomllib/tomli_w“); der Coder versucht es und blockiert
 - Phase: G1 auf rc40 (Job `3d90ec7b…`, S002 Versuch 3) · Komponente: planner (prompt) · Severity: P1 · blockierend: nein (behoben) · Status: **behoben** (`tests/unit/test_planner_prompt.py::test_research_is_for_external_facts_not_the_repository_itself`, Nadel „never names a third-party package the job does not ask for“)
 - Reproduktion:
