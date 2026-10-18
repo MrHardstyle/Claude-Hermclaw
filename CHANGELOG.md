@@ -4,6 +4,8 @@ Format: [Keep a Changelog](https://keepachangelog.com/de/1.1.0/), Versionen nach
 
 ## [Unreleased]
 
+## [0.1.0rc58] – Release Candidate (2026-10-18)
+
 ### Behoben
 - **Kurze Komponentennamen ordnen Schritte (BUG-273):** Ein Schritt, dessen Ziel „die lokale API“ nennt, muss mit dem Schritt geordnet sein, der `api.py` schreibt; kurze Stämme zählen als Akronym in Großbuchstaben.
 
