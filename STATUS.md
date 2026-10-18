@@ -234,6 +234,11 @@ bestanden; ansible-lint (production) sauber. `test_deploy_converge` ist angepass
     - Beobachtung ohne Fix: Der Reviewer meldete einmal eine Testdatei als fehlend, deren Diff gekürzt war (der Prompt verbietet das bereits). Wieder aufgreifen, falls es erneut auftritt.
 
     Neustart auf rc46 (`28f184c5`) scheiterte nach 4,5 min in der Planung (BUG-261). Neustart auf rc47 (`99f2f1ff`) scheiterte ebenfalls in der Planung (BUG-262). Neustart auf rc48 (`cbfe8802`) scheiterte nach 4 s an einer GitLab-Störung (BUG-263). Neustart von G1 auf rc49. Während des Laufs wird nur bei blockierenden Fehlern deployt.
+15. G1 auf rc49–rc55 (Job `5c3d40a5…`, FAIL nach 150,5 min, `REPLAN_LIMIT`; nur die Recherche abgeschlossen). Plan v1 war nach 2 Reparaturen gültig (BUG-261/262 live bestätigt).
+    - Früheste vermeidbare Entscheidung: S003 las sein eigenes, 845 Zeilen langes collector.py immer wieder von vorn. Das führte zu BUG-264 (Blättern), BUG-265 (Blättern als Schleife gewertet) und BUG-266 (geblätterte Seiten nicht im Kontext); Replan 1.
+    - Replan 1 gab S008 ein Ziel in collector.py ohne die Datei im Scope (BUG-268). Gefunden wurden außerdem `pytest | tail` als bestanden gewertet (BUG-267) und verrutschte Felder (BUG-269); Replan 2.
+    - In Replan 2 las S014 in vier Versuchen nur. Eine Änderung wurde am maskierten Passwort abgelehnt (BUG-270), danach forderte der Coder gezeigte Zeilen immer wieder an (BUG-271).
+    - Neustart von G1 auf rc56.
 3. 0.1.0rc18 ausrollen, J1–J6 zweimal in Folge bestehen, dann die erweiterte Batterie X1–X5
    (`config/acceptance-jobs-extended.example.yaml`); danach Abbruch, parallele Jobs und Worker-Neustart prüfen.
 4. Wake-on-LAN einrichten (MACs, BIOS, Kapitel 13.1), danach `--suite wol --full-wol` und erst dann den Leerlauf-Suspend einschalten.
