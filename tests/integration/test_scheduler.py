@@ -139,6 +139,15 @@ class FakeHandler:
                 raise WorkerUnreachable("no ready execution worker with capability sandbox")
             if what == "fail_retry":
                 return StepOutcome("failed", error_code="FLAKY", error_message="transient", retryable=True)
+            if what == "fail_correct":  # like the coder handler's _correction: evidence for the next attempt
+                async with ctx.sessionmaker() as s:
+                    await s.execute(
+                        update(StepAttempt)
+                        .where(StepAttempt.id == ctx.attempt_id)
+                        .values(correction_input={"pending": True, "items": ["lint"]})
+                    )
+                    await s.commit()
+                return StepOutcome("failed", error_code="VERIFIER_FAILED", error_message="lint", retryable=True, retry_delay_seconds=0)
             if what == "fail":
                 return StepOutcome("failed", error_code="BROKEN", error_message="permanent")
             if what == "model_down":
@@ -298,6 +307,29 @@ async def test_model_outage_during_a_step_does_not_use_up_its_attempts(sessionma
     sched4 = Scheduler(sm, get_config(), [h4], driver, settings=_settings(model_outage_retry_seconds=(0,)))
     jobs4 = await _run_until(sched4, sm, [jid4])
     assert jobs4[jid4].status == "succeeded" and len(h4.calls) == 5
+    # BUG-249: after a resumed attempt failed with a correction, the next attempt is the correction (with its evidence),
+    # not another "resume" of the stale checkpoint; a worker outage keeps the checkpoint for the next resume
+    h5 = FakeHandler({"test"}, script={"S1": ["checkpoint", "worker_down", "fail_correct", "completed"]})
+    jid5 = await _new_job(sm)
+    driver.plans[jid5] = [StepSpec("S1", max_attempts=3)]
+    sched5 = Scheduler(sm, get_config(), [h5], driver, settings=_settings(model_outage_retry_seconds=(0,)))
+    jobs5 = await _run_until(sched5, sm, [jid5])
+    assert jobs5[jid5].status == "succeeded"
+    assert [k for _, _, k in h5.calls] == ["initial", "resume", "resume", "correction"]
+    # a correction interrupted by a deployment: the resumed attempt still carries the evidence
+    h6 = FakeHandler({"test"}, script={"S1": ["fail_correct", "checkpoint", "completed"]})
+    jid6 = await _new_job(sm)
+    driver.plans[jid6] = [StepSpec("S1", max_attempts=3)]
+    sched6 = Scheduler(sm, get_config(), [h6], driver, settings=_settings(model_outage_retry_seconds=(0,)))
+    assert (await _run_until(sched6, sm, [jid6]))[jid6].status == "succeeded"
+    assert [k for _, _, k in h6.calls] == ["initial", "correction", "resume"]
+    async with sm() as s:
+        inputs = (
+            (await s.execute(select(StepAttempt.correction_input).join(Step).where(Step.job_id == jid6).order_by(StepAttempt.attempt_no)))
+            .scalars()
+            .all()
+        )
+    assert [bool((i or {}).get("pending")) for i in inputs] == [True, True, True]
     # an outage longer than model_outage_max_wait_seconds is a failure again
     h2 = FakeHandler({"test"}, script={"S1": ["model_down"]})
     jid2 = await _new_job(sm)

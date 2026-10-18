@@ -46,6 +46,20 @@ Noch keine.
 
 ## Behobene Bugs
 
+### BUG-249 – Nach einem Checkpoint verliert jeder weitere Versuch die Korrektur-Belege und setzt einen veralteten Stand fort
+- Phase: G1 auf rc38 (Job `8f394b63…`, S007 Versuche 3–5; ebenso S003 nach dem Deploy) · Komponente: scheduler, coder (handler) · Severity: P1 · blockierend: ja (behoben) · Status: **behoben** (`tests/integration/test_scheduler.py::test_model_outage_during_a_step_does_not_use_up_its_attempts`, Fälle h5/h6)
+- Reproduktion:
+  - S007 Versuch 1 wird beim Deploy checkpointed. Versuch 3 scheitert am Verifier: `correction.started`, 1 Element, vier `F401`-Funde.
+  - Versuch 4 startet als `resume`, nicht als `correction`. `LATEST FAILURE` ist leer (`omitted_reason: empty`). Der Coder sieht die Lint-Funde nie, ändert nichts und meldet `complete_step`. Ebenso Versuch 5.
+- Ursache:
+  1. Der Scheduler löschte `steps.checkpoint` nur bei `completed`. Nach einem echten Fehlschlag blieb der alte Checkpoint, und jeder weitere Versuch wurde ein `resume`: alter Verlauf, keine `correction_input`.
+  2. Ein Korrekturversuch, der seinerseits unterbrochen wurde, verlor seine Belege im folgenden `resume`.
+- Fix:
+  - Ein echter Fehlschlag verbraucht den Checkpoint (`st.checkpoint = {}`). Ein Ausfall (Modell/Worker) behält ihn, weil der Versuch nichts getan hat.
+  - Ein `resume`-Versuch erbt die ausstehende `correction_input` des Versuchs, den er fortsetzt.
+  - Der Coder-Handler nutzt Korrektur-Belege, sobald sie ausstehen, unabhängig von der Versuchsart.
+- Selbstprüfung: echter Schritt nach vorn. Die vierte Buchhaltungs-Lücke im Zusammenspiel Deploy/Checkpoint (BUG-232/233/236/249), jede ein eigener Pfad. Diese erklärt die verlorenen Korrekturen von S003 und S007. Weiter gilt: nur deployen, wenn es sich lohnt.
+
 ### BUG-248 – Ein maskiertes Geheimnis in einer Datei lässt sich mit keinem Werkzeug ersetzen, obwohl der Verifier es verlangt
 - Phase: G1 auf rc36/37 (Job `8f394b63…`, S003 Versuche 3–7) · Komponente: tools (engine) · Severity: P1 · blockierend: ja (behoben) · Status: **behoben** (`tests/integration/test_tools_engine_read_write.py::test_a_masked_secret_can_be_replaced_by_the_line_as_shown`)
 - Reproduktion:

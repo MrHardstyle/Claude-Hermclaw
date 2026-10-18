@@ -10,6 +10,7 @@
 - `JobDriver` protocol: `prepare(job_id, token)`, `finalize(job_id, token)`, `replan(job_id, reason, evidence, token)` → `JobPhaseResult`
 - `StepOutcome.outcome ∈ {completed, failed, blocked, checkpointed, replan, cancelled}`; `retryable`, `replan_reason`, `checkpoint`
 - `CancelToken`: cooperative cancel (`cancelled`) and pause/checkpoint (`checkpoint_requested`)
+- A checkpoint is used up by the attempt that resumes it: a real failure clears it (an outage keeps it), so the next attempt is a `correction`/`retry`, not a stale `resume`; a `resume` attempt inherits the pending `correction_input` of the attempt it continues (BUG-249)
 - `step_to()` / `job_to()`: state-machine transitions that pass through `running` when a sub-state cannot reach the target directly.
 
 ## Tick

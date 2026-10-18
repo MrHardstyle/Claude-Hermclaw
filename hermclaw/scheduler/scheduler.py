@@ -727,7 +727,9 @@ class Scheduler:
                     attempt_no=attempt_no,
                     kind=kind,
                     status="running",
-                    correction_input=(last.correction_input if last and kind == "correction" else {}),
+                    # a resumed attempt continues a correction that a deployment or an outage interrupted: it inherits the
+                    # pending evidence, else the interruption lost it (BUG-249)
+                    correction_input=(last.correction_input if last and kind in ("correction", "resume") else {}),
                 )
                 s.add(attempt)
                 st.attempt_count = attempt_no
@@ -904,6 +906,11 @@ class Scheduler:
                     error_message=out.error_message,
                 )
                 outage_delay = self._step_outage_delay(st.id, out.error_code) if out.retryable else None
+                if outage_delay is None:
+                    # the attempt that resumed a checkpoint ran and failed: the checkpoint is used up. Kept, it turned
+                    # every later attempt into a "resume" of stale state that dropped the pending correction – G1's S007
+                    # never saw the lint findings it had to fix (BUG-249). An outage did no work: its checkpoint stays.
+                    st.checkpoint = {}
                 if outage_delay is not None:
                     # BUG-197: the model host or the GPU lease was unavailable – the attempt did no work, so it does not
                     # use up the step's budget (the attempt number stays unique, the budget grows by one). Growing it

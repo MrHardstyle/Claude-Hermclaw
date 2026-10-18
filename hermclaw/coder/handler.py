@@ -408,7 +408,8 @@ class ImplementStepHandler:
         start, history, last_failure = (
             history_from_checkpoint(ctx.checkpoint.get("coder") or {}) if ctx.checkpoint.get("coder") else (0, [], None)
         )
-        corrections = corrections_from_input(ctx.correction_input) if ctx.attempt_kind == "correction" else []
+        pending = ctx.attempt_kind == "correction" or bool(ctx.correction_input.get("pending"))  # a resumed correction too
+        corrections = corrections_from_input(ctx.correction_input) if pending else []
         await self._status(ctx, f"Coder startet {row.step_key} ({ctx.attempt_kind}, max {settings.max_turns} Turns)")
         try:
             async with self._model(ctx, "coder", preemptible=True):
