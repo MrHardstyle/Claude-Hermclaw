@@ -46,6 +46,13 @@ Noch keine.
 
 ## Behobene Bugs
 
+### BUG-228 – Coder schreibt frisch angelegte Dateien identisch ein zweites Mal; ihm fehlt eine Fortschrittsliste
+- Phase: Großauftrag G1 auf 0.1.0rc26 (S003) · Komponente: context_builder · Severity: P3 · blockierend: nein (behoben) · Status: **behoben** (`tests/unit/test_context_builder_sections.py::test_scope_marks_written_new_files_and_lists_the_missing_ones`)
+- Reproduktion: Job `8e7c4b65-c9ff-46dd-a2a6-6898a2357bb6`, S003 (13 neue Dateien). Turn 2 „created config.toml“, Turn 3 dieselbe Datei erneut („already has this content; nothing written“). Turn 4/5 ebenso für `example_config.toml`. 2 von 14 Turns ohne Wirkung, bei einem 20-Turn-Budget.
+- Ursache: Der SCOPE-Abschnitt listete unter „May create“ nur die erlaubten Pfade, ohne Angabe, welche schon geschrieben waren. Bei vielen neuen Dateien verlor das Modell den Überblick über den Rest.
+- Fix: Neu angelegte Dateien dieses Versuchs werden im SCOPE-Abschnitt als „(written)“ markiert. Sobald eine geschrieben ist, listet „Not written yet: …“ die noch fehlenden konkreten Pfade auf (Globs nicht). Die Daten kommen aus den ohnehin ermittelten geänderten Dateien; kein zusätzlicher Werkzeugaufruf.
+- Selbstprüfung: echter Schritt nach vorn, eine kleine Ergänzung des Kontexts. Zusammen mit BUG-226 (kleinere Schritte) verringert sie verlorene Turns.
+
 ### BUG-227 – Nach einem Deployment scheitert der fortgesetzte Schritt, weil der Sandbox-Worker noch nicht bereit ist
 - Phase: Großauftrag G1, Deployments von rc25 und rc27 bei laufendem Job · Komponente: scheduler · Severity: P2 · blockierend: nein (behoben) · Status: **behoben** (`tests/integration/test_scheduler.py::test_model_outage_during_a_step_does_not_use_up_its_attempts`, erweitert um `worker_down`)
 - Reproduktion: Job `8e7c4b65-c9ff-46dd-a2a6-6898a2357bb6`, S003 nach 14 Turns. Deployment von rc27 um 03:04: `checkpointed` (paused) um 03:04:33, fortgesetzt um 03:05:19 (`resume`). Sofort `HANDLER_CRASHED: WorkerUnreachable: no ready execution worker with capability sandbox`, Schritt `failed`, Retry nach 120 s. Bei rc25 (Job `b3441414…`, S003) ebenso: checkpointed → failed.

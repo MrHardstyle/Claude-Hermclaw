@@ -362,3 +362,20 @@ async def test_tools_and_history_from_stored_mappings() -> None:
     built = await builder.build(make_input(tools=tools, history=[rec], turn=5))
     assert "- git_status(): Show status." in built.messages[0].content
     assert "- turn 4: run_test -> FAILED [test_failed] (changed: a.py)" in built.messages[1].content
+
+
+def test_scope_marks_written_new_files_and_lists_the_missing_ones() -> None:
+    """BUG-228 (grand job G1): without a checklist the coder rewrote freshly created files identically."""
+    from hermclaw.context_builder.render import render_scope
+    from hermclaw.contracts.scope import ScopeContract
+
+    scope = ScopeContract(
+        target_paths=["README.md"],
+        allowed_new_paths=["collector.py", "static/app.js", "tests/test_collector.py", "tests/fixtures/**"],
+        allowed_operations=["create", "modify"],
+    )
+    first = render_scope(scope, [], 4000, max_items=20).body
+    assert "(written)" not in first and "Not written yet" not in first
+    body = render_scope(scope, [], 4000, max_items=20, written=["collector.py", "README.md"]).body
+    assert "collector.py (written)" in body
+    assert "Not written yet: static/app.js, tests/test_collector.py" in body  # globs are no files to tick off

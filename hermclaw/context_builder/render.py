@@ -165,7 +165,16 @@ def _display(pattern: str) -> str:
     return lit if lit is not None else pattern
 
 
-def render_scope(scope: ScopeContract | None, exclude_globs: Sequence[str], budget: int, *, max_items: int) -> RenderedSection:
+def _new_path_display(path: str, done: set[str]) -> str:
+    return f"{_display(path)} (written)" if path in done else _display(path)
+
+
+def render_scope(
+    scope: ScopeContract | None, exclude_globs: Sequence[str], budget: int, *, max_items: int, written: Sequence[str] = ()
+) -> RenderedSection:
+    """``written``: files changed in this attempt. New files already written are marked and the ones still missing
+    are listed: without that checklist the coder wrote freshly created files a second time, identically, and lost
+    track of what was left (grand job G1 on 0.1.0rc26, BUG-228)."""
     sec = RenderedSection(SectionName.SCOPE)
     if scope is None:
         body = (
@@ -176,16 +185,20 @@ def render_scope(scope: ScopeContract | None, exclude_globs: Sequence[str], budg
         sec.truncated = char_cost(body) > budget
         return sec
     limit = max(1, max_items)
+    done = set(written)
     while True:
         forbidden = list(dict.fromkeys([*exclude_globs, *scope.forbidden_paths]))
         lines = [
             f"Scope version {scope.version} ({'strict target paths' if scope.strict_target_paths else 'target globs'}).",
             f"Allowed operations: {', '.join(scope.allowed_operations) or '(none)'}",
             f"May modify: {_bullets([_display(p) for p in scope.target_paths], limit, 200)}",
-            f"May create: {_bullets([_display(p) for p in scope.allowed_new_paths], limit, 200)}",
+            f"May create: {_bullets([_new_path_display(p, done) for p in scope.allowed_new_paths], limit, 200)}",
             f"Forbidden (never write; secret files are never shown): {_bullets(forbidden, limit, 120)}",
             "Everything else is outside the scope; request_scope_expansion asks the runtime for more (with justification).",
         ]
+        missing = [p for p in scope.allowed_new_paths if literal_path(p) and p not in done]
+        if done & set(scope.allowed_new_paths) and missing:
+            lines.insert(5, f"Not written yet: {', '.join(_display(p) for p in missing[:limit])}")
         if scope.reason:
             lines.insert(1, f"Reason: {clip_line(scope.reason, 300)}")
         body = "\n".join(lines)

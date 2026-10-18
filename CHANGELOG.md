@@ -5,6 +5,7 @@ Format: [Keep a Changelog](https://keepachangelog.com/de/1.1.0/), Versionen nach
 ## [Unreleased]
 
 ### Behoben
+- **Fortschrittsliste im Coder-Kontext (BUG-228):** Geschriebene neue Dateien sind markiert, noch fehlende werden aufgelistet.
 - **Deployment bei laufendem Job (BUG-227):** Ist der Sandbox-Worker nach einem Neustart noch nicht bereit, wartet der fortgesetzte Schritt mit Backoff, ohne einen Versuch zu verbrauchen.
 
 ## [0.1.0rc27] – Release Candidate (2026-10-18)
