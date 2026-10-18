@@ -4,6 +4,8 @@ Format: [Keep a Changelog](https://keepachangelog.com/de/1.1.0/), Versionen nach
 
 ## [Unreleased]
 
+## [0.1.0rc32] – Release Candidate (2026-10-18)
+
 ### Behoben
 - **Ausgabelimit des Coders (BUG-235):** Der Coder fordert so viele Ausgabe-Tokens an, wie das Kontextbudget reserviert (Profil `coder-main`: 8192), statt fest 6144.
 - **Schnittstellen zwischen Schritten und hohle Tests (BUG-234):** Der Planner lässt bei zusammenarbeitenden Komponenten aus verschiedenen Schritten eine Schnittstellendatei schreiben, an die sich beide Seiten halten. Der Reviewer wertet Mocks am falschen Ort, Zusicherungen, die auch bei Fehlern bestehen, und echte Netzwerkzugriffe in Tests als major.
