@@ -2,7 +2,9 @@
 
 Format: [Keep a Changelog](https://keepachangelog.com/de/1.1.0/), Versionen nach PEP 440.
 
-## [Unreleased]
+## [0.1.0rc27] – Release Candidate (2026-10-18)
+
+Fix aus dem Großauftrag G1 auf 0.1.0rc26.
 
 ### Behoben
 - **Schrittgröße (BUG-226):** Ein Planschritt legt höchstens so viele neue Dateien an, wie ein Coder-Versuch schreiben kann (aus `policies.coder.max_turns`, Standard 8). Größere Aufträge werden nach Komponenten geteilt, jede mit ihren Tests.
