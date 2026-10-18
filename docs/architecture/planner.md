@@ -229,3 +229,11 @@ A replan replaces the remaining work, but it never loses scope silently: every o
 other than the failed one is carried over unless a new step reuses its id, creates one of its files, names ≥ 60 % of
 its content words, or – for review/verify/test steps – is a check step of the same kind. Dependencies on steps that
 are gone point to the replanner's new steps. Each carry-over is listed in the notes of `replan.created`.
+
+### Written interfaces between steps (BUG-234)
+
+When components built in different steps talk to each other (an HTTP/JSON API and the page calling it, a file format
+and its reader), the planner prompt requires one written interface. The providing step writes it to a small file
+(e.g. `docs/api.md`: endpoints with method, path, example request and JSON response) in its `allowed_new_paths`. The
+consuming step depends on that step and names the file in its goal and `repo_hints`, so its coder sees the file under
+RELEVANT CODE instead of guessing the JSON shape.

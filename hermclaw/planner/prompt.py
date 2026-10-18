@@ -412,6 +412,11 @@ def _base_rules(kind_capability: dict[str, str], capability_names: Sequence[str]
         "something the implementing step's own acceptance does not; a small job usually needs one implement step. "
         "A step creates at most about 8 new files (one worker attempt has a limited number of turns): split a larger "
         "job by component (e.g. backend, frontend, scripts, documentation), each step with the tests of its own code.",
+        "Components built in different steps that talk to each other (an HTTP/JSON API and the page or client calling "
+        "it, a file format and its reader) need one written interface: the step building the providing side also "
+        "writes it to a small file (e.g. docs/api.md: every endpoint with method, path and an example request and "
+        "JSON response, or every record with its fields) in its allowed_new_paths; the consuming step depends on that "
+        "step and names the file in its goal and repo_hints. Both sides follow the file, never their own guess.",
         "Choose the simplest solution that fully meets the job. Use the language's standard library and the tools the "
         "repository or the sandbox already has (e.g. its test runner) unless the job explicitly asks for a framework or "
         "library, or the repository already uses one. Every external dependency is an extra failure source: a "

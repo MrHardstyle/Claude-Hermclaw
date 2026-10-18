@@ -46,6 +46,17 @@ Noch keine.
 
 ## Behobene Bugs
 
+### BUG-234 – Frontend und Backend aus verschiedenen Schritten passen nicht zusammen; Tests prüfen nichts
+- Phase: Qualitätsprüfung der G1-Lieferung (rc26–rc28) · Komponente: planner (prompt), review (prompt) · Severity: P2 · blockierend: nein (behoben) · Status: **behoben** (`tests/unit/test_planner_prompt.py` Nadel „need one written interface“, `tests/unit/test_review_prompt.py::test_system_prompt_rules` Nadeln „Hollow tests“, „real network connections“)
+- Reproduktion: Job `8e7c4b65…`, Lieferung unter `/var/lib/hermclaw/workspaces/8e7c4b65-…/hermclaw-test`.
+  - Schnittstelle: `static/app.js` liest `metrics.ram`, `inst.metrics.cpu` und `s.name`; `collector.py` liefert `metrics.mem.usage`, flaches `inst.cpu` und `id`. Folge: Jede VM zeigt „n/v“, RAM erscheint nie.
+  - Hohle Tests: `tests/test_collector.py` patcht `urllib.request.urlopen`, während der Code anders auflöst, oder patcht `collector.urlopen`, das der Code nie aufruft. Ein Test öffnet eine echte Verbindung (10 s Timeout) und besteht trotzdem, weil er nur Server zählt. Der Storage-Parser liefert immer `[]`, sein Test besteht dennoch.
+- Ursache: Der Planner verteilte Anbieter (API) und Verbraucher (Seite) auf Schritte ohne gemeinsame, geschriebene Schnittstelle; jeder Coder riet das JSON-Format. Der Reviewer hatte keine Regel für hohle Tests (Mock am falschen Ort, Zusicherungen, die auch bei Fehlern bestehen, echte Netzwerkzugriffe).
+- Fix:
+  - Planner-Regel: Komponenten aus verschiedenen Schritten, die miteinander sprechen, bekommen eine geschriebene Schnittstelle (z. B. `docs/api.md` mit Endpunkten und Beispiel-JSON). Sie entsteht im Anbieter-Schritt; der Verbraucher-Schritt hängt davon ab und nennt sie in Ziel und `repo_hints`.
+  - Reviewer-Regel: hohle Tests sind major.
+- Selbstprüfung: echter Schritt nach vorn. Die Ursache sitzt in der Planung, an der frühesten Stelle; Regeln ohne projektspezifische Sonderfälle.
+
 ### BUG-233 – Ein Checkpoint (Deployment, Pause, Verdrängung) kostet einen Versuch: der fortgesetzte Versuch zählt neu
 - Phase: G1 auf rc30/rc31 · Komponente: scheduler · Severity: P2 · blockierend: nein (behoben) · Status: **behoben** (`tests/integration/test_scheduler.py::test_model_outage_during_a_step_does_not_use_up_its_attempts`, erweitert um `checkpoint`)
 - Reproduktion: Job `364a9c3c-78ab-453e-b984-2936ca887c02`, S003:
