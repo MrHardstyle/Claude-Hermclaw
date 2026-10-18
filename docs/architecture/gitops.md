@@ -43,6 +43,8 @@ async handle(ws) -> WorkspaceHandle                               # shared handl
 async status(ws) -> WorkspaceStatus
 async diff(ws, *, paths=None, include_patch=True, include_untracked=True, max_patch_bytes=None, max_files=None, context_lines=None) -> DiffResult
 async changed_files(ws) -> list[str]
+async park_paths(ws, paths, *, step_id=None) -> list[str]      # leftovers of another open step → .git/hermclaw-parked (BUG-257)
+async unpark_paths(ws, patterns, *, step_id=None) -> list[str] # back to the work tree when the owner starts; a changed path keeps its version
 # 6.7 / 6.8
 async stage_allowed(ws, scope: ScopeContract, *, step_id=None) -> StageResult          # .staged / .refused
 async commit_verified(ws, message: str, verification_run_id: UUID, *, step_id=None, scope: ScopeContract | None = None) -> CommitResult
@@ -96,6 +98,7 @@ Directory names come from `safe_dir_name()` (hash suffix when the repository nam
 | 6.1 | `RepositoryRegistry.register/set_protected_branches` | `git.operation` (`repository.register/update/protected_branches`) |
 | 6.2 | mirror clone / fetch → `mirror.clone` / `mirror.fetch` | `git.operation` |
 | 6.4/6.5 | `create_workspace` → `workspace.create` (`archive` for vanished dirs) | `git.operation` |
+| – | `park_paths` / `unpark_paths` → `workspace.park` / `workspace.unpark` (BUG-257) | `git.operation` |
 | 6.7 | `stage_allowed` → `stage` (+ `scope.violation` event if anything was refused) | `git.operation` |
 | 6.8 | `commit_verified` → `commit` | `git.commit.created` |
 | 6.9 | `push_job_branch` → `push` | `git.pushed` |

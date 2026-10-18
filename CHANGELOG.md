@@ -4,6 +4,9 @@ Format: [Keep a Changelog](https://keepachangelog.com/de/1.1.0/), Versionen nach
 
 ## [Unreleased]
 
+### Behoben
+- **Altlasten gehen an den Schritt, der sie laut Plan liefert (BUG-257):** Uncommittete Dateien abgelöster Schritte, die ein anderer offener Schritt in `allowed_new_paths` führt, werden geparkt (`.git/hermclaw-parked`, auditiert) und beim Start dieses Schritts zurückgelegt, statt dem zufällig nächsten Schritt Verifier- und Review-Befunde zu fremder Arbeit einzubringen.
+
 ## [0.1.0rc43] – Release Candidate (2026-10-18)
 
 ### Behoben

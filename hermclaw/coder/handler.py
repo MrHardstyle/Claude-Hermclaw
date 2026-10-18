@@ -36,6 +36,7 @@ from hermclaw.core.interfaces import CommandExecutor, RepoContextProvider, Works
 from hermclaw.core.logging import get_logger
 from hermclaw.core.redaction import DEFAULT_REDACTOR
 from hermclaw.events.store import append_event
+from hermclaw.gitops.engine import path_matches
 from hermclaw.models.protocols import ChatModel
 from hermclaw.persistence.models import Event, Job, JobInput, Step, StepAttempt, StepDependency
 from hermclaw.research.findings import research_findings
@@ -255,6 +256,27 @@ class ImplementStepHandler:
             ).scalars()
             return {str(c.get("path")) for p in payloads for c in (p or {}).get("changes") or [] if isinstance(c, dict) and c.get("path")}
 
+    async def _path_claims(self, step_id: uuid.UUID) -> tuple[list[str], list[str]]:
+        """(the ``allowed_new_paths`` of the job's other open steps, the paths this step declares – its own
+        ``allowed_new_paths`` and ``repo_hints``) – who a leftover file belongs to (BUG-257)."""
+        async with self.sm() as s:
+            row = await s.get(Step, step_id)
+            if row is None:
+                return [], []
+            others = (
+                await s.execute(
+                    select(Step.allowed_new_paths).where(
+                        Step.job_id == row.job_id,
+                        Step.id != step_id,
+                        Step.superseded.is_(False),
+                        Step.status.not_in(("completed", "cancelled")),
+                    )
+                )
+            ).scalars()
+            claims = [str(p) for paths in others for p in paths or [] if p]
+            mine = [str(p) for p in [*(row.allowed_new_paths or []), *(row.repo_hints or [])] if p]
+        return claims, mine
+
     async def _dependency_files(self, step_id: uuid.UUID, limit: int = 12) -> list[str]:
         """Files the completed steps ``step_id`` depends on (transitively, nearest first) committed – the interfaces
         this step builds on (BUG-242) – then those of the job's other completed steps, newest first: they share the
@@ -379,10 +401,19 @@ class ImplementStepHandler:
                     replan_evidence={"reason_code": decision.reason_code, **(decision.evidence or {})},
                 )
             contract = decision.contract
+        # leftovers another open step of the job declares as its new files are that step's work, not whichever step
+        # runs first: set aside until the owner starts (live G1: S002 took over S003's frontend and S004's scripts,
+        # BUG-257)
+        claims, mine = await self._path_claims(ctx.step_id)
+        await self.deps.git.unpark_paths(ws, mine, step_id=ctx.step_id)
+        changed = await self.deps.git.changed_files(handle)
+        foreign = [p for p in changed if path_matches(p, claims) and not path_matches(p, mine)]
+        if foreign and await self.deps.git.park_paths(ws, foreign, step_id=ctx.step_id):
+            changed = await self.deps.git.changed_files(handle)
         # uncommitted changes of an earlier unfinished step are this step's to finish, not a scope violation – checked on
         # every attempt: another step can run (and be blocked) between two attempts of this one (live G1, BUG-255)
         own = await self._own_changes(ctx.step_id)
-        leftovers = [p for p in await self.deps.git.changed_files(handle) if p not in own]
+        leftovers = [p for p in changed if p not in own]
         adopted = await self.deps.scope_engine.adopt_leftovers(ctx.step_id, leftovers) if leftovers else None
         contract = adopted or contract
         step = step_contract(row, contract)

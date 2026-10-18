@@ -587,3 +587,29 @@ async def test_engine_from_config_uses_policies(sessionmaker, tmp_path):
     job_id = await world.job("prefix test")
     ws = await world.engine.create_workspace(job_id, world.repo)
     assert ws.branch.startswith("bot/")
+
+
+# ============================================================================================ leftovers of another step
+async def test_parked_leftovers_return_to_head_and_never_overwrite_a_changed_path(world):
+    """BUG-257: a tracked file returns to HEAD, a new one disappears, symlinks stay; unparking restores matching files
+    (globs too) but keeps a path the work tree changed meanwhile – its parked copy stays. Both operations are audited."""
+    job_id = await world.job("park")
+    ws = await world.engine.create_workspace(job_id, world.repo)
+    path = Path(ws.path)
+    write(path, "app.py", "changed by another step\n")
+    write(path, "web/page.js", "// new\n")
+    (path / "link.js").symlink_to(path / "app.py")
+    parked = await world.engine.park_paths(ws.id, ["app.py", "web/page.js", "link.js", "gone.txt"])
+    assert parked == ["app.py", "web/page.js"]
+    assert (path / "app.py").read_text() == "def add(a, b):\n    return a + b\n" and not (path / "web" / "page.js").exists()
+    assert sorted(await world.engine.changed_files(ws.id)) == ["link.js"]
+    write(path, "app.py", "the owner already started over\n")
+    assert await world.engine.unpark_paths(ws.id, ["app.py", "web/*.js"]) == ["web/page.js"]
+    assert (path / "web" / "page.js").read_text() == "// new\n"
+    assert (path / "app.py").read_text() == "the owner already started over\n"
+    assert (path / ".git" / "hermclaw-parked" / "app.py").read_text() == "changed by another step\n"
+    assert [o.operation for o in await world.git_ops(job_id) if o.operation.startswith("workspace.")] == [
+        "workspace.create",
+        "workspace.park",
+        "workspace.unpark",
+    ]

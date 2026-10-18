@@ -18,6 +18,7 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
+import fnmatch
 import hashlib
 import os
 import stat
@@ -159,6 +160,26 @@ def _verified_paths(changed: Any) -> set[str]:
                 if isinstance(value, str) and value:
                     out.add(value)
     return out
+
+
+#: directory in the workspace's git dir holding files set aside for another step of the job (BUG-257)
+PARKED_DIR = "hermclaw-parked"
+
+
+def path_matches(path: str, patterns: Iterable[str]) -> bool:
+    """``path`` equals one of ``patterns`` or matches it as a glob (the planner's ``allowed_new_paths``)."""
+    return any(path == p or fnmatch.fnmatchcase(path, p) for p in patterns)
+
+
+def _parked_files(store: Path) -> list[str]:
+    if not store.is_dir():
+        return []
+    return sorted(p.relative_to(store).as_posix() for p in store.rglob("*") if p.is_file() and not p.is_symlink())
+
+
+def _parkable(src: Path, root: Path) -> bool:
+    """A regular file inside the work tree (never a symlink: its target is not the step's to move)."""
+    return not src.is_symlink() and src.is_file() and _fs.is_within(src, root)
 
 
 def _cap(items: Sequence[Any], limit: int = MAX_LISTED_PATHS) -> list[Any]:
@@ -805,6 +826,63 @@ class GitEngine:
     async def changed_files(self, ws: WorkspaceRef) -> list[str]:
         info, _repo, path = await self._load(ws)
         return await ops.changed_files(self.runner, path, info.base_sha)
+
+    # ================================================================================== leftovers of another step
+    async def park_paths(self, ws: WorkspaceRef, paths: Sequence[str], *, step_id: uuid.UUID | None = None) -> list[str]:
+        """Set aside the uncommitted changes of ``paths``: they belong to another open step of the job (BUG-257).
+
+        Each existing file is copied into the workspace's git directory (invisible to ``git status``, removed with the
+        workspace) and the path returns to HEAD – a tracked file is checked out, a new one removed. Deletions and
+        symlinks are not parked. ``unpark_paths`` brings the files back when the owning step starts. Returns the
+        parked paths."""
+        clean = self._validate_paths(paths) or []
+        if not clean:
+            return []
+        async with self._locked(ws) as (info, _repo, path):
+            rec = OpRecord(operation="workspace.park", job_id=info.job_id, step_id=step_id, workspace_id=info.id, ref=info.branch)
+            async with self._audited(rec):
+                store = await ops.git_dir(self.runner, path) / PARKED_DIR
+                parked: list[str] = []
+                for rel in clean:
+                    src = path / rel
+                    if not await asyncio.to_thread(_parkable, src, path):
+                        continue
+                    await asyncio.to_thread(_fs.ensure_dir, (store / rel).parent)
+                    await asyncio.to_thread(_fs.copy_if_exists, src, store / rel)
+                    await self.runner.run(["reset", "--quiet", "--", rel], cwd=path, check=False)  # unstage
+                    tracked = await self.runner.run(["cat-file", "-e", f"HEAD:{rel}"], cwd=path, check=False)
+                    if tracked.returncode == 0:
+                        await self.runner.run(["checkout", "--quiet", "HEAD", "--", rel], cwd=path)
+                    else:
+                        await asyncio.to_thread(_fs.remove_file, src)
+                    parked.append(rel)
+                rec.details.update({"paths": _cap(parked), "count": len(parked)})
+                return parked
+
+    async def unpark_paths(self, ws: WorkspaceRef, patterns: Sequence[str], *, step_id: uuid.UUID | None = None) -> list[str]:
+        """Return parked files matching ``patterns`` (paths or globs) to the work tree – the step that owns them starts
+        (BUG-257). A path the work tree changed meanwhile keeps its version (the parked copy stays). Returns the
+        restored paths."""
+        if not patterns:
+            return []
+        async with self._locked(ws) as (info, _repo, path):
+            store = await ops.git_dir(self.runner, path) / PARKED_DIR
+            waiting = [rel for rel in await asyncio.to_thread(_parked_files, store) if path_matches(rel, patterns)]
+            if not waiting:
+                return []
+            rec = OpRecord(operation="workspace.unpark", job_id=info.job_id, step_id=step_id, workspace_id=info.id, ref=info.branch)
+            async with self._audited(rec):
+                dirty = {e.path for e in await ops.read_status(self.runner, path)}
+                restored: list[str] = []
+                for rel in waiting:
+                    dst = path / rel
+                    if rel in dirty or not await asyncio.to_thread(_fs.is_within, dst, path):
+                        continue
+                    await asyncio.to_thread(_fs.ensure_dir, dst.parent)
+                    await asyncio.to_thread(_fs.rename, store / rel, dst)
+                    restored.append(rel)
+                rec.details.update({"paths": _cap(restored), "count": len(restored)})
+                return restored
 
     @staticmethod
     def _validate_paths(paths: Sequence[str] | None) -> list[str] | None:

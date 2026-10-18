@@ -46,6 +46,21 @@ Noch keine.
 
 ## Behobene Bugs
 
+### BUG-257 – Nach einem Replan übernimmt der erste laufende Schritt die Altlasten aller abgelösten Schritte, auch Dateien, die der neue Plan anderen Schritten gibt
+- Phase: G1 auf rc43 (Job `3d90ec7b…`, Replan 1, S002 Versuch 4) · Komponente: coder (handler), gitops (engine) · Severity: P1 · blockierend: ja (behoben) · Status: **behoben** (`tests/integration/test_coder_handler.py::test_leftovers_another_open_step_declares_wait_for_that_step`, `tests/integration/test_gitops_engine.py::test_parked_leftovers_return_to_head_and_never_overwrite_a_changed_path`)
+- Reproduktion:
+  - Vor dem Replan ließen die abgelösten S003 (Frontend) und S004 (Skripte) `frontend.*` und drei `.ps1`-Skripte unfertig im Arbeitsbaum.
+  - Der neue Plan gibt diese Dateien S003 und S006 (`allowed_new_paths`). Trotzdem übernimmt S002 (Collector) alle sieben Dateien (`scope.expanded`, `adopted_leftovers`, 09:49).
+  - Verifier und Review beurteilen S002 nun auch nach Frontend und Skripten: ein Secret-Fund in `start_homelab_widget.ps1` (BUG-256) und „das Skript verweist auf widget.html statt frontend.html“. Dazu wird der Diff so groß, dass dem Reviewer `tests/test_collector.py` fehlt.
+  - S002 scheitert mit `VERIFIER_FAILED`, danach STAGNATION und Korrekturen zu fremder Arbeit. Der letzte Replan ist in Gefahr.
+- Ursache: `adopt_leftovers` (BUG-206/255) schreibt jede liegengebliebene Änderung dem Schritt zu, der zufällig als Nächster läuft. Ob ein anderer offener Schritt die Datei laut Plan liefern soll, prüfte niemand.
+- Fix:
+  - Vor jedem Versuch ermittelt der Handler die `allowed_new_paths` der anderen offenen Schritte (weder `completed`/`cancelled` noch abgelöst).
+  - Eine Altlast, die ein anderer Schritt beansprucht und die der laufende Schritt weder in `allowed_new_paths` noch in `repo_hints` nennt, wird mit `GitEngine.park_paths` beiseitegelegt: Kopie nach `.git/hermclaw-parked/`, der Pfad kehrt zu HEAD zurück, auditiert als `workspace.park`.
+  - Startet der beanspruchende Schritt, holt `unpark_paths` die Datei zurück (Pfade und Globs). Ein inzwischen geänderter Pfad behält seine Fassung; die geparkte Kopie bleibt erhalten.
+  - Nicht beanspruchte Altlasten werden weiter übernommen (BUG-206).
+- Selbstprüfung: echter Schritt nach vorn, keine weitere Kompensation. BUG-206 und BUG-255 lösten „wem gehört die Altlast“ mit „dem nächsten Schritt“. Jetzt entscheidet der Plan, und frühere Arbeit geht nicht verloren, sondern erreicht den richtigen Schritt.
+
 ### BUG-256 – Ein PowerShell-Befehl als Wert (`$env:HERMCLAW_TOKEN = Get-Content $TokenFile -Raw`) gilt als Secret
 - Phase: G1 auf rc42 (Job `3d90ec7b…`, Replan 1, S002 Versuch 1) · Komponente: verifier (secrets, languages) · Severity: P2 · blockierend: nein (behoben) · Status: **behoben** (`tests/unit/test_verifier_secrets.py::test_ordinary_code_is_not_reported[start.ps1-…]`)
 - Reproduktion:

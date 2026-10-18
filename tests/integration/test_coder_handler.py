@@ -616,3 +616,41 @@ async def test_leftovers_of_a_step_that_ran_between_two_attempts_are_adopted(wor
         ]
     assert ["notes.md"] in adopted, adopted
     assert all("src/module.py" not in (a or []) for a in adopted), "the step's own change is never adopted"
+
+
+async def test_leftovers_another_open_step_declares_wait_for_that_step(world: World, tmp_path: Path) -> None:
+    """Live G1 (BUG-257): after a replan, S002 (collector) took over the frontend and scripts the superseded steps had
+    left uncommitted – files the new plan gives to S003/S006 – and was verified and reviewed on them. A leftover that
+    another open step declares as its new file is set aside until that step starts, then handed to it unchanged."""
+    from tests.unit.test_planner_support import plan, step
+
+    seen: list[list[str]] = []
+
+    class LeftoverVerifier(ScriptedVerifier):
+        async def verify(self, step: StepContract, workspace: WorkspaceHandle, **kw: Any) -> VerificationOutcome:
+            if self.calls == 0:  # a superseded step left the frontend behind
+                (workspace.path / "frontend.js").write_text("// left by a superseded step\n")
+            outcome = await super().verify(step, workspace, **kw)
+            seen.append(list(outcome.report.changed_files))
+            return outcome
+
+    two_steps = plan(
+        "Set VALUE to 2 and add a frontend",
+        [
+            step("S001", "implement", "coding", "Change VALUE in src/module.py from 1 to 2.", repo_hints=["src/module.py"]),
+            step("S002", "implement", "coding", "Write the web page script.", allowed_new_paths=["frontend.js"], depends_on=["S001"]),
+        ],
+    )
+    finish = act("complete_step", summary="page script kept", changed_files=["frontend.js"], tests_run=[])
+    models = Models([two_steps], [EDIT, DONE, DONE, finish])
+    verifier = LeftoverVerifier(world, [False, True, True])
+    jid = await _job(world)
+    jobs = await _run(world, _driver(world, models, tmp_path), [_handler(world, models, verifier, None), ReviewHandler()], [jid])
+    assert jobs[jid].status == "succeeded", (jobs[jid].error_code, jobs[jid].error_message)
+    assert "frontend.js" not in seen[1], "S001 is not verified on S002's file"
+    async with world.sessionmaker() as s:
+        steps = {st.step_key: st for st in (await s.execute(select(Step).where(Step.job_id == jid))).scalars()}
+    assert steps["S001"].result["files"] == ["src/module.py"]
+    assert steps["S002"].result["files"] == ["frontend.js"]
+    ws = (await world.engine.list_workspaces(jid))[0]
+    assert (Path(ws.path) / "frontend.js").read_text() == "// left by a superseded step\n"
