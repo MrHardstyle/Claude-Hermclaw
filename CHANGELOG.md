@@ -4,6 +4,8 @@ Format: [Keep a Changelog](https://keepachangelog.com/de/1.1.0/), Versionen nach
 
 ## [Unreleased]
 
+## [0.1.0rc54] – Release Candidate (2026-10-18)
+
 ### Behoben
 - **Keine verlorenen Turns durch verrutschte Felder (BUG-269):** `status`/`decision` innerhalb von `args` werden in die Aktion gehoben, statt den Aufruf als `ARGS_INVALID` abzulehnen.
 
