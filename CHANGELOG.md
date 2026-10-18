@@ -4,6 +4,8 @@ Format: [Keep a Changelog](https://keepachangelog.com/de/1.1.0/), Versionen nach
 
 ## [Unreleased]
 
+## [0.1.0rc42] – Release Candidate (2026-10-18)
+
 ### Behoben
 - **Fremde Altlasten bei jedem Versuch übernommen (BUG-255):** Hat ein anderer Schritt zwischen zwei Versuchen Dateien liegen gelassen, übernimmt der nächste Versuch sie in den Scope statt am Scope-Verstoß zu scheitern; eigene Änderungen des Schritts bleiben geprüft.
 
