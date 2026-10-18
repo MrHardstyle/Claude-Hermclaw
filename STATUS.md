@@ -129,7 +129,7 @@ Lint, mypy, ShellCheck, ansible-lint (production) sauber.
 - Embeddings: `embeddinggemma:300m` (768 dim; EmbeddingGemma 2 erst, wenn Ollama es unter Linux/CUDA ausführt, D-010)
 
 ## Bugs
-- 244 gefunden, **244 behoben** – `BUGS.md`. Live-Abnahme: BUG-143 bis BUG-244.
+- 245 gefunden, **245 behoben** – `BUGS.md`. Live-Abnahme: BUG-143 bis BUG-245.
   BUG-143–242 sind produktiv (0.1.0rc36, deployt 2026-10-18 06:00; SearXNG mit Bing/Yahoo; rc33 05:06; rc29 04:23; rc28 03:48 mit laufendem G1, Worker-Ausfall beim Fortsetzen ohne Versuchsverlust (BUG-227 live bestätigt); rc26 02:55, `coder-main.max_output_tokens` 8192 im Inventory-Override; rc25 deployt 01:50 mit laufendem G1, Schritt per Checkpoint unterbrochen und fortgesetzt; rc24 deployt 2026-10-18 01:10; rc20 deployt 2026-10-17 20:40, Scheduler-Neustart mit laufendem Job live geprüft: Job lief nach dem Deployment weiter).
 - Externe Blocker: BLOCKER-002 (Tag-Push)
 

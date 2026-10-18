@@ -134,6 +134,7 @@ def test_system_prompt_rules() -> None:
         # G1 quality review (BUG-231): Bearer instead of the researched x-api-key, verify_ssl read but never applied
         "cited research",
         "never applies",
+        "Hand-written parsers",
         "Hollow tests",
         "real network connections",
     ):

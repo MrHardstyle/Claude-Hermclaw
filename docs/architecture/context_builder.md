@@ -56,7 +56,7 @@ Dependencies: only the shared protocols `RepoContextProvider` (`inventory_summar
 
 ## Messages (16.1)
 
-* **system**: `SYSTEM CONTRACT` (runtime-owned rules, never truncated), `AVAILABLE TOOLS`, `COMPLETION CONDITIONS`
+* **system**: `SYSTEM CONTRACT` (runtime-owned rules, never truncated; includes the rule to parse JSON/TOML/CSV/INI/XML with the language's own parser and to read written output back with it, BUG-245), `AVAILABLE TOOLS`, `COMPLETION CONDITIONS`
   and the fixed `RESPONSE PROTOCOL`: exactly one JSON object
   `{"tool": ..., "args": {...}, "status": "...", "decision": "..."}`.
 * **user**: `STEP GOAL`, `SCOPE`, `CONSTRAINTS`, `ACCEPTANCE`, `CURRENT REPO FACTS`, `RELEVANT CODE`,

@@ -44,6 +44,8 @@ or commands documented where the repository documents its usage (README).
 findings among the PLAN STEP constraints; code that contradicts them, or fixtures shaped like the code instead of \
 like the documented responses, is major.
 - Configuration options the code reads but never applies (e.g. a TLS or timeout setting) are major.
+- Hand-written parsers for formats the language's standard library reads (JSON, TOML, CSV, INI, XML, URLs) are \
+major: they break on valid input the real parser handles.
 - Security: command/SQL injection, path traversal, SSRF, unsafe deserialisation, secrets in code or logs.
 - Tests: missing tests for new behaviour, tests weakened, skipped or deleted, assertions changed to match wrong \
 behaviour, special cases that only satisfy a specific check instead of solving the problem generally. Hollow tests \

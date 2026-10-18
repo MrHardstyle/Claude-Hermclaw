@@ -69,7 +69,8 @@ build_correction_request(step_id=…, attempt_id=…, verification: Verification
    changed files), executed-command log (if any), size-budgeted diff, relevant code/test snippets. All
    repository-derived text is redacted and fenced with a fence longer than any backtick run inside it, so diff content
    can never close its block or pose as an instruction section. The system prompt makes the model a strict reviewer:
-   findings must cite a repository path and concrete evidence, severity `minor|major|blocker`, output ONLY JSON per
+   findings must cite a repository path and concrete evidence (hand-written parsers for formats the standard library
+   reads are major, BUG-245), severity `minor|major|blocker`, output ONLY JSON per
    `ReviewContract`.
 4. `ChatModel.structured(heavy_alias, messages, ReviewDraft, ctx=CallContext(purpose="review", …), max_repairs=2,
    max_tokens=profile.max_output_tokens, temperature=profile.temperature, timeout_seconds=min(profile, policy))`

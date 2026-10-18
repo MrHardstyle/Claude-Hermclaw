@@ -259,3 +259,5 @@ def test_prompts_explain_how_dependencies_get_into_the_sandbox() -> None:
         "Prefer the simplest solution" in DEFAULT_SYSTEM_CONTRACT and "never\n  for facts about this repository" in DEFAULT_SYSTEM_CONTRACT
     )
     assert "gets third-party packages only when the job names them" in DEFAULT_SYSTEM_CONTRACT
+    # BUG-245 (grand job G1): "standard library only" led to a hand-written TOML parser and writer that broke nested tables
+    assert "never a\n  hand-written one" in DEFAULT_SYSTEM_CONTRACT and "reading the output back" in DEFAULT_SYSTEM_CONTRACT

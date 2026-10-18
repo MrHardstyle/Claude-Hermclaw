@@ -46,6 +46,19 @@ Noch keine.
 
 ## Behobene Bugs
 
+### BUG-245 – „Nur Standardbibliothek“ führt zu handgeschriebenem TOML-Parser und -Writer, der verschachtelte Tabellen zerstört
+- Phase: G1 auf rc36 (Job `8f394b63…`, S003 Versuch 3/4) · Komponente: context_builder (System-Vertrag des Coders), review (prompt) · Severity: P1 · blockierend: nein (behoben) · Status: **behoben** (`tests/unit/test_planner_prompt.py::test_prompts_explain_how_dependencies_get_into_the_sandbox`, `tests/unit/test_review_prompt.py` Nadel „Hand-written parsers“)
+- Reproduktion:
+  - `collector.py` enthält einen eigenen TOML-Parser (`_parse_toml`) und -Writer (`save_config`).
+  - Der Writer schreibt die verschachtelte Tabelle `proxmox.main` als `main = {…}` per `str(dict)`, also kein gültiges TOML.
+  - `test_save_load_roundtrip` schlägt fehl. Der Coder kreist zwei Versuche lang darum (verweigerte Lese- und Befehlswiederholungen, keine Änderung).
+- Ursache: Planner und Coder sollen die Standardbibliothek bevorzugen. Python liest TOML mit `tomllib`, schreibt es aber nicht. Ohne Hinweis baute der Coder beide Richtungen selbst, mit Fehlern, die der echte Parser nicht hat. Der Reviewer prüfte das nicht eigens.
+- Fix:
+  - Der System-Vertrag des Coders schreibt vor: JSON/TOML/CSV/INI/XML mit dem Parser der Sprache lesen, nie handgeschrieben. Bei einem Format, das die Sprache nur liest (tomllib), die geschriebene Ausgabe testen, indem man sie damit zurückliest.
+  - Der Reviewer stuft handgeschriebene Parser für Formate, die die Standardbibliothek liest, als major ein.
+  - Damit der Vertrag ins kleinste Kontextfenster (4096 Tokens) passt, sind andere Regeln kürzer formuliert, inhaltlich unverändert.
+- Selbstprüfung: echter Schritt nach vorn. Die Regel ist allgemein und schließt eine Lücke der Standardbibliotheks-Regel. Sie bekämpft kein Symptom.
+
 ### BUG-244 – Der Coder liest Teilbereiche eines Bereichs erneut, den der Kontext bereits vollständig zeigt
 - Phase: G1 auf rc36 (Job `8f394b63…`, S003 Versuch 4) · Komponente: tools (engine) · Severity: P2 · blockierend: nein (behoben) · Status: **behoben** (`tests/integration/test_tools_engine_read_write.py::test_a_part_of_a_visible_read_is_refused_until_a_file_changes`)
 - Reproduktion: `collector.py` gelesen als 100–160, danach 110–160, danach 110–145, ohne Schreibzugriff dazwischen. Jeder Lesezugriff kostete einen Turn von etwa 45 s.
