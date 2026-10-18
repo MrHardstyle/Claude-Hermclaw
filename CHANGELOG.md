@@ -4,6 +4,8 @@ Format: [Keep a Changelog](https://keepachangelog.com/de/1.1.0/), Versionen nach
 
 ## [Unreleased]
 
+## [0.1.0rc28] – Release Candidate (2026-10-18)
+
 ### Behoben
 - **Lesesperre und Kontext (BUG-229):** Gelesene Dateien erscheinen im Kontext so, wie sie gelesen wurden (ganze Datei oder genauer Bereich, bis 400 Zeilen). Eine Wiederholung wird nur noch abgelehnt, wenn der Inhalt vollständig sichtbar war.
 - **Fortschrittsliste im Coder-Kontext (BUG-228):** Geschriebene neue Dateien sind markiert, noch fehlende werden aufgelistet.
