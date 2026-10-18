@@ -157,6 +157,7 @@ behind `on_scope_expansion`, research events by the research service.
 ## Failure behaviour
 
 - Invalid arguments / unknown keys -> `ARGS_INVALID` with the JSON schema in `data`; unknown tools and malformed
+- `status`/`decision` written inside `args` belong to the action envelope: `CoderAction` lifts them out of `args` before validation; they fill the envelope only where it is empty (BUG-269).
   actions -> `ActionRejected` (persisted as `refused` tool calls).
 - Path violations -> `PATH_INVALID`, `PATH_OUTSIDE_WORKSPACE`, `PATH_FORBIDDEN`, `SYMLINK_REFUSED`; scope violations ->
   `SCOPE_VIOLATION` (nothing written; `apply_patch` is all-or-nothing); no scope -> `SCOPE_MISSING`.

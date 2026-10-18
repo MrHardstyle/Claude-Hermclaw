@@ -5,7 +5,7 @@ from __future__ import annotations
 from enum import StrEnum
 from typing import Any, Literal
 
-from pydantic import Field
+from pydantic import Field, model_validator
 
 from hermclaw.contracts.common import Contract
 
@@ -96,6 +96,23 @@ class CoderAction(Contract):
     args: dict[str, Any] = Field(default_factory=dict)
     status: str = Field(default="", max_length=300)
     decision: str = Field(default="", max_length=120, description="short decision label, e.g. 'fix-import'")
+
+    @model_validator(mode="before")
+    @classmethod
+    def _lift_envelope_fields(cls, data: Any) -> Any:
+        """``status``/``decision`` written inside ``args`` belong to the action: no tool takes them, and refusing the
+        call as ARGS_INVALID cost 22 turns in 20 live jobs within three days (G1 S008/S014, BUG-269)."""
+        if not isinstance(data, dict) or not isinstance(data.get("args"), dict):
+            return data
+        args = data["args"]
+        stray = [k for k in ("status", "decision") if k in args]
+        if not stray:
+            return data
+        out = {**data, "args": {k: v for k, v in args.items() if k not in stray}}
+        for k, limit in (("status", 300), ("decision", 120)):
+            if k in stray and not out.get(k) and isinstance(args[k], str):
+                out[k] = args[k][:limit]
+        return out
 
 
 class ToolCall(Contract):

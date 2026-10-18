@@ -80,3 +80,15 @@ def test_coder_action_requires_known_tool():
     assert CoderAction.model_validate({"tool": "read_file", "args": {"path": "a"}}).tool == ToolName.read_file
     with pytest.raises(ValidationError):
         CoderAction.model_validate({"tool": "rm_rf", "args": {}})
+
+
+def test_status_and_decision_inside_args_belong_to_the_action() -> None:
+    """Live G1 (BUG-269): run_command was refused as ARGS_INVALID because the model wrote the action's status and
+    decision inside args – 22 lost turns in 20 jobs within three days. They are lifted onto the action."""
+    from hermclaw.contracts.tools import CoderAction
+
+    raw = {"tool": "run_command", "args": {"status": "Check tomllib", "command": "python -V", "decision": "x" * 200}}
+    action = CoderAction.model_validate(raw)
+    assert action.args == {"command": "python -V"} and action.status == "Check tomllib" and action.decision == "x" * 120
+    kept = CoderAction.model_validate({**raw, "status": "own note", "decision": "own"})
+    assert kept.args == {"command": "python -V"} and kept.status == "own note" and kept.decision == "own"

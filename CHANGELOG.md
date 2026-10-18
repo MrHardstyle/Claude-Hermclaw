@@ -5,6 +5,9 @@ Format: [Keep a Changelog](https://keepachangelog.com/de/1.1.0/), Versionen nach
 ## [Unreleased]
 
 ### Behoben
+- **Keine verlorenen Turns durch verrutschte Felder (BUG-269):** `status`/`decision` innerhalb von `args` werden in die Aktion gehoben, statt den Aufruf als `ARGS_INVALID` abzulehnen.
+
+### Behoben
 - **Im Ziel genannte Dateien gehören zum Schritt (BUG-268):** Die Plan-Validierung lehnt einen Schritt ab, dessen Ziel eine vorhandene oder geplante Datei nennt, die weder in `repo_hints` noch in `allowed_new_paths` steht.
 
 ## [0.1.0rc53] – Release Candidate (2026-10-18)

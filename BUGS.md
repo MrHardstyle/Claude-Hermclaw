@@ -46,6 +46,19 @@ Noch keine.
 
 ## Behobene Bugs
 
+### BUG-269 – `status`/`decision` innerhalb von `args` machen einen gültigen Befehl zu `ARGS_INVALID`; ein verlorener Turn je Vorkommen
+- Phase: G1 auf rc52/rc53 (Job `5c3d40a5…`, S008 Versuch 5 Turn 3, S014 Turn 1) · Komponente: contracts (tools) · Severity: P2 · blockierend: nein (behoben) · Status: **behoben** (`tests/unit/test_contracts.py::test_status_and_decision_inside_args_belong_to_the_action`)
+- Reproduktion:
+  - Das Modell schreibt `{"tool": "run_command", "args": {"status": "Check tomllib availability", "command": "python -c …", "decision": "check_dependency"}}`.
+  - Die Engine meldet „status: Extra inputs are not permitted; decision: Extra inputs are not permitted“.
+  - In den letzten drei Tagen kam das 22-mal in 20 Jobs vor.
+- Ursache: `status` und `decision` sind Felder der Aktion, nicht des Werkzeugs. Die Argumentprüfung lehnte den ganzen Aufruf ab, obwohl der Befehl eindeutig war.
+- Fix:
+  - Ein `model_validator(mode="before")` von `CoderAction` hebt die beiden Felder aus `args` heraus.
+  - Sie füllen die Aktion nur dort, wo sie leer ist, gekürzt auf 300 bzw. 120 Zeichen.
+  - Kein Werkzeug hat ein Argument dieses Namens.
+- Selbstprüfung: Ein echter Schritt, kein Symptom-Kompensieren. Die Felder sind eindeutig zuzuordnen, es wird nichts geraten. Unbekannte andere Argumente bleiben `ARGS_INVALID`.
+
 ### BUG-268 – Ein Schritt soll laut Ziel in collector.py arbeiten, hat die Datei aber nicht im Scope; er erbt sie als Altlast samt 28 fremden Testfehlern und stagniert
 - Phase: G1 auf rc50–rc53 (Job `5c3d40a5…`, Replan 1, S008 Versuche 1–6) · Komponente: planner (validation) · Severity: P1 · blockierend: ja (behoben; Replan 2) · Status: **behoben** (`tests/unit/test_planner_validation.py::test_a_file_the_goal_names_must_be_among_the_steps_files`)
 - Reproduktion:
