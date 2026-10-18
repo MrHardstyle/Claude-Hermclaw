@@ -538,6 +538,57 @@ def _split_test_errors(plan: PlanContract, new_steps: Sequence[PlanStep], ctx: V
     return errors
 
 
+#: file stems too generic to name a component in a goal ("config.toml" vs. "die Konfiguration")
+_GENERIC_STEMS = frozenset({"config", "index", "utils", "helpers", "common", "settings", "setup", "types", "constants", "__init__"})
+
+
+def _reachable(plan: PlanContract, start: str) -> set[str]:
+    by_id = {s.id: s for s in plan.steps}
+    seen: set[str] = set()
+    todo = list(by_id[start].depends_on) if start in by_id else []
+    while todo:
+        cur = todo.pop()
+        if cur not in seen and cur in by_id:
+            seen.add(cur)
+            todo.extend(by_id[cur].depends_on)
+    return seen
+
+
+def _unordered_reference_errors(
+    plan: PlanContract, new_steps: Sequence[PlanStep], ctx: ValidationContext, preserved: frozenset[str]
+) -> list[str]:
+    """A step whose title or goal names a component another step writes ("startet den Collector" – collector.py) must
+    be ordered with that step by a dependency: unordered, it runs first and guesses the interface. The planner left the
+    frontend and the start scripts beside the collector step without one, and both guessed config format, port and
+    JSON fields (live G1 on rc39, BUG-251; the written-interface rule of BUG-234 alone did not hold)."""
+    mutating = [s for s in plan.steps if s.kind.value in WORKSPACE_MUTATING_KINDS and s.id not in preserved]
+    code: dict[str, set[str]] = {}
+    for s in mutating:
+        stems = {_code_stem(p) for p in _step_paths(s, ctx) if not TEST_PATH_RE.search(p) and not DOC_PATH_RE.search(p)}
+        code[s.id] = {t for t in stems if len(t) >= 5 and t not in _GENERIC_STEMS}
+    errors: list[str] = []
+    reported: set[frozenset[str]] = set()
+    for step in new_steps:
+        if step.id not in code:
+            continue
+        text = f"{step.title}\n{step.goal}"
+        ancestors = _reachable(plan, step.id)
+        for other in mutating:
+            pair = frozenset({step.id, other.id})
+            if other.id == step.id or pair in reported or other.id in ancestors or step.id in _reachable(plan, other.id):
+                continue
+            named = sorted(t for t in code[other.id] - code[step.id] if re.search(rf"(?<![\w]){re.escape(t)}", text, re.IGNORECASE))
+            if named:
+                reported.add(pair)
+                errors.append(
+                    f"step {step.id} refers to {', '.join(named)}, which step {other.id} writes, but neither step depends "
+                    f"on the other: add {other.id} to {step.id}'s depends_on (or the reverse, if {other.id} uses "
+                    f"{step.id}'s files) so the consuming step runs after the providing one and works with its real "
+                    "interface instead of guessing it"
+                )
+    return errors
+
+
 def _step_size_errors(step: PlanStep, ctx: ValidationContext) -> list[str]:
     """A step that creates more files than one coder attempt can write fails late on its turn budget. After the
     code-and-tests rule the planner merged a whole widget (collector, frontend, scripts, tests, fixtures, README:
@@ -877,6 +928,7 @@ def semantic_errors(
 
     errors.extend(_research_question_errors(plan, new_steps))
     errors.extend(_split_test_errors(plan, new_steps, ctx, preserved))
+    errors.extend(_unordered_reference_errors(plan, new_steps, ctx, preserved))
     errors.extend(_check_only_creation_errors(new_steps))
     for step in new_steps:
         errors.extend(_must_change_errors(step, ctx))

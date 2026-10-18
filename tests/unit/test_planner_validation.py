@@ -558,6 +558,35 @@ def test_tests_for_new_code_belong_in_the_same_step() -> None:
     assert not any("writes tests for code" in e for e in _errors(plan("goal", [code, own])))
 
 
+def test_a_step_naming_another_steps_component_must_be_ordered_with_it() -> None:
+    """Live G1 on rc39 (BUG-251): frontend ("liest Daten von der lokalen JSON-API des Collectors") and start scripts
+    ("startet Collector") sat beside the collector step without a dependency; the scripts ran first and guessed config
+    format and port. Naming another step's component requires a dependency in either direction."""
+    collector = step(
+        "S002", "implement", "coding", "Implementiere den Collector mit JSON-API.", allowed_new_paths=["collector.py", "config.toml"]
+    )
+    frontend = step(
+        "S003",
+        "implement",
+        "coding",
+        "Erstelle das Frontend; es liest Daten von der lokalen JSON-API des Collectors.",
+        allowed_new_paths=["frontend.html", "frontend.js"],
+    )
+    scripts = step("S004", "implement", "coding", "Skript, das den Collector startet.", allowed_new_paths=["start_widget.ps1"])
+    errors = _errors(plan("goal", [collector, frontend, scripts]))
+    assert any("step S003 refers to collector, which step S002 writes" in e and "depends_on" in e for e in errors)
+    assert any("step S004 refers to collector, which step S002 writes" in e for e in errors)
+    assert not any("refers to config" in e for e in errors), "generic stems name no component"
+    ordered = [
+        collector,
+        step("S003", "implement", "coding", frontend["goal"], allowed_new_paths=["frontend.html", "frontend.js"], depends_on=["S002"]),
+        step("S004", "implement", "coding", scripts["goal"], allowed_new_paths=["start_widget.ps1"], depends_on=["S003"]),
+    ]
+    assert not any("refers to" in e for e in _errors(plan("goal", ordered))), "a transitive dependency orders them"
+    # a completed provider (replan history) needs no dependency: its files are in the workspace
+    assert not any("refers to" in e for e in _errors(plan("goal", [collector, scripts]), preserved=frozenset({"S002"})))
+
+
 def test_a_check_only_step_cannot_create_files() -> None:
     """rc22 battery X1: the unit tests were planned into a kind=test step, which only runs checks; the files were never
     written and the implementing step's review demanded them until the step failed (BUG-209)."""

@@ -104,6 +104,7 @@ whose capability uses the `coder` model role, otherwise `0`. `max_attempts = pol
 - A research step must not depend on mutating steps: research runs before the work that needs it.
 - `research_needed` requires the `research` capability.
 - Code and its tests share one step: a step that only writes tests for another step's code is rejected (U3, BUG-237), and so is a step with code of its own that carries test files named after another step's code (`tests/test_collector.py` for `collector.py`): those test paths move to the step that writes the code (BUG-250).
+- A workspace-mutating step whose title or goal names a component another step writes (the file stem, at least five characters and not generic: `collector` for `collector.py`, not `config`) must be ordered with that step by a dependency in either direction; completed steps of a replan are exempt (BUG-251).
 - Grounding (no invented paths):
   - a `repo_hint` is either a repository-relative path or glob, or a symbol;
   - a path must exist among the known paths. These are the explicit list, the inventory's `files` and `paths`, every path-shaped string elsewhere in the inventory (values and keys), the retrieved-context paths and the files of `existing_tests` (`a.py::test_x` counts as `a.py`);

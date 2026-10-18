@@ -326,6 +326,7 @@ async def test_replan_reports_rule_and_scope_errors_in_one_repair_turn(sessionma
     first["steps"].append(unscoped)  # no repo_hints/allowed_new_paths: semantic error
     second = _replan_answer()
     second["steps"][0]["rerun_reason"] = "still ignored"
+    second["steps"][0]["depends_on"] = ["S001", "S005"]  # documents the new pagination module: runs after it (BUG-251)
     second["steps"].append({**unscoped, "allowed_new_paths": ["app/pagination.py"]})
     chat = ScriptedChat([first, second])
     result = await Replanner(chat, sm, get_config()).replan(job_id, _trigger(ids, "repository_changed"), FASTAPI.inputs)

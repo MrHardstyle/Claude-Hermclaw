@@ -46,6 +46,18 @@ Noch keine.
 
 ## Behobene Bugs
 
+### BUG-251 – Schritte, die eine Komponente eines anderen Schritts nutzen, laufen ohne Abhängigkeit davor und raten deren Schnittstelle
+- Phase: G1 auf rc39 (Job `3d90ec7b…`, Plan v1, S003/S004) · Komponente: planner (validation) · Severity: P1 · blockierend: nein (behoben) · Status: **behoben** (`tests/unit/test_planner_validation.py::test_a_step_naming_another_steps_component_must_be_ordered_with_it`)
+- Reproduktion:
+  - S004 („Skript, das den Collector … startet“) und S003 („liest Daten von der lokalen JSON-API des Collectors“) hängen nicht von S002 ab, der `collector.py` schreibt.
+  - S004 läuft vor S002. Das Review findet `config.json` statt TOML, einen fest verdrahteten Port 8080 und kein Schutz-Token.
+- Ursache: Die Schnittstellenregel aus BUG-234 ist nur eine Prompt-Regel; der Planner befolgt sie nicht verlässlich. Die Validierung prüfte nicht, ob ein Schritt eine Komponente eines anderen Schritts nennt, ohne mit ihm geordnet zu sein.
+- Fix: Nennt Titel oder Ziel eines arbeitsbaum-ändernden Schritts den Dateistamm einer Code-Datei eines anderen Schritts, muss eine Abhängigkeit beide ordnen, in beliebiger Richtung, auch transitiv.
+  - Der Stamm muss mindestens fünf Zeichen haben und darf nicht generisch sein (`config`, `index`, `utils` …); `collector` zählt.
+  - Abgeschlossene Schritte eines Replans sind ausgenommen.
+  - Die Fehlermeldung nennt die fehlende Abhängigkeit.
+- Selbstprüfung: echter Schritt nach vorn. Die Runtime sichert jetzt deterministisch ab, was die Prompt-Regel nicht durchsetzen konnte; das ist keine weitere Prompt-Regel. Ein Test-Fixture (Doku-Schritt über das neue Pagination-Modul) wurde zu Recht beanstandet und bekam die Abhängigkeit. Beobachten: Fehlalarme bei Stämmen, die gewöhnliche Wörter sind.
+
 ### BUG-250 – Der Frontend-Schritt schreibt die Tests des Collectors und hängt nicht von dessen Schritt ab
 - Phase: G1 auf rc39 (Job `3d90ec7b…`, Plan v1) · Komponente: planner (validation), coder (handler) · Severity: P1 · blockierend: nein (behoben) · Status: **behoben** (`tests/unit/test_planner_validation.py::test_tests_for_new_code_belong_in_the_same_step`, `tests/integration/test_coder_handler.py::test_dependency_files_fall_back_to_the_jobs_other_completed_steps`)
 - Reproduktion:
