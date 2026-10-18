@@ -4,6 +4,8 @@ Format: [Keep a Changelog](https://keepachangelog.com/de/1.1.0/), Versionen nach
 
 ## [Unreleased]
 
+## [0.1.0rc39] – Release Candidate (2026-10-18)
+
 ### Behoben
 - **Korrekturen überleben Checkpoints (BUG-249):** Ein fehlgeschlagener Versuch verbraucht den Checkpoint, sodass der nächste Versuch die Korrektur mit Belegen bekommt statt eines veralteten `resume`; ein fortgesetzter Korrekturversuch behält seine Belege.
 
