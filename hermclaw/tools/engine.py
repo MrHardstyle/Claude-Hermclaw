@@ -97,6 +97,8 @@ TIMEOUT_HINT = (
     "Commands must exit on their own: a server, watcher or REPL never does. Do not start one in the foreground or "
     "in the background; a test starts the app in-process (port 0) and closes it, or calls the handler directly."
 )
+PIPEFAIL = "set -o pipefail 2>/dev/null"  # every sandbox image shell (dash, bash) knows it; older shells ignore it
+
 READ_REPEAT_WINDOW = 6  # turns; the context shows the files of the last 6 reads (context_builder ``_read_spans``)
 READ_VISIBLE_LINES = 400  # the context shows at most this many lines of one read (context_builder ``max_snippet_lines``)
 IMAGE_CONSTRAINTS = "/tmp/hermclaw-image-constraints.txt"  # noqa: S108 - path inside the sandbox
@@ -1141,6 +1143,9 @@ class ToolEngine:
         classification = self._classify(command, install=egress)
         cwd = self._resolve_cwd(cwd_raw)
         full = command if cwd == "." else f"cd -- {shlex.quote(cwd)} || exit 97\n{command}"
+        # a pipeline reports its first failing command: 'pytest | tail -80' exited 0 with 28 failing tests, and the
+        # runtime took the run as passed and completed the step (live G1, BUG-267)
+        full = f"{PIPEFAIL}\n{full}"
         effective_timeout = timeout_seconds if egress and timeout_seconds else self._timeout(timeout_seconds)
         repeat_key = (cwd, command.strip(), effective_timeout)
         if self._timed_out.get(repeat_key) == self._writes:

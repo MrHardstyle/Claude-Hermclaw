@@ -16,7 +16,7 @@ from hermclaw.contracts.tools import CoderAction, ToolName
 from hermclaw.core.redaction import REDACTED
 from hermclaw.tools import errors as E
 from hermclaw.tools.context import ScopeExpansionOutcome, ToolPermissions
-from hermclaw.tools.engine import ActionRejected
+from hermclaw.tools.engine import PIPEFAIL, ActionRejected
 from tests.integration.test_tools_support import (
     SM,
     RecordingCallbacks,
@@ -72,6 +72,19 @@ async def test_run_command_executes_persists_and_redacts(sessionmaker: SM, repo:
     res = await h.call("run_command", command="exit 3")
     assert not res.ok and res.error_code == E.COMMAND_FAILED and "exit code 3" in res.output
     assert (await tool_calls(sessionmaker, h.step.id))[-1].status == "failed"
+
+
+async def test_a_failing_command_piped_into_tail_is_a_failed_run(sessionmaker: SM, repo: Path) -> None:
+    """Live G1 (BUG-267): 'python -m pytest -q test_collector.py 2>&1 | tail -80' exited 0 with 28 failing tests; the
+    repeat guard called it a success and the runtime completed the step. A pipeline reports its first failing command."""
+    h = await make_harness(sessionmaker, repo, contract=scope(**SCOPE))
+    res = await h.call("run_command", command="echo '28 failed'; exit 1", cwd=".")
+    assert res.error_code == E.COMMAND_FAILED
+    piped = await h.call("run_command", command="sh -c \"echo '28 failed'; exit 1\" 2>&1 | tail -80")
+    assert piped.error_code == E.COMMAND_FAILED and piped.data["exit_code"] == 1 and "28 failed" in piped.output
+    again = await h.call("run_command", command="sh -c \"echo '28 failed'; exit 1\" 2>&1 | tail -80")
+    assert again.error_code == E.COMMAND_REPEATED and again.data["passed"] is False and "complete_step" not in again.output
+    assert (await h.call("run_command", command="echo ok | tail -1")).ok
 
 
 async def test_run_command_cwd_and_timeout(sessionmaker: SM, repo: Path) -> None:
@@ -480,7 +493,7 @@ async def test_install_dependencies_runs_a_runtime_built_command_with_registry_e
     assert req.image == "python"  # the toolchain image: compiled wheels match the interpreter of later commands
     assert "pip install" in req.command and "--target /deps/python" in req.command and "-r requirements.txt" in req.command
     # BUG-161: a fresh /deps/python each time, and the image's own packages (its pytest) are constraints
-    assert req.command.startswith("find /deps/python -mindepth 1 -delete && PYTHONPATH= python3 -m pip list")
+    assert req.command.removeprefix(PIPEFAIL + "\n").startswith("find /deps/python -mindepth 1 -delete && PYTHONPATH= python3 -m pip list")
     assert "-c /tmp/hermclaw-image-constraints.txt -r requirements.txt" in req.command and "--upgrade" not in req.command
     assert res.data["packages"] == ["fastapi==0.115.0", "httpx==0.28.1", "starlette==0.38.6"]
     assert "3 package(s) available" in res.output

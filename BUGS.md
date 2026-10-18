@@ -46,6 +46,21 @@ Noch keine.
 
 ## Behobene Bugs
 
+### BUG-267 – Ein in `tail` gepiptes pytest mit 28 Fehlschlägen gilt als bestanden; die Runtime schließt den Schritt selbst ab
+- Phase: G1 auf rc52 (Job `5c3d40a5…`, Replan 1, S008 Versuch 4, Turns 16–20) · Komponente: tools (engine) · Severity: P1 · blockierend: ja (behoben) · Status: **behoben** (`tests/integration/test_tools_engine_exec.py::test_a_failing_command_piped_into_tail_is_a_failed_run`)
+- Reproduktion:
+  - S008 führt `python -m pytest test_collector.py -q 2>&1 | tail -80` aus. Ergebnis: Exit-Code 0, obwohl 28 Tests fehlschlagen.
+  - Die Wiederholungssperre meldet „It succeeded … otherwise call complete_step“.
+  - Nach zwei Wiederholungen schließt die Runtime den Schritt selbst ab (BUG-207).
+  - Der Verifier findet 28 fehlschlagende Tests (`VERIFIER_FAILED`). Damit ist der Versuch verbraucht.
+- Ursache:
+  - `sh -c` liefert den Exit-Code des letzten Pipeline-Glieds, hier `tail`.
+  - Alles, was den Exit-Code auswertet, hielt den Lauf deshalb für erfolgreich: `ok`, `COMMAND_REPEATED` mit `passed` und der Runtime-Abschluss.
+- Fix:
+  - `_sandbox_run` stellt jedem Befehl `set -o pipefail` voran. Alle Sandbox-Images sind Debian-basiert, ihre Shells (dash, bash) kennen das; ältere Shells ignorieren es.
+  - Eine Pipeline meldet damit ihr erstes fehlschlagendes Glied.
+- Selbstprüfung: Ein echter Schritt nach vorn, kein Kompensieren. Der Exit-Code ist die Wahrheitsquelle für Wiederholungssperre und Runtime-Abschluss, und er war bei Pipelines falsch. Lehre: Die Runtime darf aus einem Exit-Code nur schließen, was er belegt.
+
 ### BUG-266 – Seiten einer großen Datei erscheinen im Kontext als Dateianfang; der Coder sieht die Zeilen hinter 400 nie und liest bis zum Stagnationsstopp
 - Phase: G1 auf rc51 (Job `5c3d40a5…`, Replan 1, S008 Versuch 2) · Komponente: context_builder, tools (engine) · Severity: P1 · blockierend: ja (behoben) · Status: **behoben** (`tests/unit/test_context_builder_relevance.py::test_pages_of_a_clipped_file_are_shown_from_where_they_started`, `tests/integration/test_tools_engine_read_write.py::test_reading_a_clipped_file_again_continues_where_the_last_read_stopped`)
 - Reproduktion:
