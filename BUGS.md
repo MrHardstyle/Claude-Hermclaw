@@ -46,6 +46,13 @@ Noch keine.
 
 ## Behobene Bugs
 
+### BUG-236 – Abhängige Schritte werden „dependency failed“ blockiert, obwohl für die Abhängigkeit ein Retry geplant ist
+- Phase: G1 auf rc32 (Job `364a9c3c…`) · Komponente: scheduler · Severity: P2 · blockierend: nein (behoben) · Status: **behoben** (`tests/integration/test_scheduler.py::test_a_failed_dependency_with_a_scheduled_retry_does_not_block_its_dependents`)
+- Reproduktion: 04:57:33 S003 Versuch 5 (`resume` nach dem rc32-Deployment, Checkpoint noch unter rc31 ohne BUG-233) → `WORKER_UNREACHABLE`, Retry in 60 s geplant. 04:57:34 S007 und S008 `blocked` mit „dependency failed“. 04:58:34 läuft S003 als Versuch 6 weiter.
+- Ursache: Zwei Kriterien für „wird wiederholt“. Die Retry-Auswahl nimmt jeden fehlgeschlagenen Schritt mit `not_before`. Die Abhängigkeitsprüfung verlangte zusätzlich `attempt_count < max_attempts`. Ein Ausfall-Retry jenseits des Versuchsbudgets (Fortsetzung nach einem Checkpoint) wurde ausgeführt, galt für die Abhängigen aber als endgültig gescheitert.
+- Fix: Die Abhängigkeitsprüfung nutzt dasselbe Kriterium wie die Retry-Auswahl (`not_before` gesetzt).
+- Selbstprüfung: echter Schritt nach vorn. Eine Inkonsistenz zwischen zwei Codepfaden beseitigt; zusammen mit BUG-233 entsteht der Zustand nicht mehr.
+
 ### BUG-235 – Der Coder fordert nur 6144 Ausgabe-Tokens an, obwohl Profil und Kontextbudget 8192 vorsehen
 - Phase: G1 auf rc31 (Job `364a9c3c…`, S003 Turn 1) · Komponente: coder (handler) · Severity: P2 · blockierend: nein (behoben) · Status: **behoben** (`tests/integration/test_coder_handler.py::test_implement_step_happy_path_commits_and_pushes`, erweitert)
 - Reproduktion: `model.invocation.finished` mit `completion: 6144`, `status: invalid` (abgeschnitten), etwa 4 min Modellzeit verloren. Der Kontextbericht desselben Turns nennt `max_output: 8192`. `/etc/hermclaw/models.yaml` setzt `coder-main.max_output_tokens: 8192` (Inventory-Override aus BUG-223).

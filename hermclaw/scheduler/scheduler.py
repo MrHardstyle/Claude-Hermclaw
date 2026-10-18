@@ -592,17 +592,18 @@ class Scheduler:
             for st in pending:
                 deps = (
                     await s.execute(
-                        select(Step.status, Step.step_key, Step.not_before, Step.attempt_count, Step.max_attempts)
+                        select(Step.status, Step.step_key, Step.not_before)
                         .join(StepDependency, StepDependency.depends_on_step_id == Step.id)
                         .where(StepDependency.step_id == st.id)
                     )
                 ).all()
-                # a failed dependency only blocks when no retry is scheduled for it
+                # a failed dependency only blocks when no retry is scheduled for it – the same test the retry dispatch
+                # uses (not_before): an outage retry beyond the attempt budget blocked live dependents (BUG-236)
                 bad = [
                     d.step_key
                     for d in deps
                     if d.status in (StepStatus.cancelled.value, StepStatus.blocked.value)
-                    or (d.status == StepStatus.failed.value and not (d.not_before is not None and d.attempt_count < d.max_attempts))
+                    or (d.status == StepStatus.failed.value and d.not_before is None)
                 ]
                 if all(d.status == StepStatus.completed.value for d in deps):
                     await transition_step(s, st, StepStatus.ready, reason="dependencies completed", actor=self.instance_id)

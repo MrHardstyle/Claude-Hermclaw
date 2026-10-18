@@ -305,6 +305,26 @@ async def test_model_outage_during_a_step_does_not_use_up_its_attempts(sessionma
     assert jobs2[jid2].status == "failed" and len(h2.calls) == 2
 
 
+async def test_a_failed_dependency_with_a_scheduled_retry_does_not_block_its_dependents(sessionmaker: Any, clean_jobs: None) -> None:
+    """Live G1 (BUG-236): S003 hit a worker outage on a resume beyond its attempt budget; its retry was scheduled (the
+    retry query only looks at not_before) but the dependency check also required attempt_count < max_attempts, so
+    S007/S008 were blocked with 'dependency failed' while S003 kept running."""
+    sm = sessionmaker
+    jid = await _new_job(sm)
+    async with sm() as s:
+        await s.execute(update(Job).where(Job.id == jid).values(status=JobStatus.running.value))
+        s1 = Step(job_id=jid, step_key="S1", title="S1", kind="test", capability="test", goal="g", max_attempts=4)
+        s2 = Step(job_id=jid, step_key="S2", title="S2", kind="test", capability="test", goal="g")
+        s.add_all([s1, s2])
+        await s.flush()
+        s1.status, s1.attempt_count, s1.not_before = StepStatus.failed.value, 5, datetime.now(UTC) + timedelta(seconds=60)
+        s.add(StepDependency(step_id=s2.id, depends_on_step_id=s1.id))
+        await s.commit()
+    sched = Scheduler(sm, get_config(), [FakeHandler({"test"})], FakeDriver(sm), settings=_settings())
+    await sched._promote_steps()
+    assert (await _steps(sm, jid))["S2"].status == StepStatus.pending.value
+
+
 async def test_backoff_delays_redispatch(sessionmaker: Any, clean_jobs: None) -> None:
     sm = sessionmaker
     driver = FakeDriver(sm)
