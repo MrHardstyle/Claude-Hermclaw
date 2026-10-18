@@ -146,7 +146,8 @@ async def run_structured_loop[T](
                 break
             if on_repair is not None:
                 await on_repair(record, remaining - 1)
-            conversation = _repair_conversation(messages, data, record.errors, remaining - 1, settings)
+            earlier = list(dict.fromkeys(e for a in attempts[:-1] for e in a.errors if e not in record.errors))
+            conversation = _repair_conversation(messages, data, record.errors, remaining - 1, settings, earlier)
             continue
         return LoopOutcome(value=value, result=result, attempts=attempts, duration_ms=int((time.monotonic() - started) * 1000))
     last = attempts[-1]
@@ -175,8 +176,13 @@ def _error_list(invalid: PlanInvalid, result: ChatResult, settings: PlannerSetti
     return errors or [f"{invalid.phase}: invalid plan"]
 
 
-def _repair_conversation(
-    base: list[ChatMessage], data: dict[str, Any] | None, errors: list[str], remaining_after: int, settings: PlannerSettings
+def _repair_conversation(  # noqa: PLR0917 - private helper of the loop
+    base: list[ChatMessage],
+    data: dict[str, Any] | None,
+    errors: list[str],
+    remaining_after: int,
+    settings: PlannerSettings,
+    earlier: list[str] | None = None,
 ) -> list[ChatMessage]:
     """Base prompt + the previous answer + the exact error list.
 
@@ -189,5 +195,6 @@ def _repair_conversation(
         echo = compact_json(DEFAULT_REDACTOR.obj(data))
         if len(echo) <= settings.max_echo_chars:
             conversation.append(ChatMessage(role="assistant", content=echo))
-    conversation.append(ChatMessage(role="user", content=repair_message(errors, remaining_after)))
+    earlier_rules = (earlier or [])[: settings.max_errors_reported]
+    conversation.append(ChatMessage(role="user", content=repair_message(errors, remaining_after, earlier_rules)))
     return conversation

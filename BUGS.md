@@ -46,6 +46,17 @@ Noch keine.
 
 ## Behobene Bugs
 
+### BUG-261 – Planner-Reparaturen drehen sich im Kreis: Jede Runde kennt nur die aktuellen Fehler und bricht die Regel der vorigen
+- Phase: G1 auf rc46 (Job `28f184c5…`, Planung) · Komponente: planner (loop, prompt) · Severity: P1 · blockierend: ja (behoben) · Status: **behoben** (`tests/unit/test_planner_loop.py::test_a_repair_turn_keeps_the_rules_earlier_answers_broke`)
+- Reproduktion:
+  - Erster Plan: S004 schreibt nur Tests für den Code von S002 und S003, was die Validierung ablehnt (BUG-250-Regel).
+  - Reparatur 1 legt alles in S002 zusammen. S002 hat nun 10 neue Dateien, erlaubt sind 8.
+  - Reparatur 2 teilt wieder auf, und S003 schreibt erneut nur Tests für S002.
+  - Nach zwei Reparaturen endet der Job mit `PLANNER_INVALID_OUTPUT` (4,5 min, kein Schritt gelaufen).
+- Ursache: Eine Reparaturrunde zeigt dem Modell nur die letzte Antwort und deren Fehler. Was frühere Runden abgelehnt hatten, war vergessen. Bei zwei gegenläufigen Regeln (Tests zum Code, höchstens 8 Dateien je Schritt) pendelte das Modell zwischen beiden Verstößen.
+- Fix: Ab der zweiten Reparatur listet die Nachricht zusätzlich die Fehler früherer Antworten, mit der Vorgabe: „the corrected plan must still satisfy these too“. Das gilt auch für den Replanner, der dieselbe Schleife nutzt.
+- Selbstprüfung: echter Schritt nach vorn. Die Reparaturschleife bekommt ein Gedächtnis, statt die Regeln zu lockern oder das Reparaturbudget zu erhöhen. Die Lösung (nach Komponenten aufteilen, jede mit ihren Tests) nennt die Dateigrenzen-Meldung bereits.
+
 ### BUG-260 – Eine Eskalation, die nie ausgeführt wurde (Heavy Review durch Deploy abgebrochen), verbraucht ihre Stufe; die nächste Stagnation geht direkt zum Replan
 - Phase: G1 auf rc45 (Job `3d90ec7b…`, Replan 2, S002 Versuche 2 und 4) · Komponente: stagnation (persistence) · Severity: P1 · blockierend: ja (behoben) · Status: **behoben** (`tests/integration/test_stagnation_persistence.py::test_an_escalation_an_interrupted_attempt_never_ran_is_not_used_up`)
 - Reproduktion:

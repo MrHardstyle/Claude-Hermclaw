@@ -520,12 +520,20 @@ def replanner_system_prompt(kind_capability: dict[str, str], capability_names: S
 
 
 # --------------------------------------------------------------------------------------------- repair turn
-def repair_message(errors: Sequence[str], remaining_after: int) -> str:
+def repair_message(errors: Sequence[str], remaining_after: int, earlier: Sequence[str] = ()) -> str:
+    """The repair turn: the current errors, plus the errors of earlier answers the corrected plan must keep satisfying
+    – each turn only sees the latest answer, and a fix for one rule re-broke the previous one (live G1: tests split
+    off → merged → too many files → split off again, PLANNER_INVALID_OUTPUT, BUG-261)."""
     listed = "\n".join(f"- {e}" for e in errors)
+    still = ""
+    if earlier:
+        rules = "\n".join(f"- {e}" for e in earlier)
+        still = f"Earlier answers were rejected for the following; the corrected plan must still satisfy these too:\n{rules}\n"
     return (
         "Your previous answer is not a valid plan. Fix ALL of the following validation errors and answer again "
         "with the complete corrected JSON object only (no markdown, no prose):\n"
         f"{listed}\n"
+        f"{still}"
         f"Repair attempts remaining after this one: {remaining_after}."
     )
 

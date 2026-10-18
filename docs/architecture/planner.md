@@ -81,7 +81,9 @@ the gateway, never by the planner.
    remaining budget. The previous answer is echoed only if it parsed: it is redacted and re-serialised as compact
    JSON. Prose, markdown and unparseable text are never echoed. At most `max_repair_attempts = 2` repairs in total
    (3 calls). After that the planner raises `PlannerError` and emits `planner.failed`. If an answer was cut off
-   (`finish_reason == "length"`), the error list says so.
+   (`finish_reason == "length"`), the error list says so. From the second repair on, the message also lists the errors
+   of earlier answers as rules the corrected plan must still satisfy; otherwise a fix for one rule re-broke the
+   previous one (BUG-261).
 5. **Persist** in one transaction under `SELECT … FOR UPDATE` of the job. The plan check is repeated, so a
    concurrent planner gets `PLAN_EXISTS`. The transaction writes:
    - one `plans` row and `plan_versions` v1 (`source` is `planner`, or `fallback` when the gateway reported `fallback_used`), with `model_alias`, the enriched `plan_json`, the `validation_errors` history and `repair_attempts`;

@@ -299,3 +299,19 @@ async def test_a_repair_that_changes_nothing_raises_the_temperature() -> None:
     fixed = ScriptedChat([bad, FASTAPI.answer()])
     await _run(fixed)
     assert [c.temperature for c in fixed.calls] == [0.2, 0.2]
+
+
+async def test_a_repair_turn_keeps_the_rules_earlier_answers_broke() -> None:
+    """Live G1 (BUG-261): repair 1 merged the separate test steps into their code step, repair 2 fixed the resulting
+    "too many new files" by splitting the tests off again – each turn only saw the latest errors – and the job failed
+    with PLANNER_INVALID_OUTPUT. A repair turn lists the errors of earlier answers as rules that still hold."""
+    first, second = FASTAPI.answer(), FASTAPI.answer()
+    first["steps"][0]["id"] = "one"  # schema error of the first answer
+    second["steps"][1]["id"] = "two"  # a different error in the second
+    chat = ScriptedChat([first, second, FASTAPI.answer()])
+    await _run(chat)
+    second_repair = chat.calls[2].messages[-1].content
+    first_errors = chat.calls[1].messages[-1].content.split("\n")[1]
+    assert "Earlier answers were rejected for the following" in second_repair
+    assert first_errors in second_repair.split("Earlier answers")[1], (first_errors, second_repair)
+    assert "Earlier answers" not in chat.calls[1].messages[-1].content
