@@ -656,3 +656,42 @@ async def test_leftovers_another_open_step_declares_wait_for_that_step(world: Wo
     assert steps["S002"].result["files"] == ["frontend.js"]
     ws = (await world.engine.list_workspaces(jid))[0]
     assert (Path(ws.path) / "frontend.js").read_text() == "// left by a superseded step\n"
+
+
+async def test_a_resumed_correction_gets_verifier_items_of_the_current_work_tree(world: World, tmp_path: Path) -> None:
+    """Live G1 (BUG-259): a deploy paused S002's correction attempt after it had removed the unused imports; the resumed
+    attempt got the old lint output, tried to remove the imports again and was blocked by the stagnation guard. A
+    resumed correction whose interrupted attempt changed files re-runs the verifier: fixed findings disappear."""
+    tokens: list[Any] = []
+    fix = act("replace_text", path="src/module.py", old="VALUE = 2", new="VALUE = 3")
+
+    class PausingModels(Models):
+        turns = 0
+
+        async def structured(
+            self, alias: str, messages: list[ChatMessage], schema: type[T], *, ctx: CallContext, **kw: Any
+        ) -> StructuredResult[T]:  # type: ignore[override]
+            if alias == "coder-main":
+                self.turns += 1
+                if self.turns == 3:  # the correction attempt's first turn: a deploy pauses the step afterwards
+                    tokens[-1].request_checkpoint("deploy")
+            return await super().structured(alias, messages, schema, ctx=ctx, **kw)
+
+    models = PausingModels([_plan()], [EDIT, DONE, fix, DONE])
+    verifier = ScriptedVerifier(world, [False, True, True])  # initial fails; the refresh before the resume passes
+    handler = _handler(world, models, verifier, None)
+    run = handler.run
+
+    async def capture(ctx: Any) -> Any:
+        tokens.append(ctx.token)
+        return await run(ctx)
+
+    handler.run = capture  # type: ignore[method-assign]
+    jid = await _job(world)
+    jobs = await _run(world, _driver(world, models, tmp_path), [handler, ReviewHandler()], [jid])
+    assert jobs[jid].status == "succeeded", (jobs[jid].error_code, jobs[jid].error_message)
+    kinds = [(a.kind, a.outcome) for a in await _attempts(world, jid)]
+    assert ("correction", "checkpointed") in kinds and ("resume", "completed") in kinds, kinds
+    assert verifier.calls == 3
+    resumed = "\n".join(m.content for m in models.coder_prompts[3])
+    assert "pattern 'VALUE = 3' not found" not in resumed, "the fixed finding is not shown again"

@@ -465,6 +465,8 @@ class ImplementStepHandler:
         )
         pending = ctx.attempt_kind == "correction" or bool(ctx.correction_input.get("pending"))  # a resumed correction too
         corrections = corrections_from_input(ctx.correction_input) if pending else []
+        if ctx.attempt_kind == "resume" and any(r.mutated_paths for r in history):
+            corrections = await self._fresh_verifier_items(ctx, step, handle, corrections)
         engine.expect_corrections(c.path for c in corrections)  # complete_step reminds of untouched files (BUG-258)
         await self._status(ctx, f"Coder startet {row.step_key} ({ctx.attempt_kind}, max {settings.max_turns} Turns)")
         try:
@@ -491,6 +493,19 @@ class ImplementStepHandler:
             return await self._after_loop(_Run(ctx, row, step, ws, handle), result)
         except ResourceUnavailable as exc:  # heavy-review lease not granted in time
             return StepOutcome("failed", error_code=exc.code, error_message=exc.message, retryable=True)
+
+    async def _fresh_verifier_items(
+        self, ctx: StepRunContext, step: StepContract, handle: WorkspaceHandle, corrections: list[CorrectionItem]
+    ) -> list[CorrectionItem]:
+        """The verifier items of a resumed correction, re-derived from the current work tree: the interrupted attempt
+        changed files and may have fixed some findings already (live G1: the resumed S002 tried to remove the unused
+        imports attempt 2 had removed, until the stagnation guard blocked the step, BUG-259). Other items stay."""
+        if not any(c.source == "verifier" for c in corrections):
+            return corrections
+        await self._status(ctx, "Verifier prüft den Stand vor dem Fortsetzen")
+        outcome = await self.deps.verifier.verify(step, handle, job_id=ctx.job_id, step_id=ctx.step_id, attempt_id=ctx.attempt_id)
+        kept = [c for c in corrections if c.source != "verifier"]
+        return kept if outcome.report.passed else [*kept, *CorrectionItem.from_verification(outcome.report)]
 
     def _model(self, ctx: StepRunContext, role: str, *, preemptible: bool) -> contextlib.AbstractAsyncContextManager[Any]:
         """Hold the GPU model lease for ``role``; a preemption request (video/image) makes the coder checkpoint."""

@@ -4,6 +4,10 @@ Format: [Keep a Changelog](https://keepachangelog.com/de/1.1.0/), Versionen nach
 
 ## [Unreleased]
 
+### Behoben
+- **Fortgesetzte Korrekturen mit aktuellen Befunden (BUG-259):** Hat ein unterbrochener Korrekturversuch Dateien geändert, prüft der Verifier vor dem Fortsetzen erneut; behobene Befunde verschwinden aus der Korrektur.
+- **Abgebrochene Eskalationen verbrauchen keine Stufe (BUG-260):** Nur Versuche, die über den Stagnationsweg endeten, zählen für die Eskalationsleiter; ein durch Deploy oder Ausfall abgebrochenes Heavy Review steht beim nächsten Stopp wieder zur Verfügung.
+
 ## [0.1.0rc45] – Release Candidate (2026-10-18)
 
 ### Behoben

@@ -46,6 +46,28 @@ Noch keine.
 
 ## Behobene Bugs
 
+### BUG-260 – Eine Eskalation, die nie ausgeführt wurde (Heavy Review durch Deploy abgebrochen), verbraucht ihre Stufe; die nächste Stagnation geht direkt zum Replan
+- Phase: G1 auf rc45 (Job `3d90ec7b…`, Replan 2, S002 Versuche 2 und 4) · Komponente: stagnation (persistence) · Severity: P1 · blockierend: ja (behoben) · Status: **behoben** (`tests/integration/test_stagnation_persistence.py::test_an_escalation_an_interrupted_attempt_never_ran_is_not_used_up`)
+- Reproduktion:
+  - Versuch 2 stoppt um 10:50 (`loop`, Empfehlung `heavy_review`). Das Review startet, der Deploy bricht es ab („fail-closed: the review was cancelled“), und der Versuch endet `checkpointed`.
+  - Der fortgesetzte Versuch 4 stoppt um 10:59 (`edit_mechanics`). Die Leiter hält `heavy_review` für verbraucht und empfiehlt `replan`.
+  - Der Schritt wird blockiert. Ohne verbleibenden Replan scheitert der Job.
+- Ursache: `prior_escalations` zählte jede Empfehlung früherer Versuche, auch wenn der Versuch vor ihrer Ausführung unterbrochen wurde (Checkpoint, Worker-Ausfall, Absturz).
+- Fix: Nur Versuche, die über den Stagnationsweg endeten (`error_code = STAGNATION`: Korrektur nach Review oder Recherche, oder Block), verbrauchen ihre Stufe.
+- Selbstprüfung: echter Schritt nach vorn. Die Leiter bildet ab, was tatsächlich geschah. Mit BUG-259 und BUG-249 der dritte Fehler, bei dem eine Unterbrechung Zustand verfälschte. Unterbrechungen bleiben ein eigener Prüfpunkt für künftige Änderungen.
+
+### BUG-259 – Ein fortgesetzter Korrekturversuch arbeitet mit veralteten Verifier-Befunden; der Coder behebt längst Behobenes, bis die Stagnationserkennung den Schritt blockiert
+- Phase: G1 auf rc45 (Job `3d90ec7b…`, Replan 2, S002 Versuch 4) · Komponente: coder (handler) · Severity: P1 · blockierend: ja (behoben) · Status: **behoben** (`tests/integration/test_coder_handler.py::test_a_resumed_correction_gets_verifier_items_of_the_current_work_tree`)
+- Reproduktion:
+  - Korrekturversuch 2 von S002 entfernt die ungenutzten Imports `ssl` und `threading` aus `collector.py`. Danach unterbricht der rc45-Deploy den Versuch (`checkpointed`).
+  - Versuch 4 (`resume`) erhält dieselben Korrektur-Items mit der alten Lint-Ausgabe („`ssl` imported but unused“, Zeile 12).
+  - Der Coder versucht viermal, die Imports zu entfernen: zweimal `TEXT_NOT_FOUND`, zweimal `'old' and 'new' are identical`. Die Stagnationserkennung stoppt (`edit_mechanics`). S002 wird blockiert, und der Job scheitert mit `REPLAN_LIMIT`.
+- Ursache: Ein fortgesetzter Versuch übernimmt die Korrektur-Items des unterbrochenen (BUG-249). Was der unterbrochene Versuch schon geändert hatte, spiegelten die Items nicht mehr wider. Lint- und Secret-Befunde sind aber Zustände des Arbeitsbaums, keine festen Aufgaben.
+- Fix:
+  - Hat der unterbrochene Versuch laut Checkpoint-Historie Dateien geändert, prüft der Verifier vor dem Fortsetzen den aktuellen Stand.
+  - Die Verifier-Items werden durch die aktuellen Befunde ersetzt (keine, wenn er besteht). Review- und Stagnations-Items bleiben.
+- Selbstprüfung: echter Schritt nach vorn. Die Korrektur beschreibt wieder den Ist-Zustand, statt den Coder gegen einen vergangenen Zustand arbeiten zu lassen. Kosten: ein Verifier-Lauf je fortgesetztem Korrekturversuch mit Änderungen.
+
 ### BUG-258 – Ein Korrekturversuch meldet Erfolg, ohne die Datei anzufassen, deren Befunde die Korrektur nennt
 - Phase: G1 auf rc43 (Job `3d90ec7b…`, Replan 1, S002 Versuch 5) · Komponente: tools (engine), coder (handler) · Severity: P1 · blockierend: ja (behoben) · Status: **behoben** (`tests/integration/test_tools_engine_exec.py::test_completion_is_refused_once_while_a_file_the_correction_names_is_untouched`)
 - Reproduktion:

@@ -23,7 +23,7 @@ from hermclaw.core.redaction import REDACTED
 from hermclaw.persistence.models import Event, Job, Step, StepAttempt
 from hermclaw.scheduler import CancelToken
 from hermclaw.scheduler.handlers import StepRunContext
-from hermclaw.stagnation.actions import LadderContext, decide
+from hermclaw.stagnation.actions import LadderContext, Recommendation, StagnationCause, choose_recommendation, decide
 from hermclaw.stagnation.detector import Observation, SignalKind, StagnationDetector, StagnationLevel
 from hermclaw.stagnation.monitor import StagnationMonitor, create_monitor, make_stagnation_factory, to_directive
 from hermclaw.stagnation.persistence import (
@@ -40,7 +40,15 @@ from tests.integration.test_coder_loop import PY, TEST_FILE, _run, _setup, act
 pytestmark = pytest.mark.asyncio(loop_scope="session")
 
 
-async def _attempt(sm: Any, *, step: Step | None = None, attempt_no: int = 1, fingerprints: dict[str, Any] | None = None) -> StepAttempt:
+async def _attempt(
+    sm: Any,
+    *,
+    step: Step | None = None,
+    attempt_no: int = 1,
+    fingerprints: dict[str, Any] | None = None,
+    outcome: str | None = None,
+    error_code: str | None = None,
+) -> StepAttempt:
     async with sm() as s:
         if step is None:
             job = Job(title="stagnation", prompt="p")
@@ -49,7 +57,14 @@ async def _attempt(sm: Any, *, step: Step | None = None, attempt_no: int = 1, fi
             step = Step(job_id=job.id, step_key="S001", title="t", kind="implement", capability="coding", goal="g")
             s.add(step)
             await s.flush()
-        row = StepAttempt(step_id=step.id, job_id=step.job_id, attempt_no=attempt_no, fingerprints=fingerprints or {})
+        row = StepAttempt(
+            step_id=step.id,
+            job_id=step.job_id,
+            attempt_no=attempt_no,
+            fingerprints=fingerprints or {},
+            outcome=outcome,
+            error_code=error_code,
+        )
         s.add(row)
         await s.commit()
         await s.refresh(row)
@@ -130,15 +145,31 @@ async def test_missing_or_corrupt_state_loads_fresh_and_is_overwritten(sessionma
 
 
 async def test_prior_escalations_of_the_step(sessionmaker: Any) -> None:
-    first = await _attempt(sessionmaker, fingerprints={STATE_KEY: {"escalations": ["heavy_review"]}})
+    stag = {"outcome": "failed", "error_code": "STAGNATION"}
+    first = await _attempt(sessionmaker, fingerprints={STATE_KEY: {"escalations": ["heavy_review"]}}, **stag)
     step = await _step(sessionmaker, first.step_id)
-    await _attempt(sessionmaker, step=step, attempt_no=2, fingerprints={STATE_KEY: {"escalations": ["replan", "bogus", 7]}})
+    await _attempt(sessionmaker, step=step, attempt_no=2, fingerprints={STATE_KEY: {"escalations": ["replan", "bogus", 7]}}, **stag)
     await _attempt(sessionmaker, step=step, attempt_no=3, fingerprints={"unrelated": True})
-    current = await _attempt(sessionmaker, step=step, attempt_no=4, fingerprints={STATE_KEY: {"escalations": ["block"]}})
+    current = await _attempt(sessionmaker, step=step, attempt_no=4, fingerprints={STATE_KEY: {"escalations": ["block"]}}, **stag)
     async with sessionmaker() as s:
         assert await prior_escalations(s, step.id, exclude_attempt_id=current.id) == ("heavy_review", "replan")
         assert await prior_escalations(s, step.id) == ("heavy_review", "replan", "block")
         assert await prior_escalations(s, uuid.uuid4()) == ()
+
+
+async def test_an_escalation_an_interrupted_attempt_never_ran_is_not_used_up(sessionmaker: Any) -> None:
+    """Live G1 (BUG-260): S002 stopped with heavy_review, a deploy cancelled the review and checkpointed the attempt; the
+    ladder counted heavy_review as used and the resumed attempt's next stop went straight to replan – the job failed.
+    Only attempts that ended through the stagnation route (error_code STAGNATION) use up their rung."""
+    paused = await _attempt(sessionmaker, fingerprints={STATE_KEY: {"escalations": ["heavy_review"]}}, outcome="checkpointed")
+    step = await _step(sessionmaker, paused.step_id)
+    await _attempt(sessionmaker, step=step, attempt_no=2, fingerprints={STATE_KEY: {"escalations": ["research"]}})  # crashed
+    outage = {"outcome": "failed", "error_code": "WORKER_UNREACHABLE"}
+    await _attempt(sessionmaker, step=step, attempt_no=3, fingerprints={STATE_KEY: {"escalations": ["heavy_review"]}}, **outage)
+    async with sessionmaker() as s:
+        assert await prior_escalations(s, step.id) == ()
+        ctx = LadderContext(used=await prior_escalations(s, step.id))
+    assert choose_recommendation(StagnationCause.edit_mechanics, ctx) is Recommendation.heavy_review
 
 
 # ------------------------------------------------------------------------------------------------------- events
@@ -239,7 +270,9 @@ async def test_monitor_persists_and_survives_restart(sessionmaker: Any) -> None:
 
 
 async def test_monitor_uses_prior_escalations_for_the_next_rung(sessionmaker: Any) -> None:
-    first = await _attempt(sessionmaker, fingerprints={STATE_KEY: {"escalations": ["heavy_review"]}})
+    first = await _attempt(
+        sessionmaker, fingerprints={STATE_KEY: {"escalations": ["heavy_review"]}}, outcome="failed", error_code="STAGNATION"
+    )
     step = await _step(sessionmaker, first.step_id)
     second = await _attempt(sessionmaker, step=step, attempt_no=2)
     mon = await create_monitor(sessionmaker, job_id=step.job_id, step_id=step.id, attempt_id=second.id)

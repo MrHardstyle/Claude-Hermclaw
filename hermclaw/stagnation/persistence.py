@@ -81,11 +81,20 @@ async def load_detector(
 
 
 async def prior_escalations(session: AsyncSession, step_id: uuid.UUID, *, exclude_attempt_id: uuid.UUID | None = None) -> tuple[str, ...]:
-    """Recommendations already issued by stagnation stops in earlier attempts of the step, oldest first."""
-    q = select(StepAttempt.id, StepAttempt.fingerprints).where(StepAttempt.step_id == step_id).order_by(StepAttempt.attempt_no)
+    """Recommendations already carried out after stagnation stops in earlier attempts of the step, oldest first.
+
+    Only attempts that ended through the stagnation route (``error_code = STAGNATION``: the correction after a heavy
+    review or research, or the block) count: an attempt interrupted after its stop – checkpointed by a deploy, a worker
+    outage, a crash – never ran its escalation, and counting it skipped the rung (live G1: the cancelled heavy review
+    of S002 counted as used, the next stop went straight to replan and the job failed, BUG-260)."""
+    q = (
+        select(StepAttempt.id, StepAttempt.fingerprints, StepAttempt.error_code)
+        .where(StepAttempt.step_id == step_id)
+        .order_by(StepAttempt.attempt_no)
+    )
     out: list[str] = []
-    for attempt_id, fingerprints in (await session.execute(q)).all():
-        if attempt_id == exclude_attempt_id or not isinstance(fingerprints, Mapping):
+    for attempt_id, fingerprints, error_code in (await session.execute(q)).all():
+        if attempt_id == exclude_attempt_id or error_code != "STAGNATION" or not isinstance(fingerprints, Mapping):
             continue
         state = fingerprints.get(STATE_KEY)
         if not isinstance(state, Mapping):

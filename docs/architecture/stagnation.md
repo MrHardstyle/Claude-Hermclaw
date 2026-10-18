@@ -109,7 +109,8 @@ cannot select an environment cause.
 | stop (20.7/20.8) | coder loop ends `stagnated` with a recommendation | `switch_to_research` / `request_heavy_review` / `request_replan` / `block_step` |
 
 Stop recommendation = first rung of the cause's ladder that is available and not yet used for this step (escalations of
-earlier attempts are read from their `fingerprints`), `block` as last resort:
+earlier attempts are read from their `fingerprints`; only attempts that ended through the stagnation route,
+`error_code = STAGNATION`, count – an attempt checkpointed, crashed or lost to an outage never ran its escalation, BUG-260), `block` as last resort:
 
 | cause | ladder |
 |---|---|
