@@ -57,6 +57,8 @@ _READ_ONLY = frozenset(
 )
 # withheld after a refused repeat until something changes (BUG-181)
 _RUNNERS = frozenset({ToolName.run_test.value, ToolName.run_command.value})
+# withheld after a refused re-read until a file changes: the content is shown among the files read (BUG-271)
+_READERS = frozenset({ToolName.read_file.value, ToolName.read_range.value})
 # a cut-off answer is not a format problem: the model has to write less per turn (BUG-223)
 TRUNCATED_NOTE = (
     "Your last answer hit the output limit of {max_tokens} tokens and was cut off, so nothing was executed. Write at most "
@@ -73,6 +75,11 @@ RUNNERS_WITHHELD = (
     "run_test and run_command are withheld until something changes: nothing changed since the refused command, so "
     "every check gives the same result. Edit the code or the tests now, or call complete_step if the step is done, "
     "or block_step."
+)
+
+READERS_WITHHELD = (
+    "read_file and read_range are withheld until a file changes: what you read is shown above among the files you read. "
+    "Make the change now with replace_text or write_file (or apply_patch), run a different check, or call block_step."
 )
 
 CoderOutcome = Literal["completed", "blocked", "replan", "budget_exhausted", "stagnated", "cancelled", "checkpointed", "model_failed"]
@@ -325,6 +332,7 @@ class CoderLoop:
         records = list(history)
         notice: str | None = None
         runners_withheld = False
+        readers_withheld = False
         invalid_streak = 0
         turn = start_turn - 1
         for turn in range(start_turn, s.max_turns + 1):
@@ -336,6 +344,8 @@ class CoderLoop:
             tools = self.engine.tool_catalog()
             if runners_withheld:
                 tools = [t for t in tools if t.get("name") not in _RUNNERS]
+            if readers_withheld:
+                tools = [t for t in tools if t.get("name") not in _READERS]
             built = await self.builder.build(
                 TurnContextInput(
                     step=step,
@@ -424,17 +434,26 @@ class CoderLoop:
                 await self._persist(attempt_id, turn, records)
                 if done[1].terminal and done[1].ok:
                     return CoderResult("completed", turn, records, completion=dict(done[1].data), last_failure=None)
-            if repeated and action.tool.value in _RUNNERS:
-                runners_withheld = True
-            elif (
+            # live G1 S008/S014: after a refused re-read the coder asked for the same lines again and again across 50 turns
+            # and three attempts without a single edit, until stagnation blocked the step and the job failed (BUG-271)
+            changed = (
                 result.ok
                 and action.tool not in _READ_ONLY
                 and action.tool.value not in _RUNNERS
                 and result.data.get("changed") is not False  # a write of identical content changes nothing (J3, BUG-182)
-            ):
+            )
+            if repeated and action.tool.value in _READERS:
+                readers_withheld = True
+            elif changed or (result.ok and result.mutated_paths):
+                readers_withheld = False
+            if repeated and action.tool.value in _RUNNERS:
+                runners_withheld = True
+            elif changed:
                 runners_withheld = False
             if runners_withheld:
                 notice = "\n".join(x for x in (notice, RUNNERS_WITHHELD) if x)
+            if readers_withheld:
+                notice = "\n".join(x for x in (notice, READERS_WITHHELD) if x)
             if result.terminal and result.ok:
                 if action.tool == ToolName.complete_step:
                     return CoderResult("completed", turn, records, completion=dict(result.data), last_failure=None)

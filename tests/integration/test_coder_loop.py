@@ -199,6 +199,32 @@ async def test_checks_are_withheld_after_a_refused_repeat_until_a_file_changes(s
     assert "- run_test(" in prompt(7) and "withheld" not in prompt(7), "the edit in turn 6 brings the checks back"
 
 
+async def test_reads_are_withheld_after_a_refused_re_read_until_a_file_changes(sessionmaker: Any, tmp_repo: Path) -> None:
+    """Live G1 (BUG-271): after refused re-reads the coder asked for the same lines again across three attempts of
+    S014 without one edit until stagnation blocked the step and the job failed. read_file/read_range leave the tool
+    catalogue after a refused re-read until a file changes."""
+    actions = [
+        act("read_file", path="app.py"),
+        act("read_file", "nochmal", path="app.py"),
+        act("list_files", path="."),
+        act("write_file", "Fix", path="app.py", content='"""Adds."""\n\n\ndef add(a, b):\n    return a + b\n'),
+        act("list_files", path="."),
+    ]
+    h, loop, chat = await _setup(sessionmaker, tmp_repo, actions, max_turns=5)
+    res = await _run(h, loop)
+    assert res.history[1].error_code == "READ_REPEATED"
+
+    def prompt(turn: int) -> str:
+        return "\n".join(m.content for m in chat.prompts[turn - 1])
+
+    assert "- read_file(" in prompt(2), "a first re-read is still offered (the guard refuses it)"
+    for turn in (3, 4):
+        assert "- read_file(" not in prompt(turn) and "- read_range(" not in prompt(turn)
+        assert "read_file and read_range are withheld until a file changes" in prompt(turn)
+        assert "- run_test(" in prompt(turn) and "- write_file(" in prompt(turn)
+    assert "- read_file(" in prompt(5) and "withheld" not in prompt(5), "the edit in turn 4 brings the reads back"
+
+
 async def test_a_passing_check_proposed_again_after_the_refusal_completes_the_step(sessionmaker: Any, tmp_repo: Path) -> None:
     """rc21 battery J5: the tests were green, the repeat guard told the coder to call complete_step, and it proposed
     the same command three more times. The second re-proposal completes the step on its behalf (BUG-207); a failing

@@ -46,6 +46,24 @@ Noch keine.
 
 ## Behobene Bugs
 
+### BUG-271 – Der Coder fordert nach verweigerten Wiederholungen immer wieder dieselben Zeilen an; drei Versuche ohne eine einzige Änderung, G1 scheitert mit `REPLAN_LIMIT`
+- Phase: G1 auf rc50–rc55 (Job `5c3d40a5…`, S008 Versuche 1–3, S014 Versuche 1–4) · Komponente: coder (loop) · Severity: P1 · blockierend: ja (behoben; G1 FAIL nach 2 Replans) · Status: **behoben** (`tests/integration/test_coder_loop.py::test_reads_are_withheld_after_a_refused_re_read_until_a_file_changes`)
+- Reproduktion:
+  - S014 soll collector.py (845 Zeilen) und test_collector.py (591 Zeilen) reparieren.
+  - In 54 Turns über vier Versuche liest der Coder dieselben Bereiche wieder. Es gibt 7 Verweigerungen `READ_REPEATED`, die einzige Änderung wurde abgelehnt (BUG-270), es gibt keinen erfolgreichen Schreibzugriff.
+  - Die Stagnationserkennung stoppt erst mit Hinweis, dann per Heavy Review und schließlich mit Block. Das Replan-Budget ist erschöpft, der Job endet mit FAIL.
+- Ursache:
+  - Die Verweigerung sagte „Act on it now“, ließ aber alle Lesewerkzeuge im Katalog. Das Modell blieb im Analysemodus.
+  - Für Prüfbefehle gibt es diese Sperre seit BUG-181. Für Lesezugriffe fehlte sie.
+- Fix:
+  - Nach einem verweigerten erneuten Lesen verlassen `read_file` und `read_range` den Werkzeugkatalog. Ein Turn-Hinweis nennt die Wege zur Änderung.
+  - Die Werkzeuge kommen zurück, sobald sich eine Datei ändert: durch einen Schreibzugriff oder einen Befehl mit geänderten Dateien.
+  - Der verweigerte Inhalt steht bereits unter den gelesenen Dateien (BUG-229/266).
+- Selbstprüfung:
+  - Nicht dasselbe Symptom erneut kompensiert. BUG-264–266 sorgten dafür, dass Gelesenes ankommt; das ist jetzt belegt, die Verweigerungen trafen gezeigte Inhalte.
+  - Dieser Fix setzt beim Verhalten danach an, mit derselben bewährten Mechanik wie BUG-181.
+  - Bewertung im nächsten G1-Lauf: Schreibt der Coder nach der Sperre, oder blockiert er?
+
 ### BUG-270 – Eine Änderung rund um ein maskiertes Test-Passwort wird abgelehnt, weil `new` die unveränderte maskierte Zeile enthält
 - Phase: G1 auf rc54 (Job `5c3d40a5…`, Replan 2, S014 Versuch 3, Turn 4) · Komponente: tools (engine) · Severity: P2 · blockierend: nein (behoben) · Status: **behoben** (`tests/integration/test_tools_engine_read_write.py::test_a_masked_line_left_unchanged_keeps_its_content`)
 - Reproduktion:

@@ -4,6 +4,9 @@ Format: [Keep a Changelog](https://keepachangelog.com/de/1.1.0/), Versionen nach
 
 ## [Unreleased]
 
+### Behoben
+- **Vom Lesen zum Ändern (BUG-271):** Nach einer verweigerten Wiederholung eines Lesezugriffs verlassen `read_file`/`read_range` den Werkzeugkatalog, bis sich eine Datei ändert.
+
 ## [0.1.0rc55] – Release Candidate (2026-10-18)
 
 ### Behoben
