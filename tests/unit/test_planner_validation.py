@@ -391,6 +391,24 @@ def test_conventional_extensionless_files_are_paths() -> None:
     ]
 
 
+def test_a_hint_to_a_file_an_earlier_step_creates_is_valid_once_ordered() -> None:
+    """Live G1 (BUG-262): three planner answers named collector.py / docs files in the hints of the step
+    that starts or documents the collector – files the collector step creates – and the plan failed with "never invent
+    paths". A hint to a file another step lists in allowed_new_paths is valid when that step runs first."""
+    ctx = _ctx(PlannerInput(repository_inventory={"files": ["README.md"]}))
+    collector = step("S001", "implement", "coding", "Create the collector with tests.", allowed_new_paths=["collector.py", "tests/"])
+    scripts = step("S002", "implement", "coding", "Write the start script.", allowed_new_paths=["start.ps1"], repo_hints=["collector.py"])
+    ordered = plan("Widget", [collector, {**scripts, "depends_on": ["S001"]}])
+    assert not any("collector.py" in e for e in _errors(ordered, ctx)), _errors(ordered, ctx)
+    web = step("S003", "implement", "coding", "Create the web page.", allowed_new_paths=["web/"], depends_on=["S001"])
+    nested = plan("Widget", [collector, web, {**scripts, "repo_hints": ["web/index.html"], "depends_on": ["S003"]}])
+    assert not any("web/index.html" in e for e in _errors(nested, ctx)), _errors(nested, ctx)  # transitive, directory pattern
+    unordered = _errors(plan("Widget", [collector, scripts]), ctx)
+    assert any("repo_hint 'collector.py' is created by step S001: add S001 to depends_on" in e for e in unordered), unordered
+    invented = _errors(plan("Widget", [collector, {**scripts, "repo_hints": ["docs/api.md"], "depends_on": ["S001"]}]), ctx)
+    assert any("repo_hint 'docs/api.md' does not exist" in e for e in invented)
+
+
 @pytest.mark.parametrize("pattern", ["**", "*", "**/*", "*/**", "./**"])
 def test_catch_all_patterns_are_rejected(pattern: str) -> None:
     """Scope stays explicit: hints and new-path patterns must name a concrete location."""

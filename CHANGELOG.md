@@ -4,6 +4,9 @@ Format: [Keep a Changelog](https://keepachangelog.com/de/1.1.0/), Versionen nach
 
 ## [Unreleased]
 
+### Behoben
+- **Hinweise auf Dateien früherer Schritte (BUG-262):** Ein `repo_hint` auf eine Datei, die ein anderer Schritt des Plans in `allowed_new_paths` anlegt, ist gültig, wenn der Schritt von diesem abhängt; sonst nennt der Fehler die fehlende Abhängigkeit statt „never invent paths“.
+
 ## [0.1.0rc47] – Release Candidate (2026-10-18)
 
 ### Behoben

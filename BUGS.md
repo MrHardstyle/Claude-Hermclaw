@@ -46,6 +46,18 @@ Noch keine.
 
 ## Behobene Bugs
 
+### BUG-262 – Ein repo_hint auf eine Datei, die ein früherer Schritt desselben Plans anlegt, gilt als erfundener Pfad
+- Phase: G1 auf rc47 (Job `99f2f1ff…`, Planung) · Komponente: planner (validation) · Severity: P1 · blockierend: ja (behoben) · Status: **behoben** (`tests/unit/test_planner_validation.py::test_a_hint_to_a_file_an_earlier_step_creates_is_valid_once_ordered`)
+- Reproduktion:
+  - In allen drei Planner-Antworten nennen spätere Schritte (Skripte, Dokumentation) Dateien des Collector-Schritts in ihren `repo_hints`: `tests/test_collector.py`, `collector.py`, `docs/api.md`.
+  - Jede Antwort scheitert mit „does not exist in repository_inventory … never invent paths“. Die Reparaturen tauschen nur den Namen, und der Job endet mit `PLANNER_INVALID_OUTPUT` (6,5 min).
+- Ursache: Die Regel kannte nur Pfade, die schon im Repository liegen. Dass ein Schritt das Ergebnis eines Vorgängers lesen soll und es deshalb in den Hinweisen nennt, ist für einen Neubau der Normalfall. Die Regel verbot es trotzdem, und ihre Meldung („files to be created belong in allowed_new_paths“) passte nicht, denn die Datei *wurde* schon von einem anderen Schritt angelegt.
+- Fix:
+  - Ein Pfad, den ein anderer Schritt des Plans in `allowed_new_paths` führt, ist als Hinweis gültig, wenn der Schritt (auch transitiv) von diesem abhängt.
+  - Ohne Abhängigkeit nennt der Fehler den Schritt, der in `depends_on` fehlt („is created by step S001: add S001 to depends_on“).
+  - Wirklich erfundene Pfade bleiben Fehler. Testpfade eines fremden Schritts fängt weiter BUG-250.
+- Selbstprüfung: echter Schritt nach vorn. Die Regel unterscheidet jetzt „erfunden“ von „von einem Vorgänger geliefert“. Eine Meldung, die der Planner nicht erfüllen konnte, wird zu einer, die er erfüllen kann. Zusammen mit BUG-261 die zweite Planungsblockade in Folge, beide in der Validierung bzw. Reparatur, nicht im Modell.
+
 ### BUG-261 – Planner-Reparaturen drehen sich im Kreis: Jede Runde kennt nur die aktuellen Fehler und bricht die Regel der vorigen
 - Phase: G1 auf rc46 (Job `28f184c5…`, Planung) · Komponente: planner (loop, prompt) · Severity: P1 · blockierend: ja (behoben) · Status: **behoben** (`tests/unit/test_planner_loop.py::test_a_repair_turn_keeps_the_rules_earlier_answers_broke`)
 - Reproduktion:

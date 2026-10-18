@@ -274,8 +274,10 @@ def _capability_errors(step: PlanStep, ctx: ValidationContext) -> list[str]:
     return errors
 
 
-def _hint_errors(step: PlanStep, ctx: ValidationContext) -> list[str]:
+def _hint_errors(step: PlanStep, ctx: ValidationContext, plan: PlanContract | None = None) -> list[str]:
     errors: list[str] = []
+    creators = {s.id: s for s in plan.steps if s.id != step.id} if plan is not None else {}
+    before = _reachable(plan, step.id) if plan is not None else set()
     for hint in step.repo_hints:
         kind = ctx.classify_hint(hint)
         if kind == "invalid":
@@ -298,6 +300,16 @@ def _hint_errors(step: PlanStep, ctx: ValidationContext) -> list[str]:
             continue
         if not any(c in GLOB_CHARS for c in p) and any_match(p, list(ctx.always_forbidden)):
             errors.append(f"step {step.id}: repo_hint '{p}' is a forbidden path (runtime policy)")
+            continue
+        made_by = [sid for sid, s in creators.items() if not any(c in GLOB_CHARS for c in p) and any_match(p, list(s.allowed_new_paths))]
+        if ctx.known_paths and not ctx.path_exists(p) and made_by:
+            # a file another step of this plan creates: the step reads what that step delivered, once it has run
+            # (live G1: three planner answers named collector.py/tests in a later step's hints, BUG-262)
+            if not any(sid in before for sid in made_by):
+                errors.append(
+                    f"step {step.id}: repo_hint '{p}' is created by step {made_by[0]}: add {made_by[0]} to depends_on "
+                    "(the file exists only after that step has run)"
+                )
             continue
         if ctx.known_paths and not ctx.path_exists(p):
             errors.append(
@@ -935,7 +947,7 @@ def semantic_errors(
         errors.extend(_step_size_errors(step, ctx))
         errors.extend(_capability_errors(step, ctx))
         errors.extend(_scope_source_errors(step, ctx))
-        errors.extend(_hint_errors(step, ctx))
+        errors.extend(_hint_errors(step, ctx, plan))
         errors.extend(_acceptance_errors(step, ctx))
 
     # duplicate work
