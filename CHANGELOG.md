@@ -2,7 +2,9 @@
 
 Format: [Keep a Changelog](https://keepachangelog.com/de/1.1.0/), Versionen nach PEP 440.
 
-## [Unreleased]
+## [0.1.0rc26] – Release Candidate (2026-10-18)
+
+Weitere Fixes aus dem Großauftrag G1 auf 0.1.0rc25.
 
 ### Behoben
 - **Größeres Antwortbudget des Coders (BUG-223, Nachtrag):** `coder-main.max_output_tokens` 8192 statt 6144.
