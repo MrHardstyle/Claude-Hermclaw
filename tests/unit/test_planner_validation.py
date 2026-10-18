@@ -536,6 +536,13 @@ def test_tests_for_new_code_belong_in_the_same_step() -> None:
         depends_on=["S001"],
     )
     assert any("S004 only writes tests" in e for e in _errors(plan("goal", [code, readme])))
+    # live G1 (BUG-237): the planner dropped the dependency – tests/test_service.py beside app/service.py is still a split
+    apart = step(
+        "S005", "implement", "coding", "Write the unit tests.", allowed_new_paths=["tests/test_service.py", "tests/fixtures/a.json"]
+    )
+    assert any("S005 only writes tests for the code of step S001" in e for e in _errors(plan("goal", [code, apart])))
+    unrelated = step("S006", "implement", "coding", "Test the parser.", allowed_new_paths=["tests/test_parser.py"])
+    assert not any("S006 only writes tests" in e for e in _errors(plan("goal", [code, unrelated])))
 
 
 def test_a_check_only_step_cannot_create_files() -> None:

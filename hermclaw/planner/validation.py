@@ -473,12 +473,29 @@ def _check_only_creation_errors(new_steps: Sequence[PlanStep]) -> list[str]:
     return errors
 
 
+_TEST_STEM_RE = re.compile(r"^(?:test_(?P<a>.+)|(?P<b>.+?)_test|(?P<c>.+?)\.(?:test|spec))$", re.IGNORECASE)
+
+
+def _tested_stem(path: str) -> str | None:
+    """``collector`` for tests/test_collector.py, src/app.test.js or pkg/app_test.go; None for fixtures and helpers."""
+    name = path.rstrip("/").rsplit("/", 1)[-1]
+    m = _TEST_STEM_RE.match(name.rsplit(".", 1)[0] if "." in name else name)
+    stem = m and (m.group("a") or m.group("b") or m.group("c"))
+    return stem.lower() if stem else None
+
+
+def _code_stem(path: str) -> str:
+    name = path.rstrip("/").rsplit("/", 1)[-1]
+    return (name.rsplit(".", 1)[0] if "." in name else name).lower()
+
+
 def _split_test_errors(plan: PlanContract, new_steps: Sequence[PlanStep], ctx: ValidationContext, preserved: frozenset[str]) -> list[str]:
     """Code and the tests for it belong in one step: an implementing step cannot run tests a later step writes, and
     the test step may not fix the code (analysis 2026-10-16, U3). A step that only writes tests may therefore not
-    depend on a workspace-mutating step that writes non-test code."""
+    depend on a workspace-mutating step that writes non-test code – nor sit beside it without a dependency when its
+    test files name that step's code (tests/test_collector.py for collector.py): the planner dropped the dependency
+    and the tests were written apart from the code, shaped to whatever it returned (live G1, BUG-237)."""
     errors: list[str] = []
-    by_id = {s.id: s for s in plan.steps}
     for step in new_steps:
         if step.kind.value not in WORKSPACE_MUTATING_KINDS:
             continue
@@ -487,17 +504,19 @@ def _split_test_errors(plan: PlanContract, new_steps: Sequence[PlanStep], ctx: V
         # a README among the hints of a tests-only step is context, not code (rc22 battery X1)
         if not tests or any(not TEST_PATH_RE.search(p) and not DOC_PATH_RE.search(p) for p in paths):
             continue
-        for dep in step.depends_on:
-            other = by_id.get(dep)
-            if other is None or dep in preserved or other.kind.value not in WORKSPACE_MUTATING_KINDS:
+        stems = {t for t in map(_tested_stem, tests) if t}
+        for other in plan.steps:
+            if other.id == step.id or other.id in preserved or other.kind.value not in WORKSPACE_MUTATING_KINDS:
                 continue  # tests for code a completed step already delivered are a step of their own
-            code = [p for p in _step_paths(other, ctx) if not TEST_PATH_RE.search(p)]
-            if code:
+            code = [p for p in _step_paths(other, ctx) if not TEST_PATH_RE.search(p) and not DOC_PATH_RE.search(p)]
+            if not code:
+                continue
+            if other.id in step.depends_on or stems & {_code_stem(p) for p in code}:
                 errors.append(
-                    f"step {step.id} only writes tests for the code of step {dep}: put code and its tests into ONE step "
-                    f"(merge {step.id} into {dep}: add its test paths to {dep}'s allowed_new_paths/repo_hints and its "
-                    "test acceptance), so the step can run its own tests and fix both. Merge only these tests: other "
-                    "components stay in their own steps"
+                    f"step {step.id} only writes tests for the code of step {other.id}: put code and its tests into ONE "
+                    f"step (merge {step.id} into {other.id}: add its test paths to {other.id}'s allowed_new_paths/"
+                    "repo_hints and its test acceptance), so the step can run its own tests and fix both. Merge only "
+                    "these tests: other components stay in their own steps"
                 )
     return errors
 

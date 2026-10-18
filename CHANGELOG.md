@@ -5,6 +5,7 @@ Format: [Keep a Changelog](https://keepachangelog.com/de/1.1.0/), Versionen nach
 ## [Unreleased]
 
 ### Behoben
+- **Code und Tests in einem Schritt (BUG-237):** Ein reiner Testschritt, dessen Testdateien den Code eines anderen Schritts benennen (`test_collector.py` ↔ `collector.py`), wird auch ohne Abhängigkeit abgewiesen.
 - **Abhängigkeiten bei geplantem Retry (BUG-236):** Ein fehlgeschlagener Schritt, für den ein Retry geplant ist, blockiert seine abhängigen Schritte nicht mehr.
 
 ## [0.1.0rc32] – Release Candidate (2026-10-18)

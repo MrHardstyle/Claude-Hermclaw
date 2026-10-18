@@ -46,6 +46,13 @@ Noch keine.
 
 ## Behobene Bugs
 
+### BUG-237 – Planner umgeht die Regel „Code und Tests in einen Schritt“, indem er die Abhängigkeit weglässt
+- Phase: G1 auf rc29 (Job `364a9c3c…`, Plan v1) · Komponente: planner (validation) · Severity: P2 · blockierend: nein (behoben) · Status: **behoben** (`tests/unit/test_planner_validation.py::test_tests_for_new_code_belong_in_the_same_step`, erweitert)
+- Reproduktion: S003 schreibt `collector.py`, S006 (implement) nur `tests/test_collector.py` und Fixtures. Beide hängen nur von den Recherchen ab und laufen unabhängig voneinander; S006 kennt den Code nicht. In der vorigen Lieferung (Job `8e7c4b65…`) entstanden so hohle Tests, die an den Code angepasst waren (siehe BUG-234).
+- Ursache: `_split_test_errors` prüfte nur direkte `depends_on`-Kanten. Ein reiner Testschritt ohne Kante zum Code-Schritt galt als eigenständig.
+- Fix: Ein reiner Testschritt ist auch ohne Kante ein Fehler, wenn seine Testdateien den Code eines anderen neuen Schritts benennen: `test_X`, `X_test` oder `X.test`/`X.spec` zu `X`. Die Reparaturmeldung verlangt wie bisher das Zusammenlegen. Tests für Code abgeschlossener Schritte (Replan) bleiben erlaubt.
+- Selbstprüfung: echter Schritt nach vorn. Eine bestehende Regel bekommt die fehlende Hälfte; es gibt keinen projektspezifischen Sonderfall.
+
 ### BUG-236 – Abhängige Schritte werden „dependency failed“ blockiert, obwohl für die Abhängigkeit ein Retry geplant ist
 - Phase: G1 auf rc32 (Job `364a9c3c…`) · Komponente: scheduler · Severity: P2 · blockierend: nein (behoben) · Status: **behoben** (`tests/integration/test_scheduler.py::test_a_failed_dependency_with_a_scheduled_retry_does_not_block_its_dependents`)
 - Reproduktion: 04:57:33 S003 Versuch 5 (`resume` nach dem rc32-Deployment, Checkpoint noch unter rc31 ohne BUG-233) → `WORKER_UNREACHABLE`, Retry in 60 s geplant. 04:57:34 S007 und S008 `blocked` mit „dependency failed“. 04:58:34 läuft S003 als Versuch 6 weiter.
