@@ -26,7 +26,7 @@ import shlex
 import stat
 import time
 import uuid
-from collections.abc import Awaitable, Callable, Mapping
+from collections.abc import Awaitable, Callable, Iterable, Mapping
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
@@ -288,6 +288,11 @@ class ToolEngine:
         self._reads: dict[tuple[str, str], tuple[int, int, bool]] = {}  # (writes, turn, fully visible)
         # manifest digest of the last successful install per (ecosystem, manifest): reinstalling it changes nothing
         self._installed: dict[tuple[str, str], str] = {}
+        # files the correction of this attempt names, and the files this attempt changed: complete_step is refused
+        # once while a named file is untouched (BUG-258)
+        self._correction_paths: list[str] = []
+        self._changed_now: set[str] = set()
+        self._correction_reminded = False
         self._handlers: dict[ToolName, Handler] = {
             ToolName.list_files: self._list_files,
             ToolName.read_file: self._read_file,
@@ -636,6 +641,7 @@ class ToolEngine:
     def _file_changed(self, tool: ToolName, changes: list[dict[str, Any]], events: list[PendingEvent]) -> None:
         if changes:
             self._writes += 1
+            self._changed_now.update(str(c["path"]) for c in changes if isinstance(c, dict) and c.get("path"))
             events.append(PendingEvent(EventType.FILE_CHANGED, {"tool": tool.value, "changes": changes[:200], "count": len(changes)}))
 
     # ============================================================================================ 17.1 read tools
@@ -1699,7 +1705,31 @@ class ToolEngine:
         progress = f" ({args.progress}%)" if args.progress is not None else ""
         return self._ok(ToolName.checkpoint, f"checkpoint saved{progress}", data={"checkpoint": checkpoint})
 
+    def expect_corrections(self, paths: Iterable[str]) -> None:
+        """The files a correction attempt is asked to fix (its correction items' paths, BUG-258)."""
+        self._correction_paths = list(dict.fromkeys(canonical_path(p) for p in paths if p))
+
+    def _untouched_corrections(self, turn: int) -> list[str]:
+        """Existing files the correction names that this attempt has not changed – empty once reminded, and on the
+        last turn (a refusal there would only exhaust the budget)."""
+        if self._correction_reminded or turn >= self.max_turns:
+            return []
+        return [p for p in self._correction_paths if p not in self._changed_now and (self.fs.root / p).is_file()]
+
     async def _complete_step(self, args: CompletionReport, ctx: CallContext, events: list[PendingEvent]) -> ToolResult:
+        untouched = self._untouched_corrections(ctx.turn)
+        if untouched:
+            # live G1 S002: the last correction attempt rewrote collector.py, ran its tests and completed – the secret
+            # and lint findings in tests/test_collector.py were never touched and the step was blocked (BUG-258)
+            self._correction_reminded = True
+            raise ToolError(
+                E.CORRECTION_OPEN,
+                "complete_step refused once: the CORRECTION lists problems in "
+                + ", ".join(untouched[:10])
+                + ", which this attempt has not changed. Fix them now; if they are already resolved, call complete_step "
+                "again.",
+                data={"untouched": untouched},
+            )
         reported: list[str] = []
         for raw in args.changed_files:
             rel = canonical_path(raw)

@@ -215,7 +215,9 @@ async def test_implement_step_happy_path_commits_and_pushes(world: World, tmp_pa
 
 
 async def test_verifier_failure_triggers_correction_with_evidence(world: World, tmp_path: Path) -> None:
-    models = Models([_plan()], [EDIT, DONE, DONE])  # correction attempt: change already present, coder completes again
+    # correction attempt: change already present, coder completes again – the first completion is reminded of the
+    # file the evidence names (BUG-258), the second is accepted
+    models = Models([_plan()], [EDIT, DONE, DONE, DONE])
     verifier = ScriptedVerifier(world, [False, True])
     jid = await _job(world)
     jobs = await _run(world, _driver(world, models, tmp_path), [_handler(world, models, verifier, None), ReviewHandler()], [jid])
@@ -253,7 +255,7 @@ async def test_failed_verification_after_the_turn_budget_corrects_with_both_note
     world: World, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     monkeypatch.setattr(get_config().policies.coder, "max_turns", 2)
-    models = Models([_plan()], [EDIT, READ, DONE])
+    models = Models([_plan()], [EDIT, READ, DONE, DONE])  # second DONE: BUG-258 reminder
     verifier = ScriptedVerifier(world, [False, True])
     jid = await _job(world)
     jobs = await _run(world, _driver(world, models, tmp_path), [_handler(world, models, verifier, None), ReviewHandler()], [jid])
@@ -273,7 +275,7 @@ async def test_turn_budget_without_changes_skips_the_verifier(world: World, tmp_
 
 
 async def test_review_invariant_major_finding_forces_correction(world: World, tmp_path: Path) -> None:
-    models = Models([_plan()], [EDIT, DONE, DONE])
+    models = Models([_plan()], [EDIT, DONE, DONE, DONE])  # second DONE: BUG-258 reminder
     verifier, reviewer = ScriptedVerifier(world, [True, True]), ScriptedReviewer(["major_pass", "pass"])
     jid = await _job(world)
     jobs = await _run(world, _driver(world, models, tmp_path), [_handler(world, models, verifier, reviewer), ReviewHandler()], [jid])
@@ -284,7 +286,7 @@ async def test_review_invariant_major_finding_forces_correction(world: World, tm
 
 async def test_exhausted_corrections_escalate_to_replan(world: World, tmp_path: Path) -> None:
     # S001 fails verification 3x (initial + 2 corrections) -> blocked repeated_verifier_failure -> Gemma replan -> S003 passes
-    models = Models([_plan(), _replan()], [EDIT, DONE, DONE, DONE, EDIT, DONE])
+    models = Models([_plan(), _replan()], [EDIT, DONE, DONE, DONE, DONE, DONE, EDIT, DONE])  # BUG-258: each correction completes twice
     verifier = ScriptedVerifier(world, [False, False, False, True])
     jid = await _job(world)
     jobs = await _run(world, _driver(world, models, tmp_path), [_handler(world, models, verifier, None), ReviewHandler()], [jid])
@@ -604,7 +606,7 @@ async def test_leftovers_of_a_step_that_ran_between_two_attempts_are_adopted(wor
                 (workspace.path / "notes.md").write_text("left by another step\n")
             return await super().verify(step, workspace, **kw)
 
-    models = Models([_plan()], [EDIT, DONE, DONE])
+    models = Models([_plan()], [EDIT, DONE, DONE, DONE])  # second DONE: BUG-258 reminder
     verifier = LeftoverVerifier(world, [False, True])
     jid = await _job(world)
     jobs = await _run(world, _driver(world, models, tmp_path), [_handler(world, models, verifier, None), ReviewHandler()], [jid])
@@ -642,7 +644,7 @@ async def test_leftovers_another_open_step_declares_wait_for_that_step(world: Wo
         ],
     )
     finish = act("complete_step", summary="page script kept", changed_files=["frontend.js"], tests_run=[])
-    models = Models([two_steps], [EDIT, DONE, DONE, finish])
+    models = Models([two_steps], [EDIT, DONE, DONE, DONE, finish])  # second DONE: BUG-258 reminder
     verifier = LeftoverVerifier(world, [False, True, True])
     jid = await _job(world)
     jobs = await _run(world, _driver(world, models, tmp_path), [_handler(world, models, verifier, None), ReviewHandler()], [jid])

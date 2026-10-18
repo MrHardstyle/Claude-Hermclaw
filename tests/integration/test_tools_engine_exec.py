@@ -310,6 +310,20 @@ async def test_complete_step_validates_and_is_terminal(sessionmaker: SM, repo: P
     assert (await h.call("block_step", reason_code="other", message="too late")).error_code == E.STEP_FINISHED
 
 
+async def test_completion_is_refused_once_while_a_file_the_correction_names_is_untouched(sessionmaker: SM, repo: Path) -> None:
+    """Live G1 (BUG-258): the last correction attempt of S002 rewrote collector.py, ran its tests and completed; the secret
+    and lint findings in tests/test_collector.py were never touched and the step was blocked. complete_step is refused
+    once while an existing file the correction names is unchanged – files that do not exist are not demanded."""
+    h = await make_harness(sessionmaker, repo, contract=scope(**SCOPE))
+    h.engine.expect_corrections(["src/calc.py", "tests/test_calc.py", "frontend.js", ""])
+    await h.call("replace_text", path="src/calc.py", old="a * b", new="b * a")
+    res = await h.call("complete_step", summary="swap operands", changed_files=["src/calc.py"], tests_run=[])
+    assert res.error_code == E.CORRECTION_OPEN and not res.terminal and res.data["untouched"] == ["tests/test_calc.py"]
+    assert "tests/test_calc.py" in res.output and "call complete_step again" in res.output
+    res = await h.call("complete_step", summary="swap operands", changed_files=["src/calc.py"], tests_run=[])
+    assert res.ok and res.terminal  # a second call is accepted: the findings may already be resolved
+
+
 async def test_block_step_is_terminal(sessionmaker: SM, repo: Path) -> None:
     h = await make_harness(sessionmaker, repo)
     assert (await h.call("block_step", reason_code="nonsense", message="x y z")).error_code == E.ARGS_INVALID

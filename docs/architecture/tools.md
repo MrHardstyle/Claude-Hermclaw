@@ -82,7 +82,7 @@ per-attempt state: the active `ScopeGuard` (swapped after a granted expansion), 
 | `request_scope_expansion` | request | protected paths refused locally, forwarded to `on_scope_expansion`; a granted newer contract replaces the guard |
 | `request_replan` | control, terminal | forwarded to `on_replan` |
 | `checkpoint` | control | `steps.checkpoint` = notes, progress, next actions, turn, attempt, changed files, scope version |
-| `complete_step` | control, terminal | `CompletionReport` validated; reported vs. actual changed files in `data` (verification follows) |
+| `complete_step` | control, terminal | `CompletionReport` validated; reported vs. actual changed files in `data` (verification follows); in a correction attempt the first call is refused (`CORRECTION_OPEN`, not on the last turn) while an existing file the correction items name is unchanged – a second call is accepted (BUG-258) |
 | `block_step` | control, terminal | `BlockReport` validated |
 
 Mutating tools and write-permission semantics: the operation is judged **relative to the workspace base commit**

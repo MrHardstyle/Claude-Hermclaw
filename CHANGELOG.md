@@ -4,6 +4,9 @@ Format: [Keep a Changelog](https://keepachangelog.com/de/1.1.0/), Versionen nach
 
 ## [Unreleased]
 
+### Behoben
+- **Korrekturversuche fassen die genannten Dateien an (BUG-258):** `complete_step` wird in einem Korrekturversuch einmal verweigert (`CORRECTION_OPEN`), solange eine Datei unverändert ist, die die Korrektur-Items nennen; ein zweiter Aufruf wird angenommen.
+
 ## [0.1.0rc44] – Release Candidate (2026-10-18)
 
 ### Behoben

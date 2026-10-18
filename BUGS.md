@@ -46,6 +46,19 @@ Noch keine.
 
 ## Behobene Bugs
 
+### BUG-258 – Ein Korrekturversuch meldet Erfolg, ohne die Datei anzufassen, deren Befunde die Korrektur nennt
+- Phase: G1 auf rc43 (Job `3d90ec7b…`, Replan 1, S002 Versuch 5) · Komponente: tools (engine), coder (handler) · Severity: P1 · blockierend: ja (behoben) · Status: **behoben** (`tests/integration/test_tools_engine_exec.py::test_completion_is_refused_once_while_a_file_the_correction_names_is_untouched`)
+- Reproduktion:
+  - Die Korrektur nennt Secret-Funde in `tests/test_collector.py` (Zeilen 162/169), Lint (`MagicMock` ungenutzt) und Review-Befunde in `collector.py`.
+  - Der letzte Versuch (5/5) schreibt `collector.py` neu, führt die Tests aus (grün) und ruft nach vier Turns `complete_step`.
+  - `tests/test_collector.py` bleibt unverändert. Der Verifier meldet dieselben Funde, und S002 wird blockiert (Replan 2 von 2).
+- Ursache: `complete_step` war immer terminal. Ob der Versuch die Dateien angefasst hatte, die seine Korrektur nennt, prüfte niemand. Der Coder hielt grüne Tests für „fertig“.
+- Fix:
+  - Der Handler gibt die Pfade der Korrektur-Items an die Tool-Engine (`expect_corrections`).
+  - Ist eine dieser Dateien vorhanden und in diesem Versuch unverändert, verweigert die Engine den ersten `complete_step` mit `CORRECTION_OPEN` und nennt die Dateien.
+  - Ein zweiter Aufruf wird angenommen (die Befunde können schon erledigt sein). Im letzten Turn wird nie verweigert.
+- Selbstprüfung: echter Schritt nach vorn. Eine deterministische, einmalige Erinnerung zum Zeitpunkt der Entscheidung, keine weitere Prompt-Regel und keine Sperre. Kosten: höchstens ein Turn je Korrekturversuch, in dem der Coder die genannten Dateien bewusst nicht ändert.
+
 ### BUG-257 – Nach einem Replan übernimmt der erste laufende Schritt die Altlasten aller abgelösten Schritte, auch Dateien, die der neue Plan anderen Schritten gibt
 - Phase: G1 auf rc43 (Job `3d90ec7b…`, Replan 1, S002 Versuch 4) · Komponente: coder (handler), gitops (engine) · Severity: P1 · blockierend: ja (behoben) · Status: **behoben** (`tests/integration/test_coder_handler.py::test_leftovers_another_open_step_declares_wait_for_that_step`, `tests/integration/test_gitops_engine.py::test_parked_leftovers_return_to_head_and_never_overwrite_a_changed_path`)
 - Reproduktion:

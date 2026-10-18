@@ -465,6 +465,7 @@ class ImplementStepHandler:
         )
         pending = ctx.attempt_kind == "correction" or bool(ctx.correction_input.get("pending"))  # a resumed correction too
         corrections = corrections_from_input(ctx.correction_input) if pending else []
+        engine.expect_corrections(c.path for c in corrections)  # complete_step reminds of untouched files (BUG-258)
         await self._status(ctx, f"Coder startet {row.step_key} ({ctx.attempt_kind}, max {settings.max_turns} Turns)")
         try:
             async with self._model(ctx, "coder", preemptible=True):
