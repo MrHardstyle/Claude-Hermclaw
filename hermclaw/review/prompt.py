@@ -48,8 +48,8 @@ like the documented responses, is major.
 - Tests: missing tests for new behaviour, tests weakened, skipped or deleted, assertions changed to match wrong \
 behaviour, special cases that only satisfy a specific check instead of solving the problem generally. Hollow tests \
 are major: a mock patched where the code never looks it up (patching the library function while the module \
-calls a name it imported with "from … import", or the reverse), assertions that also pass when the result is an error or empty (only counting \
-items, `if result:`), tests that open real network connections.
+calls a name it imported with "from … import", or the reverse), assertions that also pass when the result is an error \
+or empty (only counting items, `if result:`), tests that open real network connections.
 - Constraint and architecture violations, changes outside the SCOPE, unnecessary or unrelated changes.
 
 RULES
