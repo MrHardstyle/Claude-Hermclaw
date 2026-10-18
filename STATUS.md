@@ -247,7 +247,19 @@ bestanden; ansible-lint (production) sauber. `test_deploy_converge` ist angepass
     - ein gebündeltes Fixpaket mit Regressionstests bauen;
     - die neue Version mit denselben Aufträgen erneut prüfen.
     - Gemessen wird die Erfolgsquote je Version. G1 läuft erst wieder, wenn kurze und mittlere Aufträge zuverlässig laufen. Sofortreaktion nur bei Datenverlust oder Sicherheitsproblemen.
-    - Zyklus 1 läuft auf rc59. K1 succeeded (42 min statt 30, 1 Replan: Runtime schloss eine Lint-Korrektur nach grünen Tests ab). K2 ist durch die Regression BUG-275 ungültig (jeder Befehl im Node-Image Exit-Code 2).
+    - **Zyklus 1 auf rc59 (abgeschlossen 2026-10-18 19:35):** Prozess-PASS **2 von 6** (K3, M1). Mit Codeprüfung **0 von 6** voll korrekt.
+      - K1 succeeded, aber 42 min statt 30 und 1 Replan (BUG-276). Im Code: Zeilennummern der Warnungen um eins verschoben, `nan` wird akzeptiert.
+      - K2 ungültig durch BUG-275 (jeder Befehl im Node-Image Exit-Code 2).
+      - K3 PASS in 2,2 min. Im Code: ein einzelnes Ergebnis wird Objekt statt Array, kein Treffer gibt keine Ausgabe statt `[]`.
+      - M1 PASS mit 1 Replan (BUG-277). Im Code: eine erledigte Aufgabe lässt sich nicht wieder öffnen, ein JSON-Body, der kein Objekt ist, führt zu 500.
+      - M2 succeeded, aber erst nach 2 Replans (BUG-278: `must_change` auf nur gelesene Dateien, vom Neuplaner wiederholt). Der Code ist sehr gut.
+      - M3 failed `REPLAN_LIMIT`: Testwerte wie `valid_token` und Beispiel-Tokens im README wurden als Geheimnis gemeldet und nie ersetzt (BUG-279).
+      - Gemeinsame Ursachen:
+        - Runtime-Prüfungen, die ein korrektes Ergebnis nicht erkennen (BUG-275, 276, 279);
+        - Prüfkriterien des Planers auf Dateien, die nicht geändert werden müssen (BUG-277, 278);
+        - fachliche Randfälle, die weder Plan noch Review einfordern.
+      - Fixpaket BUG-275–279 ist fertig, die volle Suite zeigt keine neuen Fehler gegenüber der Basis.
+      - Vor Zyklus 2 läuft das Planer-Turnier (R-033, Betreiberwunsch).
 3. 0.1.0rc18 ausrollen, J1–J6 zweimal in Folge bestehen, dann die erweiterte Batterie X1–X5
    (`config/acceptance-jobs-extended.example.yaml`); danach Abbruch, parallele Jobs und Worker-Neustart prüfen.
 4. Wake-on-LAN einrichten (MACs, BIOS, Kapitel 13.1), danach `--suite wol --full-wol` und erst dann den Leerlauf-Suspend einschalten.
