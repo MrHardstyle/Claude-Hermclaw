@@ -14,6 +14,7 @@ from typing import Any
 
 from hermclaw.contracts.acceptance import CommandEvidence, TestEvidence
 from hermclaw.contracts.verification import VerificationCheck
+from hermclaw.repo_intelligence.paths import is_test_path
 from hermclaw.verifier.changes import matching, read_bytes, read_text
 from hermclaw.verifier.conflicts import scan_conflicts
 from hermclaw.verifier.context import VerifyContext
@@ -145,12 +146,18 @@ def secret_checks(ctx: VerifyContext, added: AddedContent, scanner: SecretScanne
         if findings:
             rules = sorted({f.rule for f in findings})
             where = ", ".join(f"line {f.line} ({f.rule})" for f in findings[:5])
+            remedy = (
+                "Tests must not carry real-looking credentials: use an obvious placeholder value containing "
+                "'dummy', 'fake' or 'example' (e.g. 'dummy-token'); never read real secrets in tests."
+                if is_test_path(path)
+                else "Remove the value and load it from the environment or a secret store."
+            )
             out.append(
                 ctx.check(
                     "secrets",
                     f"secrets:{path}",
                     "fail",
-                    f"possible secret(s) added to {path}: {where}. Remove the value and load it from the environment or a secret store.",
+                    f"possible secret(s) added to {path}: {where}. {remedy}",
                     {"path": path, "findings": [f.to_dict() for f in findings], "rules": rules},
                 )
             )

@@ -46,6 +46,16 @@ Noch keine.
 
 ## Behobene Bugs
 
+### BUG-243 – Ein Geheimnis-Fund in einer Testdatei empfiehlt „aus der Umgebung laden“ statt eines Platzhalters
+- Phase: G1 auf rc36 (Job `8f394b63…`, S003 Versuch 3) · Komponente: verifier (secrets) · Severity: P2 · blockierend: nein (behoben) · Status: **behoben** (`tests/unit/test_verifier_secrets.py::test_secret_findings_in_tests_ask_for_a_placeholder_not_the_environment`, `::test_helpers`)
+- Reproduktion: `tests/test_collector.py` Zeile 128 enthält `api_key='<7 Kleinbuchstaben>'` als Fixture. Zwei blockierende Prüfungen (`secrets`, `acceptance[1]:security`) melden: „Remove the value and load it from the environment or a secret store.“
+- Ursache: Der Verifier gibt dieselbe Abhilfe für Produktivcode und Tests. In einem Test ist „aus der Umgebung laden“ falsch: Ein Test darf keine echten Geheimnisse lesen. Er braucht einen Platzhalter, den der Scanner akzeptiert, und welche Werte der Scanner akzeptiert, sagte die Meldung nicht.
+- Fix:
+  - Findet die Prüfung ein mögliches Geheimnis in einer Testdatei, verlangt die Abhilfe einen offensichtlichen Platzhalter mit `dummy`, `fake` oder `example` (z. B. `dummy-token`).
+  - `fake`, `mock` und `sample` gelten als Platzhalter-Bestandteile.
+  - Für Produktivcode bleibt die bisherige Abhilfe.
+- Selbstprüfung: echter Schritt nach vorn. Die Erkennung bleibt unverändert; nur die Anweisung passt jetzt zum Dateityp, und die genannten Platzhalter werden tatsächlich akzeptiert.
+
 ### BUG-242 – Ein Schritt kennt die Dateien seiner Vorgänger-Schritte nicht und rät deren Schnittstellen
 - Phase: G1 auf rc33–35 (Jobs `8e7c4b65…`, `8f394b63…`) · Komponente: coder (handler), context_builder · Severity: P1 · blockierend: nein (behoben) · Status: **behoben** (`tests/unit/test_context_builder_relevance.py::test_files_delivered_by_dependency_steps_are_shown`, `tests/integration/test_coder_handler.py::test_two_implement_steps_with_real_verifier_commit_separately`)
 - Reproduktion:

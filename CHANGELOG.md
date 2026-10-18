@@ -4,6 +4,9 @@ Format: [Keep a Changelog](https://keepachangelog.com/de/1.1.0/), Versionen nach
 
 ## [Unreleased]
 
+### Behoben
+- **Geheimnis-Funde in Tests (BUG-243):** Für Testdateien verlangt die Geheimnis-Prüfung einen offensichtlichen Platzhalter (`dummy`, `fake`, `example`) statt „aus der Umgebung laden“; `fake`, `mock` und `sample` gelten als Platzhalter.
+
 ## [0.1.0rc36] – Release Candidate (2026-10-18)
 
 ### Behoben

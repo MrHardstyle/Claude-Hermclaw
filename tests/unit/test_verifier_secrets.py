@@ -148,3 +148,25 @@ def test_helpers() -> None:
     for value in ("${X}", "<token>", "changeme", "xxxxxxxx", "123456", "", "your_token", "{{ secret }}"):
         assert is_placeholder(value), value
     assert not is_placeholder("hunter2-correct-horse")
+    for value in ("fake-api-key", "mock_secret", "sample-token"):
+        assert is_placeholder(value), value
+
+
+def test_secret_findings_in_tests_ask_for_a_placeholder_not_the_environment() -> None:
+    """Live G1 (BUG-243): a test fixture ``api_key='…'`` failed the step with "load it from the environment or a
+    secret store" – wrong advice for a test fixture. Tests get placeholder advice
+    that the scanner accepts."""
+    from hermclaw.verifier.checks import secret_checks
+    from hermclaw.verifier.types import AddedContent
+
+    class Ctx:
+        def check(self, check_type: str, name: str, status: str, message: str = "", evidence: object = None) -> tuple[str, str]:
+            return name, message
+
+    line = "    client = Client(api_key='qwzrtvk')"
+    added = AddedContent(lines={"tests/test_client.py": [AddedLine(1, line)], "client.py": [AddedLine(1, line.strip())]})
+    out = dict(secret_checks(Ctx(), added, SecretScanner()))  # type: ignore[arg-type]
+    assert "placeholder" in out["secrets:tests/test_client.py"] and "environment" not in out["secrets:tests/test_client.py"]
+    assert "load it from the environment" in out["secrets:client.py"]
+    fixed = AddedContent(lines={"tests/test_client.py": [AddedLine(1, "    client = Client(api_key='dummy-token')")]})
+    assert not any(name.startswith("secrets:tests/") for name, _ in secret_checks(Ctx(), fixed, SecretScanner()))  # type: ignore[arg-type]
