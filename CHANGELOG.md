@@ -4,6 +4,9 @@ Format: [Keep a Changelog](https://keepachangelog.com/de/1.1.0/), Versionen nach
 
 ## [Unreleased]
 
+### Behoben
+- **Bearbeiten neben maskierten Zeilen (BUG-270):** Eine maskierte Zeile, die `new` unverändert aus `old` übernimmt, behält bei `replace_text` ihren echten Inhalt, statt den Aufruf als `REDACTED_PLACEHOLDER` abzulehnen.
+
 ## [0.1.0rc54] – Release Candidate (2026-10-18)
 
 ### Behoben

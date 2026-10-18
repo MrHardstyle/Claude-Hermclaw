@@ -46,6 +46,19 @@ Noch keine.
 
 ## Behobene Bugs
 
+### BUG-270 – Eine Änderung rund um ein maskiertes Test-Passwort wird abgelehnt, weil `new` die unveränderte maskierte Zeile enthält
+- Phase: G1 auf rc54 (Job `5c3d40a5…`, Replan 2, S014 Versuch 3, Turn 4) · Komponente: tools (engine) · Severity: P2 · blockierend: nein (behoben) · Status: **behoben** (`tests/integration/test_tools_engine_read_write.py::test_a_masked_line_left_unchanged_keeps_its_content`)
+- Reproduktion:
+  - S014 ändert den Aufruf `ProxmoxClient("test_server", {…})` in `ProxmoxClient({…})`.
+  - `old` und `new` enthalten beide die Zeile `"password": "***REDACTED***",` unverändert.
+  - Die Engine meldet `REDACTED_PLACEHOLDER`. Danach liest der Coder wieder, statt zu ändern.
+- Ursache: Die Platzhalter-Prüfung (BUG-248) wies jede Markierung in `new` ab, auch eine Zeile, die nur unverändert aus `old` übernommen wurde.
+- Fix:
+  - `_masked_replace` ordnet die Zeilen von `old` den echten Zeilen der Datei zu.
+  - Eine maskierte Zeile, die `new` unverändert wiederholt, erhält ihren echten Inhalt zurück.
+  - Jede andere Markierung in `new` bleibt `REDACTED_PLACEHOLDER`. Das Geheimnis bleibt dem Coder verborgen.
+- Selbstprüfung: Ergänzung zu BUG-248, keine Kompensation. Bisher war nur das Ersetzen der maskierten Zeile möglich, nicht das Bearbeiten daneben.
+
 ### BUG-269 – `status`/`decision` innerhalb von `args` machen einen gültigen Befehl zu `ARGS_INVALID`; ein verlorener Turn je Vorkommen
 - Phase: G1 auf rc52/rc53 (Job `5c3d40a5…`, S008 Versuch 5 Turn 3, S014 Turn 1) · Komponente: contracts (tools) · Severity: P2 · blockierend: nein (behoben) · Status: **behoben** (`tests/unit/test_contracts.py::test_status_and_decision_inside_args_belong_to_the_action`)
 - Reproduktion:

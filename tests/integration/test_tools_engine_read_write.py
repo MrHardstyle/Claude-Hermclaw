@@ -180,6 +180,23 @@ async def test_a_masked_secret_can_be_replaced_by_the_line_as_shown(sessionmaker
     assert (repo / "tests" / "test_both.py").read_text() == "C = dict(password='x1x1x1x1', api_key='y2y2y2y2')\n"
 
 
+async def test_a_masked_line_left_unchanged_keeps_its_content(sessionmaker: SM, repo: Path) -> None:
+    """Live G1 (BUG-270): the coder changed the call around a fixture password; 'old' and 'new' both carried the
+    masked password line unchanged and the edit was refused for the marker. A masked line copied unchanged from 'old'
+    into 'new' keeps its real content; a marker on any other line is still refused."""
+    body = "def make():\n    return Client(\n        'srv',\n        password='qwzrtvkplm',\n    )\n"
+    (repo / "tests" / "test_client.py").write_text(body)
+    h = await make_harness(sessionmaker, repo, contract=scope(target_paths=["tests/test_client.py"]))
+    masked = "        password='" + REDACTED + "',\n"
+    old = "    return Client(\n        'srv',\n" + masked + "    )"
+    res = await h.call("replace_text", path="tests/test_client.py", old=old, new="    return Client(\n" + masked + "    )")
+    assert res.ok, res.output
+    assert (repo / "tests" / "test_client.py").read_text() == "def make():\n    return Client(\n        password='qwzrtvkplm',\n    )\n"
+    moved = "    return Client(\n" + masked + "    )"
+    bad = await h.call("replace_text", path="tests/test_client.py", old=moved, new="    return Client(token='" + REDACTED + "')")
+    assert bad.error_code == E.REDACTED_PLACEHOLDER and "qwzrtvkplm" in (repo / "tests" / "test_client.py").read_text()
+
+
 async def test_read_output_budget_sets_truncated(sessionmaker: SM, repo: Path) -> None:
     (repo / "big.txt").write_text("".join(f"line {i:05d} " + "x" * 60 + "\n" for i in range(2000)))
     h = await make_harness(sessionmaker, repo)

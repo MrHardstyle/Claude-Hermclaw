@@ -930,7 +930,8 @@ class ToolEngine:
             raise ToolError(E.NO_CHANGE, "'old' and 'new' are identical")
         tf = await asyncio.to_thread(self.fs.read_text, rel, max_bytes=self.max_read_bytes)
         text = tf.text
-        self._check_placeholder(args.new, text)
+        if not (REDACTED in args.old and REDACTED not in text):  # a masked 'old' is resolved by _masked_replace
+            self._check_placeholder(args.new, text)
         old, new = args.old, args.new
         count = text.count(old)
         if count == 0 and "\r\n" in text and "\r\n" not in old and "\n" in old:
@@ -993,6 +994,15 @@ class ToolEngine:
         real = "".join(lines[a : b + 1])
         if REDACTED in prefix or REDACTED in suffix or not real.startswith(prefix) or not real.endswith(suffix):
             return None
+        if REDACTED in new:
+            # a masked line the coder left as it was keeps its real content: the coder changed a call around a fixture
+            # password and every edit was refused for the marker it copied unchanged (live G1 S014, BUG-270)
+            shown = old.splitlines(keepends=True)
+            actual = real[len(prefix) : len(real) - len(suffix)].splitlines(keepends=True)
+            if len(shown) == len(actual):
+                kept = {v: r for v, r in zip(shown, actual, strict=True) if REDACTED in v}
+                new = "".join(kept.get(ln, ln) for ln in new.splitlines(keepends=True))
+            self._check_placeholder(new, None)
         return "".join(lines[:a]) + prefix + new + suffix + "".join(lines[b + 1 :]), a + 1
 
     @staticmethod
