@@ -4,6 +4,8 @@ Format: [Keep a Changelog](https://keepachangelog.com/de/1.1.0/), Versionen nach
 
 ## [Unreleased]
 
+## [0.1.0rc50] – Release Candidate (2026-10-18)
+
 ### Behoben
 - **read_file blättert weiter (BUG-264):** Ein erneutes `read_file` einer abgeschnittenen, unveränderten Datei zeigt die nächsten Zeilen statt wieder den Anfang; nach dem Ende oder einer Änderung beginnt es bei Zeile 1.
 
