@@ -249,6 +249,27 @@ def test_steps_that_write_tests_get_test_evidence_even_with_substantive_acceptan
     assert "test" not in generate_acceptance(no_tests, ctx)[1]
 
 
+def test_tests_an_earlier_step_creates_give_a_later_step_its_test_evidence() -> None:
+    """Live M1 (BUG-277): in an empty repository S001 created the app and its tests, S002 only updated the README. The
+    plan gave S002 no test criterion, the verifier demanded test evidence because the tests existed by then, and the
+    step was blocked into a replan. Tests of the steps a step depends on count; those of an unrelated step do not."""
+    readme = [{"type": "diff", "must_change": ["README.md"]}]
+    contract = PlanContract.model_validate(
+        plan(
+            "Task manager",
+            [
+                step("S001", "implement", "coding", "Build the app.", allowed_new_paths=["task_manager.py", "tests/test_task_manager.py"]),
+                step("S002", "implement", "coding", "Document the app.", depends_on=["S001"], repo_hints=["README.md"], acceptance=readme),
+                step("S003", "implement", "coding", "Add a config file.", repo_hints=["README.md"], acceptance=readme),
+            ],
+        )
+    )
+    result = enrich_plan(contract, _ctx(YAML_CONFIG.inputs), RiskPolicy.effective({}, SETTINGS))
+    tests = {s.id: [a for a in s.acceptance if a.type == "test"] for s in result.plan.steps}
+    assert [t.command for t in tests["S002"]] == ["python -m pytest -q"]
+    assert tests["S003"] == []
+
+
 def test_identical_acceptance_criteria_are_dropped() -> None:
     """Live job 50784df5: Gemma repeated an empty diff criterion 28 times in a verify step."""
     empty = {"type": "diff", "allow_empty": True, "must_change": [], "must_not_change": []}

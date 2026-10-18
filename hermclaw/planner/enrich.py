@@ -16,7 +16,7 @@ Everything is generic and depends only on the plan, the validation context and t
 
 from __future__ import annotations
 
-from collections.abc import Sequence
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, field
 from typing import Any
 
@@ -194,8 +194,11 @@ def _without_change_demands(acceptance: list[AcceptanceCriterion]) -> list[Accep
     return out
 
 
-def generate_acceptance(step: PlanStep, ctx: ValidationContext) -> tuple[list[AcceptanceCriterion], list[str]]:
-    """Deterministic acceptance for a workspace-mutating step. Returns (acceptance, labels of added criteria)."""
+def generate_acceptance(
+    step: PlanStep, ctx: ValidationContext, earlier_new_paths: Sequence[str] = ()
+) -> tuple[list[AcceptanceCriterion], list[str]]:
+    """Deterministic acceptance for a workspace-mutating step. Returns (acceptance, labels of added criteria).
+    ``earlier_new_paths``: the files the steps it depends on (transitively) create."""
     # identical criteria are dropped: models sometimes repeat one criterion until the list limit (live job 50784df5)
     acceptance: list[AcceptanceCriterion] = []
     seen: set[str] = set()
@@ -236,7 +239,7 @@ def generate_acceptance(step: PlanStep, ctx: ValidationContext) -> tuple[list[Ac
                 "test",
             )
     if not any(isinstance(a, TestEvidence) for a in acceptance):
-        derived = test_evidence_for(step, ctx)
+        derived = test_evidence_for(step, ctx, earlier_new_paths)
         if derived is not None:
             add(derived, "test")
     if not any(a.type == "scope" for a in acceptance):
@@ -263,19 +266,21 @@ def _test_runner_for(paths: Sequence[str]) -> tuple[str, TestFramework] | None:
     return None
 
 
-def test_evidence_for(step: PlanStep, ctx: ValidationContext) -> TestEvidence | None:
+def test_evidence_for(step: PlanStep, ctx: ValidationContext, earlier_new_paths: Sequence[str] = ()) -> TestEvidence | None:
     """Test evidence for an implementing step that writes tests or works in a repository with tests.
 
     The verifier requires a passing test run from such a step (21.12). Without a test criterion in the plan the
     coder could finish correctly and still fail verification – a defect no correction can fix (live job 04820ff9,
     analysis 2026-10-16, A6). The repository's own test command wins; else the language's standard runner for the
-    step's files (pytest also runs unittest tests).
+    step's files (pytest also runs unittest tests). Tests that a step it depends on creates count like the repository's:
+    in an empty repository the README step after the implementation step had no test criterion, the verifier demanded
+    test evidence because the tests existed by then, and the step was blocked into a replan (live M1, BUG-277).
     """
     if step.kind.value != StepKind.implement.value:
         return None
     paths = [*path_like_hints(step, ctx), *_normalised(step.allowed_new_paths)]
     writes_tests = any(TEST_PATH_RE.search(p) for p in paths)
-    repo_tests = [p for p in ctx.known_paths if TEST_PATH_RE.search(p)]
+    repo_tests = [p for p in (*ctx.known_paths, *_normalised(earlier_new_paths)) if TEST_PATH_RE.search(p)]
     if not writes_tests and not repo_tests:
         return None
     if ctx.test_command:
@@ -287,6 +292,22 @@ def test_evidence_for(step: PlanStep, ctx: ValidationContext) -> TestEvidence | 
         return None
     command, framework = runner
     return TestEvidence(description="generated: the step's tests must pass", command=command, framework=framework)
+
+
+def _earlier_new_paths(step: PlanStep, by_id: Mapping[str, PlanStep]) -> list[str]:
+    """The files the steps ``step`` depends on (transitively) create: they exist when ``step`` runs."""
+    out: list[str] = []
+    seen: set[str] = set()
+    todo = list(step.depends_on)
+    while todo:
+        sid = todo.pop()
+        dep = by_id.get(sid)
+        if dep is None or sid in seen:
+            continue
+        seen.add(sid)
+        out.extend(dep.allowed_new_paths)
+        todo.extend(dep.depends_on)
+    return out
 
 
 def _normalised(paths: Sequence[str]) -> list[str]:
@@ -361,12 +382,13 @@ def enrich_plan(
         raise PlanInvalid("enrichment", format_validation_errors(exc, data)) from exc
 
     steps_out: list[dict[str, Any]] = []
+    by_id = {s.id: s for s in staged.steps}
     for original in staged.steps:
         if original.id in preserved:
             steps_out.append(original.model_dump(mode="json"))
             continue
         step = original
-        acceptance, added = generate_acceptance(step, ctx)
+        acceptance, added = generate_acceptance(step, ctx, _earlier_new_paths(step, by_id))
         if added:
             result.generated_acceptance[step.id] = added
             result.notes.append(f"step {step.id}: generated acceptance {', '.join(added)}")

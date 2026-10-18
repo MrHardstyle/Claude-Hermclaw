@@ -46,6 +46,15 @@ Noch keine.
 
 ## Behobene Bugs
 
+### BUG-277 – Ein späterer Schritt in einem leeren Repository bekommt kein Testkriterium, der Verifier blockiert ihn trotzdem
+- Phase: Testzyklus 1 auf rc59 (M1, Job `eeb8bf5a…`, S002) · Komponente: planner (enrich) · Severity: P2 · blockierend: nein (behoben) · Status: **behoben** (`tests/unit/test_planner_enrich.py::test_tests_an_earlier_step_creates_give_a_later_step_its_test_evidence`)
+- Reproduktion:
+  - Im leeren Repository legt S001 `task_manager.py` und `tests/test_task_manager.py` an. S002 (implement) aktualisiert nur die README.
+  - Der Verifier meldet `test_evidence`: „implement step in a repository with tests has no test evidence“. Der Schritt wird mit `ACCEPTANCE_DEFECT` blockiert, es folgt ein Replan. Plan v2 bekam das generierte Testkriterium und lief durch.
+- Ursache: `test_evidence_for` sah nur die Dateien des Repositorys zur Planungszeit und die eigenen Pfade des Schritts. Tests, die ein vorheriger Schritt desselben Plans anlegt, kannte die Planung nicht. Der Verifier prüft dagegen den Stand bei Ausführung.
+- Fix: Die Anreicherung übergibt `generate_acceptance` die `allowed_new_paths` aller Schritte, von denen der Schritt (transitiv) abhängt. Darunter liegende Testdateien zählen wie vorhandene. Tests eines nicht vorgelagerten Schritts zählen nicht, sie gäbe es beim Lauf noch nicht.
+- Selbstprüfung: Runtime-Inkonsistenz zwischen Planung und Verifier, keine Modellschwäche. Kein Sonderfall, gilt für jedes leere oder testlose Repository.
+
 ### BUG-276 – Eine Korrektur wird abgeschlossen, obwohl die Lint-Prüfung, die sie beheben soll, weiter fehlschlägt
 - Phase: Testzyklus 1 auf rc59 (K1, Job `6cf9bff0…`, S001 Versuche 2–3; M1 `eeb8bf5a…` S001) · Komponente: tools (engine), coder (handler), review (correction) · Severity: P2 · blockierend: nein (behoben) · Status: **behoben** (`tests/integration/test_tools_engine_exec.py::test_complete_step_reruns_the_check_the_correction_names`, `tests/unit/test_review_correction.py::test_failed_lint_and_test_checks_carry_their_command_to_the_correction`)
 - Reproduktion:
