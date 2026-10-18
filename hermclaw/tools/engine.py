@@ -716,6 +716,8 @@ class ToolEngine:
         if first > 1:
             assert page is not None
             text = f"[{tf.rel}: lines {first}-{last} of {lines}, continuing your read of turn {page[1]}]\n" + text
+        elif clipped:  # every page names its span: the next turn's context shows the read from it (BUG-266)
+            text = f"[{tf.rel}: lines {first}-{last} of {lines}]\n" + text
         if clipped:
             self._read_pages[key] = (self._writes, ctx.turn, last + 1)
             text += (

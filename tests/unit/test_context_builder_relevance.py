@@ -358,6 +358,25 @@ async def test_reads_are_shown_as_read_not_as_a_short_head() -> None:
     assert "### pkg/huge.py lines 520-560 [read]" in code and "y540 = 540" in code and "y1 = 1\n" not in code
 
 
+async def test_pages_of_a_clipped_file_are_shown_from_where_they_started() -> None:
+    """Live G1 (BUG-266): the coder continued read_file on an 845-line file twice (lines 316-657, 658-845), but the
+    next turns showed each page as lines 1-400; it never saw the rest and re-read the file until it stagnated."""
+    from hermclaw.context_builder.history import TurnRecord
+
+    repo = default_repo()
+    repo.files["pkg/huge.py"] = "".join(f"y{i} = {i}\n" for i in range(1, 701))
+    builder, _, _ = make_builder(repo=repo)
+    history = [
+        TurnRecord(1, "read_file", '{"path": "pkg/huge.py"}', True, "[pkg/huge.py: lines 1-120 of 700]\ny1 = 1"),
+        TurnRecord(
+            2, "read_file", '{"path": "pkg/huge.py"}', True, "[pkg/huge.py: lines 521-640 of 700, continuing your read of turn 1]\ny521"
+        ),
+    ]
+    built = await builder.build(make_input(history=history))
+    code = section(built.messages[1].content, "RELEVANT CODE")
+    assert "### pkg/huge.py lines 521-640 [read]" in code and "y600 = 600" in code
+
+
 async def test_files_delivered_by_dependency_steps_are_shown() -> None:
     """Live G1 (BUG-242): the frontend step depended on the collector step but saw neither its file name nor its
     code; app.js read ``metrics.ram`` while the collector sent ``metrics.mem.usage``. Files the completed

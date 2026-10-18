@@ -4,6 +4,9 @@ Format: [Keep a Changelog](https://keepachangelog.com/de/1.1.0/), Versionen nach
 
 ## [Unreleased]
 
+### Behoben
+- **Gelesene Seiten erreichen den Coder (BUG-266):** Jede Seite eines abgeschnittenen `read_file` beginnt mit ihrem Zeilenbereich; der Kontext des nächsten Turns zeigt genau diese Seite statt erneut den Dateianfang.
+
 ## [0.1.0rc51] – Release Candidate (2026-10-18)
 
 ### Behoben

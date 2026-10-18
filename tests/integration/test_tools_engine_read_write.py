@@ -133,6 +133,7 @@ async def test_reading_a_clipped_file_again_continues_where_the_last_read_stoppe
     (repo / "big.py").write_text("".join(f"value_number_{i:04d} = {i}  # a line of the big module\n" for i in range(1, 901)))
     h = await make_harness(sessionmaker, repo, contract=scope(target_paths=["big.py"]))
     first = (await h.call("read_file", path="big.py")).output
+    assert first.startswith("[big.py: lines 1-")  # the span lets the next turn's context show this page (BUG-266)
     assert "value_number_0001" in first and "big.py has 900 lines; lines 1-" in first and "read_file again shows lines" in first
     shown = int(first.rsplit("lines 1-", 1)[1].split(" ", 1)[0])
     second = (await h.call("read_file", path="big.py")).output

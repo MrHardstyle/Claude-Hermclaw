@@ -46,6 +46,20 @@ Noch keine.
 
 ## Behobene Bugs
 
+### BUG-266 – Seiten einer großen Datei erscheinen im Kontext als Dateianfang; der Coder sieht die Zeilen hinter 400 nie und liest bis zum Stagnationsstopp
+- Phase: G1 auf rc51 (Job `5c3d40a5…`, Replan 1, S008 Versuch 2) · Komponente: context_builder, tools (engine) · Severity: P1 · blockierend: ja (behoben) · Status: **behoben** (`tests/unit/test_context_builder_relevance.py::test_pages_of_a_clipped_file_are_shown_from_where_they_started`, `tests/integration/test_tools_engine_read_write.py::test_reading_a_clipped_file_again_continues_where_the_last_read_stopped`)
+- Reproduktion:
+  - S008 blättert mit `read_file` durch `collector.py` (845 Zeilen): Turn 2 zeigt Zeilen 1–315, Turn 3 Zeilen 316–657, Turn 6 Zeilen 658–845.
+  - Danach liest S008 `read_range 1-100` und `150-250`. Die Wiederholungen werden verweigert, weil der Inhalt „oben gezeigt“ sei. Nach Turn 12 folgt der Stopp `STAGNATION`, ohne dass eine Zeile geschrieben wurde.
+- Ursache:
+  - Ein erfolgreicher Lesezugriff erreicht den Coder nur über den Kontext des nächsten Turns (`_read_spans`, BUG-229).
+  - `_read_spans` setzte für jedes `read_file` die Zeilen 1–400 an. Die Seiten 316–657 und 658–845 wurden so nie gezeigt.
+  - Mit BUG-264 wurde das Blättern möglich, aber sein Ergebnis kam nicht an.
+- Fix:
+  - Jede Seite einer abgeschnittenen Datei beginnt mit `[pfad: lines X-Y of N]`, auch die erste.
+  - `_read_spans` liest diesen Kopf aus dem Ergebnis-Digest, der auch über Checkpoints erhalten bleibt, und zeigt die Seite ab Zeile X.
+- Selbstprüfung: Kein Kompensieren desselben Symptoms. BUG-264 und BUG-265 machten das Blättern möglich und ungestraft; erst dieser Fix bringt die gelesenen Zeilen zum Modell. Lehre: Eine Werkzeugänderung muss bis in die Darstellung im Kontext durchgeprüft werden, nicht nur bis zum Werkzeugergebnis.
+
 ### BUG-265 – Die Stagnationserkennung hält das Blättern durch eine große Datei für dieselbe Aktion und stoppt den Versuch
 - Phase: G1 auf rc50 (Job `5c3d40a5…`, S003 Versuch 3) · Komponente: stagnation (detector) · Severity: P1 · blockierend: ja (behoben) · Status: **behoben** (`tests/unit/test_stagnation_detector.py::test_pages_of_a_clipped_file_are_different_actions`)
 - Reproduktion:

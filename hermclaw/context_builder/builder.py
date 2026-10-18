@@ -67,6 +67,7 @@ from hermclaw.scope.guard import any_match
 log = get_logger(__name__)
 
 _ARG_PATH_RE = re.compile(r'"path":\s*"([^"]+)"')
+_PAGE_SPAN_RE = re.compile(r"\A\[[^\]\n]*?: lines (\d+)-(\d+) of \d+")
 _PY_FRAME_RE = re.compile(r'File "(?P<path>[^"\n]+)", line (?P<line>\d+)')
 _PATH_LINE_RE = re.compile(r"(?P<path>/?(?:[\w.\-]+/)*[\w\-][\w.\-]*\.[A-Za-z][A-Za-z0-9]{0,7}):(?P<line>\d+)")
 _PYTEST_NODE_RE = re.compile(r"(?P<path>(?:[\w.\-]+/)*[\w\-][\w.\-]*\.[A-Za-z][A-Za-z0-9]{0,7})::[\w\[\]\-.]+")
@@ -512,7 +513,13 @@ class ContextBuilder:
             if not p:
                 continue
             start, end = 1, max_lines
-            if r.tool == "read_range":
+            page = _PAGE_SPAN_RE.match(r.result_digest) if r.tool == "read_file" else None
+            if page is not None:
+                # a page of a clipped file is shown from where it started: as lines 1-max_lines the coder never saw
+                # lines 316-845 of a read it continued twice and re-read the file until it stagnated (live G1, BUG-266)
+                start = int(page.group(1))
+                end = min(int(page.group(2)), start + max_lines - 1)
+            elif r.tool == "read_range":
                 start = _positive_int(args.get("start"), 1)
                 end = min(_positive_int(args.get("end"), start + max_lines - 1), start + max_lines - 1)
             if (p, start, end) not in out:
