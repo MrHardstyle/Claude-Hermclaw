@@ -420,6 +420,11 @@ async def test_two_implement_steps_with_real_verifier_commit_separately(world: W
     async with world.sessionmaker() as s:
         rows = {r.step_key: r for r in (await s.execute(select(Step).where(Step.job_id == jid))).scalars()}
     assert rows["S001"].result["files"] == ["src/module.py"] and rows["S002"].result["files"] == ["src/util.py"]
+    # BUG-242: S002 depends on S001 and is told which files S001 delivered
+    s2_prompt = "\n".join(m.content for m in models.coder_prompts[2])
+    assert "Files earlier steps delivered" in s2_prompt and "[dependency]" not in "\n".join(m.content for m in models.coder_prompts[0])
+    goal = s2_prompt.split("Files earlier steps delivered", 1)[1].split("\n\n", 1)[0]
+    assert "src/module.py" in goal
 
 
 async def test_video_preemption_checkpoints_the_coder_and_the_step_resumes(world: World, tmp_path: Path) -> None:

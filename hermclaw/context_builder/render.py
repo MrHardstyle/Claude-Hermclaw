@@ -123,12 +123,18 @@ def render_goal(
     max_turns: int,
     budget: int,
     job_request: str = "",
+    dependency_files: Sequence[str] = (),
 ) -> RenderedSection:
     sec = RenderedSection(SectionName.STEP_GOAL)
     head_parts = [p for p in (f"Step {step_key}" if step_key else "", f"kind: {kind}" if kind else "", title) if p]
     header = " · ".join(head_parts)
     meta = f"{header}\nTurn {turn} of {max_turns}.\n" if header else f"Turn {turn} of {max_turns}.\n"
     hints = f"\nPlanner hints: {_bullets(list(repo_hints), 12, 160)}" if repo_hints else ""
+    if dependency_files:
+        hints += (
+            f"\nFiles earlier steps delivered (use their real interfaces – functions, JSON fields, paths; read them "
+            f"instead of guessing): {_bullets(list(dependency_files), 12, 160)}"
+        )
     fixed = char_cost(meta) + char_cost("Goal:\n")
     hint_cost = char_cost(hints)
     if fixed + hint_cost > budget:

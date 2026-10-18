@@ -36,7 +36,7 @@ from hermclaw.core.logging import get_logger
 from hermclaw.core.redaction import DEFAULT_REDACTOR
 from hermclaw.events.store import append_event
 from hermclaw.models.protocols import ChatModel
-from hermclaw.persistence.models import Job, JobInput, Step, StepAttempt
+from hermclaw.persistence.models import Job, JobInput, Step, StepAttempt, StepDependency
 from hermclaw.research.findings import research_findings
 from hermclaw.runtime.transitions import emit_status
 from hermclaw.scheduler.handlers import StepOutcome, StepRunContext
@@ -245,6 +245,36 @@ class ImplementStepHandler:
             job = await s.get(Job, job_id)
         return "" if job is None else "\n".join(p for p in (job.title, job.prompt) if p)
 
+    async def _dependency_files(self, step_id: uuid.UUID, limit: int = 12) -> list[str]:
+        """Files the completed steps ``step_id`` depends on (transitively, nearest first) committed – the interfaces
+        this step builds on (BUG-242)."""
+        async with self.sm() as s:
+            job_id = (await s.execute(select(Step.job_id).where(Step.id == step_id))).scalar_one_or_none()
+            if job_id is None:
+                return []
+            rows = (await s.execute(select(Step).where(Step.job_id == job_id, Step.superseded.is_(False)))).scalars().all()
+            edges = (await s.execute(select(StepDependency).where(StepDependency.step_id.in_([r.id for r in rows])))).scalars().all()
+        by_id = {r.id: r for r in rows}
+        deps: dict[uuid.UUID, list[uuid.UUID]] = {}
+        for e in edges:
+            deps.setdefault(e.step_id, []).append(e.depends_on_step_id)
+        out: list[str] = []
+        seen: set[uuid.UUID] = {step_id}
+        frontier = list(deps.get(step_id, []))
+        while frontier and len(out) < limit:
+            nxt: list[uuid.UUID] = []
+            for sid in sorted(frontier, key=lambda i: by_id[i].step_key if i in by_id else ""):
+                if sid in seen or sid not in by_id:
+                    continue
+                seen.add(sid)
+                row = by_id[sid]
+                if row.status == "completed":
+                    files = (row.result or {}).get("files") or []
+                    out.extend(f for f in files if isinstance(f, str) and f not in out)
+                nxt.extend(deps.get(sid, []))
+            frontier = nxt
+        return out[:limit]
+
     async def _workspace(self, job_id: uuid.UUID) -> tuple[Any, WorkspaceHandle] | None:
         for ws in await self.deps.git.list_workspaces(job_id):
             if ws.status not in ("archived", "cleaned", "removed", "failed"):
@@ -383,7 +413,11 @@ class ImplementStepHandler:
         try:
             async with self._model(ctx, "coder", preemptible=True):
                 result = await loop.run(
-                    step=dataclasses.replace(StepBrief.from_contract(step), job_request=await self._job_request(ctx.job_id)),
+                    step=dataclasses.replace(
+                        StepBrief.from_contract(step),
+                        job_request=await self._job_request(ctx.job_id),
+                        dependency_files=await self._dependency_files(ctx.step_id),
+                    ),
                     workspace=handle,
                     job_id=ctx.job_id,
                     step_id=ctx.step_id,

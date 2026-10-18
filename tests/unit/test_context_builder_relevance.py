@@ -356,3 +356,18 @@ async def test_reads_are_shown_as_read_not_as_a_short_head() -> None:
     code = section(built.messages[1].content, "RELEVANT CODE")
     assert "### pkg/big.py lines 1-300 [read]" in code and "x300 = 300" in code
     assert "### pkg/huge.py lines 520-560 [read]" in code and "y540 = 540" in code and "y1 = 1\n" not in code
+
+
+async def test_files_delivered_by_dependency_steps_are_shown() -> None:
+    """Live G1 (BUG-242): the frontend step depended on the collector step but saw neither its file name nor its
+    code; app.js read ``metrics.ram`` while the collector sent ``metrics.mem.usage``. Files the completed
+    dependency steps committed are named in STEP GOAL and shown as code."""
+    repo = default_repo()
+    repo.files["pkg/collector.py"] = 'def snapshot():\n    return {"mem": {"usage": 0.5}}\n'
+    builder, _, _ = make_builder(repo=repo)
+    step = make_step(dependency_files=["pkg/collector.py"])
+    built = await builder.build(make_input(step=step, history=[]))
+    user = built.messages[1].content
+    assert "Files earlier steps delivered" in section(user, "STEP GOAL") and "pkg/collector.py" in section(user, "STEP GOAL")
+    code = section(user, "RELEVANT CODE")
+    assert "### pkg/collector.py" in code and "[dependency]" in code and '"usage": 0.5' in code

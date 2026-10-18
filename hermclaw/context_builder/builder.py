@@ -91,6 +91,9 @@ class StepBrief:
     #: the user's own request for the whole job: the planner's step goal summarises it and lost details such as
     #: domain, field names and ranges, which the review then demanded (rc22 battery X2, BUG-212)
     job_request: str = ""
+    #: files the completed steps this one depends on delivered: the frontend step never saw the backend's JSON and
+    #: guessed its fields (live G1 quality review, BUG-242); shown in STEP GOAL and as file heads
+    dependency_files: Sequence[str] = ()
 
     @classmethod
     def from_contract(cls, step: StepContract) -> StepBrief:
@@ -219,7 +222,15 @@ class ContextBuilder:
             (p, 1, cfg.test_head_lines if is_test_path(p) else cfg.target_head_lines)
             for p in dict.fromkeys([*head_targets, *(p for p in acc_tests if p not in targets)])
         ]
-        file_heads += self._read_spans(inp.history, ws, cfg.max_snippet_lines)
+        spans = self._read_spans(inp.history, ws, cfg.max_snippet_lines)
+        read_paths = {p for p, _, _ in spans}
+        file_heads += spans
+        shown = {p for p, _, _ in file_heads}
+        for raw in step.dependency_files[: cfg.max_target_files]:
+            dep = self._clean_path(raw, ws)
+            if dep and dep not in shown:
+                shown.add(dep)
+                file_heads.append((dep, 1, cfg.test_head_lines if is_test_path(dep) else cfg.target_head_lines))
         jobs: list[tuple[str, Callable[[], Awaitable[Any]], Any]] = [
             ("repo.inventory_summary", lambda: self.repo.inventory_summary(ws), None),
             ("git.status", lambda: self.git.status(ws), []),
@@ -264,7 +275,7 @@ class ContextBuilder:
             if not isinstance(text, str) or not text.strip():
                 dropped.append(DroppedItem(_section_for(p).value, p, "read_failed"))
                 continue
-            origin = "target" if p in targets else "acceptance" if p in acc_tests else "read"
+            origin = "target" if p in targets else "acceptance" if p in acc_tests else "read" if p in read_paths else "dependency"
             candidates.append(make_snippet(p, start, text, 2.0 - i * 0.001, origin))
         target_set = set(targets)
         hit_cands, hit_drops = await self._hit_snippets(
@@ -305,6 +316,7 @@ class ContextBuilder:
             title=self._red(step.title),
             step_key=step.step_key,
             repo_hints=[self._red(h) for h in step.repo_hints],
+            dependency_files=[self._red(f) for f in step.dependency_files],
             job_request=self._red(step.job_request),
             turn=inp.turn,
             max_turns=inp.max_turns,

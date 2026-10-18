@@ -7,6 +7,7 @@ Format: [Keep a Changelog](https://keepachangelog.com/de/1.1.0/), Versionen nach
 ## [0.1.0rc35] – Release Candidate (2026-10-18)
 
 ### Behoben
+- **Schnittstellen der Vorgänger (BUG-242):** Ein Schritt sieht die Dateien, die seine abgeschlossenen Abhängigkeiten geliefert haben, im Schrittziel und als Code-Ausschnitt `[dependency]`. Er nutzt deren echte Funktionen und JSON-Felder, statt sie zu raten.
 - **Replan robuster (BUG-241):** Der Replanner gibt nur geänderte und neue Schritte an; offene Schritte übernimmt die Runtime. Ein ungültiger Replan zählt als ein Replan und wird wiederholt, solange Budget übrig ist, statt den Job sofort zu beenden.
 - **Quellenbewertung der Recherche (BUG-240):** Nur Repositories des Produkts selbst gelten als offiziell, nicht fremde Gists oder Community-Repos. Die Domain des Produkts zählt als Doku bzw. Hersteller, und die Relevanz misst auch gegen die Suchanfragen. Ein reiner Host wie `github.com` in `primary_domains` verleiht keinen Primärstatus mehr.
 

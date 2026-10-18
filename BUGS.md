@@ -46,6 +46,18 @@ Noch keine.
 
 ## Behobene Bugs
 
+### BUG-242 – Ein Schritt kennt die Dateien seiner Vorgänger-Schritte nicht und rät deren Schnittstellen
+- Phase: G1 auf rc33–35 (Jobs `8e7c4b65…`, `8f394b63…`) · Komponente: coder (handler), context_builder · Severity: P1 · blockierend: nein (behoben) · Status: **behoben** (`tests/unit/test_context_builder_relevance.py::test_files_delivered_by_dependency_steps_are_shown`, `tests/integration/test_coder_handler.py::test_two_implement_steps_with_real_verifier_commit_separately`)
+- Reproduktion:
+  - Die Qualitätsprüfung der G1-Lieferung `8e7c4b65`: `static/app.js` liest `metrics.ram`, der Collector liefert `metrics.mem.usage`. Das Widget zeigt nie Werte.
+  - Im Plan `8f394b63` hängt S004 (Frontend) von S003 (Collector) ab, nennt `collector.py` aber weder in `repo_hints` noch im Ziel.
+- Ursache: Der Coder sah nur Ziel, Scope und die eigenen Lesezugriffe. Welche Dateien die abgeschlossenen Vorgänger committet hatten (`steps.result.files`), erreichte seinen Kontext nie. Ohne einen Hinweis des Planners rät der Coder das JSON-Format und die Funktionsnamen.
+- Fix:
+  - Der Handler sammelt die Dateien abgeschlossener Abhängigkeiten (transitiv, nächste zuerst, höchstens 12) in `StepBrief.dependency_files`.
+  - Der Context Builder nennt sie in STEP GOAL: „Files earlier steps delivered (use their real interfaces …)“.
+  - In RELEVANT CODE zeigt er sie als Dateiköpfe mit Herkunft `[dependency]`, begrenzt durch `max_target_files`.
+- Selbstprüfung: echter Schritt nach vorn. Die Information lag in der Runtime vor und kam nur nicht beim Coder an. Das ist allgemein und ergänzt die Planner-Regel aus BUG-234, die der Planner nicht verlässlich befolgt.
+
 ### BUG-241 – Ein einziger ungültiger Replan beendet den Job; der Replanner wiederholt alle offenen Schritte und läuft ins Ausgabelimit
 - Phase: G1 auf rc34 (Job `2f72c0da…`) · Komponente: planner (prompt), scheduler · Severity: P1 · blockierend: ja (behoben) · Status: **behoben** (`tests/integration/test_scheduler.py::test_an_invalid_replan_is_retried_while_replan_budget_is_left`, `tests/unit/test_planner_prompt.py` Nadel „Do not repeat an open step to keep it“)
 - Reproduktion: Replan nach blockierter Recherche S010 (9 offene Schritte):
