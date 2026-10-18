@@ -5,6 +5,7 @@ Format: [Keep a Changelog](https://keepachangelog.com/de/1.1.0/), Versionen nach
 ## [Unreleased]
 
 ### Behoben
+- **Unerfüllbare Änderungsforderungen des Plans entscheidet das Review (BUG-278):** Scheitert ein Schritt nur daran, dass vom Plan geforderte Dateien unverändert blieben, prüft das Heavy Review den Schritt ohne diese Forderung. Bei `pass` wird sie protokolliert fallen gelassen (`acceptance.waived`), statt in Korrekturen und Replans zu enden.
 - **Testkriterium für spätere Schritte im leeren Repository (BUG-277):** Tests, die ein vorgelagerter Schritt anlegt, zählen bei der Planung wie vorhandene Tests. Ein späterer Schritt wird nicht mehr am fehlenden Testnachweis blockiert.
 - **Korrekturen enden erst, wenn die gescheiterte Prüfung besteht (BUG-276):** `complete_step` führt in einem Korrekturversuch die Lint- und Testbefehle der gescheiterten Prüfungen erneut aus und lehnt ab, solange einer fehlschlägt. Das gilt auch, wenn die Runtime den Schritt für den Coder abschließt.
 - **Befehle im Node-Image laufen wieder (BUG-275):** Der `pipefail`-Präfix wird nur gesetzt, wo die Shell die Option kennt. In dash von Debian bookworm beendete er jedes Skript mit Exit-Code 2 und ohne Ausgabe.

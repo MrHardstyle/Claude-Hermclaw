@@ -46,6 +46,23 @@ Noch keine.
 
 ## Behobene Bugs
 
+### BUG-278 – Der Plan verlangt Änderungen an Dateien, die der Schritt nur liest; der richtige Code scheitert daran zweimal bis zum Replan-Limit
+- Phase: Testzyklus 1 auf rc59 (M2, Job `a4a95ec2…`, S001 in Plan v1 und v2) · Komponente: coder (handler), planner (Kriterien) · Severity: P1 · blockierend: ja (behoben) · Status: **behoben** (`tests/integration/test_coder_handler.py::test_a_change_demand_on_a_file_the_step_only_reads_is_judged_by_the_review`, `…::test_a_change_demand_the_review_upholds_goes_to_a_correction`)
+- Reproduktion:
+  - Das Planziel von S001 benennt die vier Fehler korrekt. Die Akzeptanz enthält jedoch zehn `diff`-Kriterien ohne Beschreibung, darunter `must_change` auf `data/buchungen.csv`, `data/`, `ledger/__main__.py` und `tests/test_report.py`. Das sind die Eingabedatei, der Einstiegspunkt und ein bestehender Test, also Kontext zum Lesen.
+  - Der Coder behebt alle vier Fehler, die Tests sind grün, das Tool gibt richtige Werte aus. Der Verifier scheitert an den `must_change`-Kriterien.
+  - In der Korrektur schreibt der Coder unnötig an `__main__.py` und `tests/test_report.py` herum. Danach blockiert er zu Recht: „Kriterien verlangen eine Änderung an der CSV, das Ziel nicht“.
+  - Plan v2 enthält dieselben Kriterien. Zwei Korrekturen scheitern nur an `data/buchungen.csv` und `data/` (27 von 30 Prüfungen bestanden). Es folgt Replan 2, erst Plan v3 läuft durch.
+- Ursache:
+  - Das Planer-Modell überträgt `repo_hints` (Lesekontext) in `must_change`.
+  - Die Anreicherung entfernt nur Globs außerhalb der Schrittdateien.
+  - Ein unerfüllbarer `must_change` ist für Coder und Korrektur nicht behebbar. Es bleibt nur der Replan, und der Neuplaner wiederholte das Kriterium trotz der Begründung der Blockade.
+- Fix:
+  - Bestehen die blockierenden Fehler nur aus `diff`-Prüfungen mit unveränderten `must_change`-Dateien (keine verbotene, leere oder zu große Änderung, sonst nichts fehlgeschlagen), verifiziert der Handler den Schritt ohne diese Globs erneut.
+  - Das Heavy Review urteilt über diesen Schritt. Eine Constraint fragt ausdrücklich, ob das Ziel die Änderung dieser Dateien verlangt.
+  - Bei `pass` wird das Kriterium protokolliert fallen gelassen (`acceptance.waived`) und committet. Bei `fix_required` folgt eine normale Korrektur mit dem Befund des Reviews.
+- Selbstprüfung: Das ist keine Kompensation einer Coder-Schwäche, sondern ein Planer-Defekt. Statt den Planer mit Heuristiken über Datentypen zu raten, entscheidet die Instanz, die Ziel und Diff sieht. Kein Sonderfall, gilt für jede Datei.
+
 ### BUG-277 – Ein späterer Schritt in einem leeren Repository bekommt kein Testkriterium, der Verifier blockiert ihn trotzdem
 - Phase: Testzyklus 1 auf rc59 (M1, Job `eeb8bf5a…`, S002) · Komponente: planner (enrich) · Severity: P2 · blockierend: nein (behoben) · Status: **behoben** (`tests/unit/test_planner_enrich.py::test_tests_an_earlier_step_creates_give_a_later_step_its_test_evidence`)
 - Reproduktion:

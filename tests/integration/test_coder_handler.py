@@ -695,3 +695,68 @@ async def test_a_resumed_correction_gets_verifier_items_of_the_current_work_tree
     assert verifier.calls == 3
     resumed = "\n".join(m.content for m in models.coder_prompts[3])
     assert "pattern 'VALUE = 3' not found" not in resumed, "the fixed finding is not shown again"
+
+
+class UnmetChangeDemand(ScriptedVerifier):
+    """Fails with a diff check that demands a change to an input file until the step comes without that demand."""
+
+    async def verify(self, step: StepContract, workspace: WorkspaceHandle, **kw: Any) -> VerificationOutcome:
+        self.steps = [*getattr(self, "steps", []), step]
+        if any("data/input.csv" in c for c in step.constraints):
+            return await super().verify(step, workspace, **kw)
+        self.calls += 1
+        check = VerificationCheck(
+            check_type="diff",
+            name="acceptance[3]:diff",
+            status="fail",
+            message="expected changes matching ['data/input.csv'] but none were found",
+            evidence={"changed_files": ["src/module.py"], "changed_count": 1, "missing": ["data/input.csv"], "touched_forbidden": []},
+        )
+        report = VerificationReport(passed=False, checks=[check], summary="1 blocking failure")
+        async with self.world.sessionmaker() as s:
+            vr = VerificationRun(job_id=kw["job_id"], step_id=kw["step_id"], passed=False, status="failed", summary=report.summary)
+            s.add(vr)
+            await s.commit()
+        return VerificationOutcome(report=report, run_id=vr.id)
+
+
+async def test_a_change_demand_on_a_file_the_step_only_reads_is_judged_by_the_review(world: World, tmp_path: Path) -> None:
+    """Live M2 (BUG-278): the plan demanded changes to the input data the step only reads; the code was right, two
+    corrections and two replans could not lift the demand. When only such demands fail, the review judges the step
+    without them: it passes, the demand is waived (recorded), and the step commits without a correction or replan."""
+    models = Models([_plan()], [EDIT, DONE])
+    verifier, reviewer = UnmetChangeDemand(world, [True]), ScriptedReviewer(["pass"])
+    jid = await _job(world)
+    jobs = await _run(world, _driver(world, models, tmp_path), [_handler(world, models, verifier, reviewer), ReviewHandler()], [jid])
+    assert jobs[jid].status == "succeeded", (jobs[jid].error_code, jobs[jid].error_message)
+    assert jobs[jid].replan_count == 0 and verifier.calls == 2 and reviewer.calls == 1
+    async with world.sessionmaker() as s:
+        step = (await s.execute(select(Step).where(Step.job_id == jid, Step.step_key == "S001"))).scalar_one()
+        waived = (await s.execute(select(Event).where(Event.job_id == jid, Event.event_type == "acceptance.waived"))).scalars().all()
+    assert step.correction_count == 0 and [w.payload["must_change"] for w in waived] == [["data/input.csv"]]
+    assert _remote_value(world) == "VALUE = 2"
+
+
+async def test_a_change_demand_the_review_upholds_goes_to_a_correction(world: World, tmp_path: Path) -> None:
+    """BUG-278: when the review finds the goal does need the file, the attempt is corrected with its finding."""
+
+    class Upholds(ScriptedReviewer):
+        async def review(
+            self, step: StepContract, workspace: WorkspaceHandle, verification: VerificationReport, **_: Any
+        ) -> ReviewContract:
+            self.calls += 1
+            if self.calls > 1:
+                return ReviewContract(verdict="pass", summary="ok")
+            return ReviewContract(
+                verdict="fix_required",
+                findings=[ReviewFinding(severity="blocker", path="data/input.csv", summary="the goal adds a column to data/input.csv")],
+            )
+
+    models = Models([_plan()], [EDIT, DONE, DONE, DONE])
+    verifier, reviewer = UnmetChangeDemand(world, [True, True]), Upholds([])
+    jid = await _job(world)
+    await _run(world, _driver(world, models, tmp_path), [_handler(world, models, verifier, reviewer), ReviewHandler()], [jid])
+    async with world.sessionmaker() as s:
+        step = (await s.execute(select(Step).where(Step.job_id == jid, Step.step_key == "S001"))).scalar_one()
+    assert step.correction_count >= 1 and reviewer.calls >= 1
+    assert "adds a column to data/input.csv" in json.dumps([m.content for m in models.coder_prompts[2]])  # first turn of the correction

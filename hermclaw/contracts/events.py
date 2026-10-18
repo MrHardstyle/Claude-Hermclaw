@@ -87,6 +87,7 @@ class EventType:
     REVIEW_FINDING_CREATED = "review.finding.created"
     REVIEW_FINISHED = "review.finished"
     CORRECTION_STARTED = "correction.started"
+    ACCEPTANCE_WAIVED = "acceptance.waived"
     STAGNATION_DETECTED = "stagnation.detected"
     STRATEGY_CHANGED = "strategy.changed"
     CHECKPOINT_CREATED = "checkpoint.created"

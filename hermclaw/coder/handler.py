@@ -83,6 +83,44 @@ def acceptance_defects(report: VerificationReport) -> list[str]:
     return out
 
 
+def unmet_change_demands(report: VerificationReport) -> list[str]:
+    """The ``must_change`` globs of the failed diff checks when nothing else failed: the step changed files, only not
+    every file the plan expected. Empty when any other problem (a test, lint, a forbidden or empty change) failed."""
+    globs: list[str] = []
+    for check in report.failures:
+        ev = check.evidence
+        limit = ev.get("max_changed_files")
+        if (
+            check.check_type != "diff"
+            or not ev.get("missing")
+            or ev.get("touched_forbidden")
+            or not ev.get("changed_count")
+            or (isinstance(limit, int) and ev["changed_count"] > limit)
+        ):
+            return []
+        globs.extend(str(g) for g in ev["missing"])
+    return list(dict.fromkeys(globs))
+
+
+def without_change_demands(step: StepContract, globs: Sequence[str]) -> StepContract:
+    """``step`` without the ``must_change`` globs, and a constraint that asks the review whether the goal needs them."""
+    drop = set(globs)
+    acceptance = []
+    for crit in step.acceptance:
+        if crit.type == "diff" and drop & set(crit.must_change):
+            keep = [g for g in crit.must_change if g not in drop]
+            if keep or crit.must_not_change or crit.max_changed_files is not None:
+                acceptance.append(crit.model_copy(update={"must_change": keep}))
+            continue
+        acceptance.append(crit)
+    note = (
+        f"The plan also expected changes to {', '.join(globs[:10])}, which this step left unchanged. Judge whether the "
+        "step goal requires changing them: if it does, report a blocker finding that names the file and the change it "
+        "needs; a file the step only reads (input data, an entry point it runs, tests it runs) needs no change."
+    )
+    return step.model_copy(update={"acceptance": acceptance, "constraints": [*step.constraints, note]})
+
+
 # ----------------------------------------------------------------------------- ports (adapters wrap P21/P22/P12)
 @dataclass
 class VerificationOutcome:
@@ -603,7 +641,9 @@ class ImplementStepHandler:
             return await self._correction(ctx, row, "budget", items, "TURN_BUDGET_EXHAUSTED", result.detail)
         return await self._verify_review_commit(run, result)
 
-    async def _verify_review_commit(self, run: _Run, result: CoderResult, *, budget_items: Sequence[CorrectionItem] = ()) -> StepOutcome:
+    async def _verify_review_commit(
+        self, run: _Run, result: CoderResult, *, budget_items: Sequence[CorrectionItem] = (), waived: Sequence[str] = ()
+    ) -> StepOutcome:
         ctx, row, step, handle = run.ctx, run.row, run.step, run.handle
         audit = await self.deps.scope_auditor.audit_status(
             ctx.step_id, await self.deps.git.reader().status(handle), attempt_id=ctx.attempt_id
@@ -630,6 +670,15 @@ class ImplementStepHandler:
                     replan_reason="repeated_verifier_failure",
                     replan_evidence={"source": "verifier", "acceptance_defect": True, "detail": DEFAULT_REDACTOR.text(detail)[:2000]},
                 )
+            unmet = [] if waived else unmet_change_demands(outcome.report)
+            if unmet and self.deps.reviewer is not None and self.deps.reviewer.should_review(row.kind, True):
+                # live M2: the plan demanded changes to the input data and the entry point the step only reads; the code
+                # was right (27 of 30 checks passed), two corrections and two replans could not change the plan's demand.
+                # Whether the goal needs those files is the review's judgement, on the step without the demand (BUG-278)
+                await self._status(ctx, f"{row.step_key}: Review prüft, ob {', '.join(unmet[:3])} geändert werden muss")
+                return await self._verify_review_commit(
+                    dataclasses.replace(run, step=without_change_demands(step, unmet)), result, budget_items=budget_items, waived=unmet
+                )
             items = [*budget_items, *CorrectionItem.from_verification(outcome.report)]
             return await self._correction(ctx, row, "verifier", items, "VERIFIER_FAILED", outcome.report.summary or "verification failed")
         if self.deps.reviewer is not None and self.deps.reviewer.should_review(row.kind, True):
@@ -648,6 +697,18 @@ class ImplementStepHandler:
                     "REVIEW_FIX_REQUIRED",
                     review.summary or "review requires fixes",
                 )
+        if waived:
+            async with self.sm() as s:
+                await append_event(
+                    s,
+                    EventType.ACCEPTANCE_WAIVED,
+                    source_type="coder",
+                    job_id=ctx.job_id,
+                    step_id=ctx.step_id,
+                    attempt_id=ctx.attempt_id,
+                    payload={"must_change": list(waived)[:50], "reason": "the review found the step goal met without changing them"},
+                )
+                await s.commit()
         return await self._commit(run, outcome, result)
 
     async def _review_and_correct(self, run: _Run, report: VerificationReport, items: list[CorrectionItem]) -> StepOutcome:
