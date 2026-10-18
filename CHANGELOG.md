@@ -4,6 +4,9 @@ Format: [Keep a Changelog](https://keepachangelog.com/de/1.1.0/), Versionen nach
 
 ## [Unreleased]
 
+### Behoben
+- **Unterbrechungen kosten keinen Versuch (BUG-233):** Ein Schritt, der durch Deployment, Pause oder Verdrängung einen Checkpoint schreibt, bekommt für die Fortsetzung einen Versuch dazu.
+
 ## [0.1.0rc31] – Release Candidate (2026-10-18)
 
 ### Behoben

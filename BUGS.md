@@ -46,6 +46,19 @@ Noch keine.
 
 ## Behobene Bugs
 
+### BUG-233 – Ein Checkpoint (Deployment, Pause, Verdrängung) kostet einen Versuch: der fortgesetzte Versuch zählt neu
+- Phase: G1 auf rc30/rc31 · Komponente: scheduler · Severity: P2 · blockierend: nein (behoben) · Status: **behoben** (`tests/integration/test_scheduler.py::test_model_outage_during_a_step_does_not_use_up_its_attempts`, erweitert um `checkpoint`)
+- Reproduktion: Job `364a9c3c-78ab-453e-b984-2936ca887c02`, S003:
+  - Versuch 1 `WORKER_UNREACHABLE` (rc30-Deployment, vor BUG-232);
+  - Versuch 2 `retry`, beim rc31-Deployment `checkpointed`;
+  - Versuch 3 `resume` `WORKER_UNREACHABLE`;
+  - Versuch 4 `resume`.
+
+  Ergebnis: `attempt_count 4 / max_attempts 4`, obwohl nur Versuch 2/4 Arbeit enthielt. Für Korrekturen bleibt nichts.
+- Ursache: Die Fortsetzung nach einem Checkpoint ist ein neuer Versuchsdatensatz mit eigener Nummer. Sie zählte gegen `max_attempts`, obwohl sie die Arbeit desselben Versuchs vom Checkpoint aus weiterführt. Jedes Deployment, jede Pause und jede Verdrängung durch einen Videojob verbrauchte so einen der drei Versuche, die sich der Schritt mit seinen Korrekturen teilt.
+- Fix: Ein `checkpointed`-Ergebnis erhöht `max_attempts` um eins, wie ein Ausfall (BUG-232). Das Turn-Budget im Checkpoint begrenzt die Arbeit weiterhin.
+- Selbstprüfung: echter Schritt nach vorn. Die Regel aus BUG-197 („Versuche ohne eigene Arbeit sind frei“) gilt jetzt auch für Unterbrechungen; kein neuer Mechanismus.
+
 ### BUG-232 – Ein früher Modell- oder Worker-Ausfall verbraucht trotz BUG-197/227 einen Versuch des Schritts
 - Phase: G1 auf rc28/rc29 · Komponente: scheduler · Severity: P2 · blockierend: nein (behoben) · Status: **behoben** (`tests/integration/test_scheduler.py::test_model_outage_during_a_step_does_not_use_up_its_attempts`, erweitert)
 - Reproduktion: Job `8e7c4b65…`, S003. Versuch 2 war `WORKER_UNREACHABLE` (Deployment), danach blockierte der Schritt mit „correction budget exhausted (1/2)“ bei 3/3 Versuchen. Im Folgelauf `364a9c3c…` haben S003–S006 nach dem rc30-Deployment je einen `WORKER_UNREACHABLE`-Versuch und weiterhin `max_attempts = 3`.

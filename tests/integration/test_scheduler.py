@@ -131,6 +131,8 @@ class FakeHandler:
             what = seq[min(ctx.attempt_no - 1, len(seq) - 1)]
             if what == "crash":
                 raise RuntimeError("handler exploded")
+            if what == "checkpoint":  # a deployment / pause interrupted the attempt
+                return StepOutcome("checkpointed", summary="scheduler stopped", checkpoint={"progress": ctx.attempt_no})
             if what == "worker_down":
                 raise WorkerUnreachable("no ready execution worker with capability sandbox")
             if what == "fail_retry":
@@ -287,6 +289,13 @@ async def test_model_outage_during_a_step_does_not_use_up_its_attempts(sessionma
     jobs3 = await _run_until(sched3, sm, [jid3])
     assert jobs3[jid3].status == "succeeded" and len(h3.calls) == 4
     assert (await _steps(sm, jid3))["S1"].max_attempts == 4
+    # BUG-233: an attempt interrupted by a checkpoint (deployment, pause) continues in the resumed attempt – free too
+    h4 = FakeHandler({"test"}, script={"S1": ["checkpoint", "checkpoint", "fail_retry", "fail_retry", "completed"]})
+    jid4 = await _new_job(sm)
+    driver.plans[jid4] = [StepSpec("S1", max_attempts=3)]
+    sched4 = Scheduler(sm, get_config(), [h4], driver, settings=_settings(model_outage_retry_seconds=(0,)))
+    jobs4 = await _run_until(sched4, sm, [jid4])
+    assert jobs4[jid4].status == "succeeded" and len(h4.calls) == 5
     # an outage longer than model_outage_max_wait_seconds is a failure again
     h2 = FakeHandler({"test"}, script={"S1": ["model_down"]})
     jid2 = await _new_job(sm)

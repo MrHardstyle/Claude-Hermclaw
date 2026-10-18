@@ -880,6 +880,9 @@ class Scheduler:
                 )
             elif out.outcome == "checkpointed":
                 st.checkpoint = out.checkpoint or st.checkpoint or {"note": "checkpoint without state"}
+                # the resumed attempt continues this one's work from the checkpoint: an interruption (deployment, pause,
+                # preemption) does not use up an attempt (BUG-233); the turn budget in the checkpoint still bounds it
+                st.max_attempts += 1
                 await step_to(s, st, StepStatus.checkpointed, reason=out.summary or "checkpoint", actor=self.instance_id)
             elif out.outcome == "cancelled":
                 await step_to(s, st, StepStatus.cancelled, reason=out.summary or "cancelled", actor=self.instance_id)
