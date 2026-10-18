@@ -2,6 +2,11 @@
 
 Format: [Keep a Changelog](https://keepachangelog.com/de/1.1.0/), Versionen nach PEP 440.
 
+## [Unreleased]
+
+### Behoben
+- **Deployment bei laufendem Job (BUG-227):** Ist der Sandbox-Worker nach einem Neustart noch nicht bereit, wartet der fortgesetzte Schritt mit Backoff, ohne einen Versuch zu verbrauchen.
+
 ## [0.1.0rc27] – Release Candidate (2026-10-18)
 
 Fix aus dem Großauftrag G1 auf 0.1.0rc26.

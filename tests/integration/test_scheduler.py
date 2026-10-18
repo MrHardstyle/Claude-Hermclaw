@@ -19,6 +19,7 @@ from hermclaw.persistence.models import Event, Job, Step, StepAttempt, StepDepen
 from hermclaw.runtime.transitions import transition_job
 from hermclaw.scheduler.handlers import CancelToken, JobPhaseResult, StepOutcome, StepRunContext
 from hermclaw.scheduler.scheduler import Scheduler, SchedulerSettings, transient_db_error
+from hermclaw.workers.errors import WorkerUnreachable
 
 pytestmark = pytest.mark.asyncio(loop_scope="session")
 
@@ -130,6 +131,8 @@ class FakeHandler:
             what = seq[min(ctx.attempt_no - 1, len(seq) - 1)]
             if what == "crash":
                 raise RuntimeError("handler exploded")
+            if what == "worker_down":
+                raise WorkerUnreachable("no ready execution worker with capability sandbox")
             if what == "fail_retry":
                 return StepOutcome("failed", error_code="FLAKY", error_message="transient", retryable=True)
             if what == "fail":
@@ -261,7 +264,7 @@ async def test_model_outage_during_a_step_does_not_use_up_its_attempts(sessionma
     corrections), then the step, then a replan – work lost to an outage. Outage attempts do no work and are free."""
     sm = sessionmaker
     driver = FakeDriver(sm)
-    h = FakeHandler({"test"}, script={"S1": ["fail_retry", "model_down", "model_down", "model_down", "model_down", "completed"]})
+    h = FakeHandler({"test"}, script={"S1": ["fail_retry", "model_down", "worker_down", "model_down", "worker_down", "completed"]})
     jid = await _new_job(sm)
     driver.plans[jid] = [StepSpec("S1", max_attempts=3)]
     sched = Scheduler(sm, get_config(), [h], driver, settings=_settings(model_outage_retry_seconds=(0,)))
@@ -270,6 +273,12 @@ async def test_model_outage_during_a_step_does_not_use_up_its_attempts(sessionma
     assert [c[1] for c in h.calls] == [1, 2, 3, 4, 5, 6]
     st = (await _steps(sm, jid))["S1"]
     assert st.status == "completed" and st.attempt_count == 6
+    # BUG-227: right after a deployment the sandbox worker had not re-registered yet; that is an outage, not a crash
+    async with sm() as s:
+        codes = (
+            await s.execute(select(StepAttempt.error_code).where(StepAttempt.step_id == st.id).order_by(StepAttempt.attempt_no))
+        ).scalars()
+        assert list(codes)[:3] == ["FLAKY", "MODEL_UNAVAILABLE", "WORKER_UNREACHABLE"]
     # an outage longer than model_outage_max_wait_seconds is a failure again
     h2 = FakeHandler({"test"}, script={"S1": ["model_down"]})
     jid2 = await _new_job(sm)

@@ -33,7 +33,7 @@ from hermclaw.contracts.common import MUTATING_STEP_KINDS, JobStatus, Severity, 
 from hermclaw.contracts.events import EventType
 from hermclaw.core import job_metadata
 from hermclaw.core.config import HermclawConfig
-from hermclaw.core.errors import InvalidTransition, ResourceUnavailable
+from hermclaw.core.errors import HermclawError, InvalidTransition, ResourceUnavailable
 from hermclaw.core.logging import get_logger
 from hermclaw.events.store import append_event
 from hermclaw.models.gateway import MODEL_LOAD_FAILED, MODEL_TIMEOUT, MODEL_UNAVAILABLE
@@ -47,6 +47,7 @@ from hermclaw.runtime.state_machines import (
 )
 from hermclaw.runtime.transitions import emit_status, transition_job, transition_step
 from hermclaw.scheduler.handlers import CancelToken, JobDriver, StepHandler, StepOutcome, StepRunContext
+from hermclaw.workers.errors import WorkerUnreachable
 
 log = get_logger(__name__)
 
@@ -127,8 +128,9 @@ MODEL_OUTAGE_CODES = frozenset({MODEL_UNAVAILABLE, MODEL_TIMEOUT, MODEL_LOAD_FAI
 #: finalize failures on the way to the remote that a later attempt can overcome (BUG-199): network, timeouts, a
 #: workspace lock, a push rejected because the base moved (finalize rebases again on the next run)
 FINALIZE_TRANSIENT_CODES = frozenset({"GIT_NETWORK", "GIT_TIMEOUT", "GIT_LOCK_TIMEOUT", "PUSH_REJECTED"})
-#: step failures that did no work: the model host is down or the GPU lease was not granted in time
-STEP_OUTAGE_CODES = MODEL_OUTAGE_CODES | {ResourceUnavailable.code}
+#: step failures that did no work: the model host is down, the GPU lease was not granted in time, or no execution worker
+#: is ready yet (right after a deployment the scheduler resumes before the sandbox worker re-registered, BUG-227)
+STEP_OUTAGE_CODES = MODEL_OUTAGE_CODES | {ResourceUnavailable.code, WorkerUnreachable.code}
 
 
 def transient_db_error(exc: BaseException) -> bool:
@@ -815,7 +817,14 @@ class Scheduler:
             outcome = StepOutcome("checkpointed", summary="scheduler stopped", checkpoint=ctx.checkpoint)
         except Exception as exc:
             log.exception("step handler crashed", extra={"step_id": str(ctx.step_id)})
-            outcome = StepOutcome("failed", error_code="HANDLER_CRASHED", error_message=f"{type(exc).__name__}: {exc}", retryable=True)
+            # an outage raised from deep inside a handler keeps its code, so it does not use up the step's attempts
+            code = getattr(exc, "code", None) if isinstance(exc, HermclawError) else None
+            outcome = StepOutcome(
+                "failed",
+                error_code=code if code in STEP_OUTAGE_CODES else "HANDLER_CRASHED",
+                error_message=f"{type(exc).__name__}: {exc}",
+                retryable=True,
+            )
         finally:
             stop_hb.set()
             hb.cancel()
@@ -893,7 +902,7 @@ class Scheduler:
                     await emit_status(
                         s,
                         ctx.job_id,
-                        f"Modell nicht verfügbar ({out.error_code}) – Step {st.step_key} wird in {outage_delay}s erneut versucht",
+                        f"Modell/Worker nicht verfügbar ({out.error_code}) – Step {st.step_key} wird in {outage_delay}s erneut versucht",
                         step_id=st.id,
                         severity=Severity.warning,
                     )
