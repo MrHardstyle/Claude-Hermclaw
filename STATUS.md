@@ -130,7 +130,7 @@ Lint, mypy, ShellCheck, ansible-lint (production) sauber.
 
 ## Bugs
 - 230 gefunden, **230 behoben** – `BUGS.md`. Live-Abnahme: BUG-143 bis BUG-230.
-  BUG-143–225 sind produktiv (0.1.0rc26, deployt 2026-10-18 02:55, `coder-main.max_output_tokens` 8192 im Inventory-Override; rc25 deployt 01:50 mit laufendem G1, Schritt per Checkpoint unterbrochen und fortgesetzt; rc24 deployt 2026-10-18 01:10; rc20 deployt 2026-10-17 20:40, Scheduler-Neustart mit laufendem Job live geprüft: Job lief nach dem Deployment weiter).
+  BUG-143–230 sind produktiv (0.1.0rc29, deployt 2026-10-18 04:23; rc28 03:48 mit laufendem G1, Worker-Ausfall beim Fortsetzen ohne Versuchsverlust (BUG-227 live bestätigt); rc26 02:55, `coder-main.max_output_tokens` 8192 im Inventory-Override; rc25 deployt 01:50 mit laufendem G1, Schritt per Checkpoint unterbrochen und fortgesetzt; rc24 deployt 2026-10-18 01:10; rc20 deployt 2026-10-17 20:40, Scheduler-Neustart mit laufendem Job live geprüft: Job lief nach dem Deployment weiter).
 - Externe Blocker: BLOCKER-002 (Tag-Push)
 
 ## Letzte Testresultate (2026-10-15, Build-Host)
@@ -186,6 +186,15 @@ bestanden; ansible-lint (production) sauber. `test_deploy_converge` ist angepass
    - die Redaction maskierte Code und Platzhalter, sodass der Coder den Marker kopierte (BUG-225).
 
    Alle in rc25/rc26 behoben. Neustart von G1 auf rc26.
+10. G1 auf rc26–rc28 (Job `8e7c4b65…`, `20261018T021717Z-jobs.md`): FAIL nach 98,3 min, `REPLAN_LIMIT`.
+    Die Recherche ist jetzt belastbar: Unraid-API mit `x-api-key`, 11 von 11 Aussagen belegt. Gefunden:
+    - Mega-Schritt mit 13 Dateien (BUG-226);
+    - Deployment bei laufendem Schritt (BUG-227);
+    - doppelt geschriebene Dateien (BUG-228);
+    - die Wiederholungssperre lehnte Lesezugriffe ab, die der Kontext nur als Kopf zeigte, sodass der Schritt stagnierte (BUG-229);
+    - zuletzt bestanden in Turn 20 von 20 alle 17 Tests, der Schritt wurde trotzdem verworfen (BUG-230).
+
+    Mit rc28 gab es keine abgelehnten Lesezugriffe mehr. rc29 deployt 2026-10-18; Neustart von G1 auf rc29.
 3. 0.1.0rc18 ausrollen, J1–J6 zweimal in Folge bestehen, dann die erweiterte Batterie X1–X5
    (`config/acceptance-jobs-extended.example.yaml`); danach Abbruch, parallele Jobs und Worker-Neustart prüfen.
 4. Wake-on-LAN einrichten (MACs, BIOS, Kapitel 13.1), danach `--suite wol --full-wol` und erst dann den Leerlauf-Suspend einschalten.
