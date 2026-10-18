@@ -46,6 +46,7 @@ class Endpoints:
         self.searx_status = 200
         self.litellm_up = True
         self.llama_served = ["qwen3.6:35b"]
+        self.llama_aliases: dict[str, list[str]] = {}
         self.llama_status = 200
 
     def __call__(self, req: httpx.Request) -> httpx.Response:
@@ -54,7 +55,7 @@ class Endpoints:
             if path == "/health":
                 return httpx.Response(self.llama_status, json={"status": "ok" if self.llama_status == 200 else "loading model"})
             if path == "/v1/models":
-                return httpx.Response(200, json={"data": [{"id": m} for m in self.llama_served]})
+                return httpx.Response(200, json={"data": [{"id": m, "aliases": self.llama_aliases.get(m, [])} for m in self.llama_served]})
         if req.url.port == 4000:
             if not self.litellm_up:
                 raise httpx.ConnectError("refused", request=req)
@@ -276,6 +277,17 @@ async def test_llamacpp_server_is_checked_for_the_profiles_that_use_it(db: Any, 
     ep = Endpoints(cfg)
     checks = by_name(await doctor(cfg, settings(tmp_path), db, ep).run())
     assert checks["llamacpp:model-224"].status == "ok" and "qwen3.6:35b" in checks["llamacpp:model-224"].detail
+    # router mode (R-033): presets named without ':' serve the profiles' Ollama tags as aliases
+    planner_on_other = [p.model_copy(update={"model": "qwen3.8:27b"}) if p.role == "planner" else p for p in profiles]
+    cfg2 = cfg.model_copy(update={"models": cfg.models.model_copy(update={"profiles": planner_on_other})})
+    ep2 = Endpoints(cfg2)
+    ep2.llama_served = ["qwen3.6-35b", "qwen3.8-27b"]
+    ep2.llama_aliases = {"qwen3.6-35b": ["qwen3.6:35b"], "qwen3.8-27b": ["qwen3.8:27b"]}
+    checks = by_name(await doctor(cfg2, settings(tmp_path), db, ep2).run())
+    assert checks["llamacpp:model-224"].status == "ok" and "qwen3.8:27b" in checks["llamacpp:model-224"].detail
+    ep2.llama_aliases = {"qwen3.6-35b": ["qwen3.6:35b"]}
+    checks = by_name(await doctor(cfg2, settings(tmp_path), db, ep2).run())
+    assert checks["llamacpp:model-224"].status == "fail" and "qwen3.8:27b" in checks["llamacpp:model-224"].detail
     ep.llama_served = ["other:1b"]
     checks = by_name(await doctor(cfg, settings(tmp_path), db, ep).run())
     assert checks["llamacpp:model-224"].status == "fail" and "--alias" in checks["llamacpp:model-224"].detail

@@ -1,0 +1,36 @@
+# Resolve the GGUF of one Ollama tag (ollama_llamacpp_tag) in Ollama's store, pulled with ollama if missing, and record it in
+# ollama_llamacpp_model_paths (tag -> blob path). Included by llamacpp.yml for the main model and every model of
+# ollama_llamacpp_models.
+- name: Locate the Ollama manifest of {{ ollama_llamacpp_tag }}
+  vars:
+    ollama_llamacpp_name: "{{ ollama_llamacpp_tag.split(':')[0] }}"
+    ollama_llamacpp_version: "{{ ollama_llamacpp_tag.split(':')[1] if ':' in ollama_llamacpp_tag else 'latest' }}"
+  ansible.builtin.set_fact:
+    ollama_llamacpp_manifest: "{{ ollama_effective_models_dir }}/manifests/registry.ollama.ai/library/{{ ollama_llamacpp_name }}/{{ ollama_llamacpp_version }}"
+
+- name: Check for the manifest of {{ ollama_llamacpp_tag }}
+  ansible.builtin.stat:
+    path: "{{ ollama_llamacpp_manifest }}"
+  register: ollama_llamacpp_manifest_st
+
+- name: Pull the llama.cpp model with Ollama {{ ollama_llamacpp_tag }}
+  ansible.builtin.command:
+    argv: ["{{ ollama_bin }}", pull, "{{ ollama_llamacpp_tag }}"]
+  environment:
+    OLLAMA_HOST: "127.0.0.1:{{ hermclaw_ollama_port }}"
+  when: not ollama_llamacpp_manifest_st.stat.exists
+  changed_when: true
+
+- name: Read the manifest of {{ ollama_llamacpp_tag }}
+  ansible.builtin.slurp:
+    src: "{{ ollama_llamacpp_manifest }}"
+  register: ollama_llamacpp_manifest_raw
+
+- name: Resolve the GGUF of {{ ollama_llamacpp_tag }}
+  vars:
+    ollama_llamacpp_layers: "{{ (ollama_llamacpp_manifest_raw.content | b64decode | from_json).layers }}"
+    ollama_llamacpp_digest: "{{ (ollama_llamacpp_layers | selectattr('mediaType', 'equalto', 'application/vnd.ollama.image.model') | first).digest }}"
+  ansible.builtin.set_fact:
+    ollama_llamacpp_model_paths: >-
+      {{ ollama_llamacpp_model_paths | default({})
+         | combine({ollama_llamacpp_tag: ollama_effective_models_dir ~ '/blobs/' ~ (ollama_llamacpp_digest | replace(':', '-'))}) }}

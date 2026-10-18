@@ -82,3 +82,9 @@ ollama_llamacpp_threads: 6
 ollama_llamacpp_flash_attention: "on"
 ollama_llamacpp_extra_args: []             # further llama-server arguments (validated allowlist)
 ollama_llamacpp_health_retries: 60         # x 5 s: a cold page cache loads ~20 GB from disk
+# Further models the same llama-server serves on demand (router mode, `--models-max 1`): a request names the model,
+# the server unloads the loaded one and loads the requested one (the RAM of the model host holds one large model).
+# Each entry: {model: <Ollama tag, also the served name>, settings: {<llama-server option without dashes>: <value>}};
+# the main model keeps -ngl 99/--n-cpu-moe and loads at start. Example (R-033: the planner on a dense model that
+# --fit splits between GPU and CPU): [{model: "qwen3.8:27b", settings: {fit: "on"}}]
+ollama_llamacpp_models: []

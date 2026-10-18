@@ -148,14 +148,6 @@ def check_architecture(models: ModelsConfig) -> list[ProfileIssue]:
                 issues.append(ProfileIssue("error", req.role, p.alias, "backend llamacpp serves chat profiles only"))
             if p.backend == "llamacpp" and p.gpu_layers is not None:
                 issues.append(ProfileIssue("warning", req.role, p.alias, "gpu_layers is ignored for llamacpp (set on llama-server)"))
-    # one resident llama-server per host serves exactly one model
-    served: dict[str, set[str]] = {}
-    for p in models.profiles:
-        if p.enabled and p.backend == "llamacpp":
-            served.setdefault(p.host, set()).add(normalize_model_tag(p.model))
-    for host, names in sorted(served.items()):
-        if len(names) > 1:
-            issues.append(ProfileIssue("error", "-", None, f"llamacpp on {host} serves one model, profiles name {sorted(names)}"))
     planners = [p.alias for p in models.profiles if p.role == "planner" and p.enabled]
     for p in models.profiles:
         if p.fallback_for is None:

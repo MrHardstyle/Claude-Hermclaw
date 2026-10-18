@@ -1,0 +1,26 @@
+; Managed by Hermclaw (role ollama) – llama-server model presets, router mode (R-033). One section per model; the
+; served name is the Ollama tag (alias), so requests use the same model names as the Hermclaw profiles.
+version = 1
+
+[*]
+ctx-size = {{ ollama_llamacpp_context }}
+flash-attn = {{ ollama_llamacpp_flash_attention }}
+threads = {{ ollama_llamacpp_threads }}
+parallel = 1
+jinja = true
+
+[{{ ollama_llamacpp_model | replace(':', '-') }}]
+alias = {{ ollama_llamacpp_model }}
+model = {{ ollama_llamacpp_model_path }}
+n-gpu-layers = 99
+n-cpu-moe = {{ ollama_llamacpp_n_cpu_moe }}
+load-on-startup = true
+{% for m in ollama_llamacpp_models %}
+
+[{{ m.model | replace(':', '-') }}]
+alias = {{ m.model }}
+model = {{ ollama_llamacpp_model_paths[m.model] }}
+{% for key, value in (m.settings | default({})).items() %}
+{{ key }} = {{ value }}
+{% endfor %}
+{% endfor %}

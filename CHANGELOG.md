@@ -4,6 +4,9 @@ Format: [Keep a Changelog](https://keepachangelog.com/de/1.1.0/), Versionen nach
 
 ## [Unreleased]
 
+### Geändert
+- **Planer auf eigenem Modell (R-033):** Der llama-server auf dem Modell-Host kann mehrere Modelle bedienen, eines nach dem anderen (Router-Modus, `ollama_llamacpp_models`, `--models-max 1`). Eine Anfrage an ein anderes Modell entlädt das geladene und lädt das angeforderte. Planer und Neuplaner halten dafür die Lease der exklusiven Modellgruppe, wie Coder und Review. Ein Planungsaufruf wechselt das Modell also nie unter einem laufenden Schritt. Doctor erkennt die Modellnamen der Presets (Aliase). Die Validierung „ein llama-server bedient genau ein Modell“ entfällt.
+
 ### Behoben
 - **Gemeldete Beispiel-Tokens werden wirklich ersetzt (BUG-279):** Unverändert zurückgeschriebene maskierte Zeilen werden abgelehnt statt als „ersetzt“ gemeldet. Dokumentation bekommt Platzhalter-Hinweise (`<your-token>`, `$AUTH_TOKEN`), und `complete_step` nennt in einer Korrektur die Zeilen, die noch auffallen.
 - **Unerfüllbare Änderungsforderungen des Plans entscheidet das Review (BUG-278):** Scheitert ein Schritt nur daran, dass vom Plan geforderte Dateien unverändert blieben, prüft das Heavy Review den Schritt ohne diese Forderung. Bei `pass` wird sie protokolliert fallen gelassen (`acceptance.waived`), statt in Korrekturen und Replans zu enden.

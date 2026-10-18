@@ -5,6 +5,8 @@ from __future__ import annotations
 
 import asyncio
 import uuid
+from collections.abc import AsyncIterator
+from contextlib import asynccontextmanager
 from pathlib import Path
 from typing import Any, TypeVar
 
@@ -338,6 +340,57 @@ async def test_blocked_step_triggers_gemma_replan_and_job_completes(world: World
     assert created, "replan.created event missing"
     replan_call = chat.user_payload(1)
     assert "scope_unavailable" in str(replan_call)
+
+
+class RecordingLeases:
+    """Model leases that record which profile is held while the model is called."""
+
+    def __init__(self) -> None:
+        self.held: list[str] = []
+        self.calls: list[tuple[str, list[str]]] = []
+
+    @asynccontextmanager
+    async def hold_model(self, profile: Any, **_: Any) -> AsyncIterator[None]:
+        self.held.append(profile.role)
+        try:
+            yield
+        finally:
+            self.held.pop()
+
+
+class LeaseCheckingChat(Chat):
+    def __init__(self, answers: list[Any], leases: RecordingLeases) -> None:
+        super().__init__(answers)
+        self.leases = leases
+
+    async def chat(self, alias: str, messages: list[ChatMessage], *, ctx: CallContext, **kw: Any) -> ChatResult:  # type: ignore[override]
+        self.leases.calls.append((ctx.purpose, list(self.leases.held)))
+        return await super().chat(alias, messages, ctx=ctx, **kw)
+
+
+async def test_planner_and_replanner_hold_the_planner_model_lease(world: World, tmp_path: Path) -> None:
+    """R-033: the planner runs on another model of the exclusive large-model group (a router-mode llama-server swaps
+    models), so a plan or replan call holds the planner's lease – it never switches the model under a running coder
+    step of another job."""
+    leases = RecordingLeases()
+    chat = LeaseCheckingChat([_plan(), _replan()], leases)
+    cfg = get_config()
+    driver = RuntimeJobDriver(
+        world.sessionmaker,
+        cfg,
+        planner=Planner(chat, world.sessionmaker, cfg),
+        replanner=Replanner(chat, world.sessionmaker, cfg),
+        git=world.engine,
+        repo_intel=FakeIntel(),
+        chat=chat,
+        settings=DriverSettings(artifacts_dir=tmp_path / "artifacts"),
+        resources=leases,
+    )
+    jid = await _job(world)
+    jobs = await _run(world, driver, [ImplementHandler(world, outcome="blocked"), ReviewHandler()], [jid])
+    assert jobs[jid].status == "succeeded", (jobs[jid].error_code, jobs[jid].error_message)
+    assert [held for _, held in leases.calls] == [["planner"], ["planner"]], leases.calls
+    assert leases.held == []
 
 
 async def test_replanner_question_makes_the_job_wait_and_the_answer_resumes_it(world: World, tmp_path: Path) -> None:

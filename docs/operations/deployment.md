@@ -220,8 +220,16 @@ A profile may name another model only with a documented decision, `deviation: "<
 architecture check then reports a warning instead of an error.
 
 **llama.cpp backend (D-015).** A chat profile with `backend: llamacpp` is served by the resident `llama-server` of its
-host (`hermclaw-llamacpp.service`, port 18080 or the `llamacpp` service of `hosts.yaml`). One server serves one model,
-so all llamacpp profiles of a host name the same model. Embeddings stay on Ollama.
+host (`hermclaw-llamacpp.service`, port 18080 or the `llamacpp` service of `hosts.yaml`). Embeddings stay on Ollama.
+By default one server serves one model (`ollama_llamacpp_model`). With `ollama_llamacpp_models` the server runs in
+router mode (R-033), for example for the planner on another model:
+- one preset per model in `/opt/llamacpp/models.ini`, served under its Ollama tag (alias);
+- at most one model is loaded (`--models-max 1`), and a request for another model swaps it in, which takes about 1 min
+  from the page cache and longer from disk;
+- the main model keeps `-ngl 99 --n-cpu-moe` and loads at start; the further models take their own llama-server
+  options (`settings`, e.g. `{fit: "on"}` for a dense model split between GPU and CPU);
+- planner and replanner hold the lease of the exclusive model group, so a swap never happens under a running coder or
+  review call.
 
 To switch, the inventory needs three things:
 1. The archive and its checksum on the model host (`ollama_llamacpp_enabled: true`, `ollama_llamacpp_archive_src`,

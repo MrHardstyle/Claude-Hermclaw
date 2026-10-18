@@ -14,6 +14,7 @@ Everything here runs locally without the target hosts (BLOCKER-001):
 
 from __future__ import annotations
 
+import configparser
 import json
 import os
 import re
@@ -247,6 +248,7 @@ def _render_vars(paths: Mapping[str, Any] | None = None) -> dict[str, Any]:
             "ollama_effective_home": "/var/lib/ollama",
             "ollama_effective_models_dir": "/var/lib/ollama/models",
             "ollama_llamacpp_model_path": "/var/lib/ollama/models/blobs/sha256-" + "0" * 64,
+            "ollama_llamacpp_model_paths": {"qwen3.6:35b": "/var/lib/ollama/models/blobs/sha256-" + "0" * 64},
             "common_ssh_runtime_sudo_commands": ["/usr/bin/systemctl suspend"],
         }
     )
@@ -676,6 +678,37 @@ def test_llamacpp_unit_and_firewall_cover_the_llama_server_port(tmp_path: Path) 
         check = _run([nft, "-c", "-f", str(out["ollama/hermclaw-ollama.nft"])], cwd=REPO)
         if "Operation not permitted" not in check.stderr:
             assert check.returncode == 0, check.stderr
+
+
+def test_llamacpp_router_mode_serves_further_models_under_their_ollama_tags(tmp_path: Path) -> None:
+    """R-033: with ollama_llamacpp_models the llama-server runs in router mode – one preset per model, the served name
+    is the Ollama tag (alias; a section name with ':' would be upper-cased by llama-server), the main model keeps its
+    MoE split and loads at start, at most one model is loaded at a time."""
+    blob = "/var/lib/ollama/models/blobs/sha256-"
+    out = _render(
+        tmp_path,
+        tmp_path / "out",
+        _render_vars(
+            {
+                "ollama_llamacpp_enabled": True,
+                "ollama_llamacpp_models": [{"model": "qwen3.8:27b", "settings": {"fit": "on"}}],
+                "ollama_llamacpp_model_paths": {"qwen3.6:35b": blob + "0" * 64, "qwen3.8:27b": blob + "1" * 64},
+            }
+        ),
+    )
+    unit = out["systemd/hermclaw-llamacpp.service"].read_text(encoding="utf-8")
+    exec_lines = [ln for ln in unit.splitlines() if ln.startswith("ExecStart=")]
+    assert len(exec_lines) == 1
+    assert "--models-preset /opt/llamacpp/models.ini --models-max 1 --host 0.0.0.0 --port 18080" in exec_lines[0]
+    assert " -m " not in exec_lines[0]
+    ini = configparser.ConfigParser()
+    ini.read_string("[top]\n" + out["ollama/llamacpp-models.ini"].read_text(encoding="utf-8"))
+    main, planner = ini["qwen3.6-35b"], ini["qwen3.8-27b"]
+    assert main["alias"] == "qwen3.6:35b" and main["model"] == blob + "0" * 64
+    assert main["n-cpu-moe"] == "30" and main["n-gpu-layers"] == "99" and main["load-on-startup"] == "true"
+    assert planner["alias"] == "qwen3.8:27b" and planner["model"] == blob + "1" * 64 and planner["fit"] == "on"
+    assert "load-on-startup" not in planner
+    assert ini["*"]["ctx-size"] == "32768" and ini["*"]["parallel"] == "1"
 
 
 def test_rendered_podman_and_searxng(rendered: dict[str, Path]) -> None:

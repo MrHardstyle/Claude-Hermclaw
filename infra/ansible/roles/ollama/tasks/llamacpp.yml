@@ -1,6 +1,10 @@
 # llama.cpp next to Ollama (D-015): install the archive built by scripts/ops/build-llamacpp.sh, resolve the GGUF of
-# ollama_llamacpp_model in Ollama's store (pulled with ollama if missing) and run hermclaw-llamacpp.service.
+# ollama_llamacpp_model in Ollama's store (pulled with ollama if missing) and run hermclaw-llamacpp.service. With
+# ollama_llamacpp_models the server runs in router mode: one preset per model, at most one loaded at a time; a request
+# for another model unloads the loaded one and loads the requested one.
 - name: Validate the llama.cpp settings
+  vars:
+    ollama_llamacpp_preset_settings: "{{ ollama_llamacpp_models | map(attribute='settings', default={}) | map('dict2items') | flatten }}"
   ansible.builtin.assert:
     that:
       - ollama_llamacpp_build is match('^b[0-9]+$')
@@ -15,9 +19,14 @@
       - ollama_llamacpp_threads | int >= 1
       - ollama_llamacpp_flash_attention in ['on', 'off', 'auto']
       - ollama_llamacpp_extra_args | map('string') | reject('match', '^[A-Za-z0-9._:=,/-]+$') | list | length == 0
+      - ollama_llamacpp_models | map(attribute='model') | reject('match', '^[a-z0-9][a-z0-9._-]*(:[A-Za-z0-9._-]+)?$') | list | length == 0
+      - ollama_llamacpp_model not in (ollama_llamacpp_models | map(attribute='model') | list)
+      - ollama_llamacpp_preset_settings | map(attribute='key') | map('string') | reject('match', '^[a-z][a-z0-9-]*$') | list | length == 0
+      - ollama_llamacpp_preset_settings | map(attribute='value') | map('string') | reject('match', '^[A-Za-z0-9._:,/-]+$') | list | length == 0
     fail_msg: >-
       invalid llama.cpp settings: ollama_llamacpp_archive_src/ollama_llamacpp_archive_sha256 come from scripts/ops/build-llamacpp.sh,
-      ollama_llamacpp_model is an Ollama tag, the port must differ from Ollama's
+      ollama_llamacpp_model and every ollama_llamacpp_models[].model are distinct Ollama tags, preset settings are
+      llama-server option names with plain values, the port must differ from Ollama's
     quiet: true
 
 - name: Check the llama.cpp archive on the control node
@@ -61,37 +70,25 @@
     force: true
   notify: Restart llama-server
 
-- name: Locate the Ollama manifest of {{ ollama_llamacpp_model }}
-  vars:
-    ollama_llamacpp_name: "{{ ollama_llamacpp_model.split(':')[0] }}"
-    ollama_llamacpp_tag: "{{ ollama_llamacpp_model.split(':')[1] if ':' in ollama_llamacpp_model else 'latest' }}"
+- name: Resolve the GGUFs of the llama.cpp models
+  ansible.builtin.include_tasks: llamacpp_model.yml
+  loop: "{{ [ollama_llamacpp_model] + (ollama_llamacpp_models | map(attribute='model') | list) }}"
+  loop_control:
+    loop_var: ollama_llamacpp_tag
+
+- name: Path of the main llama.cpp model
   ansible.builtin.set_fact:
-    ollama_llamacpp_manifest: "{{ ollama_effective_models_dir }}/manifests/registry.ollama.ai/library/{{ ollama_llamacpp_name }}/{{ ollama_llamacpp_tag }}"
+    ollama_llamacpp_model_path: "{{ ollama_llamacpp_model_paths[ollama_llamacpp_model] }}"
 
-- name: Check for the manifest of {{ ollama_llamacpp_model }}
-  ansible.builtin.stat:
-    path: "{{ ollama_llamacpp_manifest }}"
-  register: ollama_llamacpp_manifest_st
-
-- name: Pull the llama.cpp model with Ollama {{ ollama_llamacpp_model }}
-  ansible.builtin.command:
-    argv: ["{{ ollama_bin }}", pull, "{{ ollama_llamacpp_model }}"]
-  environment:
-    OLLAMA_HOST: "127.0.0.1:{{ hermclaw_ollama_port }}"
-  when: not ollama_llamacpp_manifest_st.stat.exists
-  changed_when: true
-
-- name: Read the manifest of {{ ollama_llamacpp_model }}
-  ansible.builtin.slurp:
-    src: "{{ ollama_llamacpp_manifest }}"
-  register: ollama_llamacpp_manifest_raw
-
-- name: Resolve the GGUF of {{ ollama_llamacpp_model }}
-  vars:
-    ollama_llamacpp_layers: "{{ (ollama_llamacpp_manifest_raw.content | b64decode | from_json).layers }}"
-    ollama_llamacpp_digest: "{{ (ollama_llamacpp_layers | selectattr('mediaType', 'equalto', 'application/vnd.ollama.image.model') | first).digest }}"
-  ansible.builtin.set_fact:
-    ollama_llamacpp_model_path: "{{ ollama_effective_models_dir }}/blobs/{{ ollama_llamacpp_digest | replace(':', '-') }}"
+- name: Install the llama-server model presets (router mode)
+  ansible.builtin.template:
+    src: llamacpp-models.ini.j2
+    dest: "{{ ollama_llamacpp_install_root }}/models.ini"
+    owner: root
+    group: root
+    mode: "0644"
+  when: ollama_llamacpp_models | length > 0
+  notify: Restart llama-server
 
 - name: Install hermclaw-llamacpp.service
   ansible.builtin.template:

@@ -12,9 +12,11 @@ from __future__ import annotations
 
 import re
 import uuid
+from collections.abc import AsyncIterator
+from contextlib import AbstractAsyncContextManager, asynccontextmanager
 from dataclasses import dataclass
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, Literal
+from typing import TYPE_CHECKING, Any, Literal, Protocol
 
 from pydantic import BaseModel, Field
 from sqlalchemy import select
@@ -23,8 +25,8 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 from hermclaw.contracts.common import JobStatus, Severity
 from hermclaw.contracts.events import EventType
 from hermclaw.core import job_metadata
-from hermclaw.core.config import HermclawConfig
-from hermclaw.core.errors import GitError, HermclawError, MergeConflictError, ModelError
+from hermclaw.core.config import HermclawConfig, ModelProfileConfig
+from hermclaw.core.errors import GitError, HermclawError, MergeConflictError, ModelError, ResourceUnavailable
 from hermclaw.core.interfaces import RepoContextProvider
 from hermclaw.core.logging import get_logger
 from hermclaw.core.redaction import DEFAULT_REDACTOR
@@ -81,6 +83,12 @@ class TriageResult(BaseModel):
     summary: str = Field(default="", max_length=600)
 
 
+class ModelLeases(Protocol):
+    """The part of :class:`hermclaw.resources.manager.ResourceManager` the driver uses."""
+
+    def hold_model(self, profile: ModelProfileConfig, **kw: Any) -> AbstractAsyncContextManager[Any]: ...
+
+
 @dataclass
 class DriverSettings:
     context_budget_chars: int = 24_000
@@ -91,6 +99,7 @@ class DriverSettings:
     create_merge_request: bool | None = None  # None: GitLab policy default of the git engine
     max_known_paths: int = 20_000
     artifacts_dir: Path | None = None  # default: settings.artifacts_dir
+    lease_wait_seconds: float = 3600.0  # wait of planner and replanner for the model lease (a running coder step)
 
 
 def _paths_from_inventory(inv: dict[str, Any], limit: int) -> list[str]:
@@ -180,6 +189,7 @@ class RuntimeJobDriver:
         regression: RegressionCheck | None = None,
         settings: DriverSettings | None = None,
         scratch: ScratchWorkspaces | None = None,
+        resources: ModelLeases | None = None,
     ) -> None:
         self.sm = sessionmaker
         self.scratch = scratch  # R-026: finalize pushes a repository-less job's scratch branch into its local scratch repo
@@ -191,6 +201,19 @@ class RuntimeJobDriver:
         self.chat = chat
         self.regression = regression
         self.settings = settings or DriverSettings()
+        self.resources = resources
+
+    @asynccontextmanager
+    async def _planner_lease(self, job_id: uuid.UUID) -> AsyncIterator[None]:
+        """Planner and replanner hold the lease of the planner's model like coder and review hold theirs: with the planner
+        on another model of the same exclusive group (R-033, a router-mode llama-server swapping models) a plan call
+        never switches the model under a running coder step of another job – it waits for the step's lease."""
+        if self.resources is None:
+            yield
+            return
+        profile = self.config.models.by_role("planner")
+        async with self.resources.hold_model(profile, job_id=job_id, wait_timeout=self.settings.lease_wait_seconds, preemptible=False):
+            yield
 
     # ------------------------------------------------------------------ helpers
     async def _advance(self, job_id: uuid.UUID, target: JobStatus, line: str) -> None:
@@ -316,13 +339,16 @@ class RuntimeJobDriver:
                 return JobPhaseResult(ok=False, error_code="CANCELLED")
             await self._advance(job_id, JobStatus.planning, "Gemma plant den Job")
             try:
-                result = await self.planner.create_plan(job_id, inputs)
+                async with self._planner_lease(job_id):
+                    result = await self.planner.create_plan(job_id, inputs)
             except PlanConflict as exc:
                 if exc.code != "PLAN_EXISTS":
                     raise
                 return JobPhaseResult(ok=True, next_status=JobStatus.running.value, detail={"plan": "existing"})
         except PlannerError as exc:
             return JobPhaseResult(ok=False, error_code=exc.code, error_message=exc.message, detail=exc.details)
+        except ResourceUnavailable as exc:
+            return JobPhaseResult(ok=False, error_code=exc.code, error_message=exc.message)
         except GitError as exc:
             # live G1 (BUG-263): GitLab answered "Internal API unreachable" for two minutes and the mirror fetch failed
             # the job for good; a network failure lets the scheduler prepare the job again after a backoff
@@ -455,7 +481,8 @@ class RuntimeJobDriver:
         job = await self._job(job_id)
         try:
             inputs = await self._planner_input(job, await self._workspace(job), (job.metadata_ or {}).get(job_metadata.TRIAGE))
-            res = await self.replanner.replan(job_id, trigger, inputs)
+            async with self._planner_lease(job_id):
+                res = await self.replanner.replan(job_id, trigger, inputs)
         except ReplanLimitReached as exc:
             return JobPhaseResult(ok=False, error_code="REPLAN_LIMIT", error_message=exc.message, detail=exc.details)
         except PlannerError as exc:

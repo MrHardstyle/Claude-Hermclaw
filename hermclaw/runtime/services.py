@@ -395,6 +395,7 @@ def build_services(
         regression=verifier,
         settings=ov.driver_settings or DriverSettings(artifacts_dir=artifacts),
         scratch=scratch,
+        resources=resources,
     )
     disk = DiskMonitor(
         sessionmaker,

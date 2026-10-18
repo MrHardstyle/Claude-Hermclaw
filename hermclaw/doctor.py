@@ -418,7 +418,7 @@ class Doctor:
             self.add(f"models:{host.id}", "ok", f"{len(wanted)} role model(s) installed: {', '.join(wanted)}")
 
     async def _llamacpp(self, host: HostConfig) -> None:
-        """The resident llama-server of a host that llamacpp profiles use (D-015): healthy and serving their model."""
+        """The llama-server of a host that llamacpp profiles use (D-015): healthy and serving their models."""
         from hermclaw.models.profiles import llamacpp_base_url, normalize_model_tag
 
         wanted = {normalize_model_tag(p.model) for p in self.enabled_profiles() if p.host == host.id and p.backend == "llamacpp"}
@@ -436,7 +436,14 @@ class Doctor:
         if health.status_code != 200:
             self.add(name, "fail", f"{base}/health → HTTP {health.status_code} (model still loading?)")
             return
-        served = {normalize_model_tag(str(m.get("id", ""))) for m in (listing.json().get("data") or []) if isinstance(m, dict)}
+        # a router-mode server (several models, one loaded at a time, R-033) lists every preset, its name as the id and
+        # the Ollama tag the profiles use as an alias
+        served = {
+            normalize_model_tag(str(name))
+            for m in (listing.json().get("data") or [])
+            if isinstance(m, dict)
+            for name in [m.get("id", ""), *(m.get("aliases") or [])]
+        }
         missing = sorted(wanted - served)
         if missing:
             self.add(name, "fail", f"serves {sorted(served)}, profiles need {missing} (llama-server --alias)")

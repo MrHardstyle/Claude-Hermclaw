@@ -240,9 +240,15 @@ def test_llamacpp_profiles_route_to_the_resident_llama_server() -> None:
     assert by_name["embedding"]["litellm_params"]["model"] == "ollama/embeddinggemma:300m"
     with pytest.raises(ConfigError):
         build_litellm_config(cfg, ollama_urls_by_host={"model-224": "http://10.0.0.5:11434"})
-    # one server serves one model; embeddings cannot use it
-    two = replace_profile(cfg, "heavy-review", model="qwen3.8:27b")
-    assert any("serves one model" in i.message for i in check_architecture(two))
+    # a router-mode server serves several models one at a time (R-033: the planner on another model); embeddings
+    # cannot use it
+    two = replace_profile(cfg, "planner-gemma", model="qwen3.8:27b")
+    assert [i for i in check_architecture(two) if i.severity == "error"] == []
+    two_conf = build_litellm_config(
+        two, ollama_urls_by_host={"model-224": "http://10.0.0.5:11434"}, llamacpp_urls_by_host={"model-224": "http://10.0.0.5:18080/"}
+    )
+    planner = {m["model_name"]: m for m in two_conf["model_list"]}["planner-gemma"]["litellm_params"]
+    assert planner["model"] == "openai/qwen3.8:27b" and planner["api_base"] == "http://10.0.0.5:18080/v1"
     emb = replace_profile(models_config(), "embedding", backend="llamacpp")
     assert any("chat profiles only" in i.message for i in check_architecture(emb))
 
