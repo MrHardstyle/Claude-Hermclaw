@@ -124,6 +124,28 @@ async def test_a_part_of_a_visible_read_is_refused_until_a_file_changes(sessionm
     assert (await h.call("read_range", path="long.py", start=420, end=440)).ok, "the clipped read did not show these lines"
 
 
+async def test_reading_a_clipped_file_again_continues_where_the_last_read_stopped(sessionmaker: SM, repo: Path) -> None:
+    """Live G1 (BUG-264): read_file of an 845-line collector.py showed its first ~300 lines; the coder read it again
+    three times, saw the same head every time and was stopped for stagnation. Reading a clipped, unchanged file again
+    continues where the previous read stopped; after the end, or after a file change, it starts at line 1."""
+    (repo / "big.py").write_text("".join(f"value_number_{i:04d} = {i}  # a line of the big module\n" for i in range(1, 901)))
+    h = await make_harness(sessionmaker, repo, contract=scope(target_paths=["big.py"]))
+    first = (await h.call("read_file", path="big.py")).output
+    assert "value_number_0001" in first and "big.py has 900 lines; lines 1-" in first and "read_file again shows lines" in first
+    shown = int(first.rsplit("lines 1-", 1)[1].split(" ", 1)[0])
+    second = (await h.call("read_file", path="big.py")).output
+    assert second.startswith(f"[big.py: lines {shown + 1}-") and "continuing your read of turn 1" in second
+    assert f"value_number_{shown + 1:04d}" in second and "value_number_0001 " not in second
+    pages = [second]
+    while "read_file again shows" in pages[-1]:
+        pages.append((await h.call("read_file", path="big.py")).output)
+    assert "value_number_0900" in pages[-1] and "of 900" in pages[-1]
+    assert "value_number_0001" in (await h.call("read_file", path="big.py")).output, "after the end it starts over"
+    assert (await h.call("read_file", path="big.py")).output.startswith("[big.py: lines")
+    assert (await h.call("replace_text", path="big.py", old="value_number_0002 = 2 ", new="value_number_0002 = 3 ")).ok
+    assert "value_number_0001" in (await h.call("read_file", path="big.py")).output, "a file changed: from line 1 again"
+
+
 async def test_a_masked_secret_can_be_replaced_by_the_line_as_shown(sessionmaker: SM, repo: Path) -> None:
     """Live G1 (BUG-248): the verifier demanded removing ``api_key='…'`` from a test, every read showed the value as the
     redaction marker, and replace_text refused the masked line – no tool could fix it. The masked line as shown is
@@ -160,7 +182,7 @@ async def test_read_output_budget_sets_truncated(sessionmaker: SM, repo: Path) -
     h = await make_harness(sessionmaker, repo)
     res = await h.call("read_file", path="big.txt")
     limit = h.engine.output_limit
-    assert res.ok and res.truncated and len(res.output) <= limit + 400 and "use read_range" in res.output
+    assert res.ok and res.truncated and len(res.output) <= limit + 400 and "read_range(start, end)" in res.output
 
 
 async def test_path_traversal_absolute_and_symlink_escape_are_refused(sessionmaker: SM, repo: Path, tmp_path: Path) -> None:

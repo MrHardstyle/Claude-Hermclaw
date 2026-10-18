@@ -286,6 +286,10 @@ class ToolEngine:
         # identical reads: (file-change count, turn). The context of every turn already shows the files read in this
         # attempt; the coder still re-read the same unchanged file turn after turn instead of acting (BUG-179)
         self._reads: dict[tuple[str, str], tuple[int, int, bool]] = {}  # (writes, turn, fully visible)
+        # a clipped read_file: (file-change count, turn, next line). Reading the same unchanged file again continues
+        # there – the coder re-read the first 300 lines of an 845-line file four times until the stagnation stop
+        # (live G1, BUG-264)
+        self._read_pages: dict[str, tuple[int, int, int]] = {}
         # manifest digest of the last successful install per (ecosystem, manifest): reinstalling it changes nothing
         self._installed: dict[tuple[str, str], str] = {}
         # files the correction of this attempt names, and the files this attempt changed: complete_step is refused
@@ -702,10 +706,22 @@ class ToolEngine:
         self._check_read_repeat(ToolName.read_file, key, ctx.turn)
         tf = await asyncio.to_thread(self.fs.read_text, args.path, max_bytes=self.max_read_bytes)
         lines = tf.text.count("\n") + (1 if tf.text and not tf.text.endswith("\n") else 0)
-        text, clipped = clip_head(tf.text, self.output_limit)
-        self._reads[(ToolName.read_file.value, key)] = (self._writes, ctx.turn, not clipped and lines <= READ_VISIBLE_LINES)
+        page = self._read_pages.pop(key, None)
+        first = page[2] if page is not None and page[0] == self._writes and page[2] <= lines else 1
+        body = "".join(tf.text.splitlines(keepends=True)[first - 1 :]) if first > 1 else tf.text
+        text, clipped = clip_head(body, self.output_limit)
+        shown = text.rsplit("\n…[truncated:", 1)[0].count("\n") + 1 if clipped else lines - first + 1
+        last = first + shown - 1
+        self._reads[(ToolName.read_file.value, key)] = (self._writes, ctx.turn, first == 1 and not clipped and lines <= READ_VISIBLE_LINES)
+        if first > 1:
+            assert page is not None
+            text = f"[{tf.rel}: lines {first}-{last} of {lines}, continuing your read of turn {page[1]}]\n" + text
         if clipped:
-            text += f"\n[{tf.rel} has {lines} lines; use read_range(start, end) for the rest]"
+            self._read_pages[key] = (self._writes, ctx.turn, last + 1)
+            text += (
+                f"\n[{tf.rel} has {lines} lines; lines {first}-{last} shown. read_file again shows lines {last + 1}-…; "
+                "read_range(start, end) shows a specific part]"
+            )
         if not tf.text:
             text = "(empty file)"
         return self._ok(ToolName.read_file, text, truncated=clipped, data={"path": tf.rel, "bytes": tf.size, "lines": lines})

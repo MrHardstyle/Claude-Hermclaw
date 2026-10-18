@@ -46,6 +46,19 @@ Noch keine.
 
 ## Behobene Bugs
 
+### BUG-264 – read_file auf eine große Datei zeigt bei jedem Aufruf denselben Anfang; der Coder liest viermal die ersten 300 Zeilen bis zum Stagnationsstopp
+- Phase: G1 auf rc49 (Job `5c3d40a5…`, S003 Versuch 1, Turns 7–13) · Komponente: tools (engine) · Severity: P1 · blockierend: nein (behoben) · Status: **behoben** (`tests/integration/test_tools_engine_read_write.py::test_reading_a_clipped_file_again_continues_where_the_last_read_stopped`)
+- Reproduktion:
+  - `collector.py` hat 845 Zeilen (30 KB). `read_file` zeigt etwa 300 Zeilen und den Hinweis „use read_range(start, end) for the rest“.
+  - 28 von 37 Tests schlagen fehl. Der Coder wechselt zwischen `read_file collector.py` (viermal, immer derselbe Anfang) und dem verweigerten Testlauf.
+  - Turn 13: Stagnationsstopp (`loop`, „same action 4x without workspace progress: read_file collector.py“). Der Versuch ist verloren.
+- Ursache: Seit BUG-229 darf eine abgeschnittene Datei erneut gelesen werden. Eine Verweigerung hatte Inhalt behauptet, den der Coder nie gesehen hatte. Die Wiederholung lieferte aber denselben Ausschnitt. Der Coder nutzte den `read_range`-Hinweis nicht und kam nie über Zeile 300 hinaus, wo die getesteten Klassen standen.
+- Fix:
+  - Ein erneutes `read_file` derselben abgeschnittenen, unveränderten Datei setzt dort fort, wo das letzte aufhörte („lines 301-600 of 845, continuing your read of turn 7“).
+  - Nach der letzten Seite oder nach einer Dateiänderung beginnt es wieder bei Zeile 1.
+  - Der Hinweis nennt die gezeigten Zeilen und was das nächste `read_file` zeigt.
+- Selbstprüfung: echter Schritt nach vorn, kein Pendeln zwischen BUG-229 (nicht verweigern) und einer erneuten Verweigerung. Die Wiederholung bekommt einen Nutzen: Die Absicht „mehr von der Datei sehen“ wird erfüllt, statt sie zu blockieren oder ins Leere laufen zu lassen.
+
 ### BUG-263 – Eine kurze GitLab-Störung beim Holen des Repositorys lässt den Job sofort scheitern, statt die Vorbereitung später zu wiederholen
 - Phase: G1 auf rc48 (Job `cbfe8802…`, Vorbereitung) · Komponente: runtime (driver), scheduler · Severity: P2 · blockierend: ja (behoben) · Status: **behoben** (`tests/integration/test_scheduler.py::test_model_outage_defers_planning_and_replanning_instead_of_failing`, `tests/unit/test_finalize_network.py::test_network_failures_are_recognised_and_others_are_not`)
 - Reproduktion:
