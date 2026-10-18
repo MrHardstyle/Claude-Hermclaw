@@ -86,3 +86,41 @@ Zusätzlich die Replan-Fälle aus Zyklus 1 (M2 Plan v1 mit Blockade-Begründung)
 
 Reihenfolge der Kandidaten: qwen3.8:27b, gemma4:26b, Agents-A1. Danach eine Batterie mit dem besten Planer als eigener
 Zyklus. Die Entscheidung wird in DECISIONS.md dokumentiert (D-015).
+
+## Ergebnis Planer-Turnier (2026-10-18, rc59-Planercode, Prüfstand `planbench`)
+
+Ablauf:
+- Jeder Kandidat lief auf llama.cpp b11361 (K2-Horizon auf b11462) mit `--fit on`, 32K Kontext und Thinking aus, wie in der Produktion.
+- Verwendet wurde der echte `Planner.create_plan` mit Prüfung, Reparaturschleife (max. 2) und Anreicherung, auf einer Wegwerf-Datenbank mit den echten Fixture-Repos.
+- Bewertet hat ein Claude-Subagent blind nach `rubric.md`: Abdeckung, Zerlegung, Kriterien, Bezug zum Repo, je 0–10 Punkte. Die Zuordnung zu den Modellen wurde erst nach dem Urteil aufgedeckt.
+
+Runde 1 (K1, M2, M3; je ein Lauf, max. 120 Punkte):
+
+| Modell | K1 | M2 | M3 | Summe | Reparaturen | Dauer 3 Pläne | tok/s |
+|---|---|---|---|---|---|---|---|
+| **qwen3.8-27b (dicht)** | 30 | **35** | 34 | **99** | 0 | 24,9 min | 2,1 |
+| Agents-A1 35B-A3B | 34 | 22 | 35 | 91 | 2 | 3,0 min | 28,6 |
+| qwen3.6-35b (Produktion) | 35 | 14 | 32 | 81 | 1 | 4,3 min | 27,6 |
+| gemma4-26b | 21 | 27 | 27 | 75 | 1 | 11,9 min | 20,6 |
+| Qwen3-Next-80B IQ3_XXS | 25 | 17 | 32 | 74 | 1 | 8,9 min | 16,4 |
+| gemma4-31b (dicht) | 15 | 27 | 23 | 65 | 0 | 36,5 min | 1,8 |
+| GLM-4.7-Flash | 18 | 17 | 23 | 58 | 3 (M2: 12 Schritte) | 7,1 min | 18,6 |
+| K2-Horizon-36B Q5 | – | – | ungültig | aus | M2 2, M3 gescheitert | – | 1,8 |
+
+Zu M2:
+- Nur qwen3.8 setzt `must_change` richtig: `ledger/parse.py`, `ledger/report.py`, `tests/`, dazu `must_not_change data/buchungen.csv`.
+- qwen3.6 verlangt Änderungen an `data/buchungen.csv` und `ledger/__main__.py`. Das ist genau das Muster, das in Zyklus 1 die Replans auslöste (BUG-278). Es stellt auch eine falsche Diagnose.
+- Agents-A1, Qwen3-Next und GLM verlangen `must_change` auf `__main__.py`.
+
+Stichentscheid G1 (schwerer Auftrag, max. 40 Punkte):
+- qwen3.8: gültig, 9 Schritte, 1 Reparatur, 39 min, **29 Punkte**.
+- Agents-A1: 4 Läufe. Einer blieb nach 2 Reparaturen ungültig, drei waren gültig mit 1–2 Reparaturen und bekamen 23, 21 und 19 Punkte.
+- qwen3.6 (Produktion): ungültig nach 2 Reparaturen.
+- qwen3.8 deckt die G1-Anforderungen am vollständigsten ab: volle Palette, Felder, Testumfang, `n/v`, Geheimnisschutz.
+- Lücke aller Pläne: ein Backend-Endpunkt für das Schreiben der Konfiguration und für „Verbindung testen“.
+
+**Sieger: qwen3.8-27b.** Er hat in beiden Runden klar gewonnen und brauchte die wenigsten Reparaturen.
+- Preis: ~2 tok/s mit CPU-Anteil, also 6–11 min je mittlerem Plan und ~40 min für G1.
+- Er braucht einen Modellwechsel gegenüber dem residenten qwen3.6 für Coder und Review.
+- Einschränkung: je Auftrag ein Lauf (Streuung nicht gemessen). Der Vorsprung auf M2 und G1 ist aber inhaltlich begründet: richtige Diagnose und richtige Kriterien.
+- Nächster Schritt: Planer und Neuplaner produktiv auf qwen3.8-27b umstellen. Dazu gehören Wechsel und Residenz auf .224 und die Zeitlimits. Danach die Testzyklus-Batterie erneut fahren und die Entscheidung als D-Eintrag in DECISIONS.md festhalten.
