@@ -409,7 +409,9 @@ def _base_rules(kind_capability: dict[str, str], capability_names: Sequence[str]
         f"At most {max_steps} steps. One step per coherent change; prefer few, well-scoped steps. A change and the "
         "tests that check it are ONE step (its allowed_new_paths/repo_hints contain both, its acceptance runs the "
         "tests): never split code and its tests into separate steps. Add verify or review steps only when they check "
-        "something the implementing step's own acceptance does not; a small job usually needs one implement step.",
+        "something the implementing step's own acceptance does not; a small job usually needs one implement step. "
+        "A step creates at most about 8 new files (one worker attempt has a limited number of turns): split a larger "
+        "job by component (e.g. backend, frontend, scripts, documentation), each step with the tests of its own code.",
         "Choose the simplest solution that fully meets the job. Use the language's standard library and the tools the "
         "repository or the sandbox already has (e.g. its test runner) unless the job explicitly asks for a framework or "
         "library, or the repository already uses one. Every external dependency is an extra failure source: a "

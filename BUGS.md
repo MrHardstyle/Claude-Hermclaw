@@ -46,6 +46,16 @@ Noch keine.
 
 ## Behobene Bugs
 
+### BUG-226 – Planner legt einen ganzen Großauftrag in einen Schritt (13 neue Dateien), der am Turn-Budget scheitern muss
+- Phase: Großauftrag G1 auf 0.1.0rc26 · Komponente: planner/validation, planner/prompt · Severity: P1 · blockierend: nein (behoben) · Status: **behoben** (`tests/unit/test_planner_validation.py::test_a_step_creating_more_files_than_one_attempt_can_write_is_split`, Prompt-Regel in `tests/unit/test_planner_prompt.py`)
+- Reproduktion: Job `8e7c4b65-c9ff-46dd-a2a6-6898a2357bb6`, Plan v1. Der erste Entwurf hatte getrennte Schritte für Collector, Frontend, Tests und Doku. Die Regel „Code und Tests in einen Schritt“ (BUG-209) meldete: „merge S005 into S003“. Die Reparatur legte daraufhin alles in S003 „Implement Collector, Frontend, Tests and Documentation“: 13 neue Dateien (collector.py, Konfigs, drei Frontend-Dateien, zwei PowerShell-Skripte, Tests, zwei Fixtures, README). Ein Coder-Schritt hat 20 Turns: mindestens ein Schreib-Turn pro Datei (große in Teilen, BUG-223) plus Testläufe und Korrekturen. Das scheitert spät am Turn-Budget.
+- Ursache: Es gab keine Obergrenze für den Umfang eines Schritts, nur für die Zahl der Schritte. Die Reparaturmeldung der Test-Regel sagte nicht, dass nur die Tests zusammengelegt werden sollen.
+- Fix:
+  - Semantikregel: Ein Schritt legt höchstens `max_new_files_per_step` neue Dateien an. Der Wert wird aus `policies.coder.max_turns` abgeleitet (2 von 5 Turns, 20 → 8); X4 hatte 8 und brauchte schon mehrere Versuche. Bei Überschreitung soll der Plan nach Komponenten geteilt werden, jeder Teil mit den Tests seines Codes.
+  - Planner-Prompt nennt die Grenze.
+  - Die Meldung der Test-Regel ergänzt: „Merge only these tests: other components stay in their own steps“.
+- Selbstprüfung: Nebenwirkung des BUG-209-Fixes. Sie wird aber nicht durch Lockern der Test-Regel kompensiert, sondern durch die fehlende Gegenkraft (Schrittgröße) geschlossen. Beide Regeln zusammen ergeben „pro Komponente ein Schritt mit ihren Tests“.
+
 ### BUG-225 – Redaction maskiert Code und Platzhalter; der Coder kopiert den Marker und jeder Schreibversuch wird abgelehnt
 - Phase: Großauftrag G1 auf 0.1.0rc25 (S011) · Komponente: core/redaction · Severity: P1 · blockierend: ja für Aufträge mit Zugangsdaten (behoben) · Status: **behoben** (`tests/unit/test_config_and_redaction.py::test_code_reading_secrets_and_placeholders_stay_readable`)
 - Reproduktion: Job `b3441414-9422-4887-8cb1-b0f7c43e5ced`, S011 Turn 3 (02:09). Nach zwei abgeschnittenen Antworten (BUG-223) kam eine gültige Antwort mit `collector.py` (5751 Tokens, 234 s). `write_file` lehnte sie ab: „the content contains the redaction marker ***REDACTED***“. Der vorige Schritt hatte `config.example.toml` mit `api_token_secret = "your-secret-here"` und `api_key = "your-unraid-api-key-here"` angelegt; im Kontext stand dort `***REDACTED***`.

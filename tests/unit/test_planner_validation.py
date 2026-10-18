@@ -703,3 +703,13 @@ def test_open_steps_without_a_replacement_are_carried_over_with_remapped_depende
     review = ReplanStep.model_validate(step("S012", "test", "testing", "Run the whole suite once more.", depends_on=["S011"]))
     carried, _ = carry_over_open_steps([fallback, review], open_steps, frozenset({"S001"}))
     assert "S008" not in {c.id for c in carried}  # a new test step covers the open one
+
+
+def test_a_step_creating_more_files_than_one_attempt_can_write_is_split() -> None:
+    """BUG-226 (grand job G1): collector, frontend, scripts, tests, fixtures and README – 13 new files – in one step."""
+    ctx = _ctx()
+    assert ctx.max_new_files_per_step == 8  # derived from policies.coder.max_turns (20)
+    files = [f"src/part_{i}.py" for i in range(9)]
+    errors = _errors(plan("goal", [_impl(allowed_new_paths=files)]), ctx)
+    assert any("creates 9 new files" in e and "split it by component" in e for e in errors)
+    assert not any("new files" in e for e in _errors(plan("goal", [_impl(allowed_new_paths=files[:8])]), ctx))

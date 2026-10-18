@@ -77,6 +77,11 @@ def content_tokens(text: str) -> set[str]:
     return {t for t in normalise_text(text).split() if len(t) >= 3 and not t.isdigit() and t not in _FILLER_WORDS}
 
 
+def new_files_per_step(max_turns: int) -> int:
+    """Two of every five coder turns may create a file; the rest run tests and fix (20 turns -> 8 files)."""
+    return max(3, max_turns * 2 // 5)
+
+
 @dataclass(frozen=True)
 class ValidationContext:
     """Everything the semantic validator and the deterministic enrichment need (built once per planner run)."""
@@ -91,6 +96,8 @@ class ValidationContext:
     forbidden_command_patterns: tuple[str, ...] = ()
     max_steps: int = 30
     many_paths_threshold: int = 6
+    # new files one coder step can create within its turn budget (one write per file plus test runs and fixes)
+    max_new_files_per_step: int = 8
     test_command: str | None = None
     test_framework: TestFramework = "generic"
     has_existing_tests: bool = False
@@ -140,6 +147,7 @@ class ValidationContext:
             forbidden_command_patterns=tuple(config.policies.commands.forbidden_patterns),
             max_steps=min(settings.max_steps, CONTRACT_MAX_STEPS),
             many_paths_threshold=settings.many_paths_threshold,
+            max_new_files_per_step=new_files_per_step(config.policies.coder.max_turns),
             test_command=test_command,
             test_framework=framework,
             has_existing_tests=bool(inputs.existing_tests),
@@ -488,9 +496,26 @@ def _split_test_errors(plan: PlanContract, new_steps: Sequence[PlanStep], ctx: V
                 errors.append(
                     f"step {step.id} only writes tests for the code of step {dep}: put code and its tests into ONE step "
                     f"(merge {step.id} into {dep}: add its test paths to {dep}'s allowed_new_paths/repo_hints and its "
-                    "test acceptance), so the step can run its own tests and fix both"
+                    "test acceptance), so the step can run its own tests and fix both. Merge only these tests: other "
+                    "components stay in their own steps"
                 )
     return errors
+
+
+def _step_size_errors(step: PlanStep, ctx: ValidationContext) -> list[str]:
+    """A step that creates more files than one coder attempt can write fails late on its turn budget. After the
+    code-and-tests rule the planner merged a whole widget (collector, frontend, scripts, tests, fixtures, README:
+    13 new files) into one step (grand job G1 on 0.1.0rc26, BUG-226)."""
+    if step.kind.value not in WORKSPACE_MUTATING_KINDS:
+        return []
+    n = len(step.allowed_new_paths)
+    if n <= ctx.max_new_files_per_step:
+        return []
+    return [
+        f"step {step.id} creates {n} new files; one step can create at most {ctx.max_new_files_per_step} within its turn "
+        "budget: split it by component (e.g. backend, frontend, scripts, documentation) into several steps, each with "
+        "the tests of its own code"
+    ]
 
 
 def _must_change_errors(step: PlanStep, ctx: ValidationContext) -> list[str]:
@@ -819,6 +844,7 @@ def semantic_errors(
     errors.extend(_check_only_creation_errors(new_steps))
     for step in new_steps:
         errors.extend(_must_change_errors(step, ctx))
+        errors.extend(_step_size_errors(step, ctx))
         errors.extend(_capability_errors(step, ctx))
         errors.extend(_scope_source_errors(step, ctx))
         errors.extend(_hint_errors(step, ctx))
