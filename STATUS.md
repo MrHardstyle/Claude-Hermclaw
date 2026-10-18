@@ -219,6 +219,14 @@ bestanden; ansible-lint (production) sauber. `test_deploy_converge` ist angepass
     - Der Replanner wiederholte alle offenen Schritte, lief ins Ausgabelimit, und ein ungültiger Replan beendete den Job (BUG-241).
 
     Neustart von G1 auf rc35.
+13. G1 auf rc35–rc39 (Job `8f394b63…`, FAIL nach 135,5 min, `REPLAN_LIMIT`; nur die Recherche-Schritte abgeschlossen). Früheste vermeidbare Entscheidung: S003 schrieb einen eigenen TOML-Parser und -Writer, der verschachtelte Tabellen zerstörte (BUG-245). Danach:
+    - Korrekturen aus dem Verifier enthielten keine Belege (BUG-247), und nach einem Deploy-Checkpoint setzte jeder Versuch veralteten Stand ohne Korrektur fort (BUG-249).
+    - Ein maskiertes Test-Geheimnis ließ sich mit keinem Werkzeug ersetzen (BUG-248).
+    - Weitere Funde: Schritte kannten die Dateien ihrer Vorgänger nicht (BUG-242), falsche Abhilfe bei Test-Geheimnissen (BUG-243), Teil-Lesezugriffe (BUG-244), Befehls-Verweigerung ohne sichtbare Ausgabe (BUG-246).
+    - Auf rc39 kamen die Korrekturen an, und das maskierte Geheimnis wurde ersetzt (BUG-248 live bestätigt). Der Reviewer verlangte den Ersatz des eigenen Parsers (BUG-245-Regel live bestätigt); im letzten Versuch gelang das nicht mehr.
+    - Mehrere Deploys mitten im Lauf erzeugten den Checkpoint-Zustand hinter BUG-249. Der Lauf ist deshalb kein Beleg für rc39 als Ganzes.
+
+    Neustart von G1 auf rc39, ohne Deploy während des Laufs, sofern kein blockierender Fehler auftritt.
 3. 0.1.0rc18 ausrollen, J1–J6 zweimal in Folge bestehen, dann die erweiterte Batterie X1–X5
    (`config/acceptance-jobs-extended.example.yaml`); danach Abbruch, parallele Jobs und Worker-Neustart prüfen.
 4. Wake-on-LAN einrichten (MACs, BIOS, Kapitel 13.1), danach `--suite wol --full-wol` und erst dann den Leerlauf-Suspend einschalten.
