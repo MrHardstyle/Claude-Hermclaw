@@ -4,6 +4,8 @@ Format: [Keep a Changelog](https://keepachangelog.com/de/1.1.0/), Versionen nach
 
 ## [Unreleased]
 
+## [0.1.0rc47] – Release Candidate (2026-10-18)
+
 ### Behoben
 - **Planner-Reparaturen mit Gedächtnis (BUG-261):** Ab der zweiten Reparatur nennt die Nachricht auch die Fehler früherer Antworten als weiter geltende Regeln; die Reparaturen pendeln nicht mehr zwischen zwei Verstößen.
 
