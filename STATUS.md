@@ -130,7 +130,7 @@ Lint, mypy, ShellCheck, ansible-lint (production) sauber.
 
 ## Bugs
 - 237 gefunden, **237 behoben** – `BUGS.md`. Live-Abnahme: BUG-143 bis BUG-237.
-  BUG-143–230 sind produktiv (0.1.0rc29, deployt 2026-10-18 04:23; rc28 03:48 mit laufendem G1, Worker-Ausfall beim Fortsetzen ohne Versuchsverlust (BUG-227 live bestätigt); rc26 02:55, `coder-main.max_output_tokens` 8192 im Inventory-Override; rc25 deployt 01:50 mit laufendem G1, Schritt per Checkpoint unterbrochen und fortgesetzt; rc24 deployt 2026-10-18 01:10; rc20 deployt 2026-10-17 20:40, Scheduler-Neustart mit laufendem Job live geprüft: Job lief nach dem Deployment weiter).
+  BUG-143–237 sind produktiv (0.1.0rc33, deployt 2026-10-18 05:15; rc29 04:23; rc28 03:48 mit laufendem G1, Worker-Ausfall beim Fortsetzen ohne Versuchsverlust (BUG-227 live bestätigt); rc26 02:55, `coder-main.max_output_tokens` 8192 im Inventory-Override; rc25 deployt 01:50 mit laufendem G1, Schritt per Checkpoint unterbrochen und fortgesetzt; rc24 deployt 2026-10-18 01:10; rc20 deployt 2026-10-17 20:40, Scheduler-Neustart mit laufendem Job live geprüft: Job lief nach dem Deployment weiter).
 - Externe Blocker: BLOCKER-002 (Tag-Push)
 
 ## Letzte Testresultate (2026-10-15, Build-Host)
@@ -195,6 +195,23 @@ bestanden; ansible-lint (production) sauber. `test_deploy_converge` ist angepass
     - zuletzt bestanden in Turn 20 von 20 alle 17 Tests, der Schritt wurde trotzdem verworfen (BUG-230).
 
     Mit rc28 gab es keine abgelehnten Lesezugriffe mehr. rc29 deployt 2026-10-18; Neustart von G1 auf rc29.
+11. Qualitätsprüfung der G1-Lieferung von Job `8e7c4b65…` (eigener Review-Agent, schreibgeschützt):
+    - Der Proxmox-Token-Header hat kein Secret, und Unraid nutzt `Bearer` statt `x-api-key`.
+    - Fixtures in der falschen Form; die Tests prüfen nichts.
+    - Pfad-Traversal im Static-Server; der Einstellungsbereich fehlt.
+    - Frontend und Backend passen nicht zusammen.
+
+    Daraus abgeleitet:
+    - Die Recherche kam beim Coder nur verstümmelt an (BUG-231, auch beim Reviewer).
+    - Keine geschriebene Schnittstelle zwischen Schritten, keine Regel gegen hohle Tests (BUG-234).
+    - Der Planner umging die Regel „Code und Tests in einen Schritt“ (BUG-237).
+
+    G1 auf rc29–rc32 (Job `364a9c3c…`) wurde abgebrochen, weil der Plan vor diesen Fixes entstand. Gefunden:
+    - Ausfälle (BUG-232) und Checkpoints (BUG-233) verbrauchten Versuche;
+    - Abhängige Schritte wurden trotz geplantem Retry blockiert (BUG-236);
+    - Das Ausgabelimit des Coders lag bei 6144 statt 8192 (BUG-235).
+
+    Mit rc30+ kommen die Recherche-Aussagen an: CONSTRAINTS 4488 statt 996 Zeichen. Neustart von G1 auf rc33.
 3. 0.1.0rc18 ausrollen, J1–J6 zweimal in Folge bestehen, dann die erweiterte Batterie X1–X5
    (`config/acceptance-jobs-extended.example.yaml`); danach Abbruch, parallele Jobs und Worker-Neustart prüfen.
 4. Wake-on-LAN einrichten (MACs, BIOS, Kapitel 13.1), danach `--suite wol --full-wol` und erst dann den Leerlauf-Suspend einschalten.
