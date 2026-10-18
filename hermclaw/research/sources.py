@@ -11,7 +11,7 @@ from __future__ import annotations
 
 import math
 from collections import Counter
-from collections.abc import Sequence
+from collections.abc import Collection, Sequence
 from dataclasses import dataclass
 from datetime import datetime
 from typing import Literal
@@ -45,6 +45,8 @@ STANDARD_HOSTS: tuple[str, ...] = (
     "nist.gov",
     "opengroup.org",
 )
+#: first path segments of a product's own documentation (pve.proxmox.com/wiki/…, docs.unraid.net is a docs host)
+_DOC_SEGMENTS = frozenset({"docs", "doc", "documentation", "manual", "reference", "api", "wiki", "pve-docs", "guide", "guides"})
 REPO_HOSTS: tuple[str, ...] = ("github.com", "gitlab.com", "codeberg.org", "bitbucket.org", "sr.ht", "git.sr.ht")
 REGISTRY_HOSTS: tuple[str, ...] = (
     "pypi.org",
@@ -140,13 +142,20 @@ def _primary_match(host: str, path: str, primary: Sequence[str]) -> str | None:
         dom = dom.removeprefix("www.")  # ``host`` arrives without ``www.`` as well
         if not dom or not _matches(host, dom):
             continue
+        if not prefix and any(_matches(dom, h) for h in (*REPO_HOSTS, *REGISTRY_HOSTS)):
+            # a bare repository host is not a primary source: 'github.com' made every stranger's gist and fork a
+            # primary source with authority 0.9 (live G1, BUG-240); name the project path (github.com/org/repo)
+            continue
         if prefix and not (path.lower().rstrip("/") + "/").startswith("/" + prefix + "/"):
             continue
         return entry
     return None
 
 
-def classify_source(url: str, primary_domains: Sequence[str] = ()) -> SourceClassification:
+def classify_source(url: str, primary_domains: Sequence[str] = (), *, subject: Collection[str] = ()) -> SourceClassification:
+    """Source type and authority of ``url``. ``subject`` holds the question's terms (with compound parts): a repository
+    whose owner is not among them is a community repository, and the product's own domain (pve.proxmox.com for a
+    Proxmox question) is vendor documentation rather than a general website (BUG-240)."""
     host = host_of(url)
     if not host:
         return SourceClassification("unknown", AUTHORITY["unknown"], "unparseable url")
@@ -176,6 +185,8 @@ def classify_source(url: str, primary_domains: Sequence[str] = ()) -> SourceClas
                 if len(segments) >= 4 and segments[2] == "-" and segments[3].lower() not in _REPO_DISCUSSION_PATHS:
                     return SourceClassification("official_repo", AUTHORITY["official_repo"], "source repository")
                 return SourceClassification("forum", 0.4, "repository issue/discussion thread")
+            if subject and segments[0].lower() not in subject:
+                return SourceClassification("secondary", AUTHORITY["secondary"], "community repository")
             return SourceClassification("official_repo", AUTHORITY["official_repo"], "source repository")
         return SourceClassification("secondary", 0.4, "repository host profile page")
     if any(_matches(bare, h) for h in REGISTRY_HOSTS):
@@ -189,7 +200,12 @@ def classify_source(url: str, primary_domains: Sequence[str] = ()) -> SourceClas
         return SourceClassification("official_docs", 0.85, "documentation host")
     if any(_matches(bare, h) for h in SECONDARY_HOSTS):
         return SourceClassification("secondary", 0.5 if "wikipedia" in bare else AUTHORITY["secondary"], "secondary publication")
-    if segments and segments[0].lower() in {"docs", "documentation", "manual", "reference", "api"}:
+    label = registrable_domain(bare).split(".", 1)[0]
+    if subject and len(label) >= 3 and label in subject:
+        if segments and segments[0].lower() in _DOC_SEGMENTS:
+            return SourceClassification("official_docs", 0.85, f"documentation of {registrable_domain(bare)}")
+        return SourceClassification("vendor", AUTHORITY["vendor"], f"product site {registrable_domain(bare)}")
+    if segments and segments[0].lower() in {"docs", "documentation", "manual", "reference", "api"}:  # not _DOC_SEGMENTS
         return SourceClassification("official_docs", 0.75, "documentation path")
     reg = registrable_domain(bare)
     for entry in primary_domains:
@@ -242,9 +258,9 @@ def question_terms(question: str, queries: Sequence[str] = ()) -> list[str]:
     return terms
 
 
-def prior_score(url: str, rank: int, *, query_hits: int, primary_domains: Sequence[str]) -> float:
+def prior_score(url: str, rank: int, *, query_hits: int, primary_domains: Sequence[str], subject: Collection[str] = ()) -> float:
     """Ranking of search candidates before fetching (primary sources first, then search rank)."""
-    cls = classify_source(url, primary_domains)
+    cls = classify_source(url, primary_domains, subject=subject)
     rank_score = 1.0 / (1.0 + max(rank, 0) * 0.35)
     return 0.6 * cls.authority_score + 0.3 * rank_score + 0.1 * min(max(query_hits - 1, 0), 3) / 3
 

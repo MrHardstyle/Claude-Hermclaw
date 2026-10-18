@@ -4,6 +4,9 @@ Format: [Keep a Changelog](https://keepachangelog.com/de/1.1.0/), Versionen nach
 
 ## [Unreleased]
 
+### Behoben
+- **Quellenbewertung der Recherche (BUG-240):** Nur Repositories des Produkts selbst gelten als offiziell, nicht fremde Gists oder Community-Repos. Die Domain des Produkts zählt als Doku bzw. Hersteller, und die Relevanz misst auch gegen die Suchanfragen. Ein reiner Host wie `github.com` in `primary_domains` verleiht keinen Primärstatus mehr.
+
 ## [0.1.0rc34] – Release Candidate (2026-10-18)
 
 ### Behoben

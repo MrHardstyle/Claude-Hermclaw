@@ -112,3 +112,27 @@ def test_prior_score_puts_primary_sources_first() -> None:
     many_hits = prior_score("https://random.net/a", 2, query_hits=3, primary_domains=())
     one_hit = prior_score("https://random.net/a", 2, query_hits=1, primary_domains=())
     assert many_hits > one_hit
+
+
+def test_subject_decides_official_repositories_and_vendor_docs() -> None:
+    """Live G1 (BUG-240): 'github.com' in primary_domains made strangers' gists primary sources (0.9), community
+    repositories counted as official, and the product's own wiki was a 'general website' (0.4)."""
+    subject = frozenset({"acme", "toolkit", "api"})
+    primary = ["github.com", "docs.python.org"]
+    gist = classify_source("https://gist.github.com/someone/abc123", primary, subject=subject)
+    assert (gist.source_type, gist.authority_score) == ("secondary", 0.4)
+    assert classify_source("https://github.com/acme/toolkit", primary, subject=subject).source_type == "official_repo"
+    assert classify_source("https://github.com/someone/acme-exporter", primary, subject=subject).source_type == "secondary"
+    assert classify_source("https://wiki.acme.com/wiki/Toolkit_API", primary, subject=subject).source_type == "official_docs"
+    assert classify_source("https://www.acme.com/en/", primary, subject=subject).source_type == "vendor"
+    assert classify_source("https://www.other.com/en/", primary, subject=subject).source_type == "secondary"
+    # without a subject the repository rule stays as before
+    assert classify_source("https://github.com/someone/acme-exporter").source_type == "official_repo"
+
+
+def test_query_terms_rescue_relevance_of_a_question_in_another_language() -> None:
+    question = "Recherchiere die aktuellen offiziellen Dokumentationen der Toolkit-Schnittstelle und Authentifizierung"
+    doc = "The Toolkit API authenticates every request with an API key header. API key authentication is required. " * 3
+    by_question = relevance_score(question_terms(question), title="Toolkit API", text=doc)
+    by_queries = relevance_score(question_terms("", ["toolkit api authentication key header"]), title="Toolkit API", text=doc)
+    assert by_question < 0.3 < by_queries

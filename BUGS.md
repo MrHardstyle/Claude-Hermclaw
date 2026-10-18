@@ -46,6 +46,25 @@ Noch keine.
 
 ## Behobene Bugs
 
+### BUG-240 – Recherche gewichtet fremde Gists und Community-Repos als Primärquellen, die offizielle Doku niedrig; alle Aussagen mit Konfidenz < 0,25
+- Phase: G1 auf rc33/rc34 (Job `2f72c0da…`, Recherche S001: 23 Aussagen aus 8 Quellen) · Komponente: research (sources, engine), config · Severity: P2 · blockierend: nein (behoben) · Status: **behoben** (`tests/unit/test_research_sources.py::test_subject_decides_official_repositories_and_vendor_docs`, `…::test_query_terms_rescue_relevance_of_a_question_in_another_language`)
+- Reproduktion: Quellen und Bewertung:
+  - `gist.github.com/ReinforceZwei/…`, `github.com/drumandbytes/pve-metrics-exporter` und `github.com/hanzoskill/unraid`: je `official_repo` mit 0,9.
+  - `pve.proxmox.com/wiki/Proxmox_VE_API`: `secondary` mit 0,4.
+  - Relevanz 0,02–0,27.
+  - Konfidenz aller Aussagen 0,07–0,23, auch für die offizielle Unraid-Doku.
+- Ursache:
+  1. `primary_domains` enthielt `github.com` ohne Pfad: jede GitHub-Seite, auch fremde Gists, galt als Primärquelle.
+  2. Jedes Repository galt als `official_repo`, egal wem es gehört.
+  3. Die eigene Domain des Produkts (`proxmox.com`) war für den Klassifizierer eine beliebige Website.
+  4. Die Relevanz wurde nur gegen die Begriffe der langen deutschen Frage gemessen („recherchiere“, „aktuellen“, „offiziellen“ …); englische Doku enthält sie nicht.
+- Fix:
+  - Ein reiner Repo- oder Registry-Host ohne Pfad in `primary_domains` verleiht keinen Primärstatus mehr; im Beispiel ist `github.com` gestrichen.
+  - `classify_source(subject=…)` nutzt die Begriffe der Frage samt Kompositum-Teilen: Ein Repository ist nur `official_repo`, wenn der Owner dazugehört, sonst „community repository“ (0,45). Die Produkt-Domain wird `official_docs` (0,85) bei Doku-Pfaden wie `/wiki`, `/docs`, `/pve-docs`, sonst `vendor`.
+  - Die Relevanz ist das Maximum aus Frage- und Suchanfragen-Begriffen.
+  - Die G1-Quellen werden jetzt richtig eingestuft: Gist und Community-Repos `secondary`, `github.com/unraid/api` `official_repo`, Proxmox-Wiki und `docs.unraid.net` `official_docs`.
+- Selbstprüfung: echter Schritt nach vorn. Die Qualität der Recherche, die über BUG-231 beim Coder ankommt, hängt an dieser Bewertung; allgemeine Regeln, kein Produkt-Sonderfall.
+
 ### BUG-239 – Englische Suchanfragen zu einer deutschen Frage mit Bindestrich-Komposita werden alle als themenfremd verworfen
 - Phase: G1 auf rc33 (Job `2f72c0da…`, Recherche S010) · Komponente: research (planner) · Severity: P2 · blockierend: nein (behoben) · Status: **behoben** (`tests/unit/test_research_planner_synth.py::test_english_queries_for_a_german_compound_question_are_kept`)
 - Reproduktion: Frage „Welche Proxmox-REST-API-Endpunkte liefern GPU-Auslastung und Temperaturen…“. Das schnelle Modell liefert gültige englische Anfragen (187 Zeichen), trotzdem steht `NO_USABLE_QUERIES` im Verlauf. Der Fallback sucht mit „proxmox-rest-api-endpunkte liefern gpu-auslastung …“ und liest Podcasts, ein Verlagsshop-Angebot und Wiktionary („welche“): 5 Quellen, 0 Aussagen, Schritt fehlgeschlagen.

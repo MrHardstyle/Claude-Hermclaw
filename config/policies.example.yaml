@@ -88,7 +88,6 @@ research:
     - docs.sqlalchemy.org
     - alembic.sqlalchemy.org
     - www.postgresql.org
-    - github.com
     - docs.ollama.com
     - docs.litellm.ai
     - docs.podman.io

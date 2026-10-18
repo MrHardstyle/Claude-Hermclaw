@@ -19,7 +19,7 @@ from __future__ import annotations
 import asyncio
 import time
 import uuid
-from collections.abc import AsyncIterator, Awaitable, Callable, Sequence
+from collections.abc import AsyncIterator, Awaitable, Callable, Collection, Sequence
 from contextlib import asynccontextmanager, suppress
 from dataclasses import dataclass, field
 from datetime import UTC, datetime, timedelta
@@ -62,7 +62,7 @@ from hermclaw.research.sources import (
     relevance_score,
 )
 from hermclaw.research.synth import ModelCallParams, SynthesisClaim, SynthesisOutcome, SynthesisThresholds, Synthesizer
-from hermclaw.research.text import clip, normalize_ws
+from hermclaw.research.text import clip, key_terms, normalize_ws, term_parts
 
 log = get_logger(__name__)
 
@@ -115,10 +115,10 @@ class _Fetch:
     error: Exception | None = None
 
 
-def _fetched_authority(fetch: _Fetch | None, primary_domains: Sequence[str]) -> float:
+def _fetched_authority(fetch: _Fetch | None, primary_domains: Sequence[str], subject: Collection[str]) -> float:
     if fetch is None or fetch.error is not None:
         return 0.0
-    return classify_source(fetch.url, primary_domains).authority_score
+    return classify_source(fetch.url, primary_domains, subject=subject).authority_score
 
 
 @dataclass
@@ -155,6 +155,11 @@ class _RunState:
     failed_sources: int = 0
     skipped_sources: int = 0
     seen_hashes: dict[str, str] = field(default_factory=dict)
+
+    @property
+    def subject(self) -> frozenset[str]:
+        """The question's terms with compound parts – who counts as the product's own repository or site (BUG-240)."""
+        return frozenset(term_parts(key_terms(self.question)))
 
 
 @dataclass
@@ -387,9 +392,13 @@ class ResearchEngine:
             per_query.append(results)
         merged = merge_results(per_query)
         primary = self.policy.primary_domains
+        subject = st.subject
         scored = sorted(
             enumerate(merged),
-            key=lambda pair: (-prior_score(pair[1].url, pair[1].rank, query_hits=len(pair[1].queries), primary_domains=primary), pair[0]),
+            key=lambda pair: (
+                -prior_score(pair[1].url, pair[1].rank, query_hits=len(pair[1].queries), primary_domains=primary, subject=subject),
+                pair[0],
+            ),
         )
         selected: list[SearchResult] = []
         per_domain: dict[str, int] = {}
@@ -404,7 +413,10 @@ class ResearchEngine:
         return selected
 
     async def _read_sources(self, st: _RunState, candidates: Sequence[SearchResult], queries: Sequence[str]) -> list[_ReadSource]:
-        terms = question_terms(st.question, queries)
+        # relevance against the question or against the searched queries, whichever fits better: a long German
+        # question ('Recherchiere die aktuellen offiziellen API-Dokumentationen …') scored English documentation at
+        # 0.02-0.27, and every claim from it got a confidence below 0.25 (live G1, BUG-240)
+        terms = [question_terms(st.question, queries), *([q] if (q := question_terms("", queries)) else [])]
         sem = asyncio.Semaphore(max(1, self.settings.fetch_concurrency))
         results: list[_ReadSource | None] = [None] * len(candidates)
 
@@ -422,7 +434,7 @@ class ResearchEngine:
             raise group.exceptions[0] from None
         # Fetch in parallel, decide in a fixed order: of two sources with identical text the more authoritative (then
         # the better ranked) one is read and the other skipped as a duplicate – not whichever answered first (BUG-192).
-        order = sorted(range(len(candidates)), key=lambda i: (-_fetched_authority(fetches[i], self.policy.primary_domains), i))
+        order = sorted(range(len(candidates)), key=lambda i: (-_fetched_authority(fetches[i], self.policy.primary_domains, st.subject), i))
         for pos in order:
             fetch = fetches[pos]
             assert fetch is not None
@@ -438,9 +450,11 @@ class ResearchEngine:
             return _Fetch(t0=t0, url=cand.url, error=exc)
         return _Fetch(t0=t0, url=fetched.final_url, fetched=fetched, doc=doc)
 
-    async def _read_one(self, st: _RunState, position: int, cand: SearchResult, terms: Sequence[str], fetch: _Fetch) -> _ReadSource | None:
+    async def _read_one(
+        self, st: _RunState, position: int, cand: SearchResult, terms: Sequence[Sequence[str]], fetch: _Fetch
+    ) -> _ReadSource | None:
         domain = host_of(cand.url).removeprefix("www.") or "unknown"
-        cls = classify_source(cand.url, self.policy.primary_domains)
+        cls = classify_source(cand.url, self.policy.primary_domains, subject=st.subject)
         t0 = fetch.t0
         fetched, doc = fetch.fetched, fetch.doc
         if fetch.error is not None or fetched is None or doc is None:
@@ -464,7 +478,7 @@ class ResearchEngine:
         final_url = DEFAULT_REDACTOR.text(fetched.final_url)  # never persist/show secrets embedded in URLs
         if fetched.final_url != cand.url:  # a redirect may lead to another site: classify what was actually read
             domain = host_of(final_url).removeprefix("www.") or domain
-            cls = classify_source(final_url, self.policy.primary_domains)
+            cls = classify_source(final_url, self.policy.primary_domains, subject=st.subject)
         retrieved = self.clock()
         freshness_date = doc.freshness_date or fetched.last_modified or cand.published_hint
         published = doc.published_at or doc.modified_at or fetched.last_modified or cand.published_hint
@@ -477,7 +491,7 @@ class ResearchEngine:
             skip_reason = f"duplicate content of {st.seen_hashes[doc.content_hash]}"
         else:
             st.seen_hashes[doc.content_hash] = final_url  # check-and-set without await in between: race free
-        relevance = relevance_score(terms, title=title, text=doc.text, snippet=cand.snippet) if skip_reason is None else 0.0
+        relevance = max(relevance_score(t, title=title, text=doc.text, snippet=cand.snippet) for t in terms) if skip_reason is None else 0.0
         row = store.SourceRow(
             url=final_url,
             domain=domain,

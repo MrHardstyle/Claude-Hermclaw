@@ -122,6 +122,8 @@ Pipeline details:
    are dropped, each query is at most 200 characters and must share a key term with the question. At most
    `max_queries` (≤ 6) are kept. If none remain, the fallback is the question itself, its key terms, and
    "<names> <versions> documentation", plus a "release notes" or "example" variant.
+Source authority (BUG-240): `classify_source(url, primary_domains, subject=…)` – the subject is the question's terms with compound parts. A repository counts as `official_repo` only when its owner is in the subject, otherwise it is a community repository (secondary, 0.45). The product's own domain is `official_docs` on documentation paths (`/docs`, `/wiki`, `/pve-docs`, …), otherwise `vendor`. A bare repository or registry host in `primary_domains` (e.g. `github.com`) confers no primary status. Relevance is the better of question terms and searched-query terms.
+
 2. **Search (12.2).** The engine sends `GET {searxng_url}/search?q=…&format=json&pageno=1&safesearch=1` with
    optional categories, language, time range and engines. URLs are canonicalised: fragment, tracking parameters
    (`utm_*`, `fbclid` …) and default ports are removed, and URLs with credentials are dropped. Duplicates are
