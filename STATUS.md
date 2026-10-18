@@ -130,7 +130,7 @@ Lint, mypy, ShellCheck, ansible-lint (production) sauber.
 
 ## Bugs
 - 260 gefunden, **260 behoben** – `BUGS.md`. Live-Abnahme: BUG-143 bis BUG-260.
-  BUG-143–258 sind produktiv (0.1.0rc45, deployt 2026-10-18 10:53; rc44 10:35; rc43 10:00; rc42 09:48; rc41 09:17; rc40 08:41; rc39 07:26; rc38 07:03; rc37 06:44; rc36 06:00; SearXNG mit Bing/Yahoo; rc33 05:06; rc29 04:23; rc28 03:48 mit laufendem G1, Worker-Ausfall beim Fortsetzen ohne Versuchsverlust (BUG-227 live bestätigt); rc26 02:55, `coder-main.max_output_tokens` 8192 im Inventory-Override; rc25 deployt 01:50 mit laufendem G1, Schritt per Checkpoint unterbrochen und fortgesetzt; rc24 deployt 2026-10-18 01:10; rc20 deployt 2026-10-17 20:40, Scheduler-Neustart mit laufendem Job live geprüft: Job lief nach dem Deployment weiter).
+  BUG-143–260 sind produktiv (0.1.0rc46, deployt 2026-10-18 11:11; rc45 10:53; rc44 10:35; rc43 10:00; rc42 09:48; rc41 09:17; rc40 08:41; rc39 07:26; rc38 07:03; rc37 06:44; rc36 06:00; SearXNG mit Bing/Yahoo; rc33 05:06; rc29 04:23; rc28 03:48 mit laufendem G1, Worker-Ausfall beim Fortsetzen ohne Versuchsverlust (BUG-227 live bestätigt); rc26 02:55, `coder-main.max_output_tokens` 8192 im Inventory-Override; rc25 deployt 01:50 mit laufendem G1, Schritt per Checkpoint unterbrochen und fortgesetzt; rc24 deployt 2026-10-18 01:10; rc20 deployt 2026-10-17 20:40, Scheduler-Neustart mit laufendem Job live geprüft: Job lief nach dem Deployment weiter).
 - Externe Blocker: BLOCKER-002 (Tag-Push)
 
 ## Letzte Testresultate (2026-10-15, Build-Host)
@@ -226,7 +226,14 @@ bestanden; ansible-lint (production) sauber. `test_deploy_converge` ist angepass
     - Auf rc39 kamen die Korrekturen an, und das maskierte Geheimnis wurde ersetzt (BUG-248 live bestätigt). Der Reviewer verlangte den Ersatz des eigenen Parsers (BUG-245-Regel live bestätigt); im letzten Versuch gelang das nicht mehr.
     - Mehrere Deploys mitten im Lauf erzeugten den Checkpoint-Zustand hinter BUG-249. Der Lauf ist deshalb kein Beleg für rc39 als Ganzes.
 
-    Neustart von G1 auf rc39, ohne Deploy während des Laufs, sofern kein blockierender Fehler auftritt.
+14. G1 auf rc39–rc45 (Job `3d90ec7b…`, FAIL nach ~180 min, `REPLAN_LIMIT`; nur die Recherche abgeschlossen). Neun Funde, jeder allgemein behoben:
+    - Erster Plan: Stagnation durch identische Schreibzugriffe in S004 (BUG-253); `tomli_w` aus dem Schrittziel in S002 (BUG-254); Altlasten von S002 als Scope-Verstoß von S003 (BUG-255).
+    - Replan 1: PowerShell-Befehl als Secret (BUG-256); S002 übernahm Frontend und Skripte der abgelösten Schritte (BUG-257, auf rc44 live bestätigt: sechs Dateien geparkt); der letzte Korrekturversuch fasste die beanstandete Testdatei nicht an (BUG-258).
+    - Replan 2: Der Deploy von rc45 unterbrach einen Korrekturversuch. Der fortgesetzte Versuch arbeitete mit veralteter Lint-Ausgabe (BUG-259), und das abgebrochene Heavy Review galt als verbraucht, sodass die nächste Stagnation direkt zum Replan führte (BUG-260).
+    - Lehre: Drei der Funde (BUG-249/259/260) zeigten sich erst durch Deploys mitten im Lauf. Es sind echte Fehler (ein Worker-Ausfall unterbricht genauso), der Lauf ist aber verzerrt.
+    - Beobachtung ohne Fix: Der Reviewer meldete einmal eine Testdatei als fehlend, deren Diff gekürzt war (der Prompt verbietet das bereits). Wieder aufgreifen, falls es erneut auftritt.
+
+    Neustart von G1 auf rc46. Während des Laufs wird nur bei blockierenden Fehlern deployt.
 3. 0.1.0rc18 ausrollen, J1–J6 zweimal in Folge bestehen, dann die erweiterte Batterie X1–X5
    (`config/acceptance-jobs-extended.example.yaml`); danach Abbruch, parallele Jobs und Worker-Neustart prüfen.
 4. Wake-on-LAN einrichten (MACs, BIOS, Kapitel 13.1), danach `--suite wol --full-wol` und erst dann den Leerlauf-Suspend einschalten.
