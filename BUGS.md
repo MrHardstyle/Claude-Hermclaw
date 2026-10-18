@@ -46,6 +46,16 @@ Noch keine.
 
 ## Behobene Bugs
 
+### BUG-265 – Die Stagnationserkennung hält das Blättern durch eine große Datei für dieselbe Aktion und stoppt den Versuch
+- Phase: G1 auf rc50 (Job `5c3d40a5…`, S003 Versuch 3) · Komponente: stagnation (detector) · Severity: P1 · blockierend: ja (behoben) · Status: **behoben** (`tests/unit/test_stagnation_detector.py::test_pages_of_a_clipped_file_are_different_actions`)
+- Reproduktion:
+  - Mit BUG-264 zeigen drei `read_file collector.py` nacheinander verschiedene Zeilenbereiche.
+  - Der Detektor zählt trotzdem „same action 4x without workspace progress: read_file collector.py“ (zusammen mit dem Lesen aus Versuch 2) und stoppt.
+  - Da die Heavy-Review-Stufe in Versuch 1 schon verbraucht war, wird S003 blockiert. Replan 1.
+- Ursache: Der Aktions-Fingerabdruck bestand nur aus Werkzeug und Argumenten. Seit BUG-264 liefert dasselbe `read_file` aber verschiedene Inhalte.
+- Fix: Ein seitenweises `read_file` (abgeschnitten oder ab Zeile > 1) trägt die gezeigten Zeilen als `shown_lines` im Fingerabdruck. Jede Seite ist eine eigene Aktion. Dieselbe Seite erneut zu lesen bleibt eine Wiederholung.
+- Selbstprüfung: notwendige Folgekorrektur von BUG-264. Ohne sie hob der Detektor den Nutzen des Blätterns auf. Lehre: Ändert ein Werkzeug sein Verhalten bei gleichen Argumenten, muss der Fingerabdruck der Stagnationserkennung mitziehen; im Test belegt.
+
 ### BUG-264 – read_file auf eine große Datei zeigt bei jedem Aufruf denselben Anfang; der Coder liest viermal die ersten 300 Zeilen bis zum Stagnationsstopp
 - Phase: G1 auf rc49 (Job `5c3d40a5…`, S003 Versuch 1, Turns 7–13) · Komponente: tools (engine) · Severity: P1 · blockierend: nein (behoben) · Status: **behoben** (`tests/integration/test_tools_engine_read_write.py::test_reading_a_clipped_file_again_continues_where_the_last_read_stopped`)
 - Reproduktion:

@@ -129,6 +129,24 @@ def test_reading_different_files_is_not_stagnation() -> None:
     assert levels(det, [read(t, f"src/m{t}.py") for t in range(1, 15)]) == [L.none] * 14
 
 
+def test_pages_of_a_clipped_file_are_different_actions() -> None:
+    """Live G1 (BUG-265): with paging (BUG-264) three read_file calls of collector.py showed lines 1-300, 301-600 and
+    601-845, yet the detector counted "same action 4x" and stopped the attempt. A paged read's shown lines are part of
+    its fingerprint; reading the same page again still repeats."""
+
+    def page(turn: int, first: int, last: int, *, clipped: bool = True) -> Observation:
+        action = CoderAction(tool=ToolName.read_file, args={"path": "collector.py"}, decision="read")
+        data = {"path": "collector.py", "lines": 845, "first": first, "last": last}
+        result = ToolResult(tool=ToolName.read_file, ok=True, output="…", data=data, truncated=clipped)
+        return Observation.from_tool(turn, action, result)
+
+    det = StagnationDetector()
+    pages = [page(1, 1, 300), page(2, 301, 600), page(3, 601, 845, clipped=False), page(4, 1, 300)]
+    assert levels(det, pages) == [L.none, L.none, L.none, L.warning]  # the 4th shows page 1 again: a repeat
+    whole = ToolResult(tool=ToolName.read_file, ok=True, output="…", data={"first": 1, "last": 20, "lines": 20})
+    assert "shown_lines" not in Observation.from_tool(1, CoderAction(tool=ToolName.read_file, args={"path": "a.py"}), whole).args
+
+
 def test_reread_after_real_change_is_legitimate() -> None:
     det = StagnationDetector()
     obs: list[Observation] = []

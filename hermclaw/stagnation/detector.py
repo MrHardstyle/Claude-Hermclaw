@@ -153,10 +153,15 @@ class Observation:
         elif tool in _RUN_TOOLS and not result.ok:
             ids = extract_failing_tests(result.output)
             failing = ids or None
+        args = dict(action.args)
+        first = result.data.get("first") if isinstance(result.data, Mapping) else None
+        if tool == "read_file" and isinstance(first, int) and (result.truncated or first > 1):
+            # a clipped file read again shows its next lines (BUG-264): each page is its own action, not a loop (BUG-265)
+            args["shown_lines"] = f"{first}-{result.data.get('last')}"
         return cls(
             turn=turn,
             tool=tool,
-            args=dict(action.args),
+            args=args,
             ok=result.ok,
             error_code=result.error_code,
             decision=action.decision,

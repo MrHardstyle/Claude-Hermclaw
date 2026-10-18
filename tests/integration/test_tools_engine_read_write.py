@@ -64,7 +64,9 @@ async def test_read_file_and_range(sessionmaker: SM, repo: Path) -> None:
     h = await make_harness(sessionmaker, repo)
     res = await h.call("read_file", path="./src//calc.py")
     assert (
-        res.ok and res.output.startswith("def mul(a, b):") and res.data == {"path": "src/calc.py", "bytes": res.data["bytes"], "lines": 6}
+        res.ok
+        and res.output.startswith("def mul(a, b):")
+        and res.data == {"path": "src/calc.py", "bytes": res.data["bytes"], "lines": 6, "first": 1, "last": 6}
     )
     res = await (await make_harness(sessionmaker, repo)).call("read_range", path="src/calc.py", start=5, end=99)
     assert res.ok and res.output.splitlines()[0] == "5| def div(a, b):" and "[end of file: 6 lines]" in res.output

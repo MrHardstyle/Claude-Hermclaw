@@ -724,7 +724,8 @@ class ToolEngine:
             )
         if not tf.text:
             text = "(empty file)"
-        return self._ok(ToolName.read_file, text, truncated=clipped, data={"path": tf.rel, "bytes": tf.size, "lines": lines})
+        data = {"path": tf.rel, "bytes": tf.size, "lines": lines, "first": first, "last": last}
+        return self._ok(ToolName.read_file, text, truncated=clipped, data=data)
 
     async def _read_range(self, args: ReadRangeArgs, ctx: CallContext, events: list[PendingEvent]) -> ToolResult:
         path = self.fs.resolve(args.path)[0]

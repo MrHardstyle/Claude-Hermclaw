@@ -110,7 +110,9 @@ cannot select an environment cause.
 
 Stop recommendation = first rung of the cause's ladder that is available and not yet used for this step (escalations of
 earlier attempts are read from their `fingerprints`; only attempts that ended through the stagnation route,
-`error_code = STAGNATION`, count – an attempt checkpointed, crashed or lost to an outage never ran its escalation, BUG-260), `block` as last resort:
+`error_code = STAGNATION`, count – an attempt checkpointed, crashed or lost to an outage never ran its escalation, BUG-260).
+A paged `read_file` (BUG-264) carries its shown lines in the action fingerprint (`shown_lines`), so reading through a clipped
+file page by page is not a repeated action; reading the same page again is (BUG-265), `block` as last resort:
 
 | cause | ladder |
 |---|---|
