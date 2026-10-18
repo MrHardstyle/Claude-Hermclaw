@@ -36,6 +36,7 @@ def scan(path: str, *lines: str) -> list[str]:
         ("config.yaml", "password: s3cr3t-v4lue", "secret_assignment"),
         (".env.production", "API_KEY=abcd1234efgh", "secret_assignment"),
         ("settings.json", '{"client_secret": "x9f8e7d6c5"}', "secret_assignment"),
+        ("start.ps1", '$ApiToken = "x9f8e7d6c5b4a3"', "secret_assignment"),
         ("db.toml", 'url = "postgresql://app:Sup3rS3cret@db.internal:5432/app"', "url_credential"),
         ("http.txt", "Authorization: Bearer abcdef0123456789xyz", "bearer_token"),
         ("auth.py", f'SAMPLE = "{JWT}"', "jwt"),
@@ -71,6 +72,9 @@ def test_secret_shapes_are_found(path: str, line: str, rule: str) -> None:
         ("app.py", "max_tokens = 4096"),
         ("app.py", 'logo = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPhfDwAChwGA"'),
         ("app.py", "x = foo_bar_baz_qux_quux_corge_grault_garply_waldo(1)"),
+        # BUG-256: in PowerShell an unquoted value is a command or variable, not a literal
+        ("start.ps1", "$env:HERMCLAW_TOKEN = Get-Content $TokenFile -Raw"),
+        ("start.ps1", "$token = [guid]::NewGuid().ToString()"),
         # BUG-041: secret *references* are not secrets (systemd credentials, secret refs, doc ellipses)
         ("hermclaw-api.service", "LoadCredential=worker-token:/etc/hermclaw-worker/worker-token"),
         ("hermclaw-api.service", "LoadCredentialEncrypted=db-password:/etc/credstore.encrypted/hermclaw-db-password"),

@@ -117,7 +117,8 @@ Sources: the patterns of `hermclaw.core.redaction` (token shapes first, then key
 shapes), a prefixed-key assignment rule (`DB_PASSWORD=…`, `spring.datasource.password=…`), literal secrets registered
 in `DEFAULT_REDACTOR`, private key headers, Slack/Google/Stripe/npm tokens, JWTs, and a high-entropy heuristic
 (≥ 32 chars, mixed case + digits, entropy ≥ 4.3, literal context; hex only with a keyword nearby; lock/data files
-excluded). Assignment matches count only for literal values (quoted in code files) that are not placeholders
+excluded). Assignment matches count only for literal values (quoted in code files – PowerShell included, where an unquoted
+value is a command or variable, BUG-256) that are not placeholders
 (`${VAR}`, `<token>`, `changeme`, `example`, `xxxx` …). Lines a GitReader already redacted (`***REDACTED***`) count as
 findings. Findings carry path, line, rule and a masked preview only.
 

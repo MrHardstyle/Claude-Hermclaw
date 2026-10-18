@@ -46,6 +46,16 @@ Noch keine.
 
 ## Behobene Bugs
 
+### BUG-256 – Ein PowerShell-Befehl als Wert (`$env:HERMCLAW_TOKEN = Get-Content $TokenFile -Raw`) gilt als Secret
+- Phase: G1 auf rc42 (Job `3d90ec7b…`, Replan 1, S002 Versuch 1) · Komponente: verifier (secrets, languages) · Severity: P2 · blockierend: nein (behoben) · Status: **behoben** (`tests/unit/test_verifier_secrets.py::test_ordinary_code_is_not_reported[start.ps1-…]`)
+- Reproduktion:
+  - S002 übernimmt das liegengebliebene `start_homelab_widget.ps1` des abgelösten S004.
+  - Die Secret-Prüfung meldet Zeile 64 `$env:HERMCLAW_TOKEN = Get-Content $TokenFile -Raw` als `secret_assignment` mit der Abhilfe „Remove the value and load it from the environment“. Die Zeile tut genau das.
+  - Der Versuch scheitert mit `VERIFIER_FAILED`, und die Korrektur verlangt etwas Unerfüllbares.
+- Ursache: Ein ungequoteter Wert nach `token =` gilt nur in `CODE_LANGUAGES` als Ausdruck. PowerShell (`.ps1` → `powershell`) fehlte dort und wurde wie eine Konfigurationsdatei behandelt: Jeder Wert galt als Literal. In PowerShell ist ein ungequotetes Wort aber ein Befehl oder eine Variable.
+- Fix: `powershell` gehört zu `CODE_LANGUAGES`. Gequotete Literale (`$ApiToken = "…"`) werden weiter gemeldet (neuer Positivfall im Test).
+- Selbstprüfung: echter Schritt nach vorn, eine fehlende Sprache in einer allgemeinen Tabelle, kein Symptom-Workaround. Beobachtung ohne Fix: S002 übernimmt Dateien des abgelösten S004, die nach dem Plan S006 gehören (BUG-206-Design). Ob das Kosten verursacht, zeigt der weitere Lauf.
+
 ### BUG-255 – Liegengebliebene Dateien eines Schritts, der zwischen zwei Versuchen eines anderen lief, gelten als dessen Scope-Verstoß
 - Phase: G1 auf rc40/41 (Job `3d90ec7b…`, S003 Versuch 5) · Komponente: coder (handler), scope · Severity: P1 · blockierend: ja (behoben) · Status: **behoben** (`tests/integration/test_coder_handler.py::test_leftovers_of_a_step_that_ran_between_two_attempts_are_adopted`)
 - Reproduktion:

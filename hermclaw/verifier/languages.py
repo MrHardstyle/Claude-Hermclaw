@@ -82,6 +82,7 @@ CODE_LANGUAGES = frozenset(
         "c",
         "cpp",
         "php",
+        "powershell",  # ``$token = Get-Content $file -Raw``: an unquoted bareword is a command (BUG-256)
         "vue",
         "svelte",
     }
