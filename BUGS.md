@@ -46,6 +46,20 @@ Noch keine.
 
 ## Behobene Bugs
 
+### BUG-241 – Ein einziger ungültiger Replan beendet den Job; der Replanner wiederholt alle offenen Schritte und läuft ins Ausgabelimit
+- Phase: G1 auf rc34 (Job `2f72c0da…`) · Komponente: planner (prompt), scheduler · Severity: P1 · blockierend: ja (behoben) · Status: **behoben** (`tests/integration/test_scheduler.py::test_an_invalid_replan_is_retried_while_replan_budget_is_left`, `tests/unit/test_planner_prompt.py` Nadel „Do not repeat an open step to keep it“)
+- Reproduktion: Replan nach blockierter Recherche S010 (9 offene Schritte):
+  - Antwort 1 und 2 nach je 8192 Tokens abgeschnitten (`invalid JSON … line 1057`), je 5–8 min.
+  - Antwort 3 mit doppeltem Schritt (S019/S009) und `requirements.txt`; keine Reparatur mehr übrig.
+  - Folge: Job `failed` mit `PLANNER_INVALID_OUTPUT` bei `replan_count 0` von 2.
+- Ursache:
+  1. Meine Regel aus BUG-224 („repeat every open step“) ließ den Replanner jeden offenen Schritt vollständig wiederholen, obwohl `carry_over_open_steps` sie ohnehin übernimmt. Bei großen Plänen sprengt das das Ausgabelimit.
+  2. Der Scheduler beendete den Job beim ersten ungültigen Replan, obwohl Budget übrig war.
+- Fix:
+  - Die Replanner-Regel lautet: Offene Schritte, die man weglässt, werden samt Abhängigkeiten übernommen; nur geänderte und neue Schritte angeben.
+  - Ein ungültiger Replan zählt als ein Replan. Ist danach noch Budget übrig, bleibt der Job in `replanning`, und der Replan läuft erneut; sonst scheitert der Job wie bisher.
+- Selbstprüfung: echter Schritt nach vorn, aber Korrektur eines eigenen früheren Fixes (BUG-224): Die Übernahme ist Aufgabe der Runtime, nicht des Modells. Der Retry nutzt das vorhandene Replan-Budget, ohne neues Budget.
+
 ### BUG-240 – Recherche gewichtet fremde Gists und Community-Repos als Primärquellen, die offizielle Doku niedrig; alle Aussagen mit Konfidenz < 0,25
 - Phase: G1 auf rc33/rc34 (Job `2f72c0da…`, Recherche S001: 23 Aussagen aus 8 Quellen) · Komponente: research (sources, engine), config · Severity: P2 · blockierend: nein (behoben) · Status: **behoben** (`tests/unit/test_research_sources.py::test_subject_decides_official_repositories_and_vendor_docs`, `…::test_query_terms_rescue_relevance_of_a_question_in_another_language`)
 - Reproduktion: Quellen und Bewertung:

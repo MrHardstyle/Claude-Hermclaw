@@ -465,6 +465,12 @@ class Scheduler:
         await asyncio.sleep(delay)
         return True
 
+    def _replan_budget_left(self, job: Job) -> bool:
+        """Another replan fits the budget (the same limits the scheduler applies before replanning)."""
+        policy = self.config.policies.correction
+        used = job_metadata.replans_used(job.replan_count + 1, job.metadata_ or {})
+        return used < policy.max_replans_per_job and job.replan_count + 1 < policy.max_replans_total
+
     def _deferred(self, job_id: uuid.UUID) -> bool:
         outage = self._outages.get(job_id)
         return outage is not None and time.monotonic() < outage.until
@@ -1191,6 +1197,16 @@ class Scheduler:
                         )
                 elif await self._defer_on_model_outage(s, job, "Neuplanung", code):
                     pass  # the job stays in replanning; _resume_job_phases runs the replan again after the backoff
+                elif code == "PLANNER_INVALID_OUTPUT" and self._replan_budget_left(job):
+                    # one invalid replan answer (cut off, duplicate steps) failed a whole job after 25 min of work while
+                    # replan budget was left (live G1, BUG-241): it counts as a replan and the replan runs again
+                    job.replan_count += 1
+                    await emit_status(
+                        s,
+                        job.id,
+                        f"Neuplanung ungültig ({(msg or '')[:160]}) – neuer Versuch",
+                        severity=Severity.warning,
+                    )
                 else:
                     await transition_job(
                         s,

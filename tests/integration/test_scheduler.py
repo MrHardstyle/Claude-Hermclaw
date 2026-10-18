@@ -39,7 +39,7 @@ class StepSpec:
 class FakeDriver:
     sm: Any
     plans: dict[uuid.UUID, list[StepSpec]] = field(default_factory=dict)
-    replans: dict[uuid.UUID, list[list[StepSpec]]] = field(default_factory=dict)
+    replans: dict[uuid.UUID, list[Any]] = field(default_factory=dict)  # StepSpec lists, or "invalid"
     finalized: list[uuid.UUID] = field(default_factory=list)
     replan_calls: list[tuple[uuid.UUID, str, dict[str, Any]]] = field(default_factory=list)
     finalize_ok: bool = True
@@ -87,6 +87,8 @@ class FakeDriver:
         if not queue:
             return JobPhaseResult(ok=False, error_code="NO_PLAN")
         specs = queue.pop(0)
+        if specs == "invalid":  # the replanner's answer stayed invalid after its repairs
+            return JobPhaseResult(ok=False, error_code="PLANNER_INVALID_OUTPUT", error_message="steps S019 and S009 describe the same work")
         async with self.sm() as s:
             await s.execute(
                 update(Step)
@@ -367,6 +369,26 @@ async def test_permanent_failure_blocks_dependents_then_replans(sessionmaker: An
     old = await _steps(sm, jid, include_superseded=True)
     assert old["S3"].superseded and old["S3"].status == "blocked"
     assert {k for k, v in (await _steps(sm, jid)).items()} == {"S1", "S4", "S5"}
+
+
+async def test_an_invalid_replan_is_retried_while_replan_budget_is_left(sessionmaker: Any, clean_jobs: None) -> None:
+    """Live G1 (BUG-241): two replan answers cut off at the output limit, the third with a duplicate step – the job
+    failed with PLANNER_INVALID_OUTPUT after its first replan although the budget allowed another one."""
+    sm = sessionmaker
+    driver = FakeDriver(sm)
+    h = FakeHandler({"test"}, script={"S1": ["fail"]})
+    jid = await _new_job(sm)
+    driver.plans[jid] = [StepSpec("S1")]
+    driver.replans[jid] = ["invalid", [StepSpec("R1")]]
+    sched = Scheduler(sm, get_config(), [h], driver, settings=_settings())
+    jobs = await _run_until(sched, sm, [jid])
+    assert jobs[jid].status == "succeeded" and jobs[jid].replan_count == 2 and len(driver.replan_calls) == 2
+    # with no budget left the invalid replan fails the job as before
+    jid2 = await _new_job(sm)
+    driver.plans[jid2] = [StepSpec("S1")]
+    driver.replans[jid2] = ["invalid", "invalid", [StepSpec("R1")]]
+    jobs2 = await _run_until(sched, sm, [jid2])
+    assert jobs2[jid2].status == "failed" and jobs2[jid2].error_code == "PLANNER_INVALID_OUTPUT"
 
 
 async def test_replan_budget_exhausted_fails_job(sessionmaker: Any, clean_jobs: None) -> None:

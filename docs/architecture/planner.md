@@ -229,6 +229,10 @@ A replan replaces the remaining work, but it never loses scope silently: every o
 other than the failed one is carried over unless a new step reuses its id, creates one of its files, names ≥ 60 % of
 its content words, or – for review/verify/test steps – is a check step of the same kind. Dependencies on steps that
 are gone point to the replanner's new steps. Each carry-over is listed in the notes of `replan.created`.
+The replanner prompt therefore asks for the changed and new steps only, not a copy of every open step: copying nine
+open steps pushed replan answers past the output limit (BUG-241). A replan answer that stays invalid after its repairs
+(`PLANNER_INVALID_OUTPUT`) counts as one replan; the scheduler runs the replan again while the replan budget allows,
+and fails the job only after that.
 
 ### Written interfaces between steps (BUG-234)
 

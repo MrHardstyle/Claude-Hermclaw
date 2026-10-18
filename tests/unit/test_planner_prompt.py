@@ -213,6 +213,8 @@ def test_replanner_system_prompt_adds_rerun_rules() -> None:
     system = replanner_system_prompt(kc, sorted(set(kc.values())), 30)
     assert "REPLANNER" in system and "rerun_reason" in system and "completed_steps are already done" in system
     assert "open_steps are still part of the job" in system and "carried over unchanged" in system  # BUG-224
+    # live G1 (BUG-241): "repeat every open step" made replan answers of nine open steps run into the output limit
+    assert "Do not repeat an open step to keep it" in system and "repeat every open step" not in system
     assert "A step creates at most about 8 new files" in system and "split a larger" in system  # BUG-226
     # G1 quality review (BUG-234): app.js read metrics.ram, the backend sent metrics.mem.usage – no shared interface
     assert "need one written interface" in system and "never their own guess" in system
