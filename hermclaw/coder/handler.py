@@ -172,7 +172,14 @@ def step_contract(row: Step, scope: ScopeContract | None = None) -> StepContract
 
 
 def _item_dict(i: CorrectionItem) -> dict[str, str]:
-    return {"source": i.source, "label": i.label, "message": i.message, "path": i.path, "suggested_fix": i.suggested_fix}
+    return {
+        "source": i.source,
+        "label": i.label,
+        "message": i.message,
+        "path": i.path,
+        "suggested_fix": i.suggested_fix,
+        "command": i.command,
+    }
 
 
 def corrections_from_input(data: dict[str, Any]) -> list[CorrectionItem]:
@@ -186,6 +193,7 @@ def corrections_from_input(data: dict[str, Any]) -> list[CorrectionItem]:
                     message=str(d["message"]),
                     path=str(d.get("path", "")),
                     suggested_fix=str(d.get("suggested_fix", "")),
+                    command=str(d.get("command", "")),
                 )
             )
     return out
@@ -468,6 +476,7 @@ class ImplementStepHandler:
         if ctx.attempt_kind == "resume" and any(r.mutated_paths for r in history):
             corrections = await self._fresh_verifier_items(ctx, step, handle, corrections)
         engine.expect_corrections(c.path for c in corrections)  # complete_step reminds of untouched files (BUG-258)
+        engine.expect_rechecks(c.command for c in corrections if c.source == "verifier")  # and re-runs failed checks (BUG-276)
         await self._status(ctx, f"Coder startet {row.step_key} ({ctx.attempt_kind}, max {settings.max_turns} Turns)")
         try:
             async with self._model(ctx, "coder", preemptible=True):

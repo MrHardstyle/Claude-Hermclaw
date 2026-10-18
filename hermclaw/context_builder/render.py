@@ -50,12 +50,13 @@ class CorrectionItem:
     message: str
     path: str = ""
     suggested_fix: str = ""
+    command: str = ""  # the command of a failed lint/test check, re-run before the attempt may complete (BUG-276)
 
     @classmethod
     def from_verification(cls, report: VerificationReport, evidence_chars: int = 800) -> list[CorrectionItem]:
         """One item per failed check with its evidence excerpt: a message like "lint reported problems (exit code 1)"
         alone never told the coder which lines to fix, and it fixed none in four attempts (live G1, BUG-247)."""
-        from hermclaw.review.correction import evidence_excerpt  # the review package builds on this module's types
+        from hermclaw.review.correction import evidence_excerpt, recheck_command  # the review package builds on this module's types
 
         items = []
         for c in report.failures:
@@ -63,7 +64,15 @@ class CorrectionItem:
             excerpt = evidence_excerpt({k: v for k, v in c.evidence.items() if k != "path"}, evidence_chars)
             if excerpt:
                 message += f" — evidence: {excerpt}"
-            items.append(cls(source="verifier", label=f"{c.check_type}:{c.name}", message=message, path=str(c.evidence.get("path", ""))))
+            items.append(
+                cls(
+                    source="verifier",
+                    label=f"{c.check_type}:{c.name}",
+                    message=message,
+                    path=str(c.evidence.get("path", "")),
+                    command=recheck_command(c.check_type, c.evidence),
+                )
+            )
         return items
 
     @classmethod

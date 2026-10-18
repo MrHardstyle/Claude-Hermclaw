@@ -46,6 +46,22 @@ Noch keine.
 
 ## Behobene Bugs
 
+### BUG-276 – Eine Korrektur wird abgeschlossen, obwohl die Lint-Prüfung, die sie beheben soll, weiter fehlschlägt
+- Phase: Testzyklus 1 auf rc59 (K1, Job `6cf9bff0…`, S001 Versuche 2–3; M1 `eeb8bf5a…` S001) · Komponente: tools (engine), coder (handler), review (correction) · Severity: P2 · blockierend: nein (behoben) · Status: **behoben** (`tests/integration/test_tools_engine_exec.py::test_complete_step_reruns_the_check_the_correction_names`, `tests/unit/test_review_correction.py::test_failed_lint_and_test_checks_carry_their_command_to_the_correction`)
+- Reproduktion:
+  - Der Verifier meldet ruff-Befunde (F811 doppelte Testfunktion, F841 unbenutzte Variable) samt Befehl und Ausgabe.
+  - Die Korrekturversuche 2 und 3 lassen nur `pytest` laufen. Die Runtime schließt den Schritt ab („pytest passed and was proposed again without any change“, BUG-207).
+  - Der Verifier scheitert zweimal an derselben Lint-Ausgabe. Das Korrekturbudget ist erschöpft, es folgt ein Replan (etwa 25 min verloren, K1 überschreitet sein Zeitziel).
+- Ursache:
+  - Abgeschlossen wurde nach dem Signal „ein Testlauf ist grün“. Ob die Prüfung, an der der letzte Versuch gescheitert war, jetzt besteht, prüfte niemand.
+  - Der Befehl dieser Prüfung lag nur als Text in der Korrektur-Evidenz vor.
+- Fix:
+  - Fehlgeschlagene Lint- und Testprüfungen geben ihren Befehl als `command` an das Korrektur-Item weiter (`VerifierFailure`, `CorrectionItem`, gespeicherte `correction_input`).
+  - Der Handler übergibt die Befehle an die Tool-Engine (`expect_rechecks`).
+  - `complete_step`, auch der von der Runtime ausgelöste, führt sie erneut aus. Solange einer fehlschlägt, wird abgelehnt (`CHECK_STILL_FAILING`, mit Ausgabe). Ohne Änderung seitdem wird nicht neu ausgeführt, die frühere Ausgabe wird gezeigt.
+  - Im letzten Turn gilt keine Sperre. Ein Befehl, der in der Sandbox nicht laufen kann, wird übersprungen.
+- Selbstprüfung: Das kompensiert kein Modellsymptom unter neuem Namen. Die Runtime traf selbst die falsche Abschlussentscheidung (BUG-207 ohne Bezug zur offenen Korrektur). Jetzt misst sie den Abschluss an der Prüfung, die gescheitert war.
+
 ### BUG-275 – Im Node-Image endet jeder Befehl mit Exit-Code 2 und ohne Ausgabe (Regression aus BUG-267)
 - Phase: Testzyklus 1 auf rc59 (K2, Job `f78edfa6…`, S001 Versuche 1–2) · Komponente: tools (engine) · Severity: P1 · blockierend: ja (behoben) · Status: **behoben** (`tests/integration/test_tools_engine_exec.py::test_the_pipefail_prefix_never_ends_a_shell_that_lacks_the_option`)
 - Reproduktion:

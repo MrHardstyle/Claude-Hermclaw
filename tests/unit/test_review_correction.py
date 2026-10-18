@@ -220,9 +220,31 @@ def test_to_dict_round_trip_and_item_format() -> None:
     data = json.loads(json.dumps(req.to_dict()))  # JSON-serialisable (step_attempts.correction_input)
     assert data["kind"] == "correction_request" and data["version"] == 1 and data["source"] == "verifier+review"
     for item in data["items"]:
-        assert set(item) == {"source", "label", "message", "path", "suggested_fix"} and item["message"]
+        extra = {"command"} if item["source"] == "verifier" else set()
+        assert set(item) == {"source", "label", "message", "path", "suggested_fix", *extra} and item["message"]
     back = CorrectionRequest.from_dict(data)
     assert back == req
+
+
+def test_failed_lint_and_test_checks_carry_their_command_to_the_correction() -> None:
+    """BUG-276: the correction attempt re-runs a failed lint/test check before it may complete, so the check's command
+    travels with the item through the stored correction input."""
+    from hermclaw.coder.handler import _item_dict, corrections_from_input
+    from hermclaw.context_builder.render import CorrectionItem
+
+    lint = "ruff check --select F csv_eval.py"
+    report = _report(
+        _check("lint", "lint:python", "lint reported problems", command=lint, output="csv_eval.py:3:1: F841 unused"),
+        _check("diff", "acceptance[2]:diff", "expected changes matching ['README.md']", command="not a check command"),
+    )
+    req = build_correction_request(step_id=STEP_ID, attempt_id=ATTEMPT_ID, verification=report, review=None)
+    stored = json.loads(json.dumps(req.to_dict()))
+    assert [i["command"] for i in stored["items"]] == [lint, ""]
+    assert CorrectionRequest.from_dict(stored) == req
+    items = corrections_from_input(stored)
+    assert [i.command for i in items] == [lint, ""]
+    assert corrections_from_input({"items": [_item_dict(i) for i in items]}) == items
+    assert [i.command for i in CorrectionItem.from_verification(report)] == [lint, ""]
 
 
 def test_from_dict_is_tolerant() -> None:

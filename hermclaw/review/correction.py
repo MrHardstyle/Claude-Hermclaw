@@ -23,7 +23,7 @@ from __future__ import annotations
 import re
 import uuid
 from collections.abc import Iterable, Mapping, Sequence
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from typing import Any, Literal
 
 from hermclaw.contracts.common import FindingSeverity
@@ -122,6 +122,7 @@ class VerifierFailure:
     evidence: str = ""  # redacted excerpt of the check evidence
     path: str = ""
     suggested_fix: str = ""  # taken over from a review finding that restated this failure
+    command: str = ""  # the failed lint/test check's command, re-run before the correction may complete (BUG-276)
 
     @property
     def label(self) -> str:
@@ -136,6 +137,7 @@ class VerifierFailure:
             "evidence": self.evidence,
             "path": self.path,
             "suggested_fix": self.suggested_fix,
+            "command": self.command,
         }
 
 
@@ -203,7 +205,16 @@ class CorrectionRequest:
             message = v.message or v.status
             if v.evidence:
                 message += f" — evidence: {v.evidence}"
-            out.append({"source": "verifier", "label": v.label, "message": message, "path": v.path, "suggested_fix": v.suggested_fix})
+            out.append(
+                {
+                    "source": "verifier",
+                    "label": v.label,
+                    "message": message,
+                    "path": v.path,
+                    "suggested_fix": v.suggested_fix,
+                    "command": v.command,
+                }
+            )
         for f in self.review_findings:
             message = f.summary + (f" — evidence: {f.evidence}" if f.evidence else "")
             out.append(
@@ -255,6 +266,7 @@ class CorrectionRequest:
                 evidence=str(d.get("evidence", "")),
                 path=str(d.get("path", "")),
                 suggested_fix=str(d.get("suggested_fix", "")),
+                command=str(d.get("command", "")),
             )
             for d in _dicts(data.get("verifier_failures"))
         )
@@ -405,6 +417,15 @@ def _verifier_failures(report: VerificationReport | None, lim: CorrectionLimits,
     return out
 
 
+RECHECKED_CHECKS = frozenset({"lint", "test"})
+
+
+def recheck_command(check_type: str, evidence: Mapping[str, Any]) -> str:
+    """The command a failed lint or test check ran: the same command shows whether a correction resolved it (BUG-276)."""
+    command = evidence.get("command")
+    return command.strip() if check_type in RECHECKED_CHECKS and isinstance(command, str) else ""
+
+
 def _failure(check: VerificationCheck, lim: CorrectionLimits) -> VerifierFailure:
     return VerifierFailure(
         check_type=one_line(check.check_type),
@@ -413,6 +434,7 @@ def _failure(check: VerificationCheck, lim: CorrectionLimits) -> VerifierFailure
         message=clip(one_line(redact(check.message)), lim.message_chars),
         evidence=evidence_excerpt(check.evidence, lim.evidence_chars),
         path=_evidence_path(check.evidence),
+        command=recheck_command(check.check_type, check.evidence),
     )
 
 
@@ -500,15 +522,7 @@ def _dedupe_against_verifier(
         dropped += 1
         target = updated[match]
         if finding.suggested_fix and not target.suggested_fix:
-            updated[match] = VerifierFailure(
-                check_type=target.check_type,
-                name=target.name,
-                status=target.status,
-                message=target.message,
-                evidence=target.evidence,
-                path=target.path or finding.path,
-                suggested_fix=finding.suggested_fix,
-            )
+            updated[match] = replace(target, path=target.path or finding.path, suggested_fix=finding.suggested_fix)
     return kept, updated, dropped
 
 

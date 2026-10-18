@@ -96,7 +96,7 @@ def test_the_pipefail_prefix_never_ends_a_shell_that_lacks_the_option(shell: str
 
     unknown = PIPEFAIL.replace("pipefail", "hermclaw-no-such-option")
     for prefix, piped_exit in ((unknown, "0"), (PIPEFAIL, "1")):
-        run = subprocess.run([shell, "-c", f"{prefix}\necho ran; false | true; echo $?"], capture_output=True, text=True)
+        run = subprocess.run([shell, "-c", f"{prefix}\necho ran; false | true; echo $?"], capture_output=True, text=True, check=False)
         assert run.returncode == 0 and run.stdout.split() == ["ran", piped_exit], (prefix, run)
 
 
@@ -718,3 +718,17 @@ async def test_commands_without_a_timeout_get_the_short_coder_default(sessionmak
     assert (await h.call("run_command", command="python -m pytest -q")).ok
     assert (await h.call("run_test", command="python -m pytest -q tests", timeout_seconds=500)).ok
     assert [r.timeout_seconds for r in rec.requests] == [180, 500]
+
+
+async def test_complete_step_reruns_the_check_the_correction_names(sessionmaker: SM, repo: Path) -> None:
+    """Live K1 (BUG-276): the correction named ruff findings, the coder re-ran only pytest, and the runtime completed the
+    step for it; the verifier failed on the same lint output and the plan was replaced. complete_step re-runs the failed
+    check and refuses while it still fails."""
+    h = await make_harness(sessionmaker, repo, contract=scope(**SCOPE))
+    h.engine.expect_rechecks(["grep -q LINT_CLEAN src/calc.py || { echo 'src/calc.py:1:1: F841 still bad'; exit 1; }"])
+    refused = await h.call("complete_step", summary="done, tests pass")
+    assert refused.error_code == E.CHECK_STILL_FAILING and "F841 still bad" in refused.output
+    again = await h.call("complete_step", summary="done, tests pass")  # nothing changed: the earlier output, not a new run
+    assert again.error_code == E.CHECK_STILL_FAILING and "F841 still bad" in again.output
+    assert (await h.call("write_file", path="src/calc.py", content="# LINT_CLEAN\n")).ok
+    assert (await h.call("complete_step", summary="done, lint clean")).ok

@@ -299,6 +299,7 @@ class ToolEngine:
         # files the correction of this attempt names, and the files this attempt changed: complete_step is refused
         # once while a named file is untouched (BUG-258)
         self._correction_paths: list[str] = []
+        self._recheck_commands: list[str] = []  # failed lint/test checks a correction must resolve (BUG-276)
         self._changed_now: set[str] = set()
         self._correction_reminded = False
         self._handlers: dict[ToolName, Handler] = {
@@ -1758,6 +1759,29 @@ class ToolEngine:
         """The files a correction attempt is asked to fix (its correction items' paths, BUG-258)."""
         self._correction_paths = list(dict.fromkeys(canonical_path(p) for p in paths if p))
 
+    def expect_rechecks(self, commands: Iterable[str]) -> None:
+        """The commands of the lint/test checks whose failure the correction attempt must resolve (BUG-276)."""
+        self._recheck_commands = list(dict.fromkeys(c.strip() for c in commands if c and c.strip()))
+
+    async def _still_failing(self, ctx: CallContext, events: list[PendingEvent]) -> tuple[str, str] | None:
+        """The first failed check of the correction that still fails, run as the verifier ran it – on the last turn
+        nothing is re-run (a refusal there would only exhaust the budget); a check that cannot run here is skipped."""
+        if ctx.turn >= self.max_turns:
+            return None
+        for command in self._recheck_commands:
+            try:
+                run = await self._sandbox_run(
+                    ToolName.run_command, command=command, cwd_raw=".", timeout_seconds=None, purpose="verifier", ctx=ctx, events=events
+                )
+            except ToolError as exc:
+                if exc.code == E.COMMAND_REPEATED and not exc.data.get("passed"):
+                    return command, self._ran_output.get((".", command), "(output not kept)")
+                continue
+            if run.sandbox_failed or run.result is None or run.result.timed_out or run.result.exit_code == 0:
+                continue
+            return command, self._render_run(command, run, budget=self.output_limit, head_ratio=0.3)[0]
+        return None
+
     def _untouched_corrections(self, turn: int) -> list[str]:
         """Existing files the correction names that this attempt has not changed – empty once reminded, and on the
         last turn (a refusal there would only exhaust the budget)."""
@@ -1778,6 +1802,17 @@ class ToolEngine:
                 + ", which this attempt has not changed. Fix them now; if they are already resolved, call complete_step "
                 "again.",
                 data={"untouched": untouched},
+            )
+        failing = await self._still_failing(ctx, events) if self._recheck_commands else None
+        if failing is not None:
+            # live K1: the correction named ruff findings, the coder re-ran only pytest and the runtime completed the step
+            # for it; the verifier failed on the same lint output twice and the plan was replaced (BUG-276)
+            command, output = failing
+            raise ToolError(
+                E.CHECK_STILL_FAILING,
+                "complete_step refused: the check that failed verification still fails, so the verifier would reject the "
+                f"step again. Fix what its output names, then call complete_step. Its output:\n{output}",
+                data={"command": command},
             )
         reported: list[str] = []
         for raw in args.changed_files:
