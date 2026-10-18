@@ -409,6 +409,29 @@ def test_a_hint_to_a_file_an_earlier_step_creates_is_valid_once_ordered() -> Non
     assert any("repo_hint 'docs/api.md' does not exist" in e for e in invented)
 
 
+def test_a_file_the_goal_names_must_be_among_the_steps_files() -> None:
+    """Live G1 (BUG-268): the replanned config step was to "implement the data models in collector.py" with only
+    README/config/docs in scope; it worked on collector.py as an adopted leftover and was measured on the failing
+    collector tests of later steps until it stagnated. A file the goal names belongs to the step's files."""
+    ctx = _ctx(PlannerInput(repository_inventory={"files": ["README.md", "src/collector.py", "config.example.toml"]}))
+    config = step(
+        "S001",
+        "implement",
+        "coding",
+        "Implement the config class in collector.py and describe it in docs/api.md.",
+        repo_hints=["config.example.toml"],
+        allowed_new_paths=["docs/api.md"],
+    )
+    errors = _errors(plan("Widget", [config]), ctx)
+    assert any("S001: its goal names src/collector.py, which is not among the step's files" in e for e in errors), errors
+    listed = _errors(plan("Widget", [{**config, "repo_hints": ["config.example.toml", "src/collector.py"]}]), ctx)
+    assert not any("its goal names" in e for e in listed), listed
+    web = step("S002", "implement", "coding", "Create web/app.js that reads the JSON of the collector.", allowed_new_paths=["web/"])
+    assert not any("its goal names" in e for e in _errors(plan("Widget", [web]), ctx))  # inside its own directory
+    research = step("S003", "research", "research", "Find out how src/collector.py should query Unraid.", network=True)
+    assert not any("its goal names" in e for e in _errors(plan("Widget", [research]), ctx))  # only workspace-mutating steps
+
+
 @pytest.mark.parametrize("pattern", ["**", "*", "**/*", "*/**", "./**"])
 def test_catch_all_patterns_are_rejected(pattern: str) -> None:
     """Scope stays explicit: hints and new-path patterns must name a concrete location."""

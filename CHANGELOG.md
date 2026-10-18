@@ -4,6 +4,9 @@ Format: [Keep a Changelog](https://keepachangelog.com/de/1.1.0/), Versionen nach
 
 ## [Unreleased]
 
+### Behoben
+- **Im Ziel genannte Dateien gehören zum Schritt (BUG-268):** Die Plan-Validierung lehnt einen Schritt ab, dessen Ziel eine vorhandene oder geplante Datei nennt, die weder in `repo_hints` noch in `allowed_new_paths` steht.
+
 ## [0.1.0rc53] – Release Candidate (2026-10-18)
 
 ### Behoben

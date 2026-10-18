@@ -13,6 +13,7 @@ import json
 import re
 from collections.abc import Iterable, Sequence
 from dataclasses import dataclass, field
+from pathlib import PurePosixPath
 from typing import Literal
 
 from hermclaw.contracts.acceptance import (
@@ -601,6 +602,40 @@ def _unordered_reference_errors(
     return errors
 
 
+_GOAL_FILE_RE = re.compile(r"(?<![\w./-])((?:[\w-]+/)*[\w-]+(?:\.[\w-]+)*\.[A-Za-z][A-Za-z0-9]{0,7})(?![\w/-])")
+
+
+def _goal_file_errors(step: PlanStep, plan: PlanContract, ctx: ValidationContext) -> list[str]:
+    """A step whose goal names a repository file – one that exists or another step creates – must list it among its
+    files (repo_hints or allowed_new_paths). Unlisted, the scope leaves it out: the replanned config step of G1 was to
+    "implement the data models in collector.py" with only README/config/docs in scope, worked on collector.py as an
+    adopted leftover and was measured on the 28 failing collector tests of later steps until it stagnated (BUG-268)."""
+    if step.kind.value not in WORKSPACE_MUTATING_KINDS:
+        return []
+    own = _step_paths(step, ctx)
+    files = set(ctx.known_paths)
+    for other in plan.steps:
+        if other.id != step.id:
+            files.update(p for p in other.allowed_new_paths if not any(c in GLOB_CHARS for c in p) and not p.endswith("/"))
+    by_name: dict[str, list[str]] = {}
+    for f in files:
+        by_name.setdefault(PurePosixPath(f).name, []).append(f)
+    errors: list[str] = []
+    for m in _GOAL_FILE_RE.finditer(step.goal):
+        token = m.group(1)
+        named = [token] if token in files else (by_name.get(token, []) if "/" not in token else [])
+        if len(named) != 1:
+            continue
+        path = named[0]
+        if any(path == o or _globs_overlap(path, o) or _globs_overlap(o, path) for o in own):
+            continue
+        errors.append(
+            f"step {step.id}: its goal names {path}, which is not among the step's files: add it to repo_hints (or "
+            "allowed_new_paths when the step creates it), or leave it out of the goal if another step changes it"
+        )
+    return errors
+
+
 def _step_size_errors(step: PlanStep, ctx: ValidationContext) -> list[str]:
     """A step that creates more files than one coder attempt can write fails late on its turn budget. After the
     code-and-tests rule the planner merged a whole widget (collector, frontend, scripts, tests, fixtures, README:
@@ -948,6 +983,7 @@ def semantic_errors(
         errors.extend(_capability_errors(step, ctx))
         errors.extend(_scope_source_errors(step, ctx))
         errors.extend(_hint_errors(step, ctx, plan))
+        errors.extend(_goal_file_errors(step, plan, ctx))
         errors.extend(_acceptance_errors(step, ctx))
 
     # duplicate work

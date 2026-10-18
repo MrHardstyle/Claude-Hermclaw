@@ -46,6 +46,21 @@ Noch keine.
 
 ## Behobene Bugs
 
+### BUG-268 – Ein Schritt soll laut Ziel in collector.py arbeiten, hat die Datei aber nicht im Scope; er erbt sie als Altlast samt 28 fremden Testfehlern und stagniert
+- Phase: G1 auf rc50–rc53 (Job `5c3d40a5…`, Replan 1, S008 Versuche 1–6) · Komponente: planner (validation) · Severity: P1 · blockierend: ja (behoben; Replan 2) · Status: **behoben** (`tests/unit/test_planner_validation.py::test_a_file_the_goal_names_must_be_among_the_steps_files`)
+- Reproduktion:
+  - Das Ziel von S008 lautet „Implement the CollectorConfig class and data models … in collector.py“. Die `repo_hints` sind nur README.md, config.example.toml und docs/.
+  - Scope v1 enthält kein collector.py. S008 erhält collector.py (845 Zeilen) und test_collector.py nur als übernommene Altlasten aus dem abgelösten Plan.
+  - Damit wird S008 an den 28 fehlschlagenden Tests der Client-Schritte S009–S012 gemessen. Nach sechs Versuchen stagniert S008, wird blockiert und löst Replan 2 aus.
+- Ursache:
+  - Die Plan-Validierung prüfte nicht, ob die im Ziel genannten Dateien zu den Dateien des Schritts gehören.
+  - Das Ziel versprach Arbeit an einer Datei, die der Scope ausschloss. Der Schritt kam nur über die Altlasten-Übernahme an sie heran, mit allem, was andere Schritte darin offen ließen.
+- Fix: Die neue Regel `_goal_file_errors` gilt für workspace-verändernde Schritte. Nennt das Ziel eine bekannte Datei oder eine, die ein anderer Schritt anlegt, muss sie in `repo_hints` oder `allowed_new_paths` stehen, direkt oder über ein Verzeichnis oder Glob. Ein bloßer Dateiname zählt, wenn er eindeutig ist.
+- Selbstprüfung:
+  - Früheste vermeidbare Entscheidung: der gültig akzeptierte Plan mit widersprüchlichem Ziel und Scope.
+  - Das ist keine Kompensation am Coder oder Verifier; die Lücke wird schon bei der Planung geschlossen.
+  - Replan 2 (S014) setzte collector.py und test_collector.py selbst in den Scope. Das bestätigt, dass ein konsistenter Plan möglich ist.
+
 ### BUG-267 – Ein in `tail` gepiptes pytest mit 28 Fehlschlägen gilt als bestanden; die Runtime schließt den Schritt selbst ab
 - Phase: G1 auf rc52 (Job `5c3d40a5…`, Replan 1, S008 Versuch 4, Turns 16–20) · Komponente: tools (engine) · Severity: P1 · blockierend: ja (behoben) · Status: **behoben** (`tests/integration/test_tools_engine_exec.py::test_a_failing_command_piped_into_tail_is_a_failed_run`)
 - Reproduktion:

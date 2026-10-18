@@ -113,6 +113,7 @@ whose capability uses the `coder` model role, otherwise `0`. `max_attempts = pol
   - a path must exist among the known paths. These are the explicit list, the inventory's `files` and `paths`, every path-shaped string elsewhere in the inventory (values and keys), the retrieved-context paths and the files of `existing_tests` (`a.py::test_x` counts as `a.py`). A path that another step of the plan lists in `allowed_new_paths` is valid when the hinting step depends on that step (transitively); otherwise the error names the step to add to `depends_on` (BUG-262);
   - a symbol must be a known symbol or appear as a whole word in the provided context;
   - absolute paths and `..` are rejected, and so are policy-forbidden paths.
+- A workspace-mutating step whose goal names a repository file (an existing one or one another step lists in `allowed_new_paths`; a bare file name counts when it is unique) must list that file in its `repo_hints` or `allowed_new_paths`, directly or through a directory/glob. Otherwise the scope leaves it out, and the step reaches the file only as an adopted leftover (BUG-268).
 - Scope stays explicit: catch-all patterns made only of wildcards and slashes (`*`, `**`, `**/*`) are rejected as `repo_hints` and as `allowed_new_paths`.
 - Acceptance sanity:
   - remote mutating kinds (`ssh`, `deploy`) need substantive model-provided acceptance;
