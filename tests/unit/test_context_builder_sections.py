@@ -379,3 +379,30 @@ def test_scope_marks_written_new_files_and_lists_the_missing_ones() -> None:
     body = render_scope(scope, [], 4000, max_items=20, written=["collector.py", "README.md"]).body
     assert "collector.py (written)" in body
     assert "Not written yet: static/app.js, tests/test_collector.py" in body  # globs are no files to tick off
+
+
+def test_research_findings_reach_the_coder_with_their_facts() -> None:
+    """Live G1 (BUG-231): the research found the 'x-api-key' header and the full PVEAPIToken format, but the worker
+    summary began with the long question and synthesis (1400 chars) and CONSTRAINTS clipped every item to 500 chars:
+    the coder wrote 'Authorization: Bearer' and a token header without the secret."""
+    from datetime import UTC, datetime
+
+    from hermclaw.context_builder.render import render_constraints
+    from hermclaw.contracts.research import Claim, ResearchContract, SourceRecord
+    from hermclaw.research.engine import format_for_worker
+
+    src = SourceRecord(
+        source_id="s1", title="API docs", url="https://docs.example/api", domain="docs.example",
+        retrieved_at=datetime.now(UTC), authority_score=0.9, relevance_score=0.9, content_hash="h",
+    )  # fmt: skip
+    contract = ResearchContract(
+        question="Research the official API documentation in detail: " + "authentication, endpoints, fields. " * 30,
+        sources=[src],
+        claims=[Claim(claim="Requests authenticate with the header 'x-api-key: <key>'.", source_ids=["s1"], confidence=0.9)],
+        synthesis="A long synthesis. " * 200,
+    )
+    summary = format_for_worker(contract, max_chars=2400)
+    assert "x-api-key" in summary and summary.index("Claims:") < 300, "facts first, question shortened"
+    finding = f"Research S002 (use these cited findings): {summary}"
+    sec = render_constraints(["Keep the public API stable.", finding], 5800)  # 8 % of a 32k window
+    assert "x-api-key" in sec.body and len(sec.body) > 1500

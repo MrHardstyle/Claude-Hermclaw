@@ -19,7 +19,7 @@ RESEARCH_KIND = StepKind.research.value
 
 
 async def research_findings(
-    sessionmaker: async_sessionmaker[AsyncSession], step_id: uuid.UUID, *, limit: int = 3, max_chars: int = 1500
+    sessionmaker: async_sessionmaker[AsyncSession], step_id: uuid.UUID, *, limit: int = 3, max_chars: int = 2400
 ) -> list[str]:
     """Cited summaries of the completed research steps ``step_id`` (transitively) depends on, nearest first."""
     async with sessionmaker() as s:

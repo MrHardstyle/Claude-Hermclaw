@@ -811,15 +811,19 @@ def _finish_text(status: str, n_sources: int, n_claims: int, n_conflicts: int) -
 
 
 def format_for_worker(contract: ResearchContract, *, max_chars: int = 6000) -> str:
-    """Compact, cited text for a coding worker (tool ``request_research``)."""
+    """Compact, cited text for a coding worker (tool ``request_research``, research steps' ``worker_summary``).
+
+    The cited claims – the exact facts a coder needs – come first; the question is shortened and the synthesis and
+    sources follow, so a length limit cuts those, not the facts (live G1: the question and synthesis filled the
+    whole summary and the coder never saw the API header or token format, BUG-231)."""
     if contract.status == "failed" and not contract.claims:
         return f"Research failed: no usable sources found for '{clip(contract.question, 200)}'."
     by_id = {s.source_id: n + 1 for n, s in enumerate(contract.sources)}
-    lines = [f"Research ({contract.status}): {contract.question}", "", contract.synthesis.strip(), "", "Claims:"]
+    lines = [f"Research ({contract.status}): {clip(contract.question, 200)}", "Claims:"]
     for n, claim in enumerate(contract.claims, start=1):
         refs = ",".join(f"S{by_id[s]}" for s in claim.source_ids if s in by_id)
         lines.append(f"[{n}] {claim.claim} ({refs}; confidence {claim.confidence:.2f})")
-    lines += ["", "Sources:"]
+    lines += ["", "Summary: " + contract.synthesis.strip(), "", "Sources:"]
     for n, src in enumerate(contract.sources, start=1):
         lines.append(f"S{n} {src.title} – {src.url} ({src.source_type})")
     text = "\n".join(lines)

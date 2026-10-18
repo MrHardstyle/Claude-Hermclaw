@@ -35,14 +35,14 @@ class SectionBudgets:
     system_contract: float = 0.03
     step_goal: float = 0.07  # goal + the job request (BUG-212); unused budget goes to the elastic sections
     scope: float = 0.04
-    constraints: float = 0.03
+    constraints: float = 0.08  # includes cited research findings (BUG-231); unused budget goes to the elastic sections
     acceptance: float = 0.05
     current_repo_facts: float = 0.03
     relevant_code: float = 0.23
     relevant_tests: float = 0.10
     current_diff: float = 0.10
-    latest_failure: float = 0.12
-    short_step_history: float = 0.06
+    latest_failure: float = 0.08
+    short_step_history: float = 0.05
     available_tools: float = 0.11
     completion_conditions: float = 0.03
 

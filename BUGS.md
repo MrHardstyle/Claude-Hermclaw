@@ -46,6 +46,18 @@ Noch keine.
 
 ## Behobene Bugs
 
+### BUG-231 – Recherche-Ergebnisse erreichen den Coder nur verstümmelt: drei Kürzungen hintereinander schneiden die Fakten ab
+- Phase: Qualitätsprüfung der G1-Lieferung (rc26–rc28) · Komponente: research, context_builder · Severity: P1 · blockierend: nein (behoben) · Status: **behoben** (`tests/unit/test_context_builder_sections.py::test_research_findings_reach_the_coder_with_their_facts`)
+- Reproduktion: Job `8e7c4b65-c9ff-46dd-a2a6-6898a2357bb6`. Die Recherchen S001/S002 fanden das Header-Format `PVEAPIToken=USER@REALM!TOKENID=UUID`, den Header `x-api-key` und die Root-Queries `info`/`array`. Trotzdem schrieb der Coder `Authorization: Bearer`, einen Token-Header ohne Secret und erfundene GraphQL-Felder. Laut Kontextbericht hatte CONSTRAINTS mit beiden Recherchen nur 996 Zeichen.
+- Ursache: Drei Kürzungen hintereinander:
+  1. `worker_summary` (1400 Zeichen) begann mit der vollständigen Frage (~350 Zeichen) und der Synthese, sodass die belegten Aussagen nie hineinpassten.
+  2. `research_findings` kappte bei 1500 Zeichen.
+  3. `render_constraints` kürzte jedes Element auf 500 Zeichen, in einem Abschnitt mit 3 % Budget.
+
+  Beim Coder kam nur die wiederholte Frage an. Er schrieb die API aus dem Gedächtnis, und Fixtures in derselben falschen Form bestätigten den Fehler.
+- Fix: `format_for_worker` stellt die belegten Aussagen voran, kürzt die Frage auf 200 Zeichen und hängt Synthese und Quellen danach an. Eine Längengrenze trifft damit nicht mehr die Fakten. `worker_summary` und Findings bekommen 2400 Zeichen, Constraint-Elemente bis 2400. CONSTRAINTS erhält 8 % statt 3 %, genommen von LATEST FAILURE (12 → 8 %) und SHORT STEP HISTORY (6 → 5 %). Ungenutztes Budget geht wie bisher an die elastischen Abschnitte.
+- Selbstprüfung: echter Schritt nach vorn, an der frühesten vermeidbaren Stelle. Die korrekte Recherche war vorhanden und wurde auf dem Weg zum Coder verworfen; kein Sonderfall für Proxmox oder Unraid.
+
 ### BUG-230 – Arbeit, die im letzten Turn fertig wird, geht verloren: Turn-Budget erschöpft, Schritt blockiert, Job scheitert
 - Phase: Großauftrag G1 auf 0.1.0rc28 (S003, Plan v3, Versuch 3) · Komponente: coder (handler) · Severity: P1 · blockierend: ja (behoben) · Status: **behoben** (`tests/integration/test_coder_handler.py::test_work_finished_in_the_last_turn_is_verified_not_thrown_away`, `…::test_failed_verification_after_the_turn_budget_corrects_with_both_notes`, `…::test_turn_budget_without_changes_skips_the_verifier`)
 - Reproduktion: Job `8e7c4b65-c9ff-46dd-a2a6-6898a2357bb6`. In Turn 20 von 20 meldet `python -m pytest -q tests/test_collector.py` „17 passed“. Danach `attempt.finished` mit `TURN_BUDGET_EXHAUSTED`, „correction budget exhausted (1/2)“, S003 `blocked`, S004/S005 `dependency failed`, Job `failed` mit `REPLAN_LIMIT` nach 98,3 min (Bericht `20261018T021717Z-jobs.md`).

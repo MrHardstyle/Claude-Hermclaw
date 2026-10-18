@@ -79,8 +79,9 @@ available = floor((total - framing) * 3.2)  character equivalents
 section   = floor(available * share)        # SectionBudgets, defaults sum to 1.00
 ```
 
-Default shares: system 3 %, goal 5 %, scope 4 %, constraints 3 %, acceptance 5 %, repo facts 3 %, **code 25 %**,
-**tests 10 %**, diff 10 %, failure 12 %, history 6 %, tools 11 %, completion 3 %.
+Default shares: system 3 %, goal 7 %, scope 4 %, constraints 8 % (including the cited findings of research steps, up to
+2400 characters each, BUG-231), acceptance 5 %, repo facts 3 %, **code 23 %**, **tests 10 %**, diff 10 %, failure 8 %,
+history 5 %, tools 11 %, completion 3 %.
 
 Token estimate (D-008): 3.2 characters per token, computed exactly with integers (`ceil(cost * 5 / 16)`);
 non-ASCII code points cost 4 characters (≥ 1 token each) to stay conservative. Every renderer guarantees

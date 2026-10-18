@@ -65,7 +65,7 @@ class ResearchStepHandler:
         config: HermclawConfig,
         *,
         engine: ResearchRunner,
-        summary_chars: int = 1400,
+        summary_chars: int = 2400,
     ) -> None:
         self.sm, self.config, self.engine = sessionmaker, config, engine
         self.summary_chars = summary_chars

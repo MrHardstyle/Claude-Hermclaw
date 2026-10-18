@@ -215,7 +215,9 @@ def render_scope(
 
 
 # ---------------------------------------------------------------------------------------------- CONSTRAINTS
-def render_constraints(constraints: Sequence[str], budget: int, *, item_chars: int = 500) -> RenderedSection:
+def render_constraints(constraints: Sequence[str], budget: int, *, item_chars: int = 2400) -> RenderedSection:
+    """Constraints include the cited findings of research steps (up to 2400 chars each, ``research_findings``):
+    clipping them to a few hundred characters dropped the facts the coder needed (BUG-231)."""
     sec = RenderedSection(SectionName.CONSTRAINTS)
     items = [c.strip() for c in constraints if c and c.strip()]
     if not items:
