@@ -62,7 +62,10 @@ Noch keine.
   3. `render_constraints` kürzte jedes Element auf 500 Zeichen, in einem Abschnitt mit 3 % Budget.
 
   Beim Coder kam nur die wiederholte Frage an. Er schrieb die API aus dem Gedächtnis, und Fixtures in derselben falschen Form bestätigten den Fehler.
-- Fix: `format_for_worker` stellt die belegten Aussagen voran, kürzt die Frage auf 200 Zeichen und hängt Synthese und Quellen danach an. Eine Längengrenze trifft damit nicht mehr die Fakten. `worker_summary` und Findings bekommen 2400 Zeichen, Constraint-Elemente bis 2400. CONSTRAINTS erhält 8 % statt 3 %, genommen von LATEST FAILURE (12 → 8 %) und SHORT STEP HISTORY (6 → 5 %). Ungenutztes Budget geht wie bisher an die elastischen Abschnitte.
+- Fix: `format_for_worker` stellt die belegten Aussagen voran, kürzt die Frage auf 200 Zeichen und hängt Synthese und Quellen danach an. Eine Längengrenze trifft damit nicht mehr die Fakten. `worker_summary` und Findings bekommen 2400 Zeichen, Constraint-Elemente bis 2400. CONSTRAINTS erhält 8 % statt 3 %, genommen von LATEST FAILURE (12 → 8 %) und SHORT STEP HISTORY (6 → 5 %). Ungenutztes Budget geht wie bisher an die elastischen Abschnitte. Nachtrag:
+  - Der Heavy Reviewer zeigt Constraints mit bis zu 2400 statt 800 Zeichen (`ReviewSettings.constraint_chars`).
+  - Zwei neue Prüfregeln: Externe APIs, Header und Felder müssen den belegten Recherche-Aussagen entsprechen; Fixtures in der Form des Codes statt der dokumentierten Antworten sind major. Gelesene, aber nie angewandte Konfigurationsoptionen (z. B. `verify_ssl`) sind ebenfalls major.
+  - Test: `tests/unit/test_review_prompt.py::test_research_findings_reach_the_reviewer_in_full`.
 - Selbstprüfung: echter Schritt nach vorn, an der frühesten vermeidbaren Stelle. Die korrekte Recherche war vorhanden und wurde auf dem Weg zum Coder verworfen; kein Sonderfall für Proxmox oder Unraid.
 
 ### BUG-230 – Arbeit, die im letzten Turn fertig wird, geht verloren: Turn-Budget erschöpft, Schritt blockiert, Job scheitert

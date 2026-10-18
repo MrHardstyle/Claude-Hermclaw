@@ -40,6 +40,10 @@ unreadable output are defects even when every test passed.
 connections that are never closed.
 - User-facing text (messages, labels, output) in the language of the JOB GOAL; new options, environment variables \
 or commands documented where the repository documents its usage (README).
+- External APIs, protocols and formats (endpoints, headers, field names, auth schemes) match the cited research \
+findings among the PLAN STEP constraints; code that contradicts them, or fixtures shaped like the code instead of \
+like the documented responses, is major.
+- Configuration options the code reads but never applies (e.g. a TLS or timeout setting) are major.
 - Security: command/SQL injection, path traversal, SSRF, unsafe deserialisation, secrets in code or logs.
 - Tests: missing tests for new behaviour, tests weakened, skipped or deleted, assertions changed to match wrong \
 behaviour, special cases that only satisfy a specific check instead of solving the problem generally.
@@ -134,7 +138,7 @@ def render_step(inp: ReviewInput, settings: ReviewSettings) -> str:
     ]
     constraints = step.constraints[: settings.max_constraints]
     lines.append("constraints:" if constraints else "constraints: (none)")
-    lines.extend(f"- {clip(one_line(redact(c)), settings.item_chars)}" for c in constraints)
+    lines.extend(f"- {clip(one_line(redact(c)), settings.constraint_chars)}" for c in constraints)
     if len(step.constraints) > len(constraints):
         lines.append(f"(+{len(step.constraints) - len(constraints)} more constraints not shown)")
     acceptance = step.acceptance[: settings.max_acceptance]
@@ -257,6 +261,7 @@ def _fixed_sections(inp: ReviewInput, budget: int, settings: ReviewSettings) -> 
         current = replace(
             current,
             item_chars=max(_MIN_ITEM_CHARS, current.item_chars // 2),
+            constraint_chars=max(_MIN_ITEM_CHARS, current.constraint_chars // 2),
             goal_chars=max(_MIN_ITEM_CHARS * 4, current.goal_chars // 2),
             step_goal_chars=max(_MIN_ITEM_CHARS * 4, current.step_goal_chars // 2),
             max_scope_entries=max(10, current.max_scope_entries // 2),

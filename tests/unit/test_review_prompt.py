@@ -131,9 +131,22 @@ def test_system_prompt_rules() -> None:
         "enforced exactly",
         "imported",
         "language of the JOB GOAL",
+        # G1 quality review (BUG-231): Bearer instead of the researched x-api-key, verify_ssl read but never applied
+        "cited research",
+        "never applies",
     ):
         assert needle in text
     assert '"verdict": "pass" | "fix_required"' in text
+
+
+def test_research_findings_reach_the_reviewer_in_full() -> None:
+    """BUG-231: the reviewer clipped constraints to 800 chars and could not see that the code contradicted the
+    researched API header."""
+    finding = "Research S002: Claims: " + "filler claim. " * 100 + "[9] Requests authenticate with the header 'x-api-key'."
+    assert len(finding) > 1400
+    step = _step().model_copy(update={"constraints": [finding]})
+    user, _ = _user(_file("export.py", 2), step=step)
+    assert "x-api-key" in user
 
 
 def test_failed_verifier_facts_first_with_evidence() -> None:

@@ -5,6 +5,7 @@ Format: [Keep a Changelog](https://keepachangelog.com/de/1.1.0/), Versionen nach
 ## [Unreleased]
 
 ### Behoben
+- **Reviewer prüft gegen die Recherche (BUG-231, Nachtrag):** Er sieht die belegten Aussagen vollständig. Widersprechen APIs, Header oder Felder im Code der Recherche, oder werden Konfigurationsoptionen nie angewandt, ist das ein major-Befund.
 - **Ausfälle kosten keinen Versuch (BUG-232):** Jeder Modell- oder Worker-Ausfallversuch erhöht das Versuchsbudget des Schritts um eins, auch wenn der Ausfall früh im Schritt passiert.
 
 ## [0.1.0rc30] – Release Candidate (2026-10-18)

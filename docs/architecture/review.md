@@ -64,7 +64,7 @@ build_correction_request(step_id=…, attempt_id=…, verification: Verification
 1. `review_runs` row (`status=running`, heavy alias) + `review.started` event, committed in its own transaction.
 2. Deterministic pre-checks: mutating step without change evidence → `REVIEW_EMPTY_DIFF`; no enabled `heavy` profile →
    `REVIEW_PROFILE_MISSING`. The model is not called.
-3. Prompt (22.1): job goal, plan step (key, title, kind, risk, capability, goal, constraints, acceptance criteria as
+3. Prompt (22.1): job goal, plan step (key, title, kind, risk, capability, goal, constraints incl. cited research findings up to 2400 chars each – BUG-231 –, acceptance criteria as
    compact JSON), explicit scope, verifier report (facts only: status, failed checks with evidence first, other checks,
    changed files), executed-command log (if any), size-budgeted diff, relevant code/test snippets. All
    repository-derived text is redacted and fenced with a fence longer than any backtick run inside it, so diff content

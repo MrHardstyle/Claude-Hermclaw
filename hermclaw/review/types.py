@@ -50,7 +50,8 @@ class ReviewSettings:
     step_goal_chars: int = 3_000
     max_constraints: int = 30
     max_acceptance: int = 30
-    item_chars: int = 800  # one constraint / acceptance criterion / scope entry
+    item_chars: int = 800  # one acceptance criterion / scope entry
+    constraint_chars: int = 2400  # one constraint – cited research findings are this long (BUG-231)
     max_scope_entries: int = 50
     verifier_share: float = 0.2  # max share of the variable budget for the verifier report
     snippet_share: float = 0.25  # max share of the variable budget for code/test snippets
