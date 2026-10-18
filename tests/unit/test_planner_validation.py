@@ -628,6 +628,21 @@ def test_a_step_naming_another_steps_component_must_be_ordered_with_it() -> None
     assert not any("refers to" in e for e in _errors(plan("goal", [collector, scripts]), preserved=frozenset({"S002"})))
 
 
+def test_an_acronym_names_a_short_component() -> None:
+    """Live G1 on rc56 (BUG-273): the frontend "fetches data from the local API" that the core step writes in
+    collector/api.py; the three-letter stem was ignored, the frontend ran without a dependency and three reviews in a
+    row found its config and secret handling at odds with an API it never saw. An upper-case acronym names a short
+    component; the ordinary word does not."""
+    core = step(
+        "S004", "implement", "coding", "Collector-Kern mit lokaler JSON-API.", allowed_new_paths=["collector/api.py", "collector/core.py"]
+    )
+    web = step("S005", "implement", "coding", "Frontend mit Datenabruf von der lokalen API.", allowed_new_paths=["frontend/app.js"])
+    errors = _errors(plan("goal", [core, web]))
+    assert any("step S005 refers to api, which step S004 writes" in e for e in errors), errors
+    plain = step("S005", "implement", "coding", "Frontend that calls the api of the page.", allowed_new_paths=["frontend/app.js"])
+    assert not any("refers to api" in e for e in _errors(plan("goal", [core, plain])))
+
+
 def test_a_check_only_step_cannot_create_files() -> None:
     """rc22 battery X1: the unit tests were planned into a kind=test step, which only runs checks; the files were never
     written and the implementing step's review demanded them until the step failed (BUG-209)."""

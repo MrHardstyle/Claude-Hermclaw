@@ -567,6 +567,15 @@ def _reachable(plan: PlanContract, start: str) -> set[str]:
     return seen
 
 
+def _names_component(stem: str, text: str) -> bool:
+    """Whether ``text`` names the component ``stem``: a stem of five or more characters as a word start in any case
+    ("startet den Collector" – collector.py); a shorter one only as an upper-case acronym ("die lokale API" – api.py),
+    so that ordinary words ("app", "web") do not count (BUG-273)."""
+    if len(stem) >= 5:
+        return re.search(rf"(?<![\w]){re.escape(stem)}", text, re.IGNORECASE) is not None
+    return re.search(rf"(?<![\w]){re.escape(stem.upper())}(?![a-z])", text) is not None
+
+
 def _unordered_reference_errors(
     plan: PlanContract, new_steps: Sequence[PlanStep], ctx: ValidationContext, preserved: frozenset[str]
 ) -> list[str]:
@@ -578,7 +587,7 @@ def _unordered_reference_errors(
     code: dict[str, set[str]] = {}
     for s in mutating:
         stems = {_code_stem(p) for p in _step_paths(s, ctx) if not TEST_PATH_RE.search(p) and not DOC_PATH_RE.search(p)}
-        code[s.id] = {t for t in stems if len(t) >= 5 and t not in _GENERIC_STEMS}
+        code[s.id] = {t for t in stems if len(t) >= 3 and t not in _GENERIC_STEMS}
     errors: list[str] = []
     reported: set[frozenset[str]] = set()
     for step in new_steps:
@@ -590,7 +599,7 @@ def _unordered_reference_errors(
             pair = frozenset({step.id, other.id})
             if other.id == step.id or pair in reported or other.id in ancestors or step.id in _reachable(plan, other.id):
                 continue
-            named = sorted(t for t in code[other.id] - code[step.id] if re.search(rf"(?<![\w]){re.escape(t)}", text, re.IGNORECASE))
+            named = sorted(t for t in code[other.id] - code[step.id] if _names_component(t, text))
             if named:
                 reported.add(pair)
                 errors.append(

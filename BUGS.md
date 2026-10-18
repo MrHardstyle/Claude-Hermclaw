@@ -46,6 +46,18 @@ Noch keine.
 
 ## Behobene Bugs
 
+### BUG-273 – Das Frontend „ruft Daten von der lokalen API ab“, hängt aber nicht vom Schritt ab, der `collector/api.py` schreibt; drei Reviews verwerfen es nacheinander
+- Phase: G1 auf rc56/rc57 (Job `0f3f2a32…`, Plan v1, S005 Versuche 1–3) · Komponente: planner (validation) · Severity: P1 · blockierend: ja (behoben) · Status: **behoben** (`tests/unit/test_planner_validation.py::test_an_acronym_names_a_short_component`)
+- Reproduktion:
+  - Plan v1: S005 (Frontend: „JavaScript für Datenabruf von der lokalen API … Konfigurationsbereich“) läuft ohne Abhängigkeit von S004 (Kern, JSON-API, `collector/api.py`).
+  - Die drei Reviews finden jeweils andere Lücken bei Konfiguration und Geheimnissen: Zugangsdaten im Client, fehlender Schutz-Token, „secrets never delivered to frontend“.
+  - Die API, die das festlegt, existierte noch nicht. S005 wird blockiert.
+- Ursache: Die Regel aus BUG-251 (benannte Komponente → Abhängigkeit) wertete nur Stämme ab fünf Zeichen aus. `api` fiel heraus.
+- Fix:
+  - Stämme ab drei Zeichen zählen.
+  - Kurze Stämme (3–4 Zeichen) zählen nur als Akronym in Großbuchstaben im Text, z. B. „API“, „CLI“. Gewöhnliche Wörter wie „app“ oder „web“ ordnen nichts.
+- Selbstprüfung: Kein Kompensieren im Review oder Coder. Die früheste vermeidbare Entscheidung war die fehlende Abhängigkeit im Plan. Die Erweiterung ist allgemein: Akronyme benennen Module.
+
 ### BUG-272 – Der Coder sendet viermal dasselbe `replace_text` mit `old == new`; die Ablehnung sagt nicht, dass die Änderung schon in der Datei steht
 - Phase: G1 auf rc56 (Job `0f3f2a32…`, S005 Versuch 2, Turns 8–14) · Komponente: tools (engine) · Severity: P2 · blockierend: nein (behoben) · Status: **behoben** (`tests/integration/test_tools_engine_read_write.py::test_an_identical_replace_says_whether_the_change_is_already_made`)
 - Reproduktion:
