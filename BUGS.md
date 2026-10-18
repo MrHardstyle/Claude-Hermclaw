@@ -46,6 +46,27 @@ Noch keine.
 
 ## Behobene Bugs
 
+### BUG-248 – Ein maskiertes Geheimnis in einer Datei lässt sich mit keinem Werkzeug ersetzen, obwohl der Verifier es verlangt
+- Phase: G1 auf rc36/37 (Job `8f394b63…`, S003 Versuche 3–7) · Komponente: tools (engine) · Severity: P1 · blockierend: ja (behoben) · Status: **behoben** (`tests/integration/test_tools_engine_read_write.py::test_a_masked_secret_can_be_replaced_by_the_line_as_shown`)
+- Reproduktion:
+  - `tests/test_collector.py:128` enthält `api_key='…'`. Jeder Lesezugriff zeigt `api_key='***REDACTED***'`.
+  - `replace_text` mit der gezeigten Zeile findet den Text nicht. `write_file` mit dem Marker wird verweigert („Leave lines with secrets untouched“).
+  - Der Verifier blockiert mit `secret_assignment` jeden Versuch. S003 endet `repeated_verifier_failure`, und der Job geht in den Replan.
+- Ursache: Die Redaktion schützt Geheimnisse vor dem Modell, und die Werkzeuge verweigern das Zurückschreiben des Markers. Zusammen machten sie genau die Änderung unmöglich, die der Verifier verlangte. Die Anweisung „edit around them“ widersprach dem Verifier.
+- Fix:
+  - `replace_text` sucht ein `old` mit Redaktionsmarker in der redigierten Sicht der Datei, zeilenweise. Der Treffer muss eindeutig sein.
+  - Der Text um den Treffer auf den betroffenen Zeilen darf keinen maskierten Teil enthalten. So wird nichts Maskiertes zurückgeschrieben, und das Modell sieht das Geheimnis nie.
+  - Ist eine Zeile mehrdeutig oder enthält sie ein zweites Geheimnis, wird verweigert, und der Hinweis nennt den Weg: die ganze Zeile wie gezeigt kopieren.
+  - Die Meldungen zum Marker beschreiben jetzt das Ersetzen statt „untouched“.
+- Selbstprüfung: echter Schritt nach vorn. Ein Widerspruch zwischen zwei Komponenten wurde aufgelöst, ohne den Schutz aufzuweichen: Das Geheimnis wird weder gezeigt noch zurückgeschrieben.
+
+### BUG-247 – Korrekturen aus dem Verifier enthalten nur dessen Kurzmeldung, nicht die Belege (z. B. die Lint-Ausgabe)
+- Phase: G1 auf rc36/37 (Job `8f394b63…`, S003 Versuche 3–7) · Komponente: context_builder (render) · Severity: P1 · blockierend: ja (behoben) · Status: **behoben** (`tests/unit/test_context_builder_sections.py::test_verifier_correction_items_carry_the_check_evidence`)
+- Reproduktion: `lint:python` schlägt mit sechs `F401`-Funden fehl (`hashlib`, `hmac`, `sys`, `copy`, `MagicMock`, `StringIO`). Der Coder bekommt als Korrektur nur „lint reported problems (exit code 1)“ und behebt in vier Versuchen keinen Fund.
+- Ursache: `CorrectionItem.from_verification` übernahm nur `message`. Die Belege des Checks (`evidence.output`, `stderr` …) kamen nie beim Coder an, obwohl der Review-Pfad dafür `evidence_excerpt` schon hatte.
+- Fix: Jedes Korrektur-Element aus dem Verifier enthält einen Auszug der Belege (bis 800 Zeichen, Ausgabe zuerst, redigiert, ohne `path`). Der Auszug wird mit `evidence_excerpt` aus der Review-Korrektur gebildet.
+- Selbstprüfung: echter Schritt nach vorn. Die Information lag vor und ging an einer Schnittstelle verloren; kein Symptom-Ausgleich.
+
 ### BUG-246 – Die Verweigerung eines wiederholten fehlgeschlagenen Befehls verweist auf LATEST FAILURE, das dessen Ausgabe nicht mehr zeigt
 - Phase: G1 auf rc36 (Job `8f394b63…`, S003 Versuch 4, Turns 9–14) · Komponente: tools (engine) · Severity: P1 · blockierend: nein (behoben) · Status: **behoben** (`tests/integration/test_tools_engine_exec.py::test_a_refused_repeat_of_a_failed_command_carries_its_output`)
 - Reproduktion:

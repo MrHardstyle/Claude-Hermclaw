@@ -4,6 +4,10 @@ Format: [Keep a Changelog](https://keepachangelog.com/de/1.1.0/), Versionen nach
 
 ## [Unreleased]
 
+### Behoben
+- **Belege in Verifier-Korrekturen (BUG-247):** Der Coder bekommt zu jedem fehlgeschlagenen Check einen Auszug der Belege (z. B. die Lint-Ausgabe mit Datei und Zeile), nicht nur die Kurzmeldung.
+- **Maskierte Geheimnisse ersetzbar (BUG-248):** `replace_text` ersetzt eine Zeile mit maskiertem Geheimnis, wenn `old` sie wie angezeigt (mit Marker) enthält; nichts Maskiertes wird zurückgeschrieben.
+
 ## [0.1.0rc37] – Release Candidate (2026-10-18)
 
 ### Behoben

@@ -619,7 +619,8 @@ class ToolEngine:
             raise ToolError(
                 E.REDACTED_PLACEHOLDER,
                 f"the content contains the redaction marker {REDACTED}; secrets are masked in tool output and must not be "
-                "written back. Leave lines with secrets untouched (edit around them with replace_text).",
+                "written back. To replace a masked secret use replace_text: 'old' is the line as shown (marker included), "
+                "'new' the line with a placeholder value instead.",
             )
 
     def _check_patch_placeholder(self, modified: list[str]) -> None:
@@ -901,6 +902,18 @@ class ToolEngine:
             crlf_old, crlf_new = old.replace("\n", "\r\n"), new.replace("\n", "\r\n")
             if text.count(crlf_old):
                 old, new, count = crlf_old, crlf_new, text.count(crlf_old)
+        masked = self._masked_replace(text, old, new) if count == 0 and REDACTED in old and args.count == 1 else None
+        if masked is not None:
+            updated, first_line = masked
+            data = updated.encode("utf-8")
+            await asyncio.to_thread(self.fs.atomic_write, target, data, mode=tf.mode)
+            self._file_changed(ToolName.replace_text, [{"path": rel, "operation": "modify", "replacements": 1}], events)
+            return self._ok(
+                ToolName.replace_text,
+                f"replaced 1 occurrence(s) in {rel} (first at line {first_line}, masked secret replaced); file now has {len(data)} bytes",
+                mutated_paths=[rel],
+                data={"path": rel, "operation": "modify", "replacements": 1, "first_line": first_line},
+            )
         if count == 0:
             raise ToolError(E.TEXT_NOT_FOUND, self._not_found_hint(rel, text, old))
         if count != args.count:
@@ -923,11 +936,38 @@ class ToolEngine:
             data={"path": rel, "operation": "modify", "replacements": count, "first_line": first_line},
         )
 
+    def _masked_replace(self, text: str, old: str, new: str) -> tuple[str, int] | None:
+        """Replace ``old`` as the coder saw it – with a secret masked as the redaction marker – by ``new``: the match
+        runs on the redacted view of the file, line by line, and must be unique; the text around it on the matched
+        lines must contain no masked part, so nothing masked is written back. The verifier demanded the removal of a
+        test fixture secret that every read showed masked, and no tool could edit that line (live G1, BUG-248)."""
+        lines = text.splitlines(keepends=True)
+        red = [self.redactor.text(ln) for ln in lines]
+        view = "".join(red)
+        idx = view.find(old)
+        if idx < 0 or view.find(old, idx + 1) >= 0:
+            return None
+        starts, pos = [], 0
+        for ln in red:
+            starts.append(pos)
+            pos += len(ln)
+        a = max(i for i, s in enumerate(starts) if s <= idx)
+        b = max(i for i, s in enumerate(starts) if s <= idx + max(len(old) - 1, 0))
+        block = "".join(red[a : b + 1])
+        prefix, suffix = block[: idx - starts[a]], block[idx - starts[a] + len(old) :]
+        real = "".join(lines[a : b + 1])
+        if REDACTED in prefix or REDACTED in suffix or not real.startswith(prefix) or not real.endswith(suffix):
+            return None
+        return "".join(lines[:a]) + prefix + new + suffix + "".join(lines[b + 1 :]), a + 1
+
     @staticmethod
     def _not_found_hint(rel: str, text: str, old: str) -> str:
         msg = f"'old' text not found in {rel}"
         if REDACTED in old:
-            return msg + f"; it contains the redaction marker {REDACTED} – masked secrets cannot be matched, edit around them"
+            return msg + (
+                f"; it contains the redaction marker {REDACTED}: copy the masked line exactly as shown (marker included, "
+                "unique in the file) to replace the secret with new text that contains no marker"
+            )
         if old.strip() and old.strip() in text:
             return msg + "; the text exists with different leading/trailing whitespace – copy it exactly (read_range shows it)"
         first = next((ln.strip() for ln in old.splitlines() if ln.strip()), "")

@@ -155,6 +155,29 @@ async def test_correction_evidence_alone_creates_failure_section() -> None:
     assert "suggested fix: use x + 3" in section
 
 
+async def test_verifier_correction_items_carry_the_check_evidence() -> None:
+    """Live G1 (BUG-247): the coder got "lint reported problems (exit code 1)" without the ruff output and fixed none
+    of the unused imports in four attempts. A verifier item carries its evidence (output first), without the path."""
+    builder, _, _ = make_builder()
+    output = "collector.py:9:8: F401 `hashlib` imported but unused\ncollector.py:16:8: F401 `sys` imported but unused"
+    verification = VerificationReport(
+        passed=False,
+        checks=[
+            VerificationCheck(
+                check_type="lint",
+                name="lint:python",
+                status="fail",
+                message="lint reported problems (exit code 1)",
+                evidence={"output": output, "exit_code": 1, "path": "collector.py"},
+            )
+        ],
+    )
+    [item] = CorrectionItem.from_verification(verification)
+    assert item.path == "collector.py" and "`hashlib` imported but unused" in item.message and "`sys`" in item.message
+    section = (await builder.build(make_input(correction=[item]))).messages[1].content.split("## LATEST FAILURE", 1)[1]
+    assert "collector.py:9:8: F401" in section
+
+
 async def test_step_brief_from_contract() -> None:
     import uuid
 

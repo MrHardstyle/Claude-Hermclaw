@@ -124,6 +124,37 @@ async def test_a_part_of_a_visible_read_is_refused_until_a_file_changes(sessionm
     assert (await h.call("read_range", path="long.py", start=420, end=440)).ok, "the clipped read did not show these lines"
 
 
+async def test_a_masked_secret_can_be_replaced_by_the_line_as_shown(sessionmaker: SM, repo: Path) -> None:
+    """Live G1 (BUG-248): the verifier demanded removing ``api_key='…'`` from a test, every read showed the value as the
+    redaction marker, and replace_text refused the masked line – no tool could fix it. The masked line as shown is
+    matched on the redacted view and replaced; nothing masked is written back."""
+    (repo / "tests" / "test_client.py").write_text("def make():\n    return Client(api_key='qwzrtvkplm', timeout=5)\n\n\nX = 1\n")
+    h = await make_harness(sessionmaker, repo, contract=scope(target_paths=["tests/test_client.py"]))
+    shown = (await h.call("read_file", path="tests/test_client.py")).output
+    masked_line = next(ln for ln in shown.splitlines() if "api_key" in ln)
+    assert REDACTED in masked_line and "qwzrtvkplm" not in shown
+    res = await h.call("replace_text", path="tests/test_client.py", old="api_key='" + REDACTED + "'", new="api_key='dummy-token'")
+    assert res.ok, res.output
+    text = (repo / "tests" / "test_client.py").read_text()
+    assert "return Client(api_key='dummy-token', timeout=5)\n" in text and "qwzrtvkplm" not in text and REDACTED not in text
+    assert text.startswith("def make():\n") and text.endswith("X = 1\n")
+    # two identical masked lines: ambiguous, refused with the hint
+    (repo / "tests" / "test_two.py").write_text("A = dict(password='aaaa1111')\nB = dict(password='bbbb2222')\n")
+    h2 = await make_harness(sessionmaker, repo, contract=scope(target_paths=["tests/test_two.py"]))
+    amb = await h2.call("replace_text", path="tests/test_two.py", old="password='" + REDACTED + "'", new="password='dummy'")
+    assert amb.error_code == E.TEXT_NOT_FOUND and "copy the masked line exactly" in amb.output
+    one = await h2.call(
+        "replace_text", path="tests/test_two.py", old="B = dict(password='" + REDACTED + "')", new="B = dict(password='dummy')"
+    )
+    assert one.ok and (repo / "tests" / "test_two.py").read_text() == "A = dict(password='aaaa1111')\nB = dict(password='dummy')\n"
+    # the text around the match would carry a masked part: refused, nothing masked is written back
+    (repo / "tests" / "test_both.py").write_text("C = dict(password='x1x1x1x1', api_key='y2y2y2y2')\n")
+    h3 = await make_harness(sessionmaker, repo, contract=scope(target_paths=["tests/test_both.py"]))
+    refused = await h3.call("replace_text", path="tests/test_both.py", old="api_key='" + REDACTED + "'", new="api_key='dummy'")
+    assert refused.error_code == E.TEXT_NOT_FOUND
+    assert (repo / "tests" / "test_both.py").read_text() == "C = dict(password='x1x1x1x1', api_key='y2y2y2y2')\n"
+
+
 async def test_read_output_budget_sets_truncated(sessionmaker: SM, repo: Path) -> None:
     (repo / "big.txt").write_text("".join(f"line {i:05d} " + "x" * 60 + "\n" for i in range(2000)))
     h = await make_harness(sessionmaker, repo)

@@ -52,11 +52,19 @@ class CorrectionItem:
     suggested_fix: str = ""
 
     @classmethod
-    def from_verification(cls, report: VerificationReport) -> list[CorrectionItem]:
-        return [
-            cls(source="verifier", label=f"{c.check_type}:{c.name}", message=c.message or c.status, path=str(c.evidence.get("path", "")))
-            for c in report.failures
-        ]
+    def from_verification(cls, report: VerificationReport, evidence_chars: int = 800) -> list[CorrectionItem]:
+        """One item per failed check with its evidence excerpt: a message like "lint reported problems (exit code 1)"
+        alone never told the coder which lines to fix, and it fixed none in four attempts (live G1, BUG-247)."""
+        from hermclaw.review.correction import evidence_excerpt  # the review package builds on this module's types
+
+        items = []
+        for c in report.failures:
+            message = c.message or c.status
+            excerpt = evidence_excerpt({k: v for k, v in c.evidence.items() if k != "path"}, evidence_chars)
+            if excerpt:
+                message += f" — evidence: {excerpt}"
+            items.append(cls(source="verifier", label=f"{c.check_type}:{c.name}", message=message, path=str(c.evidence.get("path", ""))))
+        return items
 
     @classmethod
     def from_review(cls, review: ReviewContract) -> list[CorrectionItem]:
