@@ -93,6 +93,19 @@ async def test_identical_read_of_an_unchanged_file_is_refused_within_the_context
     assert (await h.call("read_file", path="src/calc.py")).ok, "outside the window the file may have left the context"
 
 
+async def test_a_read_the_context_cannot_show_in_full_may_be_repeated(sessionmaker: SM, repo: Path) -> None:
+    """Live G1 (BUG-229): the guard refused re-reads of a clipped 624-line file as 'shown above' although the context
+    showed only part of it; the coder circled on refused reads until the step stagnated."""
+    (repo / "long.py").write_text("".join(f"v{i} = {i}\n" for i in range(1, 501)))
+    h = await make_harness(sessionmaker, repo)
+    assert (await h.call("read_file", path="long.py")).ok
+    assert (await h.call("read_file", path="long.py")).ok, "more lines than the context shows: allowed again"
+    assert (await h.call("read_range", path="long.py", start=1, end=450)).ok
+    assert (await h.call("read_range", path="long.py", start=1, end=450)).ok, "range longer than the context shows"
+    assert (await h.call("read_range", path="long.py", start=10, end=40)).ok
+    assert (await h.call("read_range", path="long.py", start=10, end=40)).error_code == E.READ_REPEATED
+
+
 async def test_read_output_budget_sets_truncated(sessionmaker: SM, repo: Path) -> None:
     (repo / "big.txt").write_text("".join(f"line {i:05d} " + "x" * 60 + "\n" for i in range(2000)))
     h = await make_harness(sessionmaker, repo)

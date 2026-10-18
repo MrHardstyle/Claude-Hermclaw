@@ -132,6 +132,10 @@ class _FileRef:
 
 
 # ---------------------------------------------------------------------------------------------- builder
+def _positive_int(value: object, default: int) -> int:
+    return value if isinstance(value, int) and not isinstance(value, bool) and value > 0 else default
+
+
 class ContextBuilder:
     def __init__(
         self,
@@ -211,8 +215,11 @@ class ContextBuilder:
             return lambda: self.repo.read(ws, path, start, end, max_chars=cfg.read_max_chars)
 
         head_targets = [p for p in targets if not is_test_path(p)] + [p for p in targets if is_test_path(p)]
-        read_set = [p for p in self._read_paths(inp.history, ws) if p not in targets and p not in acc_tests]
-        file_heads = list(dict.fromkeys([*head_targets, *(p for p in acc_tests if p not in targets), *read_set]))
+        file_heads: list[tuple[str, int, int]] = [
+            (p, 1, cfg.test_head_lines if is_test_path(p) else cfg.target_head_lines)
+            for p in dict.fromkeys([*head_targets, *(p for p in acc_tests if p not in targets)])
+        ]
+        file_heads += self._read_spans(inp.history, ws, cfg.max_snippet_lines)
         jobs: list[tuple[str, Callable[[], Awaitable[Any]], Any]] = [
             ("repo.inventory_summary", lambda: self.repo.inventory_summary(ws), None),
             ("git.status", lambda: self.git.status(ws), []),
@@ -220,9 +227,8 @@ class ContextBuilder:
             ("git.diff", lambda: self.git.diff(ws, None, max_bytes=cfg.diff_max_bytes), ""),
             ("repo.context_for", lambda: self.repo.context_for(ws, query, budget_chars=max(2000, elastic_chars)), []),
         ]
-        for p in file_heads:
-            lines = cfg.test_head_lines if is_test_path(p) else cfg.target_head_lines
-            jobs.append((f"repo.read {p}", read(p, 1, lines), None))
+        for p, start, end in file_heads:
+            jobs.append((f"repo.read {p}", read(p, start, end), None))
         for ref in refs:
             if ref.line is None:
                 jobs.append((f"{_REF_LABEL} {ref.path}", read(ref.path, 1, cfg.test_head_lines), None))
@@ -238,7 +244,7 @@ class ContextBuilder:
         values = [v for v, _ in results]
         inventory, status, changed, diff, hits = values[:5]
         pos = 5
-        head_texts = dict(zip(file_heads, values[pos : pos + len(file_heads)], strict=True))
+        head_texts = values[pos : pos + len(file_heads)]
         pos += len(file_heads)
         ref_texts = values[pos : pos + len(refs)]
         pos += len(refs)
@@ -253,13 +259,13 @@ class ContextBuilder:
                 continue
             start = 1 if ref.line is None else max(1, ref.line - cfg.failure_region_lines)
             candidates.append(make_snippet(ref.path, start, text, 3.0 - i * 0.001, "failure"))
-        for i, p in enumerate(file_heads):
-            text = head_texts.get(p)
+        for i, (p, start, _) in enumerate(file_heads):
+            text = head_texts[i]
             if not isinstance(text, str) or not text.strip():
                 dropped.append(DroppedItem(_section_for(p).value, p, "read_failed"))
                 continue
             origin = "target" if p in targets else "acceptance" if p in acc_tests else "read"
-            candidates.append(make_snippet(p, 1, text, 2.0 - i * 0.001, origin))
+            candidates.append(make_snippet(p, start, text, 2.0 - i * 0.001, origin))
         target_set = set(targets)
         hit_cands, hit_drops = await self._hit_snippets(
             sem, ws, _as_hits(hits), "context", base=0.0, boost=target_set, warnings=warnings, tests_only=False
@@ -472,21 +478,33 @@ class ContextBuilder:
             out.append(p)
         return out, drops
 
-    def _read_paths(self, history: Sequence[TurnRecord], ws: WorkspaceHandle, limit: int = 6) -> list[str]:
-        """Files the coder read in this attempt, most recent first. Every turn gets a fresh context: without them
-        the coder re-read the same files turn after turn (live job 50784df5, analysis 2026-10-16)."""
-        out: list[str] = []
+    def _read_spans(self, history: Sequence[TurnRecord], ws: WorkspaceHandle, max_lines: int, limit: int = 6) -> list[tuple[str, int, int]]:
+        """What the coder read in this attempt as (path, start, end), most recent first. Every turn gets a fresh context:
+        without them the coder re-read the same files turn after turn (live job 50784df5, analysis 2026-10-16). A read
+        is shown as read – the whole file or the exact range, up to ``max_lines`` – not as a short head: the engine
+        refuses an identical re-read because its content is shown here (BUG-229)."""
+        out: list[tuple[str, int, int]] = []
         for r in sorted(history, key=lambda h: h.turn, reverse=True):
             if r.tool not in ("read_file", "read_range") or not r.ok:
                 continue
             try:
-                raw = json.loads(r.args_digest).get("path")
-            except (ValueError, AttributeError):
+                args = json.loads(r.args_digest)
+            except ValueError:
+                args = None
+            if isinstance(args, dict):
+                raw = args.get("path")
+            else:
                 m = _ARG_PATH_RE.search(r.args_digest)
-                raw = m.group(1) if m else None
+                raw, args = (m.group(1) if m else None), {}
             p = self._clean_path(raw, ws) if isinstance(raw, str) else None
-            if p and p not in out:
-                out.append(p)
+            if not p:
+                continue
+            start, end = 1, max_lines
+            if r.tool == "read_range":
+                start = _positive_int(args.get("start"), 1)
+                end = min(_positive_int(args.get("end"), start + max_lines - 1), start + max_lines - 1)
+            if (p, start, end) not in out:
+                out.append((p, start, end))
             if len(out) >= limit:
                 break
         return out

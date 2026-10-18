@@ -5,6 +5,7 @@ Format: [Keep a Changelog](https://keepachangelog.com/de/1.1.0/), Versionen nach
 ## [Unreleased]
 
 ### Behoben
+- **Lesesperre und Kontext (BUG-229):** Gelesene Dateien erscheinen im Kontext so, wie sie gelesen wurden (ganze Datei oder genauer Bereich, bis 400 Zeilen). Eine Wiederholung wird nur noch abgelehnt, wenn der Inhalt vollständig sichtbar war.
 - **Fortschrittsliste im Coder-Kontext (BUG-228):** Geschriebene neue Dateien sind markiert, noch fehlende werden aufgelistet.
 - **Deployment bei laufendem Job (BUG-227):** Ist der Sandbox-Worker nach einem Neustart noch nicht bereit, wartet der fortgesetzte Schritt mit Backoff, ohne einen Versuch zu verbrauchen.
 

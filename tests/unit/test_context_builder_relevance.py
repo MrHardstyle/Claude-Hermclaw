@@ -27,7 +27,7 @@ async def test_target_files_rank_first_then_context_hits() -> None:
     ]
     repo.files["other.py"] = "x = 1\ny = 2\nz = 3\n"
     builder, _, _ = make_builder(repo=repo, target_head_lines=60)
-    built = await builder.build(make_input())
+    built = await builder.build(make_input(history=[]))  # a full read of app.py would show all of it (BUG-229)
     code = section(built.messages[1].content, "RELEVANT CODE")
     order = [line.split(" lines ")[0][4:] for line in code.splitlines() if line.startswith("### ")]
     assert order[0] == "app.py"  # target head first
@@ -336,3 +336,23 @@ async def test_files_read_in_this_attempt_stay_in_the_context() -> None:
     code = section(built.messages[1].content, "RELEVANT CODE")
     assert "### helpers/format.py lines 1-2 [read]" in code and "return str(x)" in code
     assert "missing.py" not in code  # failed reads are not part of the working set
+
+
+async def test_reads_are_shown_as_read_not_as_a_short_head() -> None:
+    """Live G1 (BUG-229): a 624-line file read in full or by range came back only as its 160-line head, while the
+    engine refused the identical re-read because 'its content is shown above'; the coder circled on refused reads.
+    A read keeps its exact range (whole file up to max_snippet_lines)."""
+    from hermclaw.context_builder.history import TurnRecord
+
+    repo = default_repo()
+    repo.files["pkg/big.py"] = "".join(f"x{i} = {i}\n" for i in range(1, 301))
+    repo.files["pkg/huge.py"] = "".join(f"y{i} = {i}\n" for i in range(1, 701))
+    builder, _, _ = make_builder(repo=repo)
+    history = [
+        TurnRecord(1, "read_file", '{"path": "pkg/big.py"}', True, "300 lines"),
+        TurnRecord(2, "read_range", '{"end": 560, "path": "pkg/huge.py", "start": 520}', True, "41 lines"),
+    ]
+    built = await builder.build(make_input(history=history))
+    code = section(built.messages[1].content, "RELEVANT CODE")
+    assert "### pkg/big.py lines 1-300 [read]" in code and "x300 = 300" in code
+    assert "### pkg/huge.py lines 520-560 [read]" in code and "y540 = 540" in code and "y1 = 1\n" not in code

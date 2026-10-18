@@ -46,6 +46,13 @@ Noch keine.
 
 ## Behobene Bugs
 
+### BUG-229 – Wiederholungssperre lehnt Lesezugriffe ab, deren Inhalt der Kontext nur teilweise zeigt; Coder dreht sich, Schritt stagniert
+- Phase: Großauftrag G1 auf 0.1.0rc27 (S003, Plan v2) · Komponente: context_builder, tools · Severity: P2 · blockierend: nein (behoben) · Status: **behoben** (`tests/unit/test_context_builder_relevance.py::test_reads_are_shown_as_read_not_as_a_short_head`, `tests/integration/test_tools_engine_read_write.py::test_a_read_the_context_cannot_show_in_full_may_be_repeated`)
+- Reproduktion: Job `8e7c4b65-c9ff-46dd-a2a6-6898a2357bb6`, S003 v2: etwa 9 von 19 Turns „read refused: … its content is shown above“. Danach `blocked` mit `replan_reason: stagnation`, Verlauf nur aus `read_file`/`read_range`. `collector.py` hat 624 Zeilen (21 453 Bytes).
+- Ursache: Der Kontext-Builder zeigte gelesene Dateien nur als Kopf (160 Zeilen, Tests 120) und merkte sich nur den Pfad, nicht den gelesenen Bereich. Die Sperre aus BUG-179 lehnte die identische Wiederholung trotzdem mit „its content is shown above“ ab. Bei großen Dateien und bei Bereichen außerhalb des Kopfes stimmte das nicht.
+- Fix: Der Builder übernimmt jeden Lesezugriff des Versuchs als (Pfad, Start, Ende): die ganze Datei bzw. den genauen Bereich, höchstens `max_snippet_lines` (400). Die Engine sperrt eine Wiederholung nur noch, wenn der Inhalt vollständig sichtbar war: nicht abgeschnitten und höchstens `READ_VISIBLE_LINES` (400) Zeilen. Größere Lesezugriffe dürfen wiederholt werden.
+- Selbstprüfung: echter Schritt nach vorn. Behoben ist die Ursache: Die Sperre behauptete etwas Falsches, und der Kontext zeigt jetzt, was gelesen wurde. Die Sperre bleibt für kleine Dateien wirksam (BUG-179); es gibt keinen neuen Sonderfall.
+
 ### BUG-228 – Coder schreibt frisch angelegte Dateien identisch ein zweites Mal; ihm fehlt eine Fortschrittsliste
 - Phase: Großauftrag G1 auf 0.1.0rc26 (S003) · Komponente: context_builder · Severity: P3 · blockierend: nein (behoben) · Status: **behoben** (`tests/unit/test_context_builder_sections.py::test_scope_marks_written_new_files_and_lists_the_missing_ones`)
 - Reproduktion: Job `8e7c4b65-c9ff-46dd-a2a6-6898a2357bb6`, S003 (13 neue Dateien). Turn 2 „created config.toml“, Turn 3 dieselbe Datei erneut („already has this content; nothing written“). Turn 4/5 ebenso für `example_config.toml`. 2 von 14 Turns ohne Wirkung, bei einem 20-Turn-Budget.
