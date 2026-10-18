@@ -9,7 +9,10 @@
 2. **discovering**: fast-router triage (`fast-router`, Qwen3 8B, structured `TriageResult`: intent, needs_research, risk, summary;
    failures are non-fatal and reported as status event), repository inventory and goal-related context via `RepoContextProvider.inventory_summary/context_for`.
 3. **planning**: `Planner.create_plan(job_id, PlannerInput)` with inventory, known paths, retrieved snippets, test hints and
-   a research hint from triage. An existing plan (crash after planning) is reused – never planned twice.
+   a research hint from triage. An existing plan (crash after planning) is reused – never planned twice. Planner and
+   replanner calls hold the model lease of the planner profile (`ResourceManager.hold_model`, like coder and heavy
+   review): with the planner on another model of the exclusive group, a plan call waits for a running step's lease
+   instead of swapping the model under it (R-033, router-mode llama-server).
 4. Result `next_status=running`. Errors become job failures with stable codes (`PLANNER_INVALID_OUTPUT`, git/model codes).
 
 ## finalize(job_id) – committing → succeeded/failed
