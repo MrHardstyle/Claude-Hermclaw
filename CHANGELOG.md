@@ -4,6 +4,9 @@ Format: [Keep a Changelog](https://keepachangelog.com/de/1.1.0/), Versionen nach
 
 ## [Unreleased]
 
+### Behoben
+- **Fertige Arbeit am Turn-Limit (BUG-230):** Endet ein Coder-Versuch am Turn-Budget nach Dateiänderungen, prüfen Verifier und Review die Änderungen. Bestehen sie, ist der Schritt abgeschlossen, statt verworfen zu werden.
+
 ## [0.1.0rc28] – Release Candidate (2026-10-18)
 
 ### Behoben

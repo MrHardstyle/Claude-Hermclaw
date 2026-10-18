@@ -225,6 +225,46 @@ async def test_verifier_failure_triggers_correction_with_evidence(world: World, 
     assert st.correction_count == 1 and st.attempt_count == 2
 
 
+READ = act("read_file", path="src/module.py")
+
+
+async def test_work_finished_in_the_last_turn_is_verified_not_thrown_away(
+    world: World, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Live G1 (BUG-230): all 17 tests passed in turn 20 of 20, the coder had no turn left for complete_step, the step
+    was blocked and the job failed. When the turn budget runs out after changes, the verifier decides."""
+    monkeypatch.setattr(get_config().policies.coder, "max_turns", 2)
+    models = Models([_plan()], [EDIT, READ])
+    verifier, reviewer = ScriptedVerifier(world, [True]), ScriptedReviewer(["pass"])
+    jid = await _job(world)
+    jobs = await _run(world, _driver(world, models, tmp_path), [_handler(world, models, verifier, reviewer), ReviewHandler()], [jid])
+    assert jobs[jid].status == "succeeded", (jobs[jid].error_code, jobs[jid].error_message)
+    assert verifier.calls == 1 and reviewer.calls == 1 and _remote_value(world) == "VALUE = 2"
+
+
+async def test_failed_verification_after_the_turn_budget_corrects_with_both_notes(
+    world: World, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(get_config().policies.coder, "max_turns", 2)
+    models = Models([_plan()], [EDIT, READ, DONE])
+    verifier = ScriptedVerifier(world, [False, True])
+    jid = await _job(world)
+    jobs = await _run(world, _driver(world, models, tmp_path), [_handler(world, models, verifier, None), ReviewHandler()], [jid])
+    assert jobs[jid].status == "succeeded", (jobs[jid].error_code, jobs[jid].error_message)
+    correction_prompt = "\n".join(m.content for m in models.coder_prompts[2])
+    assert "without complete_step" in correction_prompt and "pattern 'VALUE = 3' not found" in correction_prompt
+
+
+async def test_turn_budget_without_changes_skips_the_verifier(world: World, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(get_config().policies.coder, "max_turns", 2)
+    models = Models([_plan()], [READ, act("list_files", path="."), EDIT, DONE])
+    verifier = ScriptedVerifier(world, [True])
+    jid = await _job(world)
+    jobs = await _run(world, _driver(world, models, tmp_path), [_handler(world, models, verifier, None), ReviewHandler()], [jid])
+    assert jobs[jid].status == "succeeded", (jobs[jid].error_code, jobs[jid].error_message)
+    assert verifier.calls == 1, "only the correction attempt that completed was verified"
+
+
 async def test_review_invariant_major_finding_forces_correction(world: World, tmp_path: Path) -> None:
     models = Models([_plan()], [EDIT, DONE, DONE])
     verifier, reviewer = ScriptedVerifier(world, [True, True]), ScriptedReviewer(["major_pass", "pass"])

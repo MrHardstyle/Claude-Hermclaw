@@ -13,7 +13,7 @@ from __future__ import annotations
 import contextlib
 import dataclasses
 import uuid
-from collections.abc import Awaitable, Callable
+from collections.abc import Awaitable, Callable, Sequence
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Protocol
@@ -265,7 +265,10 @@ class ImplementStepHandler:
         if row.correction_count >= limit or row.attempt_count >= row.max_attempts:
             return StepOutcome(
                 "blocked",
-                summary=f"correction budget exhausted ({row.correction_count}/{limit})",
+                summary=(
+                    f"correction budget exhausted ({row.correction_count}/{limit} corrections, "
+                    f"{row.attempt_count}/{row.max_attempts} attempts)"
+                ),
                 error_code=code,
                 error_message=DEFAULT_REDACTOR.text(detail)[:2000],
                 replan_reason="repeated_verifier_failure",
@@ -468,12 +471,17 @@ class ImplementStepHandler:
                     message="the previous attempt used all turns without complete_step; finish faster",
                 )
             ]
+            if any(r.mutated_paths for r in result.history):
+                # the verifier, not the coder's complete_step, decides whether the step is done: the coder may have
+                # finished the work in its last turn (live G1: 17 tests passed in turn 20 of 20, the job failed, BUG-230)
+                await self._status(ctx, f"Turn-Budget von {row.step_key} erschöpft – Verifier prüft die Änderungen")
+                return await self._verify_review_commit(run, result, budget_items=items)
             if result.last_failure:
                 items.append(CorrectionItem(source="runtime", label="last failure", message=result.last_failure[:1500]))
             return await self._correction(ctx, row, "budget", items, "TURN_BUDGET_EXHAUSTED", result.detail)
         return await self._verify_review_commit(run, result)
 
-    async def _verify_review_commit(self, run: _Run, result: CoderResult) -> StepOutcome:
+    async def _verify_review_commit(self, run: _Run, result: CoderResult, *, budget_items: Sequence[CorrectionItem] = ()) -> StepOutcome:
         ctx, row, step, handle = run.ctx, run.row, run.step, run.handle
         audit = await self.deps.scope_auditor.audit_status(
             ctx.step_id, await self.deps.git.reader().status(handle), attempt_id=ctx.attempt_id
@@ -500,10 +508,8 @@ class ImplementStepHandler:
                     replan_reason="repeated_verifier_failure",
                     replan_evidence={"source": "verifier", "acceptance_defect": True, "detail": DEFAULT_REDACTOR.text(detail)[:2000]},
                 )
-            items = CorrectionItem.from_verification(outcome.report)
-            return await self._correction(
-                ctx, row, "verifier", list(items), "VERIFIER_FAILED", outcome.report.summary or "verification failed"
-            )
+            items = [*budget_items, *CorrectionItem.from_verification(outcome.report)]
+            return await self._correction(ctx, row, "verifier", items, "VERIFIER_FAILED", outcome.report.summary or "verification failed")
         if self.deps.reviewer is not None and self.deps.reviewer.should_review(row.kind, True):
             await self._status(ctx, f"Heavy Review für {row.step_key}")
             async with self._model(ctx, "heavy", preemptible=False):

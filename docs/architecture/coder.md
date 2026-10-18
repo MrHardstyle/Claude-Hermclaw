@@ -27,6 +27,7 @@ Ports: `VerifierPort.verify(step, workspace, …) -> VerificationOutcome(report,
 ## Correction pipeline (P23)
 
 - failure sources: scope audit, verifier, review (`fix_required` or major/blocker), turn budget, stagnation→heavy review
+- turn budget exhausted after file changes: the verifier (and review) still run – a pass completes and commits the step, a failure becomes a correction carrying both the turn-budget note and the verifier evidence (BUG-230); without changes it is a plain correction
 - `_correction`: writes `step_attempts.correction_input = {pending, source, items[], detail}` with the real evidence,
   increments `steps.correction_count`, emits `correction.started`, returns a retryable failure with `retry_delay_seconds=0`
   → the scheduler starts attempt kind `correction` whose prompt contains the evidence (`CorrectionItem`s)
