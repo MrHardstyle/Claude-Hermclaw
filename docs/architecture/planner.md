@@ -103,6 +103,7 @@ whose capability uses the `coder` model role, otherwise `0`. `max_attempts = pol
 - `review` and `verify` steps must depend on the steps they check.
 - A research step must not depend on mutating steps: research runs before the work that needs it.
 - `research_needed` requires the `research` capability.
+- Prompt (not validated): a goal never names a third-party package the job does not ask for, not even as an option; where the standard library only reads a format, the goal asks for a small own writer tested by reading back (BUG-254).
 - Code and its tests share one step: a step that only writes tests for another step's code is rejected (U3, BUG-237), and so is a step with code of its own that carries test files named after another step's code (`tests/test_collector.py` for `collector.py`): those test paths move to the step that writes the code (BUG-250).
 - A workspace-mutating step whose title or goal names a component another step writes (the file stem, at least five characters and not generic: `collector` for `collector.py`, not `config`) must be ordered with that step by a dependency in either direction; completed steps of a replan are exempt (BUG-251).
 - Grounding (no invented paths):

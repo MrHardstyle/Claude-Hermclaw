@@ -421,7 +421,10 @@ def _base_rules(kind_capability: dict[str, str], capability_names: Sequence[str]
         "repository or the sandbox already has (e.g. its test runner) unless the job explicitly asks for a framework or "
         "library, or the repository already uses one. Every external dependency is an extra failure source: a "
         "repository without a dependency manifest gets third-party packages only when the job names them (the runtime "
-        "refuses to install others), so plan the standard-library solution unless the job asks for a package.",
+        "refuses to install others), so plan the standard-library solution unless the job asks for a package. A goal "
+        'never names a third-party package the job does not ask for, not even as an option ("tomllib or tomli_w"): '
+        "the coder tries it and is refused. Where the standard library only reads a format (Python's tomllib reads "
+        "TOML), the goal asks for a small own writer for the subset the program writes, tested by reading it back.",
         "When a step delivers a runnable program (command-line tool or script), its acceptance also gets one command "
         "criterion that runs it end to end the way a user would – the documented command with the sample data or "
         "arguments the step creates – so its real output is checked, not only unit tests. Use stdout_pattern only for a "

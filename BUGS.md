@@ -46,6 +46,16 @@ Noch keine.
 
 ## Behobene Bugs
 
+### BUG-254 – Das Schrittziel bietet ein nicht angefordertes Drittpaket an („tomllib/tomli_w“); der Coder versucht es und blockiert
+- Phase: G1 auf rc40 (Job `3d90ec7b…`, S002 Versuch 3) · Komponente: planner (prompt) · Severity: P1 · blockierend: nein (behoben) · Status: **behoben** (`tests/unit/test_planner_prompt.py::test_research_is_for_external_facts_not_the_repository_itself`, Nadel „never names a third-party package the job does not ask for“)
+- Reproduktion:
+  - Ziel von S002: „Verwende configparser oder tomllib/tomli_w für TOML.“
+  - Der Coder importiert `tomli_w`, legt `requirements.txt` an, und `install_dependencies` wird verweigert („Solve it with the standard library … remove the manifest and the imports“).
+  - Danach `block_step` (`scope_unavailable`) nach 15 Turns. S002 ist blockiert und braucht einen Replan.
+- Ursache: Die Standardbibliotheks-Regel des Planners verbot nicht, ein Drittpaket als *Option* zu nennen. Für TOML kennt Python nur das Lesen (`tomllib`), also bot der Planner ein Schreibpaket an. Der Coder folgte dem Ziel statt der Laufzeitregel.
+- Fix: Die Planner-Regel verlangt: Ein Ziel nennt nie ein Drittpaket, das der Auftrag nicht verlangt, auch nicht als Option. Liest die Standardbibliothek ein Format nur, verlangt das Ziel einen kleinen eigenen Writer für die geschriebene Teilmenge, geprüft durch Zurücklesen (passt zur Coder-Regel aus BUG-245).
+- Selbstprüfung: Prompt-Regel, keine deterministische Prüfung. Paketnamen im Freitext lassen sich ohne Paketliste nicht verlässlich erkennen. Die Laufzeit verweigert die Installation weiterhin deterministisch. Beobachten, ob Planner-Ziele weiter Pakete anbieten; dann eine Validierung gegen die vom Auftrag genannten Pakete prüfen.
+
 ### BUG-253 – Ein Schreibzugriff ohne Änderung gilt als Erfolg; der Coder schreibt dieselbe Datei viermal und löscht dabei LATEST FAILURE
 - Phase: G1 auf rc39 (Job `3d90ec7b…`, S004 Versuche 2/3) · Komponente: tools (engine) · Severity: P2 · blockierend: nein (behoben) · Status: **behoben** (`tests/integration/test_tools_engine_read_write.py::test_write_file_create_modify_scope_and_events`)
 - Reproduktion: Nach Review-Befunden schreibt der Coder `start_homelab_widget.ps1` viermal hintereinander mit identischem Inhalt. Antwort jeweils `ok`: „already has this content; nothing written“. Die Stagnationserkennung bricht ab; S004 endet `blocked` (STAGNATION).

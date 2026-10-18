@@ -203,6 +203,8 @@ def test_research_is_for_external_facts_not_the_repository_itself() -> None:
         assert "Choose the simplest solution that fully meets the job" in system and "standard library" in system
         assert "never split code and its tests into separate steps" in system
         assert "gets third-party packages only when the job names them" in system
+        # BUG-254 (G1 on rc40): the goal offered "tomllib/tomli_w"; the coder tried tomli_w, was refused and blocked
+        assert "never names a third-party package the job does not ask for" in system and "small own writer" in system
         # rc23 battery quality review: new programs/options/env vars were never documented (BUG-218)
         assert "documents their use there" in system and "test, verify and review only run checks" in system
         assert "runs it end to end the way a user would" in system  # BUG-219

@@ -5,6 +5,7 @@ Format: [Keep a Changelog](https://keepachangelog.com/de/1.1.0/), Versionen nach
 ## [Unreleased]
 
 ### Behoben
+- **Keine angebotenen Drittpakete (BUG-254):** Planner-Ziele nennen keine nicht angeforderten Drittpakete mehr, auch nicht als Option; für nur lesbare Formate verlangen sie einen kleinen eigenen Writer.
 - **Wirkungslose Schreibzugriffe (BUG-253):** Ein `write_file`, der die Datei nicht ändert, wird als Wiederholung verweigert, statt als Erfolg die letzte Fehlermeldung zu löschen.
 
 ## [0.1.0rc40] – Release Candidate (2026-10-18)
