@@ -15,6 +15,7 @@ import dataclasses
 import uuid
 from collections.abc import Awaitable, Callable, Sequence
 from dataclasses import dataclass, field
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Protocol
 
@@ -247,7 +248,8 @@ class ImplementStepHandler:
 
     async def _dependency_files(self, step_id: uuid.UUID, limit: int = 12) -> list[str]:
         """Files the completed steps ``step_id`` depends on (transitively, nearest first) committed – the interfaces
-        this step builds on (BUG-242)."""
+        this step builds on (BUG-242) – then those of the job's other completed steps, newest first: they share the
+        workspace, and the planner left the frontend step without a dependency on the collector step (BUG-250)."""
         async with self.sm() as s:
             job_id = (await s.execute(select(Step.job_id).where(Step.id == step_id))).scalar_one_or_none()
             if job_id is None:
@@ -273,6 +275,16 @@ class ImplementStepHandler:
                     out.extend(f for f in files if isinstance(f, str) and f not in out)
                 nxt.extend(deps.get(sid, []))
             frontier = nxt
+        others = sorted(
+            (r for r in rows if r.id not in seen and r.status == "completed"),
+            key=lambda r: r.finished_at or datetime.min.replace(tzinfo=UTC),
+            reverse=True,
+        )
+        for row in others:
+            if len(out) >= limit:
+                break
+            files = (row.result or {}).get("files") or []
+            out.extend(f for f in files if isinstance(f, str) and f not in out)
         return out[:limit]
 
     async def _workspace(self, job_id: uuid.UUID) -> tuple[Any, WorkspaceHandle] | None:

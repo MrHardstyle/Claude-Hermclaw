@@ -543,6 +543,19 @@ def test_tests_for_new_code_belong_in_the_same_step() -> None:
     assert any("S005 only writes tests for the code of step S001" in e for e in _errors(plan("goal", [code, apart])))
     unrelated = step("S006", "implement", "coding", "Test the parser.", allowed_new_paths=["tests/test_parser.py"])
     assert not any("S006 only writes tests" in e for e in _errors(plan("goal", [code, unrelated])))
+    # live G1 on rc39 (BUG-250): the frontend step also wrote tests/test_service.py for the other step's code
+    frontend = step(
+        "S007",
+        "implement",
+        "coding",
+        "Create the frontend and the service tests.",
+        allowed_new_paths=["web/frontend.js", "tests/test_service.py", "tests/test_frontend.py", "tests/data/x.json"],
+    )
+    errors = _errors(plan("goal", [code, frontend]))
+    assert any("S007 writes tests for code of step S001 (tests/test_service.py)" in e and "move these test paths" in e for e in errors)
+    assert not any("test_frontend" in e for e in errors), "tests of the step's own code stay"
+    own = step("S007", "implement", "coding", "Create the frontend.", allowed_new_paths=["web/frontend.js", "tests/test_frontend.py"])
+    assert not any("writes tests for code" in e for e in _errors(plan("goal", [code, own])))
 
 
 def test_a_check_only_step_cannot_create_files() -> None:

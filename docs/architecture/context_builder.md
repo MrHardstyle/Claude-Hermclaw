@@ -103,7 +103,7 @@ Candidates (score → rank):
 |---|---|---|
 | file:line references in the latest failure / correction evidence (`File "…", line N`, `path:N`, `path::test`), region ±`failure_region_lines` | 3.0 | code or tests |
 | literal scope target files: head (`target_head_lines`, tests `test_head_lines`) | 2.0 | code or tests |
-| files the completed dependency steps committed (`StepBrief.dependency_files`, transitive, nearest first; origin `dependency`; also named in STEP GOAL, BUG-242) | 2.0 | code or tests |
+| files the completed dependency steps committed (`StepBrief.dependency_files`, transitive, nearest first, then the job's other completed steps newest first; origin `dependency`; also named in STEP GOAL, BUG-242/BUG-250) | 2.0 | code or tests |
 | test files named in acceptance `test`/`command` evidence: head | 2.0 | tests |
 | `search(stem)` for each literal non-test target (`__init__`/`index` → package name) and code-like identifiers of the goal (`snake_case`, `camelCase`, `name(`), test paths only | 1.0 + normalised score | tests |
 | `context_for(title + goal + first error line)` | normalised score (+1.0 inside a target file) | code or tests |

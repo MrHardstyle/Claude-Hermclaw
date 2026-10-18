@@ -46,6 +46,20 @@ Noch keine.
 
 ## Behobene Bugs
 
+### BUG-250 – Der Frontend-Schritt schreibt die Tests des Collectors und hängt nicht von dessen Schritt ab
+- Phase: G1 auf rc39 (Job `3d90ec7b…`, Plan v1) · Komponente: planner (validation), coder (handler) · Severity: P1 · blockierend: nein (behoben) · Status: **behoben** (`tests/unit/test_planner_validation.py::test_tests_for_new_code_belong_in_the_same_step`, `tests/integration/test_coder_handler.py::test_dependency_files_fall_back_to_the_jobs_other_completed_steps`)
+- Reproduktion:
+  - S002 schreibt `collector.py` und `config*.toml`.
+  - S003 schreibt `frontend.html/css/js` *und* `tests/test_collector.py` samt Beispieldaten, hängt aber nur von der Recherche S001 ab.
+  - Keine Schnittstellendatei, obwohl die Regel aus BUG-234 sie verlangt.
+- Ursache:
+  1. Die Prüfung aus BUG-237 erfasste nur Schritte, die *ausschließlich* Tests schreiben. Ein Schritt mit eigenem Code und fremden Tests lief durch.
+  2. BUG-242 zeigte nur die Dateien von Abhängigkeiten. Fehlt die Abhängigkeit, sieht der Frontend-Schritt den Collector nicht, obwohl dessen Dateien im gemeinsamen Arbeitsbaum liegen.
+- Fix:
+  - Die Validierung lehnt Testdateien ab, die nach dem Code eines anderen Schritts benannt sind (`tests/test_collector.py` ↔ `collector.py`), auch in Schritten mit eigenem Code. Diese Testpfade gehören in den Schritt, der den Code schreibt.
+  - `dependency_files` nennt nach den Abhängigkeiten auch die Dateien der übrigen abgeschlossenen Schritte des Jobs, neueste zuerst. Ersetzte Schritte zählen nicht, die Obergrenze bleibt 12.
+- Selbstprüfung: echter Schritt nach vorn, aber Erweiterung eigener Fixes (BUG-237, BUG-242). Beide griffen zu eng, und der Planner befolgt die Schnittstellenregel nicht verlässlich. Deshalb sichert jetzt die Runtime ab, statt einer weiteren Prompt-Regel. Nicht mitten im Lauf deployt: Der Lauf `3d90ec7b` soll rc39 belegen.
+
 ### BUG-249 – Nach einem Checkpoint verliert jeder weitere Versuch die Korrektur-Belege und setzt einen veralteten Stand fort
 - Phase: G1 auf rc38 (Job `8f394b63…`, S007 Versuche 3–5; ebenso S003 nach dem Deploy) · Komponente: scheduler, coder (handler) · Severity: P1 · blockierend: ja (behoben) · Status: **behoben** (`tests/integration/test_scheduler.py::test_model_outage_during_a_step_does_not_use_up_its_attempts`, Fälle h5/h6)
 - Reproduktion:

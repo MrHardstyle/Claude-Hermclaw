@@ -4,6 +4,9 @@ Format: [Keep a Changelog](https://keepachangelog.com/de/1.1.0/), Versionen nach
 
 ## [Unreleased]
 
+### Behoben
+- **Fremde Tests und Nachbar-Dateien (BUG-250):** Die Plan-Validierung lehnt Testdateien für den Code eines anderen Schritts auch in Schritten mit eigenem Code ab; ein Schritt sieht neben den Dateien seiner Abhängigkeiten auch die der übrigen abgeschlossenen Schritte des Jobs.
+
 ## [0.1.0rc39] – Release Candidate (2026-10-18)
 
 ### Behoben

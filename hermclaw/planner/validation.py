@@ -501,10 +501,27 @@ def _split_test_errors(plan: PlanContract, new_steps: Sequence[PlanStep], ctx: V
             continue
         paths = _step_paths(step, ctx)
         tests = [p for p in paths if TEST_PATH_RE.search(p)]
-        # a README among the hints of a tests-only step is context, not code (rc22 battery X1)
-        if not tests or any(not TEST_PATH_RE.search(p) and not DOC_PATH_RE.search(p) for p in paths):
+        if not tests:
             continue
         stems = {t for t in map(_tested_stem, tests) if t}
+        own_code = [p for p in paths if not TEST_PATH_RE.search(p) and not DOC_PATH_RE.search(p)]
+        if own_code:
+            # a step with code of its own may still carry tests named after ANOTHER step's code: the frontend step
+            # wrote tests/test_collector.py without depending on the collector step (live G1 on rc39, BUG-250)
+            foreign = stems - {_code_stem(p) for p in own_code}
+            for other in plan.steps:
+                if other.id == step.id or other.id in preserved or other.kind.value not in WORKSPACE_MUTATING_KINDS:
+                    continue
+                named = sorted(foreign & {_code_stem(p) for p in _step_paths(other, ctx) if not TEST_PATH_RE.search(p)})
+                if named:
+                    moved = [t for t in tests if _tested_stem(t) in named]
+                    errors.append(
+                        f"step {step.id} writes tests for code of step {other.id} ({', '.join(moved)}): move these test "
+                        f"paths to step {other.id} (its allowed_new_paths/repo_hints and test acceptance), which writes "
+                        "that code and can run them"
+                    )
+            continue
+        # a README among the hints of a tests-only step is context, not code (rc22 battery X1)
         for other in plan.steps:
             if other.id == step.id or other.id in preserved or other.kind.value not in WORKSPACE_MUTATING_KINDS:
                 continue  # tests for code a completed step already delivered are a step of their own

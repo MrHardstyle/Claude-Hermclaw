@@ -553,3 +553,41 @@ async def test_failing_verification_step_blocks_with_evidence_for_the_replanner(
     assert s2.status == "blocked" and s2.error_code == "VERIFICATION_STEP_FAILED"
     checks = [f["check"] for f in s2.result["replan_evidence"]["failures"]]
     assert any(c.startswith("presence") for c in checks) and any(c.startswith("absence") for c in checks)
+
+
+async def test_dependency_files_fall_back_to_the_jobs_other_completed_steps(world: World) -> None:
+    """BUG-242/BUG-250: dependencies first (transitive, nearest first), then the job's other completed steps newest first –
+    the planner left the frontend step without a dependency on the collector step it reads from."""
+    from datetime import UTC, datetime, timedelta
+
+    from hermclaw.persistence.models import StepDependency
+
+    jid = await _job(world)
+    now = datetime.now(UTC)
+    async with world.sessionmaker() as s:
+
+        def mk(key: str, status: str, files: list[str], minutes: int = 0, superseded: bool = False) -> Step:
+            st = Step(job_id=jid, step_key=key, title=key, kind="implement", capability="coding", goal="g", status=status)
+            st.result, st.finished_at, st.superseded = {"files": files}, now - timedelta(minutes=minutes), superseded
+            s.add(st)
+            return st
+
+        research = mk("S001", "completed", [], 50)
+        base = mk("S002", "completed", ["lib/base.py"], 40)
+        collector = mk("S003", "completed", ["collector.py", "config.example.toml"], 10)
+        old = mk("S004", "completed", ["old.py"], 30, superseded=True)
+        scripts = mk("S005", "completed", ["start.ps1"], 20)
+        pending = mk("S006", "pending", ["never.py"])
+        frontend = mk("S007", "running", [])
+        await s.flush()
+        s.add_all(
+            [
+                StepDependency(step_id=frontend.id, depends_on_step_id=base.id),
+                StepDependency(step_id=base.id, depends_on_step_id=research.id),
+            ]
+        )
+        await s.commit()
+        assert old.id and pending.id and collector.id and scripts.id
+    handler = _handler(world, Models([], []), ScriptedVerifier(world, []), None)
+    files = await handler._dependency_files(frontend.id)
+    assert files == ["lib/base.py", "collector.py", "config.example.toml", "start.ps1"]
