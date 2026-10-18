@@ -4,6 +4,8 @@ Format: [Keep a Changelog](https://keepachangelog.com/de/1.1.0/), Versionen nach
 
 ## [Unreleased]
 
+## [0.1.0rc51] – Release Candidate (2026-10-18)
+
 ### Behoben
 - **Blättern ist keine Schleife (BUG-265):** Die Stagnationserkennung unterscheidet die Seiten eines seitenweisen `read_file`; nur dieselbe Seite erneut zählt als Wiederholung.
 
