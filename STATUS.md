@@ -130,7 +130,7 @@ Lint, mypy, ShellCheck, ansible-lint (production) sauber.
 
 ## Bugs
 - 237 gefunden, **237 behoben** – `BUGS.md`. Live-Abnahme: BUG-143 bis BUG-237.
-  BUG-143–237 sind produktiv (0.1.0rc33, deployt 2026-10-18 05:15; rc29 04:23; rc28 03:48 mit laufendem G1, Worker-Ausfall beim Fortsetzen ohne Versuchsverlust (BUG-227 live bestätigt); rc26 02:55, `coder-main.max_output_tokens` 8192 im Inventory-Override; rc25 deployt 01:50 mit laufendem G1, Schritt per Checkpoint unterbrochen und fortgesetzt; rc24 deployt 2026-10-18 01:10; rc20 deployt 2026-10-17 20:40, Scheduler-Neustart mit laufendem Job live geprüft: Job lief nach dem Deployment weiter).
+  BUG-143–237 sind produktiv (0.1.0rc33, deployt 2026-10-18 05:06; rc29 04:23; rc28 03:48 mit laufendem G1, Worker-Ausfall beim Fortsetzen ohne Versuchsverlust (BUG-227 live bestätigt); rc26 02:55, `coder-main.max_output_tokens` 8192 im Inventory-Override; rc25 deployt 01:50 mit laufendem G1, Schritt per Checkpoint unterbrochen und fortgesetzt; rc24 deployt 2026-10-18 01:10; rc20 deployt 2026-10-17 20:40, Scheduler-Neustart mit laufendem Job live geprüft: Job lief nach dem Deployment weiter).
 - Externe Blocker: BLOCKER-002 (Tag-Push)
 
 ## Letzte Testresultate (2026-10-15, Build-Host)
