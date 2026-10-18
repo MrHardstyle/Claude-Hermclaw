@@ -46,6 +46,13 @@ Noch keine.
 
 ## Behobene Bugs
 
+### BUG-232 – Ein früher Modell- oder Worker-Ausfall verbraucht trotz BUG-197/227 einen Versuch des Schritts
+- Phase: G1 auf rc28/rc29 · Komponente: scheduler · Severity: P2 · blockierend: nein (behoben) · Status: **behoben** (`tests/integration/test_scheduler.py::test_model_outage_during_a_step_does_not_use_up_its_attempts`, erweitert)
+- Reproduktion: Job `8e7c4b65…`, S003. Versuch 2 war `WORKER_UNREACHABLE` (Deployment), danach blockierte der Schritt mit „correction budget exhausted (1/2)“ bei 3/3 Versuchen. Im Folgelauf `364a9c3c…` haben S003–S006 nach dem rc30-Deployment je einen `WORKER_UNREACHABLE`-Versuch und weiterhin `max_attempts = 3`.
+- Ursache: Nach einem Ausfall setzte der Scheduler `max_attempts = max(max_attempts, attempt_count + 1)`. Das garantiert nur einen weiteren Versuch, gibt den verbrauchten aber nicht zurück. Frei war ein Ausfall nur beim letzten Versuch.
+- Fix: `max_attempts += 1` je Ausfallversuch. Begrenzt bleibt das durch `model_outage_max_wait_seconds`. Der Regressionstest hat erst einen Ausfall, dann zwei Fehlschläge, dann Erfolg: mit dem Fix bestanden, ohne ihn gescheitert.
+- Selbstprüfung: echter Schritt nach vorn. Die Absicht von BUG-197 („das Budget wächst um eins“) war falsch umgesetzt; der Fix ändert eine Zeile, ohne neuen Mechanismus.
+
 ### BUG-231 – Recherche-Ergebnisse erreichen den Coder nur verstümmelt: drei Kürzungen hintereinander schneiden die Fakten ab
 - Phase: Qualitätsprüfung der G1-Lieferung (rc26–rc28) · Komponente: research, context_builder · Severity: P1 · blockierend: nein (behoben) · Status: **behoben** (`tests/unit/test_context_builder_sections.py::test_research_findings_reach_the_coder_with_their_facts`)
 - Reproduktion: Job `8e7c4b65-c9ff-46dd-a2a6-6898a2357bb6`. Die Recherchen S001/S002 fanden das Header-Format `PVEAPIToken=USER@REALM!TOKENID=UUID`, den Header `x-api-key` und die Root-Queries `info`/`array`. Trotzdem schrieb der Coder `Authorization: Bearer`, einen Token-Header ohne Secret und erfundene GraphQL-Felder. Laut Kontextbericht hatte CONSTRAINTS mit beiden Recherchen nur 996 Zeichen.

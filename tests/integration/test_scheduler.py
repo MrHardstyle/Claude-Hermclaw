@@ -279,6 +279,14 @@ async def test_model_outage_during_a_step_does_not_use_up_its_attempts(sessionma
             await s.execute(select(StepAttempt.error_code).where(StepAttempt.step_id == st.id).order_by(StepAttempt.attempt_no))
         ).scalars()
         assert list(codes)[:3] == ["FLAKY", "MODEL_UNAVAILABLE", "WORKER_UNREACHABLE"]
+    # BUG-232: an early outage must not count either – the step keeps all three real attempts
+    h3 = FakeHandler({"test"}, script={"S1": ["worker_down", "fail_retry", "fail_retry", "completed"]})
+    jid3 = await _new_job(sm)
+    driver.plans[jid3] = [StepSpec("S1", max_attempts=3)]
+    sched3 = Scheduler(sm, get_config(), [h3], driver, settings=_settings(model_outage_retry_seconds=(0,)))
+    jobs3 = await _run_until(sched3, sm, [jid3])
+    assert jobs3[jid3].status == "succeeded" and len(h3.calls) == 4
+    assert (await _steps(sm, jid3))["S1"].max_attempts == 4
     # an outage longer than model_outage_max_wait_seconds is a failure again
     h2 = FakeHandler({"test"}, script={"S1": ["model_down"]})
     jid2 = await _new_job(sm)

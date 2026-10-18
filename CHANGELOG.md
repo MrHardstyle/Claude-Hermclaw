@@ -4,6 +4,9 @@ Format: [Keep a Changelog](https://keepachangelog.com/de/1.1.0/), Versionen nach
 
 ## [Unreleased]
 
+### Behoben
+- **Ausfälle kosten keinen Versuch (BUG-232):** Jeder Modell- oder Worker-Ausfallversuch erhöht das Versuchsbudget des Schritts um eins, auch wenn der Ausfall früh im Schritt passiert.
+
 ## [0.1.0rc30] – Release Candidate (2026-10-18)
 
 ### Behoben

@@ -896,8 +896,10 @@ class Scheduler:
                 outage_delay = self._step_outage_delay(st.id, out.error_code) if out.retryable else None
                 if outage_delay is not None:
                     # BUG-197: the model host or the GPU lease was unavailable – the attempt did no work, so it does not
-                    # use up the step's budget (the attempt number stays unique, the budget grows by one)
-                    st.max_attempts = max(st.max_attempts, st.attempt_count + 1)
+                    # use up the step's budget (the attempt number stays unique, the budget grows by one). Growing it
+                    # only to attempt_count + 1 kept an early outage counted: G1's S003 was blocked at 3/3 attempts
+                    # after one of them had been a worker outage (BUG-232)
+                    st.max_attempts += 1
                     st.not_before = _now() + timedelta(seconds=outage_delay)
                     await emit_status(
                         s,
