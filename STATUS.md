@@ -1,7 +1,7 @@
 # STATUS
 
-## Aktueller Zustand (2026-10-17)
-- Projekt: Hermclaw Next · Branch: `claude/hermclaw-next-build` · Version `0.1.0rc24`; **deployt: 0.1.0rc24** auf .222–.225 (Deployment durch Claude, Become-Passwort per systemd-creds)
+## Aktueller Zustand (2026-10-18)
+- Projekt: Hermclaw Next · Branch: `claude/hermclaw-next-build` · Version `0.1.0rc26`; **deployt: 0.1.0rc26** auf .222–.225 (Deployment durch Claude, Become-Passwort per systemd-creds)
 - Modell-Runtime seit rc16 (D-015): alle Chat-Rollen auf `qwen3.6:35b` in einem residenten `llama-server` auf .224 (`--n-cpu-moe 30`, 32K); Embeddings auf Ollama.
 - **Live-Abnahme nach Kapitel 12 durchgeführt** (2026-10-16): 396 Schritte erledigt, 34 mit offenem Live-Teil (`[~]`), 0 offen.
 - 0.1.0rc2 deployt (vom Betreiber, alle Hosts inkl. .224): doctor 19 ok, models 6/6 (Fallback, BUG-150 wirksam), workers 3/3.
@@ -130,7 +130,7 @@ Lint, mypy, ShellCheck, ansible-lint (production) sauber.
 
 ## Bugs
 - 225 gefunden, **225 behoben** – `BUGS.md`. Live-Abnahme: BUG-143 bis BUG-225.
-  BUG-143–220 sind produktiv (0.1.0rc24, deployt 2026-10-18 01:10; rc20 deployt 2026-10-17 20:40, Scheduler-Neustart mit laufendem Job live geprüft: Job lief nach dem Deployment weiter).
+  BUG-143–225 sind produktiv (0.1.0rc26, deployt 2026-10-18 02:55, `coder-main.max_output_tokens` 8192 im Inventory-Override; rc25 deployt 01:50 mit laufendem G1, Schritt per Checkpoint unterbrochen und fortgesetzt; rc24 deployt 2026-10-18 01:10; rc20 deployt 2026-10-17 20:40, Scheduler-Neustart mit laufendem Job live geprüft: Job lief nach dem Deployment weiter).
 - Externe Blocker: BLOCKER-002 (Tag-Push)
 
 ## Letzte Testresultate (2026-10-15, Build-Host)
@@ -177,6 +177,15 @@ bestanden; ansible-lint (production) sauber. `test_deploy_converge` ist angepass
 8. Erweiterte Batterie auf rc23 (`20261017T225223Z-jobs.md`): X1/X2/X4 PASS (12,3/5,6/25,3 min), X3 und X5 erfolgreich,
    aber Wiederholungs-Metrik (BUG-214) bzw. ohne MR (BUG-220). Die Qualitätsprüfung der gelieferten Dateien ergab
    BUG-215–219 (Lint, Randfälle im Review, README, Review gegen Werkzeug-Fakten, End-to-End-Aufruf von Programmen).
+9. Großauftrag G1 (Windows-11-Widget für Proxmox VE und Unraid, `config/acceptance-jobs-grand.example.yaml`) auf rc24/rc25
+   (`20261018T001631Z-jobs.md`): nach 78 min abgebrochen. Gefunden:
+   - doppelte Recherchen (BUG-221);
+   - deutsche Recherchen verloren ihre Belege (BUG-222);
+   - große Dateien am Output-Limit abgeschnitten und sinnlos repariert (BUG-223);
+   - der Replan verwarf Frontend, Tests und README still (BUG-224);
+   - die Redaction maskierte Code und Platzhalter, sodass der Coder den Marker kopierte (BUG-225).
+
+   Alle in rc25/rc26 behoben. Neustart von G1 auf rc26.
 3. 0.1.0rc18 ausrollen, J1–J6 zweimal in Folge bestehen, dann die erweiterte Batterie X1–X5
    (`config/acceptance-jobs-extended.example.yaml`); danach Abbruch, parallele Jobs und Worker-Neustart prüfen.
 4. Wake-on-LAN einrichten (MACs, BIOS, Kapitel 13.1), danach `--suite wol --full-wol` und erst dann den Leerlauf-Suspend einschalten.
