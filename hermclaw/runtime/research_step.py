@@ -17,6 +17,7 @@ from __future__ import annotations
 
 import re
 import uuid
+from collections.abc import Mapping, Sequence
 from typing import Any, Protocol
 
 from sqlalchemy import select
@@ -26,6 +27,7 @@ from hermclaw.core.config import HermclawConfig
 from hermclaw.core.errors import ValidationFailed
 from hermclaw.persistence.models import Step
 from hermclaw.research.engine import ResearchOutcome, format_for_worker
+from hermclaw.research.errors import SearchUnavailable
 from hermclaw.research.text import clip
 from hermclaw.runtime.transitions import emit_status
 from hermclaw.scheduler.handlers import StepOutcome, StepRunContext
@@ -92,6 +94,16 @@ class ResearchStepHandler:
             "claims": len(contract.claims),
             "contradictions": len(contract.contradictions),
         }
+        if contract.status == "failed" and not contract.sources and _search_unavailable(out.errors):
+            # every search failed because the provider or all its engines were down: an outage the scheduler retries
+            # with backoff without using up the step's attempts (BUG-238), not "no sources exist"
+            return StepOutcome(
+                "failed",
+                error_code=SearchUnavailable.code,
+                error_message=f"search provider unavailable: {clip(question, 200)}",
+                result=result,
+                retryable=True,
+            )
         if contract.status == "failed":
             errors = [{k: e.get(k) for k in ("stage", "code", "message")} for e in out.errors][:10]
             message = f"research found no usable sources for: {clip(question, 300)}"
@@ -109,6 +121,12 @@ class ResearchStepHandler:
         result["synthesis"] = clip(contract.synthesis, 4000)
         summary = f"Research {contract.status}: {len(contract.sources)} Quellen, {len(contract.claims)} Claims"
         return StepOutcome("completed", summary=summary, result=result)
+
+
+def _search_unavailable(errors: Sequence[Mapping[str, Any]]) -> bool:
+    """Every recorded search error is SEARCH_UNAVAILABLE (and there was at least one): no query got through."""
+    search = [e for e in errors if e.get("stage") == "search"]
+    return bool(search) and all(e.get("code") == SearchUnavailable.code for e in search)
 
 
 __all__ = ["DEEP_RISKS", "ResearchRunner", "ResearchStepHandler", "research_question", "wants_deep"]

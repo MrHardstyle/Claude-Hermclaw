@@ -15,7 +15,7 @@ from typing import Literal
 from hermclaw.contracts.research import QueryPlan
 from hermclaw.core.logging import get_logger
 from hermclaw.models.protocols import CallContext, ChatMessage, ChatModel
-from hermclaw.research.text import clip, is_numeric_token, key_terms, normalize_ws
+from hermclaw.research.text import clip, is_numeric_token, key_terms, normalize_ws, term_parts
 
 log = get_logger(__name__)
 
@@ -41,7 +41,7 @@ class PlannedQueries:
 
 def sanitize_queries(raw: Iterable[str], *, question: str, max_queries: int) -> tuple[list[str], int]:
     """Clean model queries; returns (queries, number dropped)."""
-    q_terms = set(key_terms(question))
+    q_terms = term_parts(key_terms(question))
     out: list[str] = []
     seen: set[str] = set()
     dropped = 0
@@ -52,7 +52,7 @@ def sanitize_queries(raw: Iterable[str], *, question: str, max_queries: int) -> 
         query = clip(query, MAX_QUERY_CHARS)
         terms = set(key_terms(query))
         key = " ".join(sorted(terms))
-        if len(query) < 3 or not terms or key in seen or (q_terms and not terms & q_terms):
+        if len(query) < 3 or not terms or key in seen or (q_terms and not term_parts(terms) & q_terms):
             dropped += 1
             continue
         seen.add(key)

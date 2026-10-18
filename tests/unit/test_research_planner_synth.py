@@ -200,3 +200,15 @@ async def test_no_claims_never_calls_the_model() -> None:
     chat = ScriptedChat()
     out = await Synthesizer(chat, fast=FAST, deep=DEEP).synthesize(QUESTION, [], ctx=SCTX)
     assert out.mode == "fallback" and chat.calls == []
+
+
+def test_english_queries_for_a_german_compound_question_are_kept() -> None:
+    """Live G1 (BUG-239): 'Welche Proxmox-REST-API-Endpunkte liefern GPU-Auslastung …' kept its compounds as single
+    terms, every English model query looked off-topic, and the raw-question fallback found podcasts and Wiktionary."""
+    question = "Welche Proxmox-REST-API-Endpunkte liefern GPU-Auslastung und Temperaturen, und unter welchen Voraussetzungen?"
+    queries, dropped = sanitize_queries(
+        ["Proxmox VE API GPU temperature sensors", "pveproxy hardware monitoring endpoint", "best pizza recipe"],
+        question=question,
+        max_queries=4,
+    )
+    assert queries == ["Proxmox VE API GPU temperature sensors"] and dropped == 2

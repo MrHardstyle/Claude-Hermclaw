@@ -235,7 +235,7 @@ A render failure is not an error: `RenderingFetcher` keeps the HTTP result. When
 | Code | Where | Effect |
 |---|---|---|
 | `SEARCH_JSON_DISABLED` | SearXNG answers 403 or HTML instead of JSON | Logged for the first query only; no further queries (configuration error). Fix: add `json` to `search.formats` in SearXNG `settings.yml`. |
-| `SEARCH_UNAVAILABLE` / `SEARCH_FAILED` | timeout, unreachable, 429, other HTTP or JSON errors | The query is recorded as failed and the next query runs; run status `partial`, or `failed` without sources. |
+| `SEARCH_UNAVAILABLE` / `SEARCH_FAILED` | timeout, unreachable, 429, other HTTP or JSON errors; zero results while SearXNG lists `unresponsive_engines` (rate limit, CAPTCHA – BUG-238) | The query is recorded as failed and the next query runs; run status `partial`, or `failed` without sources. When every query failed with `SEARCH_UNAVAILABLE`, the research step reports `SEARCH_UNAVAILABLE`, a scheduler outage code: retried with backoff without using up attempts. |
 | `SEARCH_DISABLED` | `search_provider: none` | The run fails fast. |
 | `FETCH_BLOCKED` | SSRF guard: scheme, credentials, private or rebinding address, redirect into a private network | The source is stored with `status=failed`; the run continues. |
 | `FETCH_TIMEOUT` / `FETCH_TOO_LARGE` / `FETCH_UNSUPPORTED_CONTENT` / `FETCH_HTTP_ERROR` / `FETCH_TOO_MANY_REDIRECTS` / `FETCH_FAILED` | fetch | The source is stored with `status=failed`; the run continues. An unexpected exception from a custom fetcher is isolated the same way. |

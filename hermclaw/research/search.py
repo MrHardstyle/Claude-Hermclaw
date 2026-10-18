@@ -246,7 +246,19 @@ class SearxngSearchProvider:
             data = resp.json()
         except ValueError as exc:
             raise SearchError("SearXNG returned invalid JSON") from exc
-        return parse_searxng_results(data, query=query, limit=limit)
+        results = parse_searxng_results(data, query=query, limit=limit)
+        down = _unresponsive_engines(data)
+        if not results and down:
+            # no hit while engines are suspended (rate limit, CAPTCHA) is an outage, not "nothing exists" (BUG-238)
+            raise SearchUnavailable(f"no results; engines unavailable: {', '.join(down)}", details={"engines": down})
+        return results
+
+
+def _unresponsive_engines(data: Any) -> list[str]:
+    items = data.get("unresponsive_engines") if isinstance(data, dict) else None
+    if not isinstance(items, list):
+        return []
+    return [str(i[0])[:40] for i in items if isinstance(i, list | tuple) and i][:10]
 
 
 def parse_searxng_results(data: Any, *, query: str, limit: int) -> list[SearchResult]:

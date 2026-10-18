@@ -46,6 +46,25 @@ Noch keine.
 
 ## Behobene Bugs
 
+### BUG-239 – Englische Suchanfragen zu einer deutschen Frage mit Bindestrich-Komposita werden alle als themenfremd verworfen
+- Phase: G1 auf rc33 (Job `2f72c0da…`, Recherche S010) · Komponente: research (planner) · Severity: P2 · blockierend: nein (behoben) · Status: **behoben** (`tests/unit/test_research_planner_synth.py::test_english_queries_for_a_german_compound_question_are_kept`)
+- Reproduktion: Frage „Welche Proxmox-REST-API-Endpunkte liefern GPU-Auslastung und Temperaturen…“. Das schnelle Modell liefert gültige englische Anfragen (187 Zeichen), trotzdem steht `NO_USABLE_QUERIES` im Verlauf. Der Fallback sucht mit „proxmox-rest-api-endpunkte liefern gpu-auslastung …“ und liest Podcasts, ein Verlagsshop-Angebot und Wiktionary („welche“): 5 Quellen, 0 Aussagen, Schritt fehlgeschlagen.
+- Ursache: `key_terms` hält Komposita mit Bindestrich als ein Token („proxmox-rest-api-endpunkte“). `sanitize_queries` verlangt einen gemeinsamen Begriff mit der Frage; „Proxmox VE API GPU“ teilte keinen.
+- Fix: `term_parts` ergänzt die Teile von Komposita (proxmox, rest, api, endpunkte, gpu, auslastung). Der Themenabgleich vergleicht diese Mengen; `key_terms` bleibt unverändert.
+- Selbstprüfung: echter Schritt nach vorn, an der frühesten Stelle der Recherche (Anfragen). Allgemein für Komposita, nicht für Proxmox.
+
+### BUG-238 – Gesperrte Suchmaschinen gelten als „keine Quellen“: Recherche-Schritte verbrauchen alle Versuche und scheitern
+- Phase: G1 auf rc33 (Job `2f72c0da…`, S001) · Komponente: research (search), runtime (research_step), scheduler, infra (SearXNG) · Severity: P1 · blockierend: ja (behoben) · Status: **behoben** (`tests/integration/test_research_fetch_search.py::test_no_results_while_engines_are_suspended_is_an_outage`, `tests/integration/test_research_step.py::test_search_outage_is_a_step_outage_not_missing_sources`)
+- Reproduktion: SearXNG antwortet für jede Anfrage mit 200 und 0 Ergebnissen, dazu `unresponsive_engines: brave (too many requests), duckduckgo (CAPTCHA), google cse (too many requests)`. Folge: S001 „0 Quellen gelesen“, `RESEARCH_NO_SOURCES`, Versuche 1 und 2 nach je 12 s verbraucht.
+- Ursache:
+  1. Nur drei Web-Engines aktiv, und alle drei waren gleichzeitig gesperrt (SearXNG sperrt 180 s nach 429 und 1 h nach CAPTCHA).
+  2. Ein leeres Ergebnis bei gesperrten Engines galt als „es gibt nichts“, statt als Ausfall.
+- Fix:
+  - Das SearXNG-Template aktiviert zusätzlich `bing` und `yahoo`, live geprüft: 17 Treffer, während die drei anderen gesperrt waren. `qwant` lieferte „access denied“ und bleibt aus.
+  - `SearxngSearchProvider.search` meldet `SEARCH_UNAVAILABLE`, wenn es keine Treffer gibt und Engines als nicht erreichbar gemeldet sind.
+  - Scheitern alle Suchen einer Recherche so, meldet der Schritt `SEARCH_UNAVAILABLE`. Das gehört zu `STEP_OUTAGE_CODES`: Wiederholung mit Backoff, ohne Versuchsverbrauch.
+- Selbstprüfung: echter Schritt nach vorn. Ein Ausfall wird als Ausfall behandelt wie bei Modell und Worker (BUG-197/227), dazu Redundanz an der Quelle. Kein G1-Sonderfall.
+
 ### BUG-237 – Planner umgeht die Regel „Code und Tests in einen Schritt“, indem er die Abhängigkeit weglässt
 - Phase: G1 auf rc29 (Job `364a9c3c…`, Plan v1) · Komponente: planner (validation) · Severity: P2 · blockierend: nein (behoben) · Status: **behoben** (`tests/unit/test_planner_validation.py::test_tests_for_new_code_belong_in_the_same_step`, erweitert)
 - Reproduktion: S003 schreibt `collector.py`, S006 (implement) nur `tests/test_collector.py` und Fixtures. Beide hängen nur von den Recherchen ab und laufen unabhängig voneinander; S006 kennt den Code nicht. In der vorigen Lieferung (Job `8e7c4b65…`) entstanden so hohle Tests, die an den Code angepasst waren (siehe BUG-234).

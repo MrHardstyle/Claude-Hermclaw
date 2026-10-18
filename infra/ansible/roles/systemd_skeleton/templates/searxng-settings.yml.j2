@@ -19,3 +19,11 @@ search:
 outgoing:
   request_timeout: 5.0
   max_request_timeout: 15.0
+# More independent web engines (BUG-238): with only brave, duckduckgo and google cse, one wave of rate limits and a
+# DuckDuckGo CAPTCHA (suspended 1 h) left research with zero results and failed the research steps of grand job G1.
+# use_default_settings merges these entries into the shipped engine list by name.
+engines:
+  - name: bing
+    disabled: false
+  - name: yahoo
+    disabled: false

@@ -144,6 +144,15 @@ def key_terms(text: str, *, limit: int | None = None) -> list[str]:
     return out
 
 
+def term_parts(terms: Iterable[str]) -> set[str]:
+    """Terms plus the parts of hyphenated compounds: 'proxmox-rest-api-endpunkte' also yields proxmox, rest, api and
+    endpunkte, so an English query matches a German compound question (BUG-239)."""
+    out = set(terms)
+    for term in list(out):
+        out.update(p for p in re.split(r"[-_/.]+", term) if len(p) >= 2 and p not in STOPWORDS)
+    return out
+
+
 def subject_terms(text: str) -> frozenset[str]:
     """Content terms without numbers/versions and negations – the 'what is this about' part of a statement."""
     return frozenset(t for t in key_terms(text) if not is_numeric_token(t) and t not in NEGATIONS and len(t) >= 3)

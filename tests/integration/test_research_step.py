@@ -13,6 +13,7 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from hermclaw.core.config import get_config
 from hermclaw.persistence.models import Job, Step, StepAttempt, StepDependency
+from hermclaw.research.errors import SearchUnavailable
 from hermclaw.research.findings import research_findings
 from hermclaw.research.search import DisabledSearchProvider
 from hermclaw.runtime.research_step import ResearchStepHandler, research_question, wants_deep
@@ -101,6 +102,32 @@ async def test_research_step_completes_with_cited_summary_for_dependent_steps(
     findings = await research_findings(sessionmaker, work.id)
     assert len(findings) == 1 and findings[0].startswith("Research S001") and "docs.toolkit.test" in findings[0]
     assert await research_findings(sessionmaker, research.id) == [], "a research step does not receive itself"
+
+
+class _DownSearch:
+    name = "searxng"
+
+    async def search(self, query: str, *, limit: int) -> list[Any]:
+        raise SearchUnavailable("no results; engines unavailable: brave, duckduckgo")
+
+    async def aclose(self) -> None:
+        return None
+
+
+async def test_search_outage_is_a_step_outage_not_missing_sources(sessionmaker: async_sessionmaker[AsyncSession]) -> None:
+    """BUG-238: with every search engine suspended the step reports SEARCH_UNAVAILABLE (a scheduler outage code: retried
+    with backoff, attempts not used up) instead of RESEARCH_NO_SOURCES and, at the last attempt, a replan."""
+    from hermclaw.scheduler.scheduler import STEP_OUTAGE_CODES
+
+    job, research, _ = await _job(sessionmaker, max_attempts=1)
+    engine = engine_for(sessionmaker, happy_chat(), _DownSearch())
+    handler = ResearchStepHandler(sessionmaker, get_config(), engine=engine)
+    try:
+        out = await handler.run(await _ctx(sessionmaker, job, research, attempt_no=1))
+    finally:
+        await engine.aclose()
+    assert out.outcome == "failed" and out.retryable and out.error_code == "SEARCH_UNAVAILABLE"
+    assert out.error_code in STEP_OUTAGE_CODES
 
 
 async def test_research_without_sources_retries_then_blocks_for_the_replanner(sessionmaker: async_sessionmaker[AsyncSession]) -> None:

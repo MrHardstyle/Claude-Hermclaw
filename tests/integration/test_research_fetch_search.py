@@ -318,6 +318,21 @@ async def test_searxng_with_mock_transport() -> None:
     await provider.aclose()
 
 
+async def test_no_results_while_engines_are_suspended_is_an_outage() -> None:
+    """Live G1 (BUG-238): brave/google cse 'too many requests', duckduckgo CAPTCHA – SearXNG answered 200 with zero
+    results and research failed every attempt with RESEARCH_NO_SOURCES as if nothing existed."""
+    down = {"results": [], "unresponsive_engines": [["brave", "too many requests"], ["duckduckgo", "CAPTCHA"]]}
+    provider = SearxngSearchProvider("http://searx.internal:8888", transport=httpx.MockTransport(lambda r: httpx.Response(200, json=down)))
+    with pytest.raises(SearchUnavailable, match="brave, duckduckgo"):
+        await provider.search("q", limit=5)
+    quiet = SearxngSearchProvider(
+        "http://searx.internal:8888", transport=httpx.MockTransport(lambda r: httpx.Response(200, json={"results": []}))
+    )
+    assert await quiet.search("q", limit=5) == [], "no hit with every engine answering is a real empty result"
+    await provider.aclose()
+    await quiet.aclose()
+
+
 @pytest.mark.live
 async def test_live_searxng_on_target_host() -> None:
     """BLOCKER-001: needs the SearXNG container on the orchestrator host (.225). Default URL: the deployed

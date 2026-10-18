@@ -4,6 +4,10 @@ Format: [Keep a Changelog](https://keepachangelog.com/de/1.1.0/), Versionen nach
 
 ## [Unreleased]
 
+### Behoben
+- **Gesperrte Suchmaschinen (BUG-238):** SearXNG nutzt zusätzlich Bing und Yahoo. Liefert die Suche nichts, weil Engines gesperrt sind, gilt das als Ausfall (`SEARCH_UNAVAILABLE`, Wiederholung ohne Versuchsverbrauch) statt als „keine Quellen“.
+- **Suchanfragen zu deutschen Komposita (BUG-239):** Englische Anfragen zu Fragen wie „Proxmox-REST-API-Endpunkte“ werden nicht mehr als themenfremd verworfen.
+
 ## [0.1.0rc33] – Release Candidate (2026-10-18)
 
 ### Behoben

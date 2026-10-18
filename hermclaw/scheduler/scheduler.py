@@ -130,7 +130,7 @@ MODEL_OUTAGE_CODES = frozenset({MODEL_UNAVAILABLE, MODEL_TIMEOUT, MODEL_LOAD_FAI
 FINALIZE_TRANSIENT_CODES = frozenset({"GIT_NETWORK", "GIT_TIMEOUT", "GIT_LOCK_TIMEOUT", "PUSH_REJECTED"})
 #: step failures that did no work: the model host is down, the GPU lease was not granted in time, or no execution worker
 #: is ready yet (right after a deployment the scheduler resumes before the sandbox worker re-registered, BUG-227)
-STEP_OUTAGE_CODES = MODEL_OUTAGE_CODES | {ResourceUnavailable.code, WorkerUnreachable.code}
+STEP_OUTAGE_CODES = MODEL_OUTAGE_CODES | {ResourceUnavailable.code, WorkerUnreachable.code, "SEARCH_UNAVAILABLE"}
 
 
 def transient_db_error(exc: BaseException) -> bool:
