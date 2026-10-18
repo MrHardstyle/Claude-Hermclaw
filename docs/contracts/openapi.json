@@ -2,7 +2,7 @@
  "openapi": "3.1.0",
  "info": {
   "title": "Hermclaw Next API",
-  "version": "0.1.0rc34"
+  "version": "0.1.0rc35"
  },
  "paths": {
   "/api/version": {
