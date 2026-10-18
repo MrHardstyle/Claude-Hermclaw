@@ -45,6 +45,25 @@ Nicht verifiziert:
 - unabhängige Werte für Qwen3.8 und Agents-A1;
 - IFEval und BFCL der meisten Kandidaten.
 
+## Nachtrag: größere Modelle mit CPU-Anteil (Betreiber, 2026-10-18)
+
+Budget: ~30–34 GB Gewichte (24 GB RAM + 8 GB VRAM). Größen stammen aus der HF-API-Dateiliste.
+
+| Modell | Gesamt/aktiv | Belege (Hersteller) | GGUF | llama.cpp |
+|---|---|---|---|---|
+| K2-Horizon-MoVA-36B-A4B (IFM, 2026-09-01) | 37,4B/4B | IFEval 90,7 (Q4_K_M 87,0), Terminal-Bench 2.1 58,6 vs. 44,9 für Qwen3.6-35B | IFM/…-Q5_K_M, 26,4 GB | erst ab b11454 (PR #29535); `reasoning_effort` low/medium fehlerhaft (#30246, #30335) |
+| Qwen3-Next-80B-A3B-Instruct | 81B/3B | IFEval 87,6, BFCL-v3 70,3; denkt nie | bartowski IQ3_XXS, 31,7 GB | ja; Low-Bit-Risiko |
+| Nemotron-Labs-3-Puzzle-75B-A9B | 75B/9,3B | IFBench 71,9 | Community-Q2_K, 31,5 GB | ja; beschnitten + 2 Bit, nicht geladen |
+| Nemotron-3.5-Bolt-74B-A9B-24GB | 74B/9B | offizielles 2-Bit-QAT, 22 GB | – | erst ab PR #30520 (2026-10-15); jünger als zwei Wochen → später |
+
+Ausgeschlossen (zu groß, ohne upstream-Unterstützung oder schwächer): Qwen3.5-122B-A10B (≥36,6 GB), GLM-4.5-Air
+(≥47 GB), gpt-oss-120b, LongCat-Flash-Lite, Kimi-Linear-48B, Seed-OSS-36B, EXAONE-4.5-33B.
+
+Turnier (Betreiber, 2026-10-18): alle Kandidaten bekommen dieselben Aufträge (Runde 1: K1, M2, M3), bewertet
+automatisch (gültig, Reparaturen, Dauer) und blind nach Rubrik (Abdeckung, Zerlegung, Kriterien, Bezug zum Repo); bei
+Gleichstand entscheidet ein schwererer Auftrag (G1). Prüfstand: `planbench` (Wegwerf-DB, echter Planer-Code, eigener
+llama-server auf Port 18090).
+
 ## Bewertung
 
 - Für Kriterienqualität zählt Befolgen von Anweisungen (IFBench) mehr als Codier-Benchmarks.
