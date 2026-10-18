@@ -658,6 +658,21 @@ class ToolEngine:
             data={"path": rel, "count": len(entries), "shown": len(shown), "recursive": args.recursive},
         )
 
+    def _covering_read(self, path: str, start: int, end: int, turn: int) -> tuple[str, int] | None:
+        """A fully visible read of ``path`` in the repeat window, with no file changed since, that already contains lines
+        ``start``-``end`` – re-reading a part of it only costs a turn (live G1: 100-160, then 110-160, then 110-145, BUG-244)."""
+        for (tool, key), (writes, at, visible) in self._reads.items():
+            if writes != self._writes or turn - at > READ_REPEAT_WINDOW or not visible:
+                continue
+            if tool == ToolName.read_file.value and key == path:
+                return "the whole file", at
+            rpath, _, span = key.rpartition(":")
+            lo, _, hi = span.partition("-")
+            inside = lo.isdigit() and hi.isdigit() and int(lo) <= start and end <= int(hi)
+            if tool == ToolName.read_range.value and rpath == path and inside:
+                return f"lines {lo}-{hi}", at
+        return None
+
     def _check_read_repeat(self, tool: ToolName, key: str, turn: int) -> None:
         """Refuse a read identical to one of the last ``READ_REPEAT_WINDOW`` turns while no file changed: its content is
         already in this turn's context (files read in this attempt), so reading again only costs a turn. A read that was
@@ -688,7 +703,8 @@ class ToolEngine:
         return self._ok(ToolName.read_file, text, truncated=clipped, data={"path": tf.rel, "bytes": tf.size, "lines": lines})
 
     async def _read_range(self, args: ReadRangeArgs, ctx: CallContext, events: list[PendingEvent]) -> ToolResult:
-        key = f"{self.fs.resolve(args.path)[0]}:{args.start}-{args.end}"
+        path = self.fs.resolve(args.path)[0]
+        key = f"{path}:{args.start}-{args.end}"
         self._check_read_repeat(ToolName.read_range, key, ctx.turn)
         rel, lines, total = await asyncio.to_thread(self.fs.read_lines, args.path, args.start, args.end)
         if args.start > total > 0:
@@ -697,6 +713,15 @@ class ToolEngine:
             self._reads[(ToolName.read_range.value, key)] = (self._writes, ctx.turn, True)
             return self._ok(ToolName.read_range, "(empty file)", data={"path": rel, "start": 0, "end": 0, "total_lines": 0})
         end = min(args.end, total)
+        covering = self._covering_read(path, args.start, end, ctx.turn)
+        if covering is not None:
+            raise ToolError(
+                E.READ_REPEATED,
+                f"read refused: lines {args.start}-{end} are part of what you read in turn {covering[1]} ({covering[0]}) "
+                "and no file changed since; that content is shown above among the files you read. Act on it now: edit the "
+                "code or the test, run a different check, or call complete_step/block_step.",
+                data={"previous_turn": covering[1], "repeated": True},
+            )
         width = len(str(end))
         body = "\n".join(f"{n:>{width}}| {line}" for n, line in enumerate(lines, start=args.start))
         text, clipped = clip_head(body, self.output_limit)

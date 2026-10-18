@@ -46,6 +46,19 @@ Noch keine.
 
 ## Behobene Bugs
 
+### BUG-244 – Der Coder liest Teilbereiche eines Bereichs erneut, den der Kontext bereits vollständig zeigt
+- Phase: G1 auf rc36 (Job `8f394b63…`, S003 Versuch 4) · Komponente: tools (engine) · Severity: P2 · blockierend: nein (behoben) · Status: **behoben** (`tests/integration/test_tools_engine_read_write.py::test_a_part_of_a_visible_read_is_refused_until_a_file_changes`)
+- Reproduktion: `collector.py` gelesen als 100–160, danach 110–160, danach 110–145, ohne Schreibzugriff dazwischen. Jeder Lesezugriff kostete einen Turn von etwa 45 s.
+- Ursache: Die Wiederholungssperre (BUG-179) verweigerte nur identische Lesezugriffe. Ein Teilbereich eines vollständig sichtbaren Lesezugriffs zeigt nichts Neues, lief aber durch.
+- Fix:
+  - `read_range` wird verweigert (`READ_REPEATED`), wenn ein vollständig sichtbarer Lesezugriff derselben Datei im 6-Turn-Fenster ohne Schreibzugriff den Bereich enthält: die ganze Datei oder ein umfassender Bereich.
+  - Geprüft wird nach der Bereichsprüfung gegen das tatsächliche Dateiende, `RANGE_INVALID` bleibt also vorrangig.
+  - Abgeschnittene oder zu lange Lesezugriffe (BUG-229) zählen nicht als sichtbar; deren Teilbereiche bleiben erlaubt.
+- Selbstprüfung: dritte Änderung an derselben Sperre (BUG-179, BUG-229, BUG-244), deshalb geprüft:
+  - Die Regel nutzt genau das Sichtbarkeitskriterium aus BUG-229 und verweigert nur, was der Kontext nachweislich zeigt.
+  - Das ist eine Verallgemeinerung, kein Gegensteuern gegen ein Symptom.
+  - Beobachten: Ob verweigerte Teil-Lesezugriffe in einem Live-Lauf zum Kreisen führen.
+
 ### BUG-243 – Ein Geheimnis-Fund in einer Testdatei empfiehlt „aus der Umgebung laden“ statt eines Platzhalters
 - Phase: G1 auf rc36 (Job `8f394b63…`, S003 Versuch 3) · Komponente: verifier (secrets) · Severity: P2 · blockierend: nein (behoben) · Status: **behoben** (`tests/unit/test_verifier_secrets.py::test_secret_findings_in_tests_ask_for_a_placeholder_not_the_environment`, `::test_helpers`)
 - Reproduktion: `tests/test_collector.py` Zeile 128 enthält `api_key='<7 Kleinbuchstaben>'` als Fixture. Zwei blockierende Prüfungen (`secrets`, `acceptance[1]:security`) melden: „Remove the value and load it from the environment or a secret store.“

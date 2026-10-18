@@ -66,7 +66,7 @@ async def test_read_file_and_range(sessionmaker: SM, repo: Path) -> None:
     assert (
         res.ok and res.output.startswith("def mul(a, b):") and res.data == {"path": "src/calc.py", "bytes": res.data["bytes"], "lines": 6}
     )
-    res = await h.call("read_range", path="src/calc.py", start=5, end=99)
+    res = await (await make_harness(sessionmaker, repo)).call("read_range", path="src/calc.py", start=5, end=99)
     assert res.ok and res.output.splitlines()[0] == "5| def div(a, b):" and "[end of file: 6 lines]" in res.output
     assert (await h.call("read_range", path="src/calc.py", start=50, end=60)).error_code == E.RANGE_INVALID
     assert (await h.call("read_range", path="src/calc.py", start=5, end=2)).error_code == E.ARGS_INVALID
@@ -82,8 +82,8 @@ async def test_identical_read_of_an_unchanged_file_is_refused_within_the_context
     assert (await h.call("read_file", path="src/calc.py")).ok
     again = await h.call("read_file", path="./src//calc.py")
     assert again.error_code == E.READ_REPEATED and again.data["repeated"] is True and "turn 1" in again.output
-    assert (await h.call("read_range", path="src/calc.py", start=1, end=3)).ok, "a different read runs"
-    assert (await h.call("read_range", path="src/calc.py", start=1, end=3)).error_code == E.READ_REPEATED
+    assert (await h.call("read_range", path="src/util.py", start=1, end=1)).ok, "a different read runs"
+    assert (await h.call("read_range", path="src/util.py", start=1, end=1)).error_code == E.READ_REPEATED
     assert (await h.call("read_file", path="missing.py")).error_code == E.NOT_FOUND
     assert (await h.call("read_file", path="missing.py")).error_code == E.NOT_FOUND, "failed reads are not remembered"
     assert (await h.call("replace_text", path="src/calc.py", old="a * b", new="b * a")).ok
@@ -104,6 +104,24 @@ async def test_a_read_the_context_cannot_show_in_full_may_be_repeated(sessionmak
     assert (await h.call("read_range", path="long.py", start=1, end=450)).ok, "range longer than the context shows"
     assert (await h.call("read_range", path="long.py", start=10, end=40)).ok
     assert (await h.call("read_range", path="long.py", start=10, end=40)).error_code == E.READ_REPEATED
+
+
+async def test_a_part_of_a_visible_read_is_refused_until_a_file_changes(sessionmaker: SM, repo: Path) -> None:
+    """Live G1 (BUG-244): the coder read collector.py 100-160, then 110-160, then 110-145 – each a part of what the
+    context already showed – one ~45 s turn per read. A range inside a fully visible read of the window is refused."""
+    (repo / "mid.py").write_text("".join(f"m{i} = {i}\n" for i in range(1, 201)))
+    h = await make_harness(sessionmaker, repo, contract=scope(target_paths=["mid.py"]))
+    assert (await h.call("read_range", path="mid.py", start=100, end=160)).ok
+    inner = await h.call("read_range", path="mid.py", start=110, end=145)
+    assert inner.error_code == E.READ_REPEATED and "turn 1" in inner.output and "lines 100-160" in inner.output
+    assert (await h.call("read_range", path="mid.py", start=90, end=120)).ok, "reaches beyond what was read"
+    assert (await h.call("read_file", path="src/calc.py")).ok
+    assert (await h.call("read_range", path="src/calc.py", start=2, end=4)).error_code == E.READ_REPEATED, "whole file shown"
+    assert (await h.call("replace_text", path="mid.py", old="m150 = 150", new="m150 = 151")).ok
+    assert (await h.call("read_range", path="mid.py", start=140, end=155)).ok, "a file changed: reading again is allowed"
+    (repo / "long.py").write_text("".join(f"v{i} = {i}\n" for i in range(1, 501)))
+    assert (await h.call("read_file", path="long.py")).ok
+    assert (await h.call("read_range", path="long.py", start=420, end=440)).ok, "the clipped read did not show these lines"
 
 
 async def test_read_output_budget_sets_truncated(sessionmaker: SM, repo: Path) -> None:

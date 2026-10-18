@@ -5,6 +5,7 @@ Format: [Keep a Changelog](https://keepachangelog.com/de/1.1.0/), Versionen nach
 ## [Unreleased]
 
 ### Behoben
+- **Teil-Lesezugriffe (BUG-244):** Ein `read_range` innerhalb eines vollständig sichtbaren Lesezugriffs derselben Datei wird wie ein identischer Lesezugriff verweigert, solange keine Datei geändert wurde.
 - **Geheimnis-Funde in Tests (BUG-243):** Für Testdateien verlangt die Geheimnis-Prüfung einen offensichtlichen Platzhalter (`dummy`, `fake`, `example`) statt „aus der Umgebung laden“; `fake`, `mock` und `sample` gelten als Platzhalter.
 
 ## [0.1.0rc36] – Release Candidate (2026-10-18)

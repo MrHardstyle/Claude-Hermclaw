@@ -68,7 +68,7 @@ per-attempt state: the active `ScopeGuard` (swapped after a granted expansion), 
 |---|---|---|
 | `list_files` | read | git `ls-files` (tracked + untracked, not ignored) or a walk for non-git workspaces; `path`, `recursive`, glob `pattern`, `max_entries` |
 | `read_file` | read | whole UTF-8 file (≤ 2 MB), binary refused (`BINARY_FILE`), output clipped with a `read_range` hint; an identical re-read within 6 turns, with no file changed and the content fully shown in the context (not clipped, ≤ 400 lines), is refused (`READ_REPEATED`) |
-| `read_range` | read | numbered lines `start..end` (streamed) |
+| `read_range` | read | numbered lines `start..end` (streamed); a range inside a fully shown read of the same file (whole file or a containing range) within 6 turns, with no file changed, is refused like an identical re-read (`READ_REPEATED`, BUG-244) |
 | `find_text` | read | literal (default) or regex search, `glob`, `ignore_case`, result limit + time budget; regexes with nested quantifiers are refused (ReDoS) |
 | `search_repo` / `search_symbol` | read | `RepoContextProvider.search` / `find_symbol`; hits on hidden paths are dropped |
 | `git_status` / `git_diff` | git | `GitReader.status` / `diff` (diff sections of protected files are omitted) |
