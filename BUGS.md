@@ -46,6 +46,20 @@ Noch keine.
 
 ## Behobene Bugs
 
+### BUG-263 – Eine kurze GitLab-Störung beim Holen des Repositorys lässt den Job sofort scheitern, statt die Vorbereitung später zu wiederholen
+- Phase: G1 auf rc48 (Job `cbfe8802…`, Vorbereitung) · Komponente: runtime (driver), scheduler · Severity: P2 · blockierend: ja (behoben) · Status: **behoben** (`tests/integration/test_scheduler.py::test_model_outage_defers_planning_and_replanning_instead_of_failing`, `tests/unit/test_finalize_network.py::test_network_failures_are_recognised_and_others_are_not`)
+- Reproduktion:
+  - 11:38:36 schlägt `git fetch` des Mirrors fehl (exit 128). GitLab (.226) antwortet „remote: Internal API unreachable … Could not read from remote repository“, die Web-Oberfläche liefert HTTP 500.
+  - Der Job endet nach 4 s mit `GIT_COMMAND_FAILED` („preparation failed“). Um 11:40:34 antwortet GitLab wieder normal.
+- Ursache:
+  - Der Abschluss erkannte Netzwerkfehler des Remotes und wiederholte ihn später (`GIT_NETWORK`, BUG-199). Die Vorbereitung tat das nicht, sie wiederholte nur bei Ausfällen des Modell-Hosts (BUG-176).
+  - Die GitLab-Meldung „Internal API unreachable“ fehlte außerdem im Netzwerkmuster.
+- Fix:
+  - Die Vorbereitung bildet Netzwerkfehler von git auf `GIT_NETWORK` ab.
+  - Der Scheduler behandelt `GIT_NETWORK` und `GIT_TIMEOUT` in der Vorbereitung wie einen Modellausfall: Der Job bleibt in seiner Phase und läuft nach Backoff erneut, begrenzt durch `model_outage_max_wait_seconds`.
+  - Das Muster kennt „Internal API unreachable“. Echte Fehler wie „Permission denied (publickey)“ bleiben sofortige Fehler (im Test belegt).
+- Selbstprüfung: echter Schritt nach vorn. Die vorhandene Ausfallbehandlung gilt jetzt durchgängig für eine weitere Phase, ohne neue Mechanik. Externe Ursache: GitLab auf .226, kein Teil dieses Systems.
+
 ### BUG-262 – Ein repo_hint auf eine Datei, die ein früherer Schritt desselben Plans anlegt, gilt als erfundener Pfad
 - Phase: G1 auf rc47 (Job `99f2f1ff…`, Planung) · Komponente: planner (validation) · Severity: P1 · blockierend: ja (behoben) · Status: **behoben** (`tests/unit/test_planner_validation.py::test_a_hint_to_a_file_an_earlier_step_creates_is_valid_once_ordered`)
 - Reproduktion:

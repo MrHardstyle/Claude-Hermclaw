@@ -50,11 +50,13 @@ if TYPE_CHECKING:
 log = get_logger(__name__)
 
 _PREPARE_ORDER = (JobStatus.queued, JobStatus.inventory, JobStatus.discovering, JobStatus.researching, JobStatus.planning)
-#: finalize failed on the way to the remote (DNS, connection, TLS, HTTP 5xx): the scheduler runs finalize again later
+#: the remote is unreachable (DNS, connection, TLS, HTTP 5xx, a GitLab whose internal API is down): the scheduler runs
+#: the phase – finalize (BUG-199) or preparation (BUG-263) – again later
 GIT_NETWORK = "GIT_NETWORK"
 _NETWORK_STDERR = re.compile(
     r"could not resolve host|connection (refused|reset|timed out)|operation timed out|network is unreachable|"
-    r"unable to access|early eof|the remote end hung up|returned error: 5\d\d|\b50[234]\b|tls|ssl|gnutls",
+    r"unable to access|early eof|the remote end hung up|returned error: 5\d\d|\b50[234]\b|tls|ssl|gnutls|"
+    r"internal api unreachable",
     re.IGNORECASE,
 )
 
@@ -321,7 +323,12 @@ class RuntimeJobDriver:
                 return JobPhaseResult(ok=True, next_status=JobStatus.running.value, detail={"plan": "existing"})
         except PlannerError as exc:
             return JobPhaseResult(ok=False, error_code=exc.code, error_message=exc.message, detail=exc.details)
-        except (GitError, ModelError, HermclawError) as exc:
+        except GitError as exc:
+            # live G1 (BUG-263): GitLab answered "Internal API unreachable" for two minutes and the mirror fetch failed
+            # the job for good; a network failure lets the scheduler prepare the job again after a backoff
+            code = GIT_NETWORK if _network_failure(exc) else exc.code
+            return JobPhaseResult(ok=False, error_code=code, error_message=DEFAULT_REDACTOR.text(exc.message))
+        except (ModelError, HermclawError) as exc:
             return JobPhaseResult(ok=False, error_code=exc.code, error_message=DEFAULT_REDACTOR.text(exc.message))
         async with self.sm() as s:
             await emit_status(s, job_id, f"Plan v{result.version} mit {len(result.step_ids)} Steps erstellt")

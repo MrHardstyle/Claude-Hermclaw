@@ -128,6 +128,8 @@ MODEL_OUTAGE_CODES = frozenset({MODEL_UNAVAILABLE, MODEL_TIMEOUT, MODEL_LOAD_FAI
 #: finalize failures on the way to the remote that a later attempt can overcome (BUG-199): network, timeouts, a
 #: workspace lock, a push rejected because the base moved (finalize rebases again on the next run)
 FINALIZE_TRANSIENT_CODES = frozenset({"GIT_NETWORK", "GIT_TIMEOUT", "GIT_LOCK_TIMEOUT", "PUSH_REJECTED"})
+#: preparation failures that say nothing about the job: the model host or the git remote is unavailable (BUG-263)
+PREPARE_OUTAGE_CODES = MODEL_OUTAGE_CODES | {"GIT_NETWORK", "GIT_TIMEOUT"}
 #: step failures that did no work: the model host is down, the GPU lease was not granted in time, or no execution worker
 #: is ready yet (right after a deployment the scheduler resumes before the sandbox worker re-registered, BUG-227)
 STEP_OUTAGE_CODES = MODEL_OUTAGE_CODES | {ResourceUnavailable.code, WorkerUnreachable.code, "SEARCH_UNAVAILABLE"}
@@ -560,7 +562,7 @@ class Scheduler:
                         error_code="PREPARE_INVALID_STATE",
                         error_message=str(exc),
                     )
-            elif await self._defer_on_model_outage(s, job, "Vorbereitung", code):
+            elif await self._defer_on_model_outage(s, job, "Vorbereitung", code, codes=PREPARE_OUTAGE_CODES):
                 pass  # the job keeps its preparation state; _start_queued_jobs prepares it again after the backoff
             else:
                 await transition_job(

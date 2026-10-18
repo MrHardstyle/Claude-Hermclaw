@@ -11,6 +11,7 @@
 - `StepOutcome.outcome ∈ {completed, failed, blocked, checkpointed, replan, cancelled}`; `retryable`, `replan_reason`, `checkpoint`
 - `CancelToken`: cooperative cancel (`cancelled`) and pause/checkpoint (`checkpoint_requested`)
 - A checkpoint is used up by the attempt that resumes it: a real failure clears it (an outage keeps it), so the next attempt is a `correction`/`retry`, not a stale `resume`; a `resume` attempt inherits the pending `correction_input` of the attempt it continues (BUG-249)
+- Preparation that fails only because the model host or the git remote is unavailable (`MODEL_*` outage codes, `GIT_NETWORK` – DNS, connection, TLS, HTTP 5xx, GitLab "Internal API unreachable" – and `GIT_TIMEOUT`) keeps the job in its phase and runs again after `model_outage_retry_seconds`, bounded by `model_outage_max_wait_seconds`; other failures still fail the job (BUG-176, BUG-263)
 - `step_to()` / `job_to()`: state-machine transitions that pass through `running` when a sub-state cannot reach the target directly.
 
 ## Tick

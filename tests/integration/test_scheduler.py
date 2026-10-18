@@ -732,6 +732,21 @@ async def test_model_outage_defers_planning_and_replanning_instead_of_failing(se
         lines = [e.payload.get("text", "") for e in (await s.execute(select(Event).where(Event.job_id == j1))).scalars()]
     assert sum("Modell nicht erreichbar" in t for t in lines) == 3
 
+    class RemoteDownDriver(FakeDriver):  # live G1 (BUG-263): GitLab's internal API was down for two minutes
+        fetch_outages = 2
+
+        async def prepare(self, job_id: uuid.UUID, token: CancelToken) -> JobPhaseResult:
+            if self.fetch_outages:
+                self.fetch_outages -= 1
+                return JobPhaseResult(ok=False, error_code="GIT_NETWORK", error_message="git fetch failed (exit 128)")
+            return await super().prepare(job_id, token)
+
+    remote = RemoteDownDriver(sm)
+    j4 = await _new_job(sm)
+    remote.plans[j4] = [StepSpec("S1")]
+    jobs = await _run_until(Scheduler(sm, get_config(), [FakeHandler({"test"})], remote, settings=settings), sm, [j4])
+    assert jobs[j4].status == "succeeded" and remote.fetch_outages == 0, (jobs[j4].error_code, jobs[j4].error_message)
+
     class DownDriver(FakeDriver):
         async def prepare(self, job_id: uuid.UUID, token: CancelToken) -> JobPhaseResult:
             return JobPhaseResult(ok=False, error_code="MODEL_UNAVAILABLE", error_message="connect call failed")
