@@ -59,6 +59,7 @@ Noch keine.
 - Fix:
   - Ein maskiertes `replace_text`, das nichts ändert, wird abgelehnt (`NO_CHANGE`) mit der Anweisung, an Stelle des Markers einen Platzhalter zu schreiben. Bleibt ein Marker stehen, sagt die Erfolgsmeldung das („kept their real value“). Die Ablehnung identischer Ersetzungen nennt den Fall ebenfalls.
   - Für Dokumentation (`.md/.rst/.txt/.adoc`) rät der Verifier zu `<your-token>` oder `$AUTH_TOKEN`, beides akzeptiert der Scanner.
+  - Werte, die nur aus Rollenwörtern bestehen (`valid_token`, `invalid-token`, `wrong_password`, `my-secret-key`, optional nummeriert), gelten als Platzhalter. Die Tests von M3 nutzten genau solche Werte und wurden als Geheimnisse gemeldet. Ein Teil, der kein solches Wort ist (`sk_test_4eC3…`, `valid_token_9f8e…`), lässt den Wert ein Geheimnis bleiben.
   - In einer Korrektur mit Geheimnis-Befunden scannt `complete_step` die gemeldeten Dateien erneut (Zeilen, die nicht in der Basisversion stehen, mit dem Scanner des Verifiers). Solange noch Zeilen auffallen, wird abgelehnt (`CHECK_STILL_FAILING`), mit Zeilennummer, Regel und maskierter Vorschau.
 - Selbstprüfung: Die Runtime gab falsche und fehlende Rückmeldungen, das ist keine reine Modellschwäche. Kein Sonderfall: gilt für jede Datei mit gemeldeten Geheimnissen. Aufträge mit Authentifizierung treffen das regelmäßig.
 

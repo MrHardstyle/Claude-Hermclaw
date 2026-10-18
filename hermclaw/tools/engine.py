@@ -1799,8 +1799,11 @@ class ToolEngine:
             if not (self.fs.root / rel).is_file():
                 continue
             text = (await asyncio.to_thread(self.fs.read_text, rel, max_bytes=self.max_read_bytes)).text
+            show_base = getattr(self.git, "show_base_file", None)  # GitReader extension of the real reader
+            if show_base is None:
+                return []
             try:
-                base = await self.git.show_base_file(self.workspace, rel) or ""
+                base = await show_base(self.workspace, rel) or ""
             except Exception as exc:  # a scan that cannot run here leaves the judgement to the verifier
                 log.warning("secret recheck skipped", extra={"path": rel, "error_type": type(exc).__name__})
                 continue

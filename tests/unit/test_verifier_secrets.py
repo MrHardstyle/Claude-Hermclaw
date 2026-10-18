@@ -193,3 +193,14 @@ def test_secret_findings_in_docs_ask_for_a_placeholder_the_scanner_accepts() -> 
     for placeholder in ("<your-token>", "$AUTH_TOKEN"):
         fixed = AddedContent(lines={"README.md": [AddedLine(1, line.replace("s3cr3tT0k3nV4lu3xyz", placeholder))]})
         assert not any(name.startswith("secrets:README") for name, _ in secret_checks(Ctx(), fixed, SecretScanner()))  # type: ignore[arg-type]
+
+
+def test_values_made_of_role_words_are_placeholders_real_tokens_are_not() -> None:
+    """Live M3 (BUG-279): the tests of a token-protected API used token="valid_token" / "invalid_token" and were
+    failed as secrets. A value made only of role words is a placeholder; a part that is no such word keeps it a secret."""
+    for value in ("valid_token", "invalid-token", "wrong_password", "my-secret-key", "test-token-2", "expired.token"):
+        assert is_placeholder(value), value
+    stripe_shape = "sk_" + "test_" + "4eC39HqLyjWDarjtT1zdp7dc"  # assembled: no key-shaped literal in the repository
+    for value in (stripe_shape, "valid_token_9f8e7d6c", "zq81vkpw3mxt5", "token12345"):
+        assert not is_placeholder(value), value
+    assert not SecretScanner().scan_line("tests/test_api.py", 1, 'r = call(token="valid_token")', language="python")
