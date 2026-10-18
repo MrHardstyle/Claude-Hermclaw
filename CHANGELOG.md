@@ -4,6 +4,8 @@ Format: [Keep a Changelog](https://keepachangelog.com/de/1.1.0/), Versionen nach
 
 ## [Unreleased]
 
+## [0.1.0rc30] – Release Candidate (2026-10-18)
+
 ### Behoben
 - **Recherche beim Coder (BUG-231):** Die belegten Aussagen einer Recherche stehen jetzt vorn und kommen vollständig im Abschnitt CONSTRAINTS an (2400 Zeichen je Recherche, 8 % Budget), statt auf 500 Zeichen gekürzt zu werden.
 
