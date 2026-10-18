@@ -26,9 +26,32 @@ _PATTERNS: list[re.Pattern[str]] = [
 #: public, read-only view of the secret shapes (used by the verifier secret scan)
 SECRET_PATTERNS: tuple[re.Pattern[str], ...] = tuple(_PATTERNS)
 
+_KEY_VALUE = _PATTERNS[2]
+# ``api_key = config["x"]``, ``token = self.token``, ``password = getpass.getpass()``: code that *reads* a secret. Masking
+# it showed the coder broken code (``api_key = ***REDACTED***"x"]``), which it copied into new files (BUG-225).
+_CODE_REFERENCE = re.compile(r"^[A-Za-z_]\w*(?:\.[A-Za-z_]\w*)*(?:\(\)?|\[)?[)\]}]*$")
+_CODE_SIGNS = frozenset(".([)]}")
+_PLACEHOLDER_START = ("<", "${", "$", "{{", "%")
+_PLACEHOLDER_PARTS = ("your-", "your_", "example", "placeholder", "changeme", "change-me", "change_me", "dummy", "-here", "_here")
+
+
+def is_benign_value(value: str, *, quoted: bool) -> bool:
+    """A ``key = value`` match that is no secret: an obvious placeholder, or (unquoted) a short code reference."""
+    low = value.lower()
+    if low.startswith(_PLACEHOLDER_START) or any(part in low for part in _PLACEHOLDER_PARTS) or not set(low) - set("x*-."):
+        return True
+    return not quoted and len(value) <= 60 and bool(_CODE_SIGNS & set(value)) and bool(_CODE_REFERENCE.match(value))
+
+
 _SENSITIVE_KEYS = re.compile(r"(?i)(password|passwd|secret|token|api[_-]?key|authorization|private[_-]?key|credential)")
 # numeric telemetry under "sensitive-looking" keys (prompt_tokens, max_tokens, token_count …) is not a secret
 _COUNTER_KEYS = re.compile(r"(?i)(tokens|_count|_ms|_seconds|_bytes|_chars)$|^(max|min|num|total)_")
+
+
+def _mask_key_value(m: re.Match[str]) -> str:
+    if is_benign_value(m.group(2), quoted=m.group(1).endswith(("'", '"'))):
+        return m.group(0)
+    return m.group(1) + REDACTED
 
 
 class Redactor:
@@ -47,7 +70,9 @@ class Redactor:
         for lit in self._literals:
             out = out.replace(lit, REDACTED)
         for pat in _PATTERNS:
-            if pat.groups >= 2:
+            if pat is _KEY_VALUE:
+                out = pat.sub(_mask_key_value, out)
+            elif pat.groups >= 2:
                 out = pat.sub(lambda m: m.group(1) + REDACTED + (m.group(3) if m.re.groups >= 3 else ""), out)
             else:
                 out = pat.sub(REDACTED, out)

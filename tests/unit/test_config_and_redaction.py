@@ -123,3 +123,27 @@ def test_api_trusts_forwarded_headers_only_from_configured_proxies(monkeypatch: 
     app_mod.main()
     assert seen["forwarded_allow_ips"] == "192.168.178.223"
     reset_settings_cache()
+
+
+def test_code_reading_secrets_and_placeholders_stay_readable() -> None:
+    """BUG-225: masking ``api_key = config["x"]`` and ``"your-secret-here"`` showed the coder broken code and markers,
+    which it copied into new files; every such write was refused (grand job G1)."""
+    from hermclaw.core.redaction import DEFAULT_REDACTOR, REDACTED
+
+    for text in (
+        'api_token_secret = "your-secret-here"',
+        'api_key = "your-unraid-api-key-here"',
+        'password = "changeme"',
+        'token = "<your token>"',
+        "TOKEN=${GITLAB_TOKEN}",
+        'secret = os.environ["X"]',
+        'api_key = config["unraid"]["api_key"]',
+        "token = self.token",
+        "password = getpass.getpass()",
+        'headers = {"x-api-key": api_key}',
+        'self.api_token_secret = cfg.get("api_token_secret", "")',
+        "api_key = 'xxxx-xxxx'",
+    ):
+        assert DEFAULT_REDACTOR.text(text) == text, text
+    for text in ("PASSWORD=hunter2realpw", 'api_key = "abc.def.ghi"', "password: hunter2", 'secret = "s3cr3t.value"'):
+        assert REDACTED in DEFAULT_REDACTOR.text(text), text

@@ -46,6 +46,21 @@ Noch keine.
 
 ## Behobene Bugs
 
+### BUG-225 – Redaction maskiert Code und Platzhalter; der Coder kopiert den Marker und jeder Schreibversuch wird abgelehnt
+- Phase: Großauftrag G1 auf 0.1.0rc25 (S011) · Komponente: core/redaction · Severity: P1 · blockierend: ja für Aufträge mit Zugangsdaten (behoben) · Status: **behoben** (`tests/unit/test_config_and_redaction.py::test_code_reading_secrets_and_placeholders_stay_readable`)
+- Reproduktion: Job `b3441414-9422-4887-8cb1-b0f7c43e5ced`, S011 Turn 3 (02:09). Nach zwei abgeschnittenen Antworten (BUG-223) kam eine gültige Antwort mit `collector.py` (5751 Tokens, 234 s). `write_file` lehnte sie ab: „the content contains the redaction marker ***REDACTED***“. Der vorige Schritt hatte `config.example.toml` mit `api_token_secret = "your-secret-here"` und `api_key = "your-unraid-api-key-here"` angelegt; im Kontext stand dort `***REDACTED***`.
+- Ursache: Die `key = value`-Regel des Redactors maskierte jeden Wert ab 4 Zeichen hinter einem Schlüssel wie token/secret/password/api_key, auch:
+  - offensichtliche Platzhalter;
+  - Code, der ein Geheimnis liest: `api_key = config["unraid"]["api_key"]` wurde zu `api_key = ***REDACTED***"unraid"]["api_key"]`, `token = self.token` zu `token = ***REDACTED***`.
+
+  Der Coder sah kaputten Code und Marker, kopierte sie in neue Dateien, und die Platzhalter-Sperre verwarf die ganze Antwort. Das betrifft jeden Auftrag, der mit Zugangsdaten umgeht (APIs, Datenbanken, Monitoring).
+- Fix: `is_benign_value` lässt zwei Fälle stehen:
+  - offensichtliche Platzhalter: `<…>`, `${…}`, `your-…`, `…-here`, `example`, `changeme`, `placeholder`, `dummy`, nur `x`/`*`;
+  - unquotierte, kurze Code-Referenzen: Bezeichner mit `.`, `(`, `[` usw.
+
+  Gequotete Literale, `PASSWORD=hunter2realpw`, Token-Formate (`ghp_`, `sk-`, `glpat-`), JWTs und Schlüssel bleiben maskiert. Der Secret-Scan des Verifiers nutzt die Muster direkt mit eigener Literal-/Platzhalter-Logik und ist unverändert.
+- Selbstprüfung: echter Schritt nach vorn. Die Redaction war auf Logs ausgelegt; dass ihr Ergebnis dem Coder als Code gezeigt wird, war nicht berücksichtigt.
+
 ### BUG-224 – Replan verwirft offene Schritte stillschweigend; der Job würde mit einem Bruchteil des Auftrags „succeeded“ enden
 - Phase: Großauftrag G1 auf 0.1.0rc25 · Komponente: planner/replanner · Severity: P0 · blockierend: ja (behoben) · Status: **behoben** (`tests/unit/test_planner_validation.py::test_open_steps_without_a_replacement_are_carried_over_with_remapped_dependencies`, `tests/integration/test_planner_replan.py::test_open_steps_the_replan_leaves_out_are_carried_over`, Prompt-Regel in `tests/unit/test_planner_prompt.py`; Simulation mit den echten Plänen v1/v2 von G1: S004–S008 übernommen, Abhängigkeiten von S003 auf S011 umgehängt)
 - Reproduktion: Job `b3441414-9422-4887-8cb1-b0f7c43e5ced`. S003 (Collector) scheiterte an BUG-223, Replan `step_failed` um 01:55. Der Replanner lieferte einen einzigen Schritt S011 „Implement Collector Core and Config (Fallback)“ (608 Completion-Tokens). Die Runtime brach S004 bis S008 (Frontend, PowerShell-Skripte, Tests, README, Testlauf) als „superseded by plan version 2“ ab. Plan v2 enthält nur noch die Recherchen und S011. Nach S011 wäre der Job ohne Widget, Skripte, Tests und README erfolgreich beendet worden.
