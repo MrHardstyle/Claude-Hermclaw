@@ -130,7 +130,7 @@ Lint, mypy, ShellCheck, ansible-lint (production) sauber.
 
 ## Bugs
 - 263 gefunden, **263 behoben** – `BUGS.md`. Live-Abnahme: BUG-143 bis BUG-263.
-  BUG-143–262 sind produktiv (0.1.0rc48, deployt 2026-10-18 11:38; rc47 11:24; rc46 11:11; rc45 10:53; rc44 10:35; rc43 10:00; rc42 09:48; rc41 09:17; rc40 08:41; rc39 07:26; rc38 07:03; rc37 06:44; rc36 06:00; SearXNG mit Bing/Yahoo; rc33 05:06; rc29 04:23; rc28 03:48 mit laufendem G1, Worker-Ausfall beim Fortsetzen ohne Versuchsverlust (BUG-227 live bestätigt); rc26 02:55, `coder-main.max_output_tokens` 8192 im Inventory-Override; rc25 deployt 01:50 mit laufendem G1, Schritt per Checkpoint unterbrochen und fortgesetzt; rc24 deployt 2026-10-18 01:10; rc20 deployt 2026-10-17 20:40, Scheduler-Neustart mit laufendem Job live geprüft: Job lief nach dem Deployment weiter).
+  BUG-143–263 sind produktiv (0.1.0rc49, deployt 2026-10-18 11:46; rc48 11:38; rc47 11:24; rc46 11:11; rc45 10:53; rc44 10:35; rc43 10:00; rc42 09:48; rc41 09:17; rc40 08:41; rc39 07:26; rc38 07:03; rc37 06:44; rc36 06:00; SearXNG mit Bing/Yahoo; rc33 05:06; rc29 04:23; rc28 03:48 mit laufendem G1, Worker-Ausfall beim Fortsetzen ohne Versuchsverlust (BUG-227 live bestätigt); rc26 02:55, `coder-main.max_output_tokens` 8192 im Inventory-Override; rc25 deployt 01:50 mit laufendem G1, Schritt per Checkpoint unterbrochen und fortgesetzt; rc24 deployt 2026-10-18 01:10; rc20 deployt 2026-10-17 20:40, Scheduler-Neustart mit laufendem Job live geprüft: Job lief nach dem Deployment weiter).
 - Externe Blocker: BLOCKER-002 (Tag-Push)
 
 ## Letzte Testresultate (2026-10-15, Build-Host)
@@ -233,7 +233,7 @@ bestanden; ansible-lint (production) sauber. `test_deploy_converge` ist angepass
     - Lehre: Drei der Funde (BUG-249/259/260) zeigten sich erst durch Deploys mitten im Lauf. Es sind echte Fehler (ein Worker-Ausfall unterbricht genauso), der Lauf ist aber verzerrt.
     - Beobachtung ohne Fix: Der Reviewer meldete einmal eine Testdatei als fehlend, deren Diff gekürzt war (der Prompt verbietet das bereits). Wieder aufgreifen, falls es erneut auftritt.
 
-    Neustart auf rc46 (`28f184c5`) scheiterte nach 4,5 min in der Planung (BUG-261). Neustart auf rc47 (`99f2f1ff`) scheiterte ebenfalls in der Planung (BUG-262). Neustart von G1 auf rc48. Während des Laufs wird nur bei blockierenden Fehlern deployt.
+    Neustart auf rc46 (`28f184c5`) scheiterte nach 4,5 min in der Planung (BUG-261). Neustart auf rc47 (`99f2f1ff`) scheiterte ebenfalls in der Planung (BUG-262). Neustart auf rc48 (`cbfe8802`) scheiterte nach 4 s an einer GitLab-Störung (BUG-263). Neustart von G1 auf rc49. Während des Laufs wird nur bei blockierenden Fehlern deployt.
 3. 0.1.0rc18 ausrollen, J1–J6 zweimal in Folge bestehen, dann die erweiterte Batterie X1–X5
    (`config/acceptance-jobs-extended.example.yaml`); danach Abbruch, parallele Jobs und Worker-Neustart prüfen.
 4. Wake-on-LAN einrichten (MACs, BIOS, Kapitel 13.1), danach `--suite wol --full-wol` und erst dann den Leerlauf-Suspend einschalten.
