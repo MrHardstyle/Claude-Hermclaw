@@ -75,7 +75,7 @@ per-attempt state: the active `ScopeGuard` (swapped after a granted expansion), 
 | `write_file` | write | create/overwrite or `append` a part (large files are written in parts, BUG-223), scope-checked, atomic (temp file + fsync + rename), mode preserved, redaction marker refused |
 | `replace_text` | write | exact match, `count` must equal the number of occurrences (default 1), CRLF-aware, helpful not-found hints |
 | `apply_patch` | write | unified diff (`-p1` git style or `-p0`); every target validated → numstat cross-check → `git apply --check` → `git apply` (worktree only) inside a tracker audit |
-| `run_command` | exec | classified, executed via `CommandExecutor`, side effects audited (see below) |
+| `run_command` | exec | classified, executed via `CommandExecutor`, side effects audited (see below); an identical command on unchanged files is refused (`COMMAND_REPEATED`), and the refusal of a failed one repeats its earlier output (BUG-246) |
 | `run_test` | exec | like `run_command` + parsed counts, `test_runs` row, `test.*` events |
 | `request_research` | request | forwarded to `on_research`; per-attempt limit |
 | `request_scope_expansion` | request | protected paths refused locally, forwarded to `on_scope_expansion`; a granted newer contract replaces the guard |

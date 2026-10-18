@@ -282,6 +282,7 @@ class ToolEngine:
         # re-ran identical commands on unchanged files again and again (analysis 2026-10-16, live job 50784df5)
         # keyed without the timeout: a command that finished is not changed by another timeout (BUG-211)
         self._ran: dict[tuple[str, str], tuple[int, int, str]] = {}
+        self._ran_output: dict[tuple[str, str], str] = {}  # rendered output of a failed run, repeated in its refusal
         # identical reads: (file-change count, turn). The context of every turn already shows the files read in this
         # attempt; the coder still re-read the same unchanged file turn after turn instead of acting (BUG-179)
         self._reads: dict[tuple[str, str], tuple[int, int, bool]] = {}  # (writes, turn, fully visible)
@@ -1084,7 +1085,8 @@ class ToolEngine:
                 "It succeeded: if the STEP GOAL or ACCEPTANCE still needs a change (for example new tests), make that "
                 "change now; otherwise call complete_step."
                 if passed
-                else "Its exact output is in LATEST FAILURE: fix the code or the tests it names, then run it again."
+                else "Fix the code or the tests its output names, then run it again. Its output was:\n"
+                + self._ran_output.get(ran_key, "(not kept)")
             )
             raise ToolError(
                 E.COMMAND_REPEATED,
@@ -1168,7 +1170,15 @@ class ToolEngine:
                 )
             ],
         )
-        return _RunOutcome(result, audit, classification, cwd, duration, error)
+        run = _RunOutcome(result, audit, classification, cwd, duration, error)
+        recorded = self._ran.get(ran_key)
+        if recorded is not None and recorded[1] == ctx.turn and exit_code != 0:
+            # the refusal of a repeat carries this output itself: LATEST FAILURE may have been replaced since by another
+            # command that succeeded, and the coder re-proposed the refused check five times (live G1, BUG-246)
+            self._ran_output[ran_key] = self._render_run(command, run, budget=self.output_limit // 2, head_ratio=0.2)[0]
+        else:
+            self._ran_output.pop(ran_key, None)
+        return run
 
     def _render_run(self, command: str, run: _RunOutcome, *, budget: int, head_ratio: float) -> tuple[str, bool]:
         res = run.result
@@ -1425,6 +1435,7 @@ class ToolEngine:
             self._installed[(args.ecosystem, manifest)] = digest
             # new packages change what commands can do although no workspace file changed: earlier results are stale
             self._ran.clear()
+            self._ran_output.clear()
             self._timed_out.clear()
             text += f"\n[dependencies] {len(installed)} package(s) available to later commands and tests of this job"
         elif error_code == E.COMMAND_FAILED and args.ecosystem == "python":

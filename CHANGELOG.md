@@ -5,6 +5,7 @@ Format: [Keep a Changelog](https://keepachangelog.com/de/1.1.0/), Versionen nach
 ## [Unreleased]
 
 ### Behoben
+- **Verweigerte Befehlswiederholung mit Beleg (BUG-246):** Die Verweigerung eines wiederholten fehlgeschlagenen Befehls enthält dessen frühere Ausgabe, auch wenn ein anderer Befehl LATEST FAILURE inzwischen ersetzt hat.
 - **Keine handgeschriebenen Parser (BUG-245):** Der Coder liest JSON/TOML/CSV/INI/XML mit dem Parser der Sprache und prüft selbst geschriebene Formate durch Zurücklesen; der Reviewer stuft handgeschriebene Parser als major ein.
 - **Teil-Lesezugriffe (BUG-244):** Ein `read_range` innerhalb eines vollständig sichtbaren Lesezugriffs derselben Datei wird wie ein identischer Lesezugriff verweigert, solange keine Datei geändert wurde.
 - **Geheimnis-Funde in Tests (BUG-243):** Für Testdateien verlangt die Geheimnis-Prüfung einen offensichtlichen Platzhalter (`dummy`, `fake`, `example`) statt „aus der Umgebung laden“; `fake`, `mock` und `sample` gelten als Platzhalter.

@@ -46,6 +46,19 @@ Noch keine.
 
 ## Behobene Bugs
 
+### BUG-246 – Die Verweigerung eines wiederholten fehlgeschlagenen Befehls verweist auf LATEST FAILURE, das dessen Ausgabe nicht mehr zeigt
+- Phase: G1 auf rc36 (Job `8f394b63…`, S003 Versuch 4, Turns 9–14) · Komponente: tools (engine) · Severity: P1 · blockierend: nein (behoben) · Status: **behoben** (`tests/integration/test_tools_engine_exec.py::test_a_refused_repeat_of_a_failed_command_carries_its_output`)
+- Reproduktion:
+  - `python -m pytest -q tests/test_collector.py` schlägt fehl (Turn 1).
+  - Ein Diagnosebefehl `python -c …` gelingt (Turn 9), und `LATEST FAILURE` wird geleert.
+  - Der Coder schlägt den Testbefehl fünfmal hintereinander erneut vor (je ~45 s). Jedes Mal lautet die Antwort: „command refused … Its exact output is in LATEST FAILURE“. Der Abschnitt zeigt aber nur noch die Verweigerung (505 Zeichen statt 1391).
+- Ursache: BUG-175 hält die letzte echte Fehlermeldung über verweigerte Wiederholungen hinweg. Ein *anderer*, erfolgreicher Befehl löscht sie jedoch, obwohl sich keine Datei geändert hat. Die Verweigerung behauptete dann etwas, das der Kontext nicht mehr zeigte.
+- Fix:
+  - Die Engine merkt sich die gerenderte Ausgabe jedes fehlgeschlagenen Befehls (halbes Ausgabelimit).
+  - Die Verweigerung einer Wiederholung enthält diese Ausgabe selbst: „Its output was: …“.
+  - Ein erfolgreicher Lauf und eine erfolgreiche Installation verwerfen die gemerkte Ausgabe.
+- Selbstprüfung: echter Schritt nach vorn. Die Verweigerung trägt jetzt ihren Beleg selbst, statt sich auf den Zustand einer anderen Komponente zu verlassen. Gleiches Muster wie BUG-229: Eine Sperre darf nur auf Inhalte verweisen, die nachweislich sichtbar sind.
+
 ### BUG-245 – „Nur Standardbibliothek“ führt zu handgeschriebenem TOML-Parser und -Writer, der verschachtelte Tabellen zerstört
 - Phase: G1 auf rc36 (Job `8f394b63…`, S003 Versuch 3/4) · Komponente: context_builder (System-Vertrag des Coders), review (prompt) · Severity: P1 · blockierend: nein (behoben) · Status: **behoben** (`tests/unit/test_planner_prompt.py::test_prompts_explain_how_dependencies_get_into_the_sandbox`, `tests/unit/test_review_prompt.py` Nadel „Hand-written parsers“)
 - Reproduktion:

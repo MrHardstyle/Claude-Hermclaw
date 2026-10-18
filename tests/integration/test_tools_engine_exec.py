@@ -607,6 +607,22 @@ async def test_identical_command_on_unchanged_files_is_not_rerun(sessionmaker: S
     assert len(rec.requests) == 3
 
 
+async def test_a_refused_repeat_of_a_failed_command_carries_its_output(sessionmaker: SM, repo: Path) -> None:
+    """Live G1 (BUG-246): a diagnostic command that succeeded replaced LATEST FAILURE; the refusal of the failing test
+    command then pointed at "its exact output in LATEST FAILURE", which no longer showed it, and the coder re-proposed
+    the refused command five times. The refusal repeats the earlier output itself."""
+    rec = InstallRecorder("FAILED tests/test_x.py::test_roundtrip - KeyError: 'main'\n1 failed, 13 passed\n", exit_code=1)
+    h = await make_harness(sessionmaker, repo, contract=scope(**SCOPE), executor=rec)
+    first = await h.call("run_test", command="python -m pytest -q")
+    assert not first.ok and "KeyError: 'main'" in first.output
+    rec.stdout, rec.exit_code = "ok\n", 0
+    assert (await h.call("run_command", command="python -c 'print(1)'")).ok
+    again = await h.call("run_test", command="python -m pytest -q")
+    assert again.error_code == E.COMMAND_REPEATED and again.data["repeated"] is True
+    assert "KeyError: 'main'" in again.output and "1 failed, 13 passed" in again.output and "LATEST FAILURE" not in again.output
+    assert len(rec.requests) == 2
+
+
 async def test_a_successful_install_allows_rerunning_the_same_command(sessionmaker: SM, repo: Path) -> None:
     """Live job d50dc59e (J1, rc11): after install_dependencies succeeded, the same test command was refused as a
     repeat – the install changed the environment (/deps), not a workspace file. A successful install resets it."""
