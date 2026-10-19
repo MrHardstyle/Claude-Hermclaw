@@ -122,12 +122,14 @@ class ScriptedVerifier:
 class ScriptedReviewer:
     def __init__(self, verdicts: list[str]) -> None:
         self.verdicts, self.calls = list(verdicts), 0
+        self.earlier: list[tuple[str, ...]] = []  # the earlier findings handed to each review (BUG-284)
 
     def should_review(self, step_kind: str, verifier_passed: bool) -> bool:
         return step_kind == "implement" and verifier_passed
 
-    async def review(self, step: StepContract, workspace: WorkspaceHandle, verification: VerificationReport, **_: Any) -> ReviewContract:
+    async def review(self, step: StepContract, workspace: WorkspaceHandle, verification: VerificationReport, **kw: Any) -> ReviewContract:
         self.calls += 1
+        self.earlier.append(tuple(kw.get("earlier", ())))
         v = self.verdicts.pop(0) if self.verdicts else "pass"
         if v == "major_pass":  # model claims pass but reports a major finding -> invariant must override
             return ReviewContract(
@@ -282,6 +284,8 @@ async def test_review_invariant_major_finding_forces_correction(world: World, tm
     assert jobs[jid].status == "succeeded", (jobs[jid].error_code, jobs[jid].error_message)
     assert reviewer.calls == 2
     assert any("configurable via env" in m.content for m in models.coder_prompts[2]), "review finding must reach the correction attempt"
+    # BUG-284: the correction's review is told which findings it corrects; the first review is not
+    assert reviewer.earlier[0] == () and any("configurable via env" in f for f in reviewer.earlier[1])
 
 
 async def test_exhausted_corrections_escalate_to_replan(world: World, tmp_path: Path) -> None:

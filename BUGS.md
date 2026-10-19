@@ -46,6 +46,20 @@ Noch keine.
 
 ## Behobene Bugs
 
+### BUG-284 – Review-Korrekturen kommen nicht zur Ruhe: jedes Review stellt neue Forderungen, auch an unveränderten Code
+- Phase: Testzyklus 2 auf rc60 (K1, Job `582bba63…`, Plan v2, S002 Versuche 1–3) · Komponente: review (invariant, prompt), coder (handler) · Severity: P1 · blockierend: ja (behoben) · Status: **behoben** (`tests/unit/test_review_severity.py::test_new_major_findings_of_a_correction_review_do_not_block`, `::test_finding_origin_is_normalised`, `tests/unit/test_review_prompt.py::test_a_correction_review_sees_the_findings_it_corrects`, `tests/integration/test_coder_handler.py::test_review_invariant_major_finding_forces_correction`)
+- Reproduktion:
+  - Review 1 fordert Header-Prüfung und Tests für `inf`/`nan`. Die Korrektur liefert beides, alle 19 Prüfungen bestehen.
+  - Review 2 lehnt ab, weil der Code „die Planvorgabe verletzt“: Der Replan hatte den alten Lint-Befund als „unbenutzte `header`-Variable entfernen“ ins Ziel geschrieben, und `header` wird jetzt für die geforderte Prüfung gebraucht.
+  - Review 3 (Code unverändert, gleicher Inhalts-Digest) fordert Neues: die `zeitpunkt`-Spalte prüfen und deutsche Ausgabetexte. Letzteres verlangt der Auftrag nicht, und die Prompt-Regel stuft es als minor ein.
+  - Ergebnis: Der Schritt ist blockiert, zweiter Replan.
+- Ursache: Ein Review im Korrekturversuch kannte die Befunde nicht, die korrigiert werden sollten, und durfte beliebige neue Forderungen blockierend stellen. Die Korrekturschleife hatte damit kein festes Ziel. Gleiche Klasse wie BUG-191, BUG-260 und BUG-274; Prompt-Regeln allein hielten nicht.
+- Fix:
+  - In einem Korrekturversuch nach einem Review bekommt das Review die früheren Befunde (Abschnitt „EARLIER REVIEW FINDINGS“) und kennzeichnet jeden Befund mit `origin`: `earlier`, `introduced` oder `new`. Unbekannt oder fehlend gilt als `new`.
+  - Deterministisch: Ein `major`-Befund mit `origin: new` wird zu `minor` (`downgrade_new_correction_findings`). Blocker bleiben blockierend. Bleiben nur `minor`-Befunde und hat der Verifier bestanden, gilt das Review als bestanden (bestehende Invariante, BUG-191).
+- Abwägung: Ein echter neuer Mangel, den erst das zweite Review sieht, blockiert nur noch als Blocker. Das erste Review jedes Schritts behält die volle Strenge.
+- Nebenbefund (offen): Der Neuplaner übernimmt Einzelheiten alter Befunde („Variable entfernen“) wörtlich ins neue Schrittziel und lässt dabei Anforderungen weg (`zeitpunkt`).
+
 ### BUG-283 – Review-Korrektur bringt einen neuen Lint-Fehler ein, `complete_step` nimmt an, der letzte Versuch ist verbraucht
 - Phase: Testzyklus 2 auf rc60 (K1, Job `582bba63…`, S001 Versuch 3) · Komponente: tools (engine) · Severity: P2 · blockierend: ja (behoben) · Status: **behoben** (`tests/integration/test_tools_engine_exec.py::test_complete_step_runs_the_lint_of_the_changed_files`)
 - Reproduktion: Versuch 1 scheitert an Lint, die Korrektur behebt das. Das Heavy Review fordert berechtigt, `inf`/`nan` abzulehnen und den Header zu prüfen. Die Korrektur dazu führt ein neues F841 ein, `complete_step` nimmt an. Der Verifier blockiert den Schritt (2/2 Korrekturen), es folgt ein Replan von knapp 13 Minuten.

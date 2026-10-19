@@ -115,6 +115,8 @@ _FIELD_ALIASES: dict[str, str] = {
     "fix": "suggested_fix",
     "suggestion": "suggested_fix",
     "recommendation": "suggested_fix",
+    "origin": "origin",
+    "source": "origin",
     "remediation": "suggested_fix",
 }
 _LINE_KEYS = ("line", "lines", "line_number", "start_line")
@@ -186,6 +188,9 @@ def _normalise_raw_finding(raw: object, idx: int, notes: list[str]) -> dict[str,
         if canon in out:  # first occurrence wins (e.g. 'summary' before 'description')
             continue
         out[canon] = value
+    if "origin" in out:
+        origin = _token(_text(out["origin"]))
+        out["origin"] = origin if origin in ("earlier", "introduced", "new") else "new"  # unknown: new (cannot block a correction)
     sev, changed = normalise_severity(out.get("severity"))
     if changed:
         notes.append(f"finding[{idx}]: severity {clip(_text(out.get('severity')), 30)!r} -> {sev.value}")

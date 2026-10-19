@@ -600,7 +600,10 @@ def _drop_unnamed_existing_must_change(
                 acceptance.append(crit.model_copy(update={"must_change": keep}))
         if dropped:
             steps.append(step.model_copy(update={"acceptance": acceptance}))
-            notes.append(f"step {step.id}: {', '.join(dropped[:5])} may change but is not required to (named neither in the step goal nor in the job)")
+            notes.append(
+                f"step {step.id}: {', '.join(dropped[:5])} may change but is not required to "
+                "(named neither in the step goal nor in the job)"
+            )
         else:
             steps.append(step)
     if not notes:

@@ -307,3 +307,49 @@ def test_syntax_claims_against_a_parsed_file_are_downgraded() -> None:
     )
     kept, none = downgrade_contradicted_findings(other, report)
     assert kept == other and none == []
+
+
+def test_new_major_findings_of_a_correction_review_do_not_block() -> None:
+    """Live K1 on rc60 (cycle 2): three reviews of one step raised three different sets of demands, the last two on
+    unchanged code; the step was blocked although every check passed (BUG-284). In a correction review only earlier
+    findings still open, defects the correction introduced and blockers keep blocking."""
+    from hermclaw.review.invariant import NEW_FINDING_NOTE, apply_review_invariants, downgrade_new_correction_findings
+
+    review = ReviewContract(
+        verdict="fix_required",
+        findings=[
+            ReviewFinding(severity=FindingSeverity.major, path="csv_eval.py", summary="output labels are English", origin="new"),
+            ReviewFinding(severity=FindingSeverity.major, path="csv_eval.py", summary="header still not validated", origin="earlier"),
+            ReviewFinding(severity=FindingSeverity.major, path="csv_eval.py", summary="new code divides by zero", origin="introduced"),
+            ReviewFinding(severity=FindingSeverity.blocker, path="csv_eval.py", summary="zeitpunkt column is never read", origin="new"),
+        ],
+        summary="x",
+    )
+    settled, notes = downgrade_new_correction_findings(review, ["header validation is missing"])
+    assert [f.severity for f in settled.findings] == [
+        FindingSeverity.minor,
+        FindingSeverity.major,
+        FindingSeverity.major,
+        FindingSeverity.blocker,
+    ]
+    assert settled.findings[0].summary.startswith(NEW_FINDING_NOTE) and len(notes) == 1
+    assert downgrade_new_correction_findings(review, []) == (review, []), "a first review keeps its full strength"
+    only_new = ReviewContract(verdict="fix_required", findings=[review.findings[0]], summary="x")
+    passed, _ = downgrade_new_correction_findings(only_new, ["header validation is missing"])
+    assert apply_review_invariants(passed, verifier_passed=True).review.verdict == "pass"
+
+
+def test_finding_origin_is_normalised() -> None:
+    """BUG-284: an unknown or missing origin is 'new' (it cannot block a correction); the alias 'source' is accepted."""
+    raw = {
+        "verdict": "fix_required",
+        "findings": [
+            {"severity": "major", "summary": "still open", "origin": "Earlier"},
+            {"severity": "major", "summary": "from the fix", "source": "introduced"},
+            {"severity": "major", "summary": "odd", "origin": "previous-review"},
+            {"severity": "major", "summary": "plain"},
+        ],
+        "summary": "x",
+    }
+    draft = ReviewDraft.model_validate(raw)
+    assert [f.origin for f in draft.findings] == ["earlier", "introduced", "new", "new"]

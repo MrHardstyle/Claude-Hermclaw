@@ -74,6 +74,12 @@ security problem, data loss, tests disabled or weakened.
 - A range, format or limit of the JOB GOAL that is not enforced exactly is major. Text in another language than the \
 JOB GOAL, missing documentation and import-time side effects that do not break behaviour are minor.
 
+CORRECTION REVIEWS
+- When an EARLIER REVIEW FINDINGS section is present, this attempt corrects them. Set "origin" on every finding: \
+"earlier" = one of those findings is still not resolved, "introduced" = a defect the latest changes brought in, \
+"new" = anything else. Only "earlier" and "introduced" findings (and blockers) can block a correction; do not move \
+the goal with demands the earlier review did not make.
+
 VERDICT
 - "pass" only if there is no major and no blocker finding. Any major or blocker finding requires "fix_required".
 - suggested_fix: one concise, concrete instruction for the implementation worker.
@@ -81,7 +87,8 @@ VERDICT
 OUTPUT
 Return ONLY one JSON object, no prose, no markdown fences, no reasoning:
 {"verdict": "pass" | "fix_required", "findings": [{"severity": "minor" | "major" | "blocker", "path": "<repo path>", \
-"summary": "<what is wrong>", "evidence": "<quoted line or verifier fact>", "suggested_fix": "<what to change>"}], \
+"summary": "<what is wrong>", "evidence": "<quoted line or verifier fact>", "suggested_fix": "<what to change>", \
+"origin": "earlier" | "introduced" | "new"}], \
 "summary": "<one or two sentences>"}"""
 
 OUTPUT_REMINDER = (
@@ -154,6 +161,13 @@ def render_step(inp: ReviewInput, settings: ReviewSettings) -> str:
     if len(step.acceptance) > len(acceptance):
         lines.append(f"(+{len(step.acceptance) - len(acceptance)} more acceptance criteria not shown)")
     return "\n".join(lines)
+
+
+def render_earlier(findings: Sequence[str], settings: ReviewSettings) -> str:
+    """The review findings this correction attempt had to address (BUG-284)."""
+    shown = [f"- {clip(one_line(redact(f)), settings.item_chars)}" for f in findings[: settings.max_acceptance]]
+    more = [f"(+{len(findings) - len(shown)} more not shown)"] if len(findings) > len(shown) else []
+    return "\n".join(["## EARLIER REVIEW FINDINGS (this attempt is a correction of them)", *shown, *more])
 
 
 def render_scope(scope: ScopeContract | None, settings: ReviewSettings) -> str:
@@ -283,6 +297,8 @@ def _fixed_sections(inp: ReviewInput, budget: int, settings: ReviewSettings) -> 
     current = settings
     while True:
         fixed = [render_goal(inp.goal, current), render_step(inp, current), render_scope(inp.step.scope, current)]
+        if inp.earlier_findings:
+            fixed.append(render_earlier(inp.earlier_findings, current))
         if sum(len(s) for s in fixed) <= budget * _FIXED_SHARE or current.item_chars <= _MIN_ITEM_CHARS:
             return fixed
         current = replace(

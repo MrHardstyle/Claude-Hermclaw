@@ -38,7 +38,7 @@ from hermclaw.events.store import append_event
 from hermclaw.models.protocols import CallContext, ChatModel, StructuredResult
 from hermclaw.persistence.models import ReviewFindingRow, ReviewRun
 from hermclaw.review.diff import split_diff
-from hermclaw.review.invariant import apply_review_invariants, downgrade_contradicted_findings
+from hermclaw.review.invariant import apply_review_invariants, downgrade_contradicted_findings, downgrade_new_correction_findings
 from hermclaw.review.policy import requires_change_evidence, should_review
 from hermclaw.review.prompt import build_review_prompt
 from hermclaw.review.severity import ReviewDraft, normalise_findings, redact_review
@@ -283,7 +283,8 @@ class HeavyReviewer:
         contract = draft.to_contract() if isinstance(draft, ReviewDraft) else ReviewContract.model_validate(draft.model_dump())
         normalised, more_notes = normalise_findings(redact_review(contract), changed)
         normalised, contradicted = downgrade_contradicted_findings(normalised, inp.verification)
-        more_notes = [*more_notes, *contradicted]
+        normalised, unrelated = downgrade_new_correction_findings(normalised, inp.earlier_findings)
+        more_notes = [*more_notes, *contradicted, *unrelated]
         inv = apply_review_invariants(normalised, verifier_passed=inp.verification.passed)
         reason = inv.review.summary or (
             "review passed" if inv.review.verdict == "pass" else f"review requires fixes ({len(inv.review.findings)} finding(s))"

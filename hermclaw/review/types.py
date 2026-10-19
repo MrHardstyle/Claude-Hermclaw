@@ -93,6 +93,7 @@ class ReviewInput:
     snippets: Sequence[CodeSnippet] = ()
     command_log: Sequence[str] = ()  # executed commands – change evidence for steps that mutate outside the repo
     changed_files: Sequence[str] | None = None  # defaults to the verifier's changed_files / the diff's files
+    earlier_findings: Sequence[str] = ()  # review findings the current correction attempt had to address (BUG-284)
 
 
 @dataclass(frozen=True)

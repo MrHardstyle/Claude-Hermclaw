@@ -1794,7 +1794,7 @@ class ToolEngine:
         from hermclaw.verifier.languages import detect_language, is_lock_or_data_file
         from hermclaw.verifier.secrets import SecretScanner
 
-        scanner, out = SecretScanner(), []
+        scanner, out = SecretScanner(), list[str]()
         for rel in self._recheck_secrets:
             if not (self.fs.root / rel).is_file():
                 continue

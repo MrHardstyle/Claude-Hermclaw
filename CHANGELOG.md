@@ -5,6 +5,7 @@ Format: [Keep a Changelog](https://keepachangelog.com/de/1.1.0/), Versionen nach
 ## [Unreleased]
 
 ### Behoben
+- **Review-Korrekturen kommen zur Ruhe (BUG-284):** Das Review eines Korrekturversuchs kennt die Befunde, die korrigiert werden sollten. Neue `major`-Forderungen blockieren dort nicht mehr, Blocker weiterhin. Neues Feld `origin` an Review-Befunden.
 - **`complete_step` prüft den Lint der geänderten Dateien (BUG-283):** Neue Lint-Befunde werden schon beim Abschluss gemeldet, nicht erst vom Verifier nach einem verbrauchten Versuch.
 - **Keine Pflichtänderung an Dateien, die das Schrittziel nicht nennt (BUG-282):** `must_change` auf bestehende Dateien, die weder Schrittziel noch Auftrag nennen, wird bei der Planung gestrichen. Die Datei darf weiter geändert werden.
 - **Tests wandern in den Schritt ihres Codes (BUG-281):** Plant ein Schritt Tests für den Code eines anderen Schritts, verschiebt die Runtime sie in diesen Schritt, statt den Plan abzulehnen. Die Modelle wiederholten den Fehler in jedem Reparaturzug.

@@ -15,6 +15,9 @@ class ReviewFinding(Contract):
     summary: str = Field(min_length=3, max_length=2000)
     evidence: str = Field(default="", max_length=4000)
     suggested_fix: str = Field(default="", max_length=4000)
+    # in a correction attempt: "earlier" = an earlier finding still open, "introduced" = a defect the latest changes
+    # brought in, "new" = anything else (BUG-284: only the first two may block a correction)
+    origin: Literal["earlier", "introduced", "new"] = "new"
 
 
 class ReviewContract(Contract):

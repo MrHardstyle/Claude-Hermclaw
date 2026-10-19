@@ -82,13 +82,16 @@ class WorkspaceReviewer:
         job_id: uuid.UUID,
         step_id: uuid.UUID,
         attempt_id: uuid.UUID | None,
+        earlier: Sequence[str] = (),
     ) -> ReviewContract:
         """Effective (fail-closed) review contract – the summary carries the reason when the review errored.
 
         An unreachable model host is no verdict about the change (BUG-198): it raises :class:`ResourceUnavailable`, so
         the step attempt is retried once the host is back instead of costing a correction round or a replan. It never
         passes either."""
-        outcome = await self.review_outcome(step, workspace, verification, job_id=job_id, step_id=step_id, attempt_id=attempt_id)
+        outcome = await self.review_outcome(
+            step, workspace, verification, job_id=job_id, step_id=step_id, attempt_id=attempt_id, earlier=earlier
+        )
         if outcome.fail_closed and outcome.error_code in _HOST_DOWN:
             raise ResourceUnavailable(f"heavy review: model host unavailable ({outcome.error_code}): {outcome.reason[:300]}")
         return outcome.review
@@ -102,9 +105,10 @@ class WorkspaceReviewer:
         job_id: uuid.UUID,
         step_id: uuid.UUID,
         attempt_id: uuid.UUID | None,
+        earlier: Sequence[str] = (),
     ) -> ReviewOutcome:
         try:
-            inp = await self.collect(step, workspace, verification, job_id=job_id, step_id=step_id, attempt_id=attempt_id)
+            inp = await self.collect(step, workspace, verification, job_id=job_id, step_id=step_id, attempt_id=attempt_id, earlier=earlier)
         except Exception as exc:  # any collection failure fails closed (never a pass); CancelledError propagates
             detail = exc.message if isinstance(exc, HermclawError) else str(exc)
             reason = (
@@ -130,6 +134,7 @@ class WorkspaceReviewer:
         job_id: uuid.UUID,
         step_id: uuid.UUID,
         attempt_id: uuid.UUID | None,
+        earlier: Sequence[str] = (),
     ) -> ReviewInput:
         settings = self.reviewer.settings
         async with asyncio.timeout(settings.context_timeout_seconds):
@@ -149,6 +154,7 @@ class WorkspaceReviewer:
             snippets=snippets,
             command_log=commands,
             changed_files=changed,
+            earlier_findings=tuple(earlier),
         )
 
     # ------------------------------------------------------------------------------------------------ sources

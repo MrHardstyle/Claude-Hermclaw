@@ -38,6 +38,16 @@
           "maxLength": 4000,
           "title": "Suggested Fix",
           "type": "string"
+        },
+        "origin": {
+          "default": "new",
+          "enum": [
+            "earlier",
+            "introduced",
+            "new"
+          ],
+          "title": "Origin",
+          "type": "string"
         }
       },
       "required": [

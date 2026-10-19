@@ -310,3 +310,14 @@ def test_failing_checks_show_why_they_failed() -> None:
     user, _ = _user(_file("collector/unraid.py", 2), verification=report)
     assert "failure output (why it failed)" in user and "KeyError: 'Content-Type'" in user
     assert "FAILED tests/test_unraid.py::TestBuildRequest::test_headers" in user
+
+
+def test_a_correction_review_sees_the_findings_it_corrects() -> None:
+    """BUG-284: a correction is reviewed against the findings it had to address; the reviewer marks each finding's
+    origin, and only earlier or introduced findings can block it."""
+    user, _ = _user(_file("export.py", 5), earlier_findings=["export() ignores the delimiter option — evidence: line 3"])
+    assert "## EARLIER REVIEW FINDINGS (this attempt is a correction of them)" in user
+    assert "- export() ignores the delimiter option" in user
+    assert user.index("## SCOPE") < user.index("## EARLIER REVIEW FINDINGS") < user.index("## DETERMINISTIC VERIFIER REPORT")
+    assert "## EARLIER REVIEW FINDINGS" not in _user(_file("export.py", 5))[0], "a first review has no such section"
+    assert '"origin": "earlier" | "introduced" | "new"' in REVIEW_SYSTEM_PROMPT and "do not move" in REVIEW_SYSTEM_PROMPT

@@ -12,6 +12,11 @@ Invariants (deterministic, enforced by the runtime – never left to the model):
 - fix_required with only `minor` findings → pass, findings kept as notes (BUG-191);
 - a `major`/`blocker` finding that claims a syntax error in a file whose verifier syntax check passed → downgraded to
   `minor` and marked "[contradicts the verifier …]" (`downgrade_contradicted_findings`, BUG-217);
+- a correction attempt after a review is reviewed against the findings it had to fix (section "EARLIER REVIEW
+  FINDINGS"); the model marks each finding's `origin` (`earlier` still open, `introduced` by the correction, `new`).
+  A `major` finding with origin `new` becomes `minor` ("[new in a correction review, not blocking]",
+  `downgrade_new_correction_findings`, BUG-284); blockers keep blocking. Without the rule each review could move the
+  goal and a correction never converged;
 - every failure (invalid output after the gateway's repairs, timeout, model/infra error, missing heavy profile,
   unreadable diff, internal error, cancellation) is persisted as `status='error'` with the **fail-closed** verdict
   `fix_required` and a clear reason – no code path turns an error into a pass;

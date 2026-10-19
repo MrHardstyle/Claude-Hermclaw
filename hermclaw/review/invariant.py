@@ -18,6 +18,7 @@ outcome (verdict ``fix_required``), so no code path turns an error into a pass.
 from __future__ import annotations
 
 import re
+from collections.abc import Sequence
 from dataclasses import dataclass
 
 from hermclaw.contracts.common import FindingSeverity
@@ -81,6 +82,30 @@ def downgrade_contradicted_findings(review: ReviewContract, verification: Verifi
             summary = (CONTRADICTION_NOTE + finding.summary)[:2000]
             findings.append(finding.model_copy(update={"severity": FindingSeverity.minor, "summary": summary}))
             notes.append(f"downgraded a syntax-error claim about {', '.join(sorted(paths))}: the verifier parsed it")
+        else:
+            findings.append(finding)
+    return (review.model_copy(update={"findings": findings}) if notes else review), notes
+
+
+NEW_FINDING_NOTE = "[new in a correction review, not blocking] "
+
+
+def downgrade_new_correction_findings(review: ReviewContract, earlier: Sequence[str]) -> tuple[ReviewContract, list[str]]:
+    """Rule 5: a correction is reviewed against what it had to fix. A ``major`` finding that is neither an earlier
+    finding still open nor a defect the correction brought in becomes ``minor``; blockers keep blocking.
+
+    Live K1 on rc60 (cycle 2): three reviews of one step raised three different sets of demands – the last two on code
+    that had not changed – and the step was blocked although every check passed (BUG-284). Without this rule a
+    correction never converges: each review may move the goal."""
+    if not earlier:
+        return review, []
+    notes: list[str] = []
+    findings = []
+    for finding in review.findings:
+        if finding.severity == FindingSeverity.major and finding.origin == "new":
+            summary = (NEW_FINDING_NOTE + finding.summary)[:2000]
+            findings.append(finding.model_copy(update={"severity": FindingSeverity.minor, "summary": summary}))
+            notes.append(f"downgraded a new major finding in a correction review: {finding.summary[:120]}")
         else:
             findings.append(finding)
     return (review.model_copy(update={"findings": findings}) if notes else review), notes

@@ -24,6 +24,7 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from hermclaw.coder.loop import CoderLoop, CoderResult, CoderSettings, StagnationHook, history_from_checkpoint
 from hermclaw.context_builder import ContextBuilder, ContextBuilderConfig, CorrectionItem, StepBrief
+from hermclaw.contracts.acceptance import AcceptanceCriterion
 from hermclaw.contracts.common import StepKind
 from hermclaw.contracts.events import EventType
 from hermclaw.contracts.review import ReviewContract, enforce_review_invariant
@@ -105,7 +106,7 @@ def unmet_change_demands(report: VerificationReport) -> list[str]:
 def without_change_demands(step: StepContract, globs: Sequence[str]) -> StepContract:
     """``step`` without the ``must_change`` globs, and a constraint that asks the review whether the goal needs them."""
     drop = set(globs)
-    acceptance = []
+    acceptance: list[AcceptanceCriterion] = []
     for crit in step.acceptance:
         if crit.type == "diff" and drop & set(crit.must_change):
             keep = [g for g in crit.must_change if g not in drop]
@@ -146,6 +147,7 @@ class ReviewerPort(Protocol):
         job_id: uuid.UUID,
         step_id: uuid.UUID,
         attempt_id: uuid.UUID,
+        earlier: Sequence[str] = (),
     ) -> ReviewContract: ...
 
 
@@ -246,6 +248,7 @@ class _Run:
     step: StepContract
     ws: Any
     handle: WorkspaceHandle
+    earlier_findings: tuple[str, ...] = ()  # review findings this correction attempt had to address (BUG-284)
 
 
 class _Callbacks:
@@ -540,7 +543,8 @@ class ImplementStepHandler:
         except ResourceUnavailable as exc:
             return StepOutcome("failed", error_code=exc.code, error_message=exc.message, retryable=True)
         try:
-            return await self._after_loop(_Run(ctx, row, step, ws, handle), result)
+            earlier = tuple(c.message for c in corrections if c.source == "review")
+            return await self._after_loop(_Run(ctx, row, step, ws, handle, earlier), result)
         except ResourceUnavailable as exc:  # heavy-review lease not granted in time
             return StepOutcome("failed", error_code=exc.code, error_message=exc.message, retryable=True)
 
@@ -688,7 +692,13 @@ class ImplementStepHandler:
             await self._status(ctx, f"Heavy Review für {row.step_key}")
             async with self._model(ctx, "heavy", preemptible=False):
                 raw_review = await self.deps.reviewer.review(
-                    step, handle, outcome.report, job_id=ctx.job_id, step_id=ctx.step_id, attempt_id=ctx.attempt_id
+                    step,
+                    handle,
+                    outcome.report,
+                    job_id=ctx.job_id,
+                    step_id=ctx.step_id,
+                    attempt_id=ctx.attempt_id,
+                    earlier=run.earlier_findings,
                 )
             review, _ = enforce_review_invariant(raw_review)
             if review.verdict != "pass":
