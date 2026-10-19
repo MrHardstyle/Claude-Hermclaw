@@ -5,6 +5,7 @@ Format: [Keep a Changelog](https://keepachangelog.com/de/1.1.0/), Versionen nach
 ## [Unreleased]
 
 ### Behoben
+- **Replans behalten die Anforderungen (BUG-285):** Ein Ersatzschritt, der an den Dateien des gescheiterten Schritts arbeitet, bekommt dessen ursprüngliches Ziel als Constraint – auch über mehrere Replans. Der Neuplaner schreibt keine Zeilennummern und Lint-Codes mehr ins Ziel.
 - **Review-Korrekturen kommen zur Ruhe (BUG-284):** Das Review eines Korrekturversuchs kennt die Befunde, die korrigiert werden sollten. Neue `major`-Forderungen blockieren dort nicht mehr, Blocker weiterhin. Neues Feld `origin` an Review-Befunden.
 - **`complete_step` prüft den Lint der geänderten Dateien (BUG-283):** Neue Lint-Befunde werden schon beim Abschluss gemeldet, nicht erst vom Verifier nach einem verbrauchten Versuch.
 - **Keine Pflichtänderung an Dateien, die das Schrittziel nicht nennt (BUG-282):** `must_change` auf bestehende Dateien, die weder Schrittziel noch Auftrag nennen, wird bei der Planung gestrichen. Die Datei darf weiter geändert werden.

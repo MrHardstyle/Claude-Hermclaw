@@ -67,6 +67,8 @@ from hermclaw.planner.prompt import PromptBuild, build_messages, fit_to_budget, 
 from hermclaw.planner.replan_contract import APPROACH_FAILURE_REASONS, ReplanContract, ReplanStep, ReplanTrigger
 from hermclaw.planner.validation import (
     CHECK_ONLY_KINDS,
+    DOC_PATH_RE,
+    WORKSPACE_MUTATING_KINDS,
     AdviceOnce,
     ValidationContext,
     content_tokens,
@@ -111,6 +113,7 @@ class ReplanSnapshot:
     active_keys: frozenset[str]
     failed_key: str | None
     failed_signature: tuple[Any, ...] | None
+    failed_step: PlanStep | None = None
 
 
 def step_from_row(row: Step, deps: list[str]) -> PlanStep:
@@ -170,6 +173,50 @@ OPEN_STEP_COVERAGE = 0.6
 def _step_paths(step: PlanStep) -> set[str]:
     """Files the step creates: shared hints such as README.md say nothing about which work a step does."""
     return set(step.allowed_new_paths)
+
+
+#: constraint carrying the goal of a step a replan replaced; its text is kept verbatim through later replans
+REPLACED_GOAL_PREFIX = "Requirements of the step this replaces (still in force; the goal above adds to them): "
+
+
+def _work_paths(step: PlanStep) -> set[str]:
+    """Files a step creates or works on (a replanned step names the files the failed one created as hints);
+    documentation is shared by many steps and says nothing about the work."""
+    hints = {h.strip().removeprefix("./") for h in step.repo_hints if "." in h.rsplit("/", 1)[-1] and not h.strip().endswith("/")}
+    return {p for p in set(step.allowed_new_paths) | hints if not DOC_PATH_RE.search(p)}
+
+
+def _plan_step_or_none(row: Step, deps: list[str]) -> PlanStep | None:
+    try:
+        return step_from_row(row, deps)
+    except ValueError:  # pydantic ValidationError: a row another component wrote
+        return None
+
+
+def carry_replaced_goal(
+    new_steps: list[ReplanStep], failed: PlanStep | None, completed_keys: frozenset[str]
+) -> tuple[list[ReplanStep], list[str]]:
+    """New steps working on the files of the failed step keep its requirements as a constraint.
+
+    Live K1 on rc60 (cycle 2): each replan rewrote the step goal as a list of fixes taken from the last findings
+    ("remove the unused header variable (line 39)"); the job's requirements (columns, line-numbered warnings, empty and
+    missing file, README) were gone after the first replan, and the third plan contradicted itself (BUG-285). The
+    constraint holds the ORIGINAL goal: a failed step that already carries one passes it on unchanged. Documentation
+    steps naming the file only describe it and get nothing."""
+    if failed is None:
+        return new_steps, []
+    text = next((c for c in failed.constraints if c.startswith(REPLACED_GOAL_PREFIX)), REPLACED_GOAL_PREFIX + failed.goal)
+    paths = _work_paths(failed)
+    out: list[ReplanStep] = []
+    notes: list[str] = []
+    for step in new_steps:
+        mutating = step.kind.value in WORKSPACE_MUTATING_KINDS and step.kind.value != "documentation"
+        if step.id in completed_keys or not mutating or not paths & _work_paths(step) or text in step.constraints:
+            out.append(step)
+            continue
+        out.append(step.model_copy(update={"constraints": [text, *step.constraints][:40]}))
+        notes.append(f"step {step.id}: keeps the requirements of the replaced step {failed.id}")
+    return out, notes
 
 
 def carry_over_open_steps(
@@ -377,6 +424,7 @@ class Replanner(PlannerBase):
             active_keys=frozenset(s.step_key for s in state.steps),
             failed_key=state.failed.step_key if state.failed is not None else None,
             failed_signature=failed_sig,
+            failed_step=_plan_step_or_none(state.failed, state.dependencies.get(state.failed.id, [])) if state.failed else None,
         )
 
     def build_prompt(
@@ -447,7 +495,9 @@ class Replanner(PlannerBase):
             # Report the merged-plan and semantic errors together with the replan-rule errors: one phase per repair
             # turn used up the repair budget before the model ever saw the scope errors (BUG-153).
             model_steps = [s for s in contract.steps if s.id not in unreasoned]
+            model_steps, kept_goal = carry_replaced_goal(model_steps, snapshot.failed_step, completed_keys)
             carried, carried_notes = carry_over_open_steps(model_steps, open_steps or [], completed_keys)
+            carried_notes = [*kept_goal, *carried_notes]
             candidate = contract.model_copy(update={"steps": model_steps + carried})
             try:
                 merged = validate_schema(PlanContract, merge_plan(candidate, kept), limit=limit)

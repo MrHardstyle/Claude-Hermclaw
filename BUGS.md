@@ -46,6 +46,18 @@ Noch keine.
 
 ## Behobene Bugs
 
+### BUG-285 – Neuplaner verliert die Anforderungen des gescheiterten Schritts und schreibt alte Lint-Befunde ins Ziel
+- Phase: Testzyklus 2 auf rc60 (K1, Job `582bba63…`, Pläne v2 und v3) · Komponente: planner (replanner, prompt) · Severity: P1 · blockierend: ja (behoben) · Status: **behoben** (`tests/unit/test_planner_validation.py::test_a_replacement_step_keeps_the_requirements_of_the_failed_step`, `tests/unit/test_planner_prompt.py::test_replanner_system_prompt_adds_rerun_rules`)
+- Reproduktion:
+  - Plan v1: S001 soll `csv_eval.py` mit Spalten, Warnungen mit Zeilennummern, leerer und fehlender Datei liefern. Nach BUG-283 Replan.
+  - Plan v2: Das Ziel des Ersatzschritts ist eine Liste von Einzelkorrekturen aus den letzten Befunden („unbenutzte `header`-Variable entfernen (Zeile 39)“). Die `zeitpunkt`-Spalte fehlt im Ziel.
+  - Plan v3: Das Ziel verlangt gleichzeitig „Header prüfen“ und „`header` nicht zuweisen“. Der Coder pendelt zwischen NameError und F841, Stagnation.
+- Ursache: Der Neuplaner sah nur das Ziel des zuletzt gescheiterten Schritts und die Befunde. Er schrieb Befunde zeilengenau ins neue Ziel, nichts hielt die ursprünglichen Anforderungen fest. Mit jedem Replan wurde das Ziel enger und widersprüchlicher.
+- Fix:
+  - Deterministisch (`carry_replaced_goal`): Jeder neue, nicht abgeschlossene Code-Schritt, der an den Dateien des gescheiterten Schritts arbeitet (`allowed_new_paths` oder Datei-Hinweise, ohne Dokumentation), bekommt dessen Ziel als Constraint „Requirements of the step this replaces (still in force …)“. Trägt der gescheiterte Schritt diese Constraint schon, wird sie unverändert weitergegeben – auch nach mehreren Replans gilt das ursprüngliche Ziel. Notiz in `replan.created`.
+  - Prompt: Ein Ersatzschritt beschreibt das vollständige Ergebnis, keine Bearbeitungsliste; keine Zeilennummern, Lint-Codes oder Einzeländerungen aus den Belegen.
+- Abwägung: Dokumentationsschritte, die die Datei nur nennen, bekommen nichts. Verlangt der Neuplaner bewusst weniger als vorher, gilt trotzdem das alte Ziel – Anforderungen des Auftrags fallen nicht durch einen Replan weg.
+
 ### BUG-284 – Review-Korrekturen kommen nicht zur Ruhe: jedes Review stellt neue Forderungen, auch an unveränderten Code
 - Phase: Testzyklus 2 auf rc60 (K1, Job `582bba63…`, Plan v2, S002 Versuche 1–3) · Komponente: review (invariant, prompt), coder (handler) · Severity: P1 · blockierend: ja (behoben) · Status: **behoben** (`tests/unit/test_review_severity.py::test_new_major_findings_of_a_correction_review_do_not_block`, `::test_finding_origin_is_normalised`, `tests/unit/test_review_prompt.py::test_a_correction_review_sees_the_findings_it_corrects`, `tests/integration/test_coder_handler.py::test_review_invariant_major_finding_forces_correction`)
 - Reproduktion:

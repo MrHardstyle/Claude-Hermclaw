@@ -241,6 +241,15 @@ open steps pushed replan answers past the output limit (BUG-241). A replan answe
 (`PLANNER_INVALID_OUTPUT`) counts as one replan; the scheduler runs the replan again while the replan budget allows,
 and fails the job only after that.
 
+### A replacement step keeps the failed step's requirements (BUG-285)
+
+Every new, not completed code step that works on the files of the failed step (its `allowed_new_paths` or file
+`repo_hints`; documentation steps excluded) gets the failed step's goal as a constraint prefixed with "Requirements of
+the step this replaces (still in force; the goal above adds to them)". A failed step that already carries such a
+constraint passes it on unchanged, so after several replans the original goal still holds, not the last list of
+fixes. The prompt asks for the replacement goal as the complete outcome, without line numbers, lint codes or
+single-line edits from the evidence. Each carry is listed in the notes of `replan.created`.
+
 ### Written interfaces between steps (BUG-234)
 
 When components built in different steps talk to each other (an HTTP/JSON API and the page calling it, a file format

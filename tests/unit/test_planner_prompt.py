@@ -220,6 +220,8 @@ def test_replanner_system_prompt_adds_rerun_rules() -> None:
     assert "A step creates at most about 8 new files" in system and "split a larger" in system  # BUG-226
     # G1 quality review (BUG-234): app.js read metrics.ram, the backend sent metrics.mem.usage – no shared interface
     assert "need one written interface" in system and "never their own guess" in system
+    # K1 on rc60 (BUG-285): the replanned goal was "remove the unused header variable (line 39)"
+    assert "Never copy line numbers, lint codes or single-line edits" in system and "everything the failed step" in system
 
 
 def test_repair_message_lists_every_error() -> None:

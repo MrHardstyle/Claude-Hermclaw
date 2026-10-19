@@ -496,6 +496,11 @@ def replanner_system_prompt(kind_capability: dict[str, str], capability_names: S
         "those old steps are superseded by your new plan.",
         "Address the failure evidence (failed_step, evidence) directly: change the approach instead of repeating "
         "the failed step unchanged.",
+        "A step that replaces the failed step still has to deliver everything the failed step's goal demands: write "
+        "its goal as the outcome (the complete behaviour, with what the evidence showed to be missing or wrong), not "
+        "as a list of edits. Never copy line numbers, lint codes or single-line edits from the evidence into a goal: "
+        "the code has changed since, and the coder sees the current tool output itself (the runtime also keeps the "
+        "failed step's goal as a constraint of the step that replaces it).",
         "open_steps are still part of the job: open steps you leave out are carried over unchanged, with their "
         "dependencies. Do not repeat an open step to keep it; list it only to change it (its id may be reused), and add "
         "new steps only for work no open step covers. A short answer (the changed and new steps) is complete.",

@@ -874,6 +874,41 @@ def test_open_steps_without_a_replacement_are_carried_over_with_remapped_depende
     assert "S008" not in {c.id for c in carried}  # a new test step covers the open one
 
 
+def test_a_replacement_step_keeps_the_requirements_of_the_failed_step() -> None:
+    """BUG-285 (K1 on rc60): the replanned goal listed only lint fixes; columns, warnings and README were gone."""
+    from hermclaw.planner.replan_contract import ReplanStep
+    from hermclaw.planner.replanner import REPLACED_GOAL_PREFIX, carry_replaced_goal
+
+    original = "Implement csv_eval.py: columns name/value, warnings with line numbers, empty and missing file handling."
+    failed = PlanStep.model_validate(step("S003", "implement", "coding", original, allowed_new_paths=["csv_eval.py"]))
+
+    def rs(sid: str, kind: str, cap: str, goal: str, **kw: Any) -> ReplanStep:
+        return ReplanStep.model_validate(step(sid, kind, cap, goal, **kw))
+
+    fix = rs("S005", "implement", "coding", "Remove the unused header variable (line 39).", repo_hints=["csv_eval.py"])
+    docs = rs("S006", "documentation", "documentation", "Update README.md.", repo_hints=["README.md", "csv_eval.py"])
+    other = rs("S007", "implement", "coding", "Add a helper module.", allowed_new_paths=["helper.py"])
+    done = rs("S001", "implement", "coding", "Scaffold.", allowed_new_paths=["csv_eval.py"])
+    out, notes = carry_replaced_goal([fix, docs, other, done], failed, frozenset({"S001"}))
+    by_id = {s.id: s.constraints for s in out}
+    assert by_id["S005"][0] == REPLACED_GOAL_PREFIX + original
+    assert by_id["S006"] == docs.constraints and by_id["S007"] == other.constraints and by_id["S001"] == done.constraints
+    assert notes == ["step S005: keeps the requirements of the replaced step S003"]
+
+    # a second replan passes the ORIGINAL goal on, not the fix list of the replacement
+    failed2 = PlanStep.model_validate(
+        step("S005", "implement", "coding", fix.goal, repo_hints=["csv_eval.py"], constraints=list(by_id["S005"]))
+    )
+    again = rs("S008", "implement", "coding", "Define header before use.", repo_hints=["./csv_eval.py"])
+    out2, _ = carry_replaced_goal([again], failed2, frozenset())
+    assert out2[0].constraints == [REPLACED_GOAL_PREFIX + original]
+    assert carry_replaced_goal([again], None, frozenset()) == ([again], [])
+
+    # a documentation-only overlap carries nothing
+    readme = PlanStep.model_validate(step("S004", "documentation", "documentation", "Write README.md.", allowed_new_paths=["README.md"]))
+    assert carry_replaced_goal([docs], readme, frozenset())[1] == []
+
+
 def test_a_step_creating_more_files_than_one_attempt_can_write_is_split() -> None:
     """BUG-226 (grand job G1): collector, frontend, scripts, tests, fixtures and README – 13 new files – in one step."""
     ctx = _ctx()
