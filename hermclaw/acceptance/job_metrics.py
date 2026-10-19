@@ -81,6 +81,8 @@ class JobMetrics:
     verifier_failures: list[str] = field(default_factory=list)
     dependency_manifests_changed: list[str] = field(default_factory=list)
     merge_request: bool = False
+    # GitLab could not open the MR because its background processing stalled (BUG-289): infrastructure, not the job
+    merge_request_infrastructure: str | None = None
 
     def as_dict(self) -> dict[str, Any]:
         return asdict(self)
@@ -178,6 +180,15 @@ async def collect(sm: async_sessionmaker[AsyncSession], job_id: uuid.UUID) -> Jo
         verifier_failures=[(v.summary or "")[:500] for v in verifications if v.status in ("failed", "error")],
         dependency_manifests_changed=sorted(p for p in changed if _basename(p) in DEPENDENCY_MANIFESTS),
         merge_request=any(g.operation == "merge_request.create" and g.status == "ok" for g in git_ops),
+        merge_request_infrastructure=next(
+            (
+                str(stalled)
+                for g in git_ops
+                if g.operation == "merge_request.create"
+                and (stalled := ((g.details or {}).get("error_details") or {}).get("gitlab_background"))
+            ),
+            None,
+        ),
     )
 
 
@@ -185,9 +196,12 @@ def evaluate(m: JobMetrics, exp: Expectation) -> list[Criterion]:
     expected = "/".join(exp.status)
     out = [Criterion("status", m.status in exp.status, f"{m.status} (expected {expected}; error {m.error_code or '-'})")]
     infra = m.error_code in INFRASTRUCTURE_ERRORS
-    out.append(Criterion("infrastructure", not infra, f"job ended on {m.error_code}" if infra else "no infrastructure error"))
+    stalled = None if m.merge_request else m.merge_request_infrastructure
+    detail = f"job ended on {m.error_code}" if infra else stalled or "no infrastructure error"
+    out.append(Criterion("infrastructure", not (infra or stalled), detail))
     if exp.require_merge_request and m.status == "succeeded":
-        out.append(Criterion("merge_request", m.merge_request, "merge request created" if m.merge_request else "no merge request"))
+        missing = f"no merge request ({stalled})" if stalled else "no merge request"
+        out.append(Criterion("merge_request", m.merge_request, "merge request created" if m.merge_request else missing))
     if exp.max_minutes is not None:
         ok = m.duration_minutes is not None and m.duration_minutes <= exp.max_minutes
         out.append(Criterion("duration", ok, f"{m.duration_minutes} min (max {exp.max_minutes:g})"))

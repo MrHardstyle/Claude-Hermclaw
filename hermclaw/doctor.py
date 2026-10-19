@@ -162,7 +162,7 @@ class Doctor:
         if self.offline:
             self.add("network", "skip", "--offline: LiteLLM, workers, models, sandbox images and research not checked")
             return self.report
-        for check in (self.check_litellm, self.check_workers, self.check_research):
+        for check in (self.check_litellm, self.check_workers, self.check_research, self.check_gitlab):
             try:
                 await check()
             except Exception as exc:  # one broken probe must not hide the others
@@ -465,6 +465,35 @@ class Doctor:
             self.add(f"sandbox:{host.id}", "fail", "; ".join(failed)[:600])
         else:
             self.add(f"sandbox:{host.id}", "ok", ", ".join(f"{c.name}" for c in result.checks))
+
+    # ------------------------------------------------------------------------------------------- gitlab
+    async def check_gitlab(self) -> None:
+        """GitLab answers and processes pushes: a stopped Sidekiq left every merge request of a battery with
+        ``source_branch does not exist`` for hours (BUG-289)."""
+        from hermclaw.gitops.gitlab import GitLabClient
+
+        client = GitLabClient.from_config(self.config, self.settings, timeout=self.timeout, retries=0, transport=self.transport)
+        if client is None:
+            self.add("gitlab", "skip", "no host with role gitlab")
+            return
+        try:
+            version = await client._request("GET", "/version")
+            if version.status_code != 200:
+                self.add("gitlab", "fail", f"{client.api_url}/version → HTTP {version.status_code} (token?)")
+                return
+            stalled = await client.background_problem()
+        except httpx.HTTPError as exc:
+            self.add("gitlab", "fail", f"{client.api_url} unreachable: {type(exc).__name__}")
+            return
+        except Exception as exc:  # e.g. the token reference does not resolve
+            self.add("gitlab", "fail", f"{client.api_url}: {type(exc).__name__}: {str(exc)[:200]}")
+            return
+        finally:
+            await client.aclose()
+        if stalled:
+            self.add("gitlab", "fail", f"{stalled} – pushes are not processed, merge requests fail (gitlab-ctl status sidekiq)")
+        else:
+            self.add("gitlab", "ok", f"GitLab {version.json().get('version', '?')} answers; background processing not stalled")
 
     # ------------------------------------------------------------------------------------------- research
     async def check_research(self) -> None:

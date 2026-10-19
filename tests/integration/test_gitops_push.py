@@ -282,6 +282,26 @@ async def test_a_server_without_push_options_gets_a_plain_push(sessionmaker, tmp
             await client.aclose()
 
 
+async def test_a_stopped_gitlab_background_processing_is_named(sessionmaker, tmp_path):
+    """BUG-289: with Sidekiq stopped GitLab never registers the pushed branch; the error names that cause and the
+    git audit carries it, so the battery counts it as infrastructure instead of a job failure."""
+    with FakeGitLab() as gl:
+        gl.branch_unknown, gl.sidekiq_running = True, False
+        client = GitLabClient(gl.base_url, token=gl.token, retries=0)
+        client.branch_settle_delays = (0.01,)
+        world = await make_world(sessionmaker, tmp_path, gitlab=client, provider="gitlab", gitlab_project_id="grp/demo")
+        try:
+            job_id, _step, ws, _commit = await _committed_workspace(world)
+            res = await world.engine.push_job_branch(ws, create_merge_request=True)
+            assert res.merge_request is None and res.merge_request_error
+            assert "Sidekiq) is not running: 106 job(s) waiting, the oldest for 16.8 h" in res.merge_request_error
+            op = (await world.git_ops(job_id))[-1]
+            assert op.operation == "merge_request.create" and op.status == "failed"
+            assert "not running" in op.details["error_details"]["gitlab_background"]
+        finally:
+            await client.aclose()
+
+
 async def test_merge_request_skipped_for_generic_provider(world):
     _job, _step, ws, _commit = await _committed_workspace(world)
     res = await world.engine.push_job_branch(ws, create_merge_request=True)

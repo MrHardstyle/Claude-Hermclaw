@@ -58,16 +58,19 @@ Noch keine.
   - Review: Dokumentationsdateien in den `repo_hints` des Schritts, die Auftrag oder Schrittziel nennen (Dateiname oder Stamm), kommen ganz aus dem Workspace in den neuen Abschnitt „REQUIREMENT DOCUMENTS“ (gekürzt wie das Jobziel; geschützte Pfade nie). Die Regel „exakt durchgesetzt“ gilt für sie wie für das Jobziel, ausdrücklich auch Typ (ganze Zahl) und optional/Pflicht.
   - Planer-Prompt: Verweist der Auftrag auf Regeln in einem Dokument, nennt der Schritt das Dokument in `repo_hints` und verlangt jede Regel daraus – keine Zusammenfassung im Ziel.
 
-### BUG-289 – Merge Request fehlt trotz erfolgreichem Push: GitLab kennt den Zweig im MR-API noch nicht
-- Phase: Testzyklus 2 auf rc60 (K2, Job `0527d6af…`) · Komponente: gitops (engine, gitlab) · Severity: P2 · blockierend: nein (Job `succeeded`, Batterie FAIL nur durch fehlenden MR) · Status: **behoben** (`tests/integration/test_gitops_push.py::test_merge_request_is_requested_with_the_push`, `::test_a_server_without_push_options_gets_a_plain_push`)
-- Reproduktion: Push um 14:28:37 erfolgreich. Die MR-Anlage wiederholt sich 3,5 Minuten lang und scheitert um 14:32:10 mit `HTTP 400 {'source_branch': ['does not exist']}`. Eine Stunde später liefert die Zweig-API den Zweig (200), der Spiegel hat ihn – ein MR existiert nicht.
-- Häufigkeit: Vier von 46 MR-Anlagen seit rc19 (J2, X5, K1 aus Zyklus 1, K2). BUG-202 und BUG-220 hatten nur die Wartezeit verlängert.
-- Ursache: Das MR-API prüft den Quellzweig gegen einen Zweig-Cache, den GitLab erst in der asynchronen Push-Verarbeitung aktualisiert. Ist diese verzögert, hilft kein Warten auf Hermclaw-Seite.
-- Fix:
-  - Der Push fordert den MR selbst an (`-o merge_request.create`, Ziel, Titel, Label `hermclaw`). GitLab öffnet ihn in derselben Verarbeitung, die den Zweig registriert – kein Wettlauf mit dem Cache.
-  - Die Engine sucht den MR in der Warteschleife, zählt ihn als angelegt (`merge_request.create`) und setzt die mehrzeilige Beschreibung per `PUT`.
-  - Der API-POST bleibt Rückfallweg. Ein Server ohne Push-Optionen bekommt denselben Push ohne `-o`.
-- Selbstprüfung: kein drittes Verlängern der Wartezeit, sondern ein Weg ohne den verzögerten Cache. Live-Nachweis in Zyklus 3.
+### BUG-289 – Merge Request fehlt trotz erfolgreichem Push: GitLab verarbeitet keine Pushes (Sidekiq gestoppt)
+- Phase: Testzyklus 2 auf rc60 (K2 `0527d6af…`, K3 `d8032ccb…`) · Komponente: gitops (engine, gitlab), doctor, acceptance (job_metrics) · Severity: P2 · blockierend: nein (Jobs `succeeded`, Batterie FAIL nur durch fehlenden MR) · Status: **behoben** auf Hermclaw-Seite (`tests/integration/test_gitops_push.py::test_merge_request_is_requested_with_the_push`, `::test_a_server_without_push_options_gets_a_plain_push`, `::test_a_stopped_gitlab_background_processing_is_named`, `tests/integration/test_doctor.py::test_a_stopped_gitlab_sidekiq_fails`, `tests/integration/test_acceptance_jobs.py::test_metrics_of_a_good_job_pass`); **offen auf GitLab .226**: Sidekiq neu starten (kein SSH-Zugang von der Steuermaschine)
+- Reproduktion:
+  - K2: Push um 14:28:37 erfolgreich, MR-Anlage wiederholt sich 3,5 Minuten und scheitert um 14:32:10 mit `HTTP 400 {'source_branch': ['does not exist']}`. K3 ebenso (Push 14:37:41, Fehler 14:41:13).
+  - Die Zweig-API liefert den Zweig (200), der Spiegel hat ihn; ein MR existiert nicht.
+  - GitLab-Metriken (lesend, Token des Dienstes): `/sidekiq/process_metrics` → keine Prozesse; `/sidekiq/queue_metrics` → 106 Jobs im Rückstand, ältester seit 60 484 s (16,8 h). `last_activity_at` des Projekts und das letzte Projekt-Ereignis: 18.10. 16:43 UTC – der letzte gelungene MR.
+- Ursache: GitLab registriert gepushte Zweige und öffnet MRs in der Hintergrundverarbeitung (Sidekiq). Sie läuft seit dem 18.10. abends nicht mehr; das MR-API prüft den Quellzweig gegen den nicht aktualisierten Zweig-Cache. Die früheren Einzelfälle (J2, X5, K1 aus Zyklus 1; BUG-202/220 verlängerten nur das Warten) passen zu Rückständen derselben Verarbeitung. Hermclaw meldete „source_branch does not exist“ statt der Ursache, und die Batterie zählte es als Fehler des Jobs.
+- Fix (Hermclaw):
+  - Der Push fordert den MR selbst an (`-o merge_request.create`, Ziel, Titel, Label `hermclaw`): Läuft GitLab hinterher, öffnet es den MR, sobald es den Push verarbeitet, statt dass die API-Anlage nach 3,5 Minuten aufgibt. Die Engine übernimmt den so geöffneten MR (`merge_request.create`) und setzt die mehrzeilige Beschreibung per `PUT`; der API-POST bleibt Rückfallweg, ein Server ohne Push-Optionen bekommt denselben Push ohne `-o`.
+  - Scheitert die Anlage weiter, fragt der Client die Sidekiq-Metriken ab und nennt die Ursache („GitLab background processing (Sidekiq) is not running: 106 job(s) waiting, the oldest for 16.8 h“); das Git-Audit trägt sie (`error_details.gitlab_background`).
+  - `job_metrics`: Ein so fehlender MR lässt das Kriterium `infrastructure` scheitern und nennt die Ursache beim MR – Infrastruktur, nicht der Job.
+  - `hermclaw doctor`: neue Prüfung `gitlab` (API erreichbar, Hintergrundverarbeitung läuft und ist höchstens 10 min im Rückstand).
+- Selbstprüfung: kein drittes Verlängern der Wartezeit; die Ursache liegt außerhalb von Hermclaw und wird jetzt gemessen und benannt.
 
 ### BUG-288 – Planer wiederholt Akzeptanzkriterien bis zur Vertragsgrenze: 32 Minuten für einen Plan
 - Phase: Testzyklus 2 auf rc60 (K2, Job `0527d6af…`, Erstplan) · Komponente: planner (Schema an das Modell) · Severity: P2 · blockierend: nein (Plan war gültig) · Status: **behoben** (`tests/unit/test_planner_loop.py::test_model_facing_schemas_require_the_scope_fields`)

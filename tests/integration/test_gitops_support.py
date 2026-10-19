@@ -214,6 +214,7 @@ class FakeGitLab:
         self.branch_unknown = False
         # push options recorded by the upstream's post-receive hook; GitLab opens the MR while processing the push
         self.push_options_file: Path | None = None
+        self.sidekiq_running = True  # BUG-289: a stopped Sidekiq never registers pushed branches
         outer = self
 
         class Handler(BaseHTTPRequestHandler):
@@ -241,6 +242,13 @@ class FakeGitLab:
                     self._send(outer.fail_status, {"message": "unavailable"})
                     return
                 segs = [unquote(s) for s in parts.path.split("/") if s]
+                if segs[:3] == ["api", "v4", "sidekiq"] and method == "GET":
+                    if segs[3:] == ["process_metrics"]:
+                        self._send(200, {"processes": [{"hostname": "gitlab"}] if outer.sidekiq_running else []})
+                    else:
+                        backlog, latency = (0, 0.0) if outer.sidekiq_running else (106, 60484.0)
+                        self._send(200, {"queues": {"default": {"backlog": backlog, "latency": latency}}})
+                    return
                 # /api/v4/projects/<id>/...
                 if len(segs) < 4 or segs[:3] != ["api", "v4", "projects"]:
                     self._send(404, {"message": "404 Not Found"})

@@ -8,7 +8,7 @@ from pathlib import Path
 from typing import Any
 
 import pytest
-from sqlalchemy import update
+from sqlalchemy import delete, update
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from hermclaw.acceptance.job_metrics import Expectation, collect, evaluate
@@ -122,6 +122,22 @@ async def test_metrics_of_a_good_job_pass(sessionmaker: SM) -> None:
     criteria = evaluate(m, Expectation())
     assert all(c.passed for c in criteria), [c for c in criteria if not c.passed]
     assert m.merge_request and m.implementing_steps_completed == 1 and m.implementing_steps_completed_without_complete_step == 0
+    # BUG-289: GitLab's background processing stopped – the missing MR is infrastructure, not the job
+    stalled = "GitLab background processing (Sidekiq) is not running: 106 job(s) waiting, the oldest for 16.8 h"
+    async with sessionmaker() as s:
+        await s.execute(delete(GitOperation).where(GitOperation.job_id == job_id))
+        s.add(
+            GitOperation(
+                job_id=job_id,
+                operation="merge_request.create",
+                status="failed",
+                details={"error_details": {"status": 400, "gitlab_background": stalled}},
+            )
+        )
+        await s.commit()
+    by_name = {c.name: c for c in evaluate(await collect(sessionmaker, job_id), Expectation())}
+    assert not by_name["infrastructure"].passed and by_name["infrastructure"].detail == stalled
+    assert not by_name["merge_request"].passed and stalled in by_name["merge_request"].detail
 
 
 async def test_battery_submits_waits_and_reports(sessionmaker: SM, tmp_path: Path) -> None:

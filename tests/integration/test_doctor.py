@@ -33,7 +33,9 @@ def settings(tmp_path: Path) -> Settings:
     data = tmp_path / "data"
     for sub in ("workspaces", "artifacts", "repos"):
         (data / sub).mkdir(parents=True, exist_ok=True)
-    return Settings(env="test", data_dir=data, disk_warn_free_mb=1, disk_critical_free_mb=1)
+    token = tmp_path / "gitlab-token"
+    token.write_text("glpat-doctor-test-0123456789\n", encoding="utf-8")
+    return Settings(env="test", data_dir=data, disk_warn_free_mb=1, disk_critical_free_mb=1, gitlab_token_ref=f"file:{token}")
 
 
 class Endpoints:
@@ -48,6 +50,7 @@ class Endpoints:
         self.llama_served = ["qwen3.6:35b"]
         self.llama_aliases: dict[str, list[str]] = {}
         self.llama_status = 200
+        self.sidekiq_processes = 1
 
     def __call__(self, req: httpx.Request) -> httpx.Response:
         path = req.url.path
@@ -63,6 +66,14 @@ class Endpoints:
                 return httpx.Response(200, text='"I\'m alive!"')
             if path == "/v1/models":
                 return httpx.Response(200, json={"data": [{"id": a} for a in self.aliases]})
+        if req.url.host.endswith(".226") and path.startswith("/api/v4/"):
+            if path == "/api/v4/version":
+                return httpx.Response(200, json={"version": "19.4.1"})
+            if path == "/api/v4/sidekiq/process_metrics":
+                return httpx.Response(200, json={"processes": [{"hostname": "gitlab"}] * self.sidekiq_processes})
+            if path == "/api/v4/sidekiq/queue_metrics":
+                backlog, latency = (0, 0) if self.sidekiq_processes else (106, 60484)
+                return httpx.Response(200, json={"queues": {"default": {"backlog": backlog, "latency": latency}}})
         if req.url.port == 8888 and path == "/search":
             if self.searx_status != 200:
                 return httpx.Response(self.searx_status, text="forbidden")
@@ -142,10 +153,21 @@ async def test_healthy_installation_passes_every_check(db: Any, tmp_path: Path) 
     assert checks["worker:exec-222"].status == "ok" and checks["worker:model-224"].status == "ok"
     assert checks["models:model-224"].status == "ok" and "qwen3-coder:30b" in checks["models:model-224"].detail
     assert checks["sandbox:exec-222"].status == "ok" and checks["research"].status == "ok"
+    assert checks["gitlab"].status == "ok" and "19.4.1" in checks["gitlab"].detail
     roles = checks["config:roles"].data["roles"]
     assert roles["planner"][0].endswith("gemma4:26b") and roles["coder"][0].endswith("qwen3-coder:30b")
     assert roles["heavy"][0].endswith("qwen3.8:27b") and roles["fast"][0].endswith("qwen3:8b")
     assert json.dumps(report.to_dict())
+
+
+async def test_a_stopped_gitlab_sidekiq_fails(db: Any, tmp_path: Path) -> None:
+    """BUG-289 (cycle 2 on rc60): no Sidekiq process, 106 jobs waiting for 16.8 h – every merge request failed."""
+    cfg = get_config()
+    ep = Endpoints(cfg)
+    ep.sidekiq_processes = 0
+    checks = by_name(await doctor(cfg, settings(tmp_path), db, ep).run())
+    assert checks["gitlab"].status == "fail"
+    assert "Sidekiq) is not running: 106 job(s) waiting, the oldest for 16.8 h" in checks["gitlab"].detail
 
 
 async def test_problems_fail_with_actionable_hints(db: Any, tmp_path: Path) -> None:

@@ -27,6 +27,8 @@ RETRY_STATUS = frozenset({429, 500, 502, 503, 504})
 #: {"source_branch": ["does not exist"]} (BUG-202). Waits between the creation attempts, in seconds: about 3.5 min in
 #: total – a busy GitLab needed more than the first 30 s (rc23 battery X5, BUG-220).
 BRANCH_SETTLE_DELAYS = (1.0, 2.0, 4.0, 8.0, 15.0, 30.0, 30.0, 30.0, 45.0, 45.0)
+#: GitLab processes pushes in Sidekiq; a queue this far behind means pushes are not being processed (BUG-289)
+BACKGROUND_LATENCY_LIMIT_S = 600.0
 
 
 def _project(project_id: str | int) -> str:
@@ -226,7 +228,37 @@ class GitLabClient:
             again = await self.find_open_merge_request(project_id, source_branch=source_branch, target_branch=target_branch)
             if again is not None:
                 return again
+        if _branch_not_yet_known(resp):
+            stalled = await self.background_problem()
+            if stalled:
+                later = "; GitLab opens the requested MR once it processes the push" if requested_by_push else ""
+                raise GitLabError(
+                    f"GitLab merge request creation failed: {stalled} – the pushed branch is not registered yet{later}",
+                    details={"status": resp.status_code, "gitlab_background": stalled},
+                )
         raise self._error(resp, "merge request creation")
+
+    async def background_problem(self) -> str | None:
+        """Why GitLab is not processing pushes (Sidekiq stopped or far behind), or ``None`` – also when the token
+        may not read the Sidekiq metrics (admin only). Live rc60 (cycle 2): no Sidekiq process, 106 jobs waiting
+        for 16.8 h; every MR failed with ``source_branch does not exist`` (BUG-289)."""
+        procs = await self._request("GET", "/sidekiq/process_metrics")
+        queues = await self._request("GET", "/sidekiq/queue_metrics")
+        if procs.status_code != 200 or queues.status_code != 200:
+            return None
+        try:
+            running = len(procs.json().get("processes") or [])
+            metrics = (queues.json().get("queues") or {}).values()
+            backlog = sum(int(q.get("backlog") or 0) for q in metrics)
+            latency = max((float(q.get("latency") or 0) for q in metrics), default=0.0)
+        except (ValueError, AttributeError, TypeError):
+            return None
+        waiting = f"{backlog} job(s) waiting, the oldest for {latency / 3600:.1f} h"
+        if running == 0 and backlog:
+            return f"GitLab background processing (Sidekiq) is not running: {waiting}"
+        if latency > BACKGROUND_LATENCY_LIMIT_S:
+            return f"GitLab background processing (Sidekiq) is behind: {waiting}"
+        return None
 
     async def _adopt_pushed(self, project_id: str | int, mr: MergeRequestInfo, description: str) -> MergeRequestInfo:
         """The MR GitLab opened for ``-o merge_request.create``, with its description set (best effort)."""
