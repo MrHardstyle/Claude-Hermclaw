@@ -52,6 +52,8 @@ Noch keine.
   - Plan v1: S001 soll `csv_eval.py` mit Spalten, Warnungen mit Zeilennummern, leerer und fehlender Datei liefern. Nach BUG-283 Replan.
   - Plan v2: Das Ziel des Ersatzschritts ist eine Liste von Einzelkorrekturen aus den letzten Befunden („unbenutzte `header`-Variable entfernen (Zeile 39)“). Die `zeitpunkt`-Spalte fehlt im Ziel.
   - Plan v3: Das Ziel verlangt gleichzeitig „Header prüfen“ und „`header` nicht zuweisen“. Der Coder pendelt zwischen NameError und F841, Stagnation.
+  - Plan v3 enthält außerdem die Review-Forderung aus v2 „Ausgabe-Labels auf Deutsch“, die der Auftrag nicht stellt. Im letzten Versuch sind alle 22 Prüfungen grün, das Heavy Review blockiert gegen genau dieses Planziel. `REPLAN_LIMIT` nach 90,5 min.
+  - Plan v1 war vollständig (alle Spalten, Fehlerfälle, Tests, README); verloren gingen die Anforderungen erst durch die Replans.
 - Ursache: Der Neuplaner sah nur das Ziel des zuletzt gescheiterten Schritts und die Befunde. Er schrieb Befunde zeilengenau ins neue Ziel, nichts hielt die ursprünglichen Anforderungen fest. Mit jedem Replan wurde das Ziel enger und widersprüchlicher.
 - Fix:
   - Deterministisch (`carry_replaced_goal`): Jeder neue, nicht abgeschlossene Code-Schritt, der an den Dateien des gescheiterten Schritts arbeitet (`allowed_new_paths` oder Datei-Hinweise, ohne Dokumentation), bekommt dessen Ziel als Constraint „Requirements of the step this replaces (still in force …)“. Trägt der gescheiterte Schritt diese Constraint schon, wird sie unverändert weitergegeben – auch nach mehreren Replans gilt das ursprüngliche Ziel. Notiz in `replan.created`.
