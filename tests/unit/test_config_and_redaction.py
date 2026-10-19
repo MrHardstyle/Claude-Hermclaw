@@ -147,3 +147,15 @@ def test_code_reading_secrets_and_placeholders_stay_readable() -> None:
         assert DEFAULT_REDACTOR.text(text) == text, text
     for text in ("PASSWORD=hunter2realpw", 'api_key = "abc.def.ghi"', "password: hunter2", 'secret = "s3cr3t.value"'):
         assert REDACTED in DEFAULT_REDACTOR.text(text), text
+
+
+def test_role_values_a_test_compares_stay_visible() -> None:
+    """Cycle 2 M3 on rc60: the review saw ``token="***REDACTED***"`` for both the valid and the wrong token of the
+    tests and could not tell them apart; the verifier already accepted both as placeholders (BUG-293)."""
+    assert Redactor().text('def _get(self, path, token="test-token-123"):') == 'def _get(self, path, token="test-token-123"):'
+    assert Redactor().text('self._get("/notes", token="wrong-token")') == 'self._get("/notes", token="wrong-token")'
+    assert Redactor().text("token: 'valid_token'") == "token: 'valid_token'"
+    # a real value, or one with a part that is no role word, stays masked
+    assert Redactor().text('token="hX9q2LmP4tR8"') == f'token="{REDACTED}"'
+    assert Redactor().text('password = "S3cr3t!Pa55"') == f'password = "{REDACTED}"'
+    assert Redactor().text('token="wrong-hX9q2LmP4tR8"') == f'token="{REDACTED}"'

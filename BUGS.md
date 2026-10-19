@@ -46,6 +46,16 @@ Noch keine.
 
 ## Behobene Bugs
 
+### BUG-293 – Redaktion und Geheimnis-Prüfung sind uneins: das Review sieht gültigen und falschen Test-Token gleich maskiert
+- Phase: Testzyklus 2 auf rc60 (M3, Job `d5554059…`, Plan v3) · Komponente: core (redaction), verifier (secrets) · Severity: P2 · blockierend: mitursächlich (Review-Befunde gegen die Tests) · Status: **behoben** (`tests/unit/test_config_and_redaction.py::test_role_values_a_test_compares_stay_visible`)
+- Reproduktion:
+  - `test_api.py` setzt `os.environ["API_TOKEN"] = "test-token-123"` und nutzt `token="test-token-123"` als Standard der Hilfsfunktionen, `token="wrong-token"` im 401-Test.
+  - Model-Sicht (`DEFAULT_REDACTOR.text`): die erste Zeile unverändert, beide `token="…"` als `token="***REDACTED***"`.
+  - Review (Befund `73627`, blocker): „The diff shows `***REDACTED***` in the test's default token … If the actual token does not match `test-token-123`, the test will fail.“ Der Schritt geht in die nächste Korrektur.
+- Ursache: Die Geheimnis-Prüfung des Verifiers erkennt seit BUG-279 Werte aus Rollenwörtern („test“, „wrong“, „valid“, „token“ …) als Platzhalter; die Redaktion für Modell-Eingaben kannte nur `dummy`/`example`/`your-` u. ä. Was der Verifier als harmlos durchlässt, sah das Modell maskiert – und die Werte, die ein Test vergleicht, waren nicht mehr unterscheidbar.
+- Fix: Die Regel liegt jetzt einmal in `hermclaw/core/redaction.py` (`is_role_value`) und gilt für beide: Ein in Anführungszeichen stehender Wert nur aus Rollenwörtern (mit höchstens dreistelliger Nummer) wird nicht maskiert. Echte Werte und Werte mit einem Teil, der kein Rollenwort ist, bleiben maskiert.
+- Nebenbefund M3 (beobachtet, nicht neu): Das erste Review forderte als `major`, der Server solle ohne `API_TOKEN` gar nicht starten („should likely fail to start“) – der Auftrag verlangt nur 401. Der Neuplaner schrieb das ins neue Ziel. Abgedeckt durch BUG-284 (neue `major`-Befunde in Korrekturen nicht blockierend) und BUG-285 (Review-Wünsche ohne Auftragsgrundlage nicht ins Ziel), beide erst mit rc61 live – Messung in Zyklus 3.
+
 ### BUG-292 – Schutz der Eingabedaten aus dem Plan gestrichen, Coder ergänzt eine erfundene Buchung
 - Phase: Testzyklus 2 auf rc60, Prüfung der gelieferten Dateien (M2, Job `ece98d3b…`) · Komponente: planner (validation) · Severity: P2 · blockierend: nein (Job `succeeded`, Lieferung fehlerhaft) · Status: **behoben** (`tests/unit/test_planner_validation.py::test_must_not_change_on_a_file_the_step_only_reads_is_kept`)
 - Reproduktion:

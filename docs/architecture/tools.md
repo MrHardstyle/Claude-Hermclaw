@@ -163,6 +163,9 @@ behind `on_scope_expansion`, research events by the research service.
   `SCOPE_VIOLATION` (nothing written; `apply_patch` is all-or-nothing); no scope -> `SCOPE_MISSING`.
 - Writes containing the redaction marker (`***REDACTED***`) are refused (`REDACTED_PLACEHOLDER`) unless the file
   already contains it – masked secrets can never be written back.
+- Quoted values made only of role words (`test-token-123`, `wrong-token`, `valid_token`) are not masked. The rule
+  (`is_role_value` in `hermclaw/core/redaction.py`) is the one the verifier's secret scan uses for placeholders, so a
+  model sees the values a test compares, and the scan does not flag them (BUG-279, BUG-293).
 - Sandbox/executor exceptions -> the side-effect audit still runs, then `SANDBOX_ERROR` (or the scope violation).
 - Broken `GitReader` / `RepoContextProvider` / callbacks -> `GIT_UNAVAILABLE`, `REPO_UNAVAILABLE`, `RESEARCH_FAILED`,
   `SCOPE_EXPANSION_FAILED`, `REPLAN_FAILED` (never terminal).

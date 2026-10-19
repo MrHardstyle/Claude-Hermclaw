@@ -21,7 +21,7 @@ from collections import Counter
 from dataclasses import dataclass
 
 from hermclaw.core import redaction as _redaction
-from hermclaw.core.redaction import DEFAULT_REDACTOR, REDACTED, Redactor
+from hermclaw.core.redaction import DEFAULT_REDACTOR, REDACTED, Redactor, is_role_value
 from hermclaw.verifier.languages import CODE_LANGUAGES, detect_language, is_lock_or_data_file
 from hermclaw.verifier.types import AddedLine
 
@@ -115,18 +115,6 @@ _PLACEHOLDER_PARTS = (
     "{{",
 )
 
-# a value made only of these words names a role, not a secret: tests of a token-protected API use "valid_token" and
-# "wrong-password", and docs "my-secret-key"; a real credential always carries a part that is no such word (BUG-279)
-_PLACEHOLDER_VOCABULARY = frozenset(
-    {
-        "valid", "invalid", "wrong", "bad", "good", "correct", "incorrect", "expired", "revoked", "unknown", "other",
-        "another", "right", "my", "your", "the", "a", "test", "testing", "tests", "secret", "token", "key", "api",
-        "password", "pass", "passwd", "pwd", "user", "admin", "auth", "bearer", "access", "refresh", "session",
-        "client", "demo", "local", "dev", "new", "old", "first", "second", "foo", "bar", "baz", "abc", "some", "super",
-        "value", "missing", "no", "empty",
-    }
-)  # fmt: skip
-_WORD_SPLIT = re.compile(r"[-_.\s]+")
 _CANDIDATE = re.compile(r"[A-Za-z0-9+/_=-]{32,}")
 _HEX = re.compile(r"^[0-9a-fA-F-]+$")
 _WORDY = re.compile(r"^[A-Za-z_]+[0-9]*$")
@@ -157,12 +145,6 @@ def shannon_entropy(value: str) -> float:
 _REFERENCE = re.compile(r"^(?:(?:file|cred|env|vault):\S+|(?:/[a-z0-9._-]+){2,}/?)$")
 
 
-def _role_word(word: str) -> bool:
-    """A placeholder vocabulary word, optionally numbered (``token2``), or a short number of its own."""
-    stem = word.rstrip("0123456789")
-    return len(word) - len(stem) <= 3 and (stem in _PLACEHOLDER_VOCABULARY or not stem)
-
-
 def is_placeholder(value: str) -> bool:
     v = value.strip().strip("\"'`")
     if not v:
@@ -174,8 +156,7 @@ def is_placeholder(value: str) -> bool:
         return True
     if any(part in low for part in _PLACEHOLDER_PARTS):
         return True
-    words = [w for w in _WORD_SPLIT.split(low) if w]
-    if words and all(_role_word(w) for w in words) and not all(w.isdigit() for w in words):
+    if is_role_value(low):
         return True
     return len(set(v)) <= 2 or v.isdigit()
 

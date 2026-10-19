@@ -35,10 +35,41 @@ _PLACEHOLDER_START = ("<", "${", "$", "{{", "%")
 _PLACEHOLDER_PARTS = ("your-", "your_", "example", "placeholder", "changeme", "change-me", "change_me", "dummy", "-here", "_here")
 
 
+# a value made only of these words names a role, not a secret: tests of a token-protected API use "valid_token" and
+# "wrong-password", and docs "my-secret-key"; a real credential always carries a part that is no such word (BUG-279).
+# The verifier and the redactor share the rule, so a model sees the values a test compares (BUG-293).
+_PLACEHOLDER_VOCABULARY = frozenset(
+    {
+        "valid", "invalid", "wrong", "bad", "good", "correct", "incorrect", "expired", "revoked", "unknown", "other",
+        "another", "right", "my", "your", "the", "a", "test", "testing", "tests", "secret", "token", "key", "api",
+        "password", "pass", "passwd", "pwd", "user", "admin", "auth", "bearer", "access", "refresh", "session",
+        "client", "demo", "local", "dev", "new", "old", "first", "second", "foo", "bar", "baz", "abc", "some", "super",
+        "value", "missing", "no", "empty",
+    }
+)  # fmt: skip
+_WORD_SPLIT = re.compile(r"[-_.\s]+")
+
+
+def _role_word(word: str) -> bool:
+    """A placeholder vocabulary word, optionally numbered (``token2``), or a short number of its own."""
+    stem = word.rstrip("0123456789")
+    return len(word) - len(stem) <= 3 and (stem in _PLACEHOLDER_VOCABULARY or not stem)
+
+
+def is_role_value(value: str) -> bool:
+    """A value made only of role words (``test-token-123``, ``wrong-token``): a test's or a document's stand-in."""
+    words = [w for w in _WORD_SPLIT.split(value.lower()) if w]
+    return bool(words) and all(_role_word(w) for w in words) and not all(w.isdigit() for w in words)
+
+
 def is_benign_value(value: str, *, quoted: bool) -> bool:
     """A ``key = value`` match that is no secret: an obvious placeholder, or (unquoted) a short code reference."""
     low = value.lower()
     if low.startswith(_PLACEHOLDER_START) or any(part in low for part in _PLACEHOLDER_PARTS) or not set(low) - set("x*-."):
+        return True
+    # cycle 2 M3 on rc60: ``token="test-token-123"`` and ``token="wrong-token"`` both showed as the marker, and the review
+    # could not tell the valid-token test from the wrong-token test (BUG-293)
+    if quoted and is_role_value(value):
         return True
     return not quoted and len(value) <= 60 and bool(_CODE_SIGNS & set(value)) and bool(_CODE_REFERENCE.match(value))
 
