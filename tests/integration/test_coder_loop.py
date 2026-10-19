@@ -348,7 +348,15 @@ async def test_a_test_that_passes_alone_is_reported_as_shared_state(sessionmaker
     assert "Isolation check by the runtime: 'tests/test_app.py::test_second' passes when it runs alone" in third
     assert "-q -p no:cacheprovider tests/test_app.py::test_second" in third
     async with sessionmaker() as s:
-        runs = (await s.execute(select(Event).where(Event.job_id == h.step.job_id, Event.event_type == "test.started"))).scalars().all()
+        runs = (
+            (
+                await s.execute(
+                    select(Event).where(Event.job_id == h.step.job_id, Event.event_type == "test.started").order_by(Event.sequence)
+                )
+            )
+            .scalars()
+            .all()
+        )
     assert [r.payload["command"].endswith("tests/test_app.py::test_second") for r in runs] == [False, True]
 
 

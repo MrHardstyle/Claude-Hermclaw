@@ -31,6 +31,7 @@ Invariants:
 | `testparse.py` | runner output parsers (pytest, unittest, jest, vitest, mocha, phpunit, go test, cargo test, generic) + verdict | 17.6 |
 | `executors.py` | `LocalSandboxExecutor`, `SubprocessExecutor` (dev/test only), `SandboxUnavailable` | 17.5 |
 | `errors.py` / `output.py` | `ToolError` + stable error codes; clipping helpers | – |
+| `locations.py` | `source_locations()` – the source lines a failed command's output names (`path:line`, `path(line,col)`, sandbox paths), each with the definition it belongs to (BUG-294) | – |
 
 ## Public interfaces
 
@@ -76,7 +77,7 @@ per-attempt state: the active `ScopeGuard` (swapped after a granted expansion), 
 | `write_file` | write | create/overwrite or `append` a part (large files are written in parts, BUG-223), scope-checked, atomic (temp file + fsync + rename), mode preserved, redaction marker refused; a write that leaves the file unchanged is refused (`NO_CHANGE`, a repeat that keeps LATEST FAILURE, BUG-253) |
 | `replace_text` | write | exact match, `count` must equal the number of occurrences (default 1), CRLF-aware, helpful not-found hints; `old == new` is refused as `NO_CHANGE` (marked `repeated`), saying whether the file already contains the text, so the change is already made, or not (BUG-272) |
 | `apply_patch` | write | unified diff (`-p1` git style or `-p0`); every target validated → numstat cross-check → `git apply --check` → `git apply` (worktree only) inside a tracker audit |
-| `run_command` | exec | classified, executed via `CommandExecutor`, side effects audited (see below); an identical command on unchanged files is refused (`COMMAND_REPEATED`), and the refusal of a failed one repeats its earlier output (BUG-246); every command (also `run_test` and installs) runs after `set -o pipefail`, so a pipeline such as `pytest | tail -80` exits with its first failing command (BUG-267); the option is probed in a subshell first, since a shell without it (dash of Debian bookworm, the Node image) would end the script with exit code 2 (BUG-275) |
+| `run_command` | exec | classified, executed via `CommandExecutor`, side effects audited (see below); an identical command on unchanged files is refused (`COMMAND_REPEATED`), and the refusal of a failed one repeats its earlier output (BUG-246); every command (also `run_test` and installs) runs after `set -o pipefail`, so a pipeline such as `pytest | tail -80` exits with its first failing command (BUG-267); the option is probed in a subshell first, since a shell without it (dash of Debian bookworm, the Node image) would end the script with exit code 2 (BUG-275); a failed run ends with a `[source]` block quoting up to six lines its output names (`tests/test_app.py:73 (in def test_get_tasks_done(self):): task2 = …`), read through the workspace confinement, so a linter or compiler location is not left to the model's line counting (BUG-294) |
 | `run_test` | exec | like `run_command` + parsed counts, `test_runs` row, `test.*` events |
 | `request_research` | request | forwarded to `on_research`; per-attempt limit |
 | `request_scope_expansion` | request | protected paths refused locally, forwarded to `on_scope_expansion`; a granted newer contract replaces the guard |

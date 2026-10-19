@@ -46,6 +46,16 @@ Noch keine.
 
 ## Behobene Bugs
 
+### BUG-294 – Lint-Befund mit Zeilennummer, Coder ändert 35 Minuten den falschen, gleich gebauten Test
+- Phase: Testzyklus 3 auf rc61 (M1, Job `6b99148d…`, Plan v3) · Komponente: tools (engine, Ausgabe fehlgeschlagener Befehle) · Severity: P1 · blockierend: ja (`REPLAN_LIMIT` nach 130,9 min) · Status: **behoben** (`tests/unit/test_tools_locations.py`, `tests/integration/test_tools_engine_exec.py::test_a_failed_run_shows_the_source_lines_its_output_names`)
+- Reproduktion:
+  - Plan v3, S001: nach der Isolationsnotiz (BUG-291, live wirksam) bestehen um 22:29 alle 21 Tests.
+  - `complete_step` wird abgelehnt (`CHECK_STILL_FAILING`), Ausgabe vollständig: ``tests/test_app.py:73:9: F841 Local variable `task2` is assigned to but never used`` – Zeile 73 liegt in `test_get_tasks_done`.
+  - Der Coder ändert in drei Versuchen sechsmal `test_get_tasks_open` bzw. `test_get_api_tasks_open` (gleich aufgebaut, mit eigener Variable `done_task`), liest Zeilen 60–80 und findet die Zeile nicht; der letzte Versuch pendelt zwischen zwei Fassungen. Stagnation → Replan-Budget erschöpft.
+- Ursache: Linter, Compiler und Testläufer nennen nur `pfad:zeile:spalte`. Die Zuordnung der Zeile zur Funktion blieb dem Modell überlassen, das bei zwei gleich gebauten Nachbarn die falsche wählte – eine Zuordnung, die die Runtime ohne Risiko selbst treffen kann.
+- Fix: `hermclaw/tools/locations.py` (`source_locations`) liest bei jedem fehlgeschlagenen Befehl die genannten Stellen (`pfad:zeile`, tsc `pfad(zeile,spalte)`, Sandbox-Pfade wie `/workspace/app.py`, relativ zum Befehlsverzeichnis) über die Workspace-Begrenzung und hängt bis zu sechs als `[source]`-Block an: `tests/test_app.py:73 (in def test_get_tasks_done(self):): task2 = app.create_task('Task 2')`. Gilt auch für die Ausgabe in `CHECK_STILL_FAILING`.
+- Weitere Beobachtungen M1 (Zyklus 3): Plan v1 mit gemockten HTTP-Handlern (Tests brachen am Konstruktor); die Isolationsprobe lief und meldete korrekt nichts, weil der Einzeltest ebenfalls scheiterte. 709 Modellaufrufe.
+
 ### BUG-293 – Redaktion und Geheimnis-Prüfung sind uneins: das Review sieht gültigen und falschen Test-Token gleich maskiert
 - Phase: Testzyklus 2 auf rc60 (M3, Job `d5554059…`, Plan v3) · Komponente: core (redaction), verifier (secrets) · Severity: P2 · blockierend: mitursächlich (Review-Befunde gegen die Tests) · Status: **behoben** (`tests/unit/test_config_and_redaction.py::test_role_values_a_test_compares_stay_visible`)
 - Reproduktion:

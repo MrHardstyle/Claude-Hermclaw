@@ -52,6 +52,7 @@ from hermclaw.tools.classify import CommandClassification, CommandClassifier, pa
 from hermclaw.tools.context import CallContext, NullCallbacks, ScopeExpansionOutcome, ToolCallbacks, ToolPermissions
 from hermclaw.tools.errors import ToolError, ToolProtocolError
 from hermclaw.tools.gitlocal import LocalGit
+from hermclaw.tools.locations import source_locations
 from hermclaw.tools.ops import OpsCall, OpsResult, OpsToolProvider
 from hermclaw.tools.output import clip_head, clip_middle, missing_modules, strip_ansi
 from hermclaw.tools.patch import diff_section_path, parse_numstat, parse_patch
@@ -188,6 +189,7 @@ MAX_READ_BYTES = 2_000_000
 MAX_DIFF_BYTES = 400_000
 SNIPPET_CHARS = 600
 _SLACK = 400  # markers appended after clipping
+_SOURCE_FILE_BYTES = 2_000_000  # larger files are not read for [source] lines
 
 
 @dataclass(frozen=True)
@@ -1324,6 +1326,11 @@ class ToolEngine:
             footer.append(f"[cleanup] removed {len(run.audit.cleaned)} new generated file(s) that are not git-ignored")
         stdout = strip_ansi(res.stdout) if res else ""
         stderr = strip_ansi(res.stderr) if res else ""
+        if res is not None and not res.timed_out and res.exit_code != 0:
+            # live M1: ruff named tests/test_app.py:73 and the coder edited the identically built test above it (BUG-294)
+            named = source_locations(f"{stdout}\n{stderr}", self._source_lines, cwd=run.cwd)
+            if named:
+                footer.append("[source] the lines this output names:\n" + "\n".join(named))
         fixed = len(header) + len(status) + sum(len(f) + 1 for f in footer) + 40
         room = max(200, budget - fixed)
         truncated = bool(res and (res.stdout_truncated or res.stderr_truncated))
@@ -1493,6 +1500,17 @@ class ToolEngine:
                 "then call install_dependencies – reinstalling an unchanged manifest does not add it."
             )
         return f"[hint] not installed: {names}. Without install_dependencies use the standard library, or block_step naming it."
+
+    def _source_lines(self, rel: str) -> list[str] | None:
+        """Lines of a readable workspace file for :func:`source_locations` (BUG-294); ``None`` for anything a read
+        tool would refuse or that is too large."""
+        try:
+            rel, target = self.fs.resolve(rel)
+            if not target.is_file() or target.stat().st_size > _SOURCE_FILE_BYTES:
+                return None
+            return target.read_text(encoding="utf-8", errors="replace").splitlines()
+        except (ToolError, OSError):
+            return None
 
     def _local_roots(self) -> set[str]:
         """Entries at the repository root and under ``src/``: a missing module with such a name is the project's own."""

@@ -751,3 +751,23 @@ async def test_complete_step_reruns_the_check_the_correction_names(sessionmaker:
     assert again.error_code == E.CHECK_STILL_FAILING and "F841 still bad" in again.output
     assert (await h.call("write_file", path="src/calc.py", content="# LINT_CLEAN\n")).ok
     assert (await h.call("complete_step", summary="done, lint clean")).ok
+
+
+async def test_a_failed_run_shows_the_source_lines_its_output_names(sessionmaker: SM, repo: Path) -> None:
+    """BUG-294 (live cycle 3 M1): ruff named tests/test_app.py:73 (F841 `task2`); the coder edited the identically built
+    test above it for 35 minutes. A failed run appends each named line with the definition it belongs to."""
+    (repo / "tests" / "test_twins.py").write_text(
+        "def test_open():\n    done = make()\n    use(done)\n\n\ndef test_done():\n    first = make()\n    second = make()\n    use(first)\n",
+        encoding="utf-8",
+    )
+    lint = "printf '%s\\n' 'tests/test_twins.py:8:5: F841 Local variable `second` is assigned to but never used'; exit 1"
+    res = await _run_once(sessionmaker, repo, lint)
+    assert "[source] the lines this output names:" in res.output
+    assert "tests/test_twins.py:8 (in def test_done():): second = make()" in res.output
+    passed = await _run_once(sessionmaker, repo, "printf '%s\\n' 'tests/test_twins.py:8:5: note'")
+    assert "[source]" not in passed.output  # a run that succeeded gets no lines
+
+
+async def _run_once(sessionmaker: SM, repo: Path, command: str) -> Any:
+    h = await make_harness(sessionmaker, repo, contract=scope(**SCOPE))
+    return await h.call("run_command", command=command)

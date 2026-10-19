@@ -4,6 +4,11 @@ Format: [Keep a Changelog](https://keepachangelog.com/de/1.1.0/), Versionen nach
 
 ## [Unreleased]
 
+### Behoben
+- **Fehlerorte mit Quellzeile (BUG-294):** Schlägt ein Befehl fehl, hängt die Runtime jede Zeile an, die seine Ausgabe als
+  `pfad:zeile` nennt – mit der Funktion bzw. Klasse, in der sie steht. Ein Lint-Befund in einem von zwei gleich gebauten
+  Tests führt den Coder nicht mehr in den falschen.
+
 ## [0.1.0rc61] – Release Candidate (2026-10-19)
 
 ### Behoben
