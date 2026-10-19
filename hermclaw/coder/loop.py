@@ -20,6 +20,7 @@ from typing import Any, Literal, Protocol
 from sqlalchemy import update
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
+from hermclaw.coder.isolation import ISOLATION_PASSED, isolation_probe
 from hermclaw.coder.salvage import salvage_write
 from hermclaw.context_builder import (
     ContextBuilder,
@@ -256,6 +257,35 @@ class CoderLoop:
         await self._status(job_id=job_id, step_id=step_id, attempt_id=attempt_id, turn=turn, action=action, result=result)
         return action, result
 
+    async def _isolation_check(
+        self,
+        action: CoderAction,
+        result: ToolResult,
+        probed: set[str],
+        *,
+        job_id: uuid.UUID,
+        step_id: uuid.UUID,
+        attempt_id: uuid.UUID,
+        turn: int,
+    ) -> str | None:
+        """Run the first failing test alone once; a note when it passes there (state shared between tests, BUG-291)."""
+        probe = isolation_probe(str(action.args.get("command") or ""), result.output)
+        if probe is None or probe[0] in probed:
+            return None
+        test_id, command = probe
+        probed.add(test_id)
+        check = CoderAction(
+            tool=ToolName.run_test,
+            args={"command": command, "cwd": str(action.args.get("cwd") or ".")},
+            status=f"Laufzeit-Prüfung: {test_id[:200]} einzeln ausführen",
+            decision="runtime-isolation-check",
+        )
+        outcome = await self.engine.execute(check, job_id=job_id, step_id=step_id, attempt_id=attempt_id, turn=turn)
+        await self._status(job_id=job_id, step_id=step_id, attempt_id=attempt_id, turn=turn, action=check, result=outcome)
+        if not outcome.ok or not outcome.data.get("passed"):
+            return None
+        return ISOLATION_PASSED.format(test=test_id, command=command)
+
     async def _persist(self, attempt_id: uuid.UUID, turn: int, history: Sequence[TurnRecord]) -> None:
         if self.sm is None:
             return
@@ -333,6 +363,7 @@ class CoderLoop:
         notice: str | None = None
         runners_withheld = False
         readers_withheld = False
+        probed: set[str] = set()
         invalid_streak = 0
         turn = start_turn - 1
         for turn in range(start_turn, s.max_turns + 1):
@@ -476,6 +507,12 @@ class CoderLoop:
                     )
                 if directive.level in ("warning", "diagnose") and directive.message:
                     notice = "\n\n".join(x for x in (directive.message, notice) if x)
+                    if action.tool.value in _RUNNERS and not result.ok:
+                        isolated = await self._isolation_check(
+                            action, result, probed, job_id=job_id, step_id=step_id, attempt_id=attempt_id, turn=turn
+                        )
+                        if isolated:
+                            notice = "\n\n".join((notice, isolated))
         return CoderResult(
             "budget_exhausted",
             turn,

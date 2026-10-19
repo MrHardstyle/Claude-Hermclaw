@@ -323,6 +323,35 @@ async def test_stagnation_diagnosis_is_injected_and_stop_ends_loop(sessionmaker:
     assert [o.turn for o in hook.seen] == [1, 2, 3]
 
 
+SHARED_STATE_TESTS = (
+    "ITEMS = []\n\n\ndef test_first():\n    ITEMS.append(1)\n    assert len(ITEMS) == 1\n\n\n"
+    "def test_second():\n    ITEMS.append(2)\n    assert len(ITEMS) == 1\n\n\ndef test_wrong():\n    assert 1 == 2\n"
+)
+
+
+async def test_a_test_that_passes_alone_is_reported_as_shared_state(sessionmaker: Any, tmp_repo: Path) -> None:
+    """Live cycle 2 M1 on 0.1.0rc60: two HTTP tests found four tasks instead of two because all tests used one SQLite
+    file; each passed alone, the coder never found out and the job failed after three plan versions. Once the same
+    tests keep failing, the runtime runs the first failing test alone and names shared state when it passes (BUG-291)."""
+    cmd = f"{PY} -m pytest -q -p no:cacheprovider tests/test_app.py"
+    hook = ScriptedStagnation({2: StagnationDirective("warning", message="Stagnation warning: same failing tests 2x.")})
+    actions = [
+        act("write_file", "Tests anlegen", path="tests/test_app.py", content=SHARED_STATE_TESTS),
+        act("run_test", "Tests (rot)", command=cmd),
+        act("read_file", path="tests/test_app.py"),
+    ]
+    h, loop, chat = await _setup(sessionmaker, tmp_repo, actions, max_turns=3, stagnation=hook)
+    await _run(h, loop)
+    third = "\n".join(m.content for m in chat.prompts[2])
+    assert "Stagnation warning" in third
+    # the first failing test is probed: test_second passes alone, test_wrong would fail alone too
+    assert "Isolation check by the runtime: 'tests/test_app.py::test_second' passes when it runs alone" in third
+    assert "-q -p no:cacheprovider tests/test_app.py::test_second" in third
+    async with sessionmaker() as s:
+        runs = (await s.execute(select(Event).where(Event.job_id == h.step.job_id, Event.event_type == "test.started"))).scalars().all()
+    assert [r.payload["command"].endswith("tests/test_app.py::test_second") for r in runs] == [False, True]
+
+
 async def test_invalid_model_output_twice_fails_and_timeout_is_model_failure(sessionmaker: Any, tmp_repo: Path) -> None:
     bad = ModelOutputInvalid("no valid action", code="MODEL_OUTPUT_INVALID")
     h, loop, chat = await _setup(sessionmaker, tmp_repo, [bad, bad])

@@ -127,6 +127,12 @@ So "same failing test after code changes" yields heavy review on the first stagn
 block. `replan_hint` provides `reason_code` (`scope_unavailable` for scope, else `stagnation`) and deterministic evidence
 for the replanner.
 
+**Isolation check (BUG-291).** When a warning or diagnosis follows a failed pytest run, the coder loop
+(`hermclaw/coder/isolation.py`) runs the first failing test alone once per attempt (the coder's own launcher,
+`-q -p no:cacheprovider <node id>`, as a recorded `run_test`). If it passes alone, the next turn is told that the tests share
+state and that each test needs its own fresh state – an order dependence the full run's output cannot show (live cycle 2
+M1: four attempts changed code and expected values while every test passed alone). A run of a single test is never probed.
+
 **No reasoning is stored or requested.** The diagnosis instruction tells the model to determine the root cause and a
 different approach but to answer *only* with its next tool action and a short `decision` label; nothing the model
 writes besides that action is used. Messages, reasons, labels, state and events contain only redacted, clipped labels,
@@ -184,3 +190,5 @@ fresh but know the step's used escalations.
   escalations, events per level, monitor restart/sticky stop, persistence failure tolerance, resume inheritance via the
   factory, and the real `CoderLoop` + tool engine + git + pytest stopping a looping coder and a "same failing test after
   changes" coder with `heavy_review`.
+- `tests/unit/test_coder_isolation.py`, `tests/integration/test_coder_loop.py::test_a_test_that_passes_alone_is_reported_as_shared_state`
+  – isolation probe command and the note for a test that passes alone (BUG-291).

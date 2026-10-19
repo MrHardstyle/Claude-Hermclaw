@@ -46,6 +46,17 @@ Noch keine.
 
 ## Behobene Bugs
 
+### BUG-291 – Tests teilen Zustand, jeder besteht allein: Coder sucht vier Versuche lang im Code und in den Sollwerten
+- Phase: Testzyklus 2 auf rc60 (M1, Job `a3cfcb1a…`) · Komponente: coder (loop, isolation) · Severity: P1 · blockierend: ja (Job `failed`, `REPLAN_LIMIT` nach 119 min) · Status: **behoben** (`tests/integration/test_coder_loop.py::test_a_test_that_passes_alone_is_reported_as_shared_state`, `tests/unit/test_coder_isolation.py`)
+- Reproduktion:
+  - Auftrag: Aufgabenverwaltung mit SQLite, HTTP-Server aus der Standardbibliothek, Tests für Datenhaltung und HTTP-Schnittstelle. Plan v1 mit einem Schritt.
+  - `TestHTTPHandler` legt die Datenbank einmal in `setUpClass` an; jeder Test fügt Aufgaben hinzu. `test_get_tasks` erwartet 2 Aufgaben und findet 4 (`AssertionError: 4 != 2`).
+  - Im Workspace nachgemessen: `pytest tests/test_app.py` → 2 failed, 22 passed; `pytest tests/test_app.py::TestHTTPHandler::test_get_tasks` allein → 1 passed.
+  - Der Coder änderte Code und Tests über vier Versuche und drei Planversionen, ohne den Test einzeln laufen zu lassen; die Stagnationserkennung stoppte jeden Versuch („same failing tests 4x after code changes“), die Hinweise sprachen nur von falschem Code oder falschem Sollwert.
+- Ursache: Ein Test, der allein besteht und im Gesamtlauf scheitert, ist von der Reihenfolge abhängig – geteilter Zustand zwischen Tests. Diese Ursache war für den Coder unsichtbar: Die Ausgabe des Gesamtlaufs zeigt nur die falsche Anzahl, und keine Stufe der Eskalation prüfte den Unterschied zwischen Einzel- und Gesamtlauf.
+- Fix: Meldet die Stagnationserkennung eine Warnung oder Diagnose nach einem gescheiterten Testlauf mit pytest, führt die Laufzeit den ersten gescheiterten Test einmal allein aus (derselbe Starter, `-q -p no:cacheprovider <node id>`, als `run_test` im Sandbox mit Ereignissen). Besteht er allein, bekommt der Coder den Hinweis, dass die Tests Zustand teilen, und die Anweisung, jedem Test eigenen frischen Zustand zu geben statt Sollwerte oder Code zu ändern. Jeder Test wird pro Versuch höchstens einmal so geprüft; ein schon einzeln ausgeführter Test nie.
+- Selbstprüfung: kein weiterer Hinweistext gegen dasselbe Symptom „gleiche Tests scheitern“ (BUG-179), sondern eine gemessene Unterscheidung, die der Coder selbst nicht vornahm.
+
 ### BUG-290 – Regeln aus einem Dokument des Repositorys gehen im Plan verloren, das Review prüft gegen die Zusammenfassung
 - Phase: Testzyklus 2 auf rc60, Prüfung der gelieferten Dateien (K2, Job `0527d6af…`) · Komponente: review (workspace, prompt), planner (prompt) · Severity: P2 · blockierend: nein (Job `succeeded`) · Status: **behoben** (`tests/unit/test_review_prompt.py::test_documents_the_job_names_as_its_rules_are_part_of_the_review`, `tests/integration/test_review_workspace.py::test_documents_named_as_rules_are_read_from_the_workspace`, `tests/unit/test_planner_prompt.py::test_planner_system_prompt_rules`)
 - Reproduktion:
