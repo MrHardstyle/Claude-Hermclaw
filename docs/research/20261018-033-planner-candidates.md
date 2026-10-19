@@ -124,3 +124,32 @@ Stichentscheid G1 (schwerer Auftrag, max. 40 Punkte):
 - Er braucht einen Modellwechsel gegenüber dem residenten qwen3.6 für Coder und Review.
 - Einschränkung: je Auftrag ein Lauf (Streuung nicht gemessen). Der Vorsprung auf M2 und G1 ist aber inhaltlich begründet: richtige Diagnose und richtige Kriterien.
 - Nächster Schritt: Planer und Neuplaner produktiv auf qwen3.8-27b umstellen. Dazu gehören Wechsel und Residenz auf .224 und die Zeitlimits. Danach die Testzyklus-Batterie erneut fahren und die Entscheidung als D-Eintrag in DECISIONS.md festhalten.
+
+## Runde 3: fünf weitere Kandidaten (Betreiber, 2026-10-19)
+
+Kandidaten: Nemotron 3.5 Bolt 74B-A9B (llama.cpp b11696), Qwen3.6-27B (dicht), Granite 4.2 8B (Q8), Ornith 1.5 9B
+(Q8), Ornith 1.5 35B-A3B. Ablauf wie oben. Die Referenzpläne von qwen3.8, Agents-A1 und qwen3.6-35b liefen mit in den
+blinden Vergleich (8 Pläne je Auftrag). Zusätzlich wurde nach den Freigabekriterien geprüft:
+Anforderungsabdeckung 100 %, R2 widersprüchliche Kriterien 0, R3 ungültige Dateien 0, R4 fehlende Abhängigkeiten 0,
+R5 Tests je Funktion.
+
+| Modell | K1 | M2 | M3 | Summe | freigabefähig | Dauer 3 Pläne |
+|---|---|---|---|---|---|---|
+| **qwen3.8-27b** (Referenz) | 32 | **35** | 32 | **99** | 2/3 (M2, M3) | ~25 min |
+| Ornith 1.5 9B | **37** | 25 | 32 | 94 | 1/3 (K1) | 7,0 min |
+| Agents-A1 (Referenz) | 33 | 22 | 33 | 88 | 0/3 | 3,0 min |
+| qwen3.6-35b (Referenz) | 36 | 17 | 28 | 81 | 0/3 | 4,3 min |
+| Qwen3.6-27B (dicht) | 20 | 30 | 31 | 81 | 0/3 | 80 min |
+| Ornith 1.5 35B-A3B | 31 | 22 | 24 | 77 | 0/3 | 2,8 min |
+| Nemotron 3.5 Bolt | 28 | 22 | 24 | 74 | 0/3 | 7,8 min |
+| Granite 4.2 8B | 12 | 21 | 24 | 57 | 0/3 | 28 min |
+
+Befunde:
+- qwen3.8 bleibt Referenz. Auf M2 ist er der einzige, der alle vier Fehler den richtigen Dateien zuordnet.
+  7 von 8 Plänen verfehlen die echte Absturzursache (`parse_date`-Format).
+- Ornith 9B liefert den besten K1-Plan, ist auf M2 aber schwach (`must_change` auf `__main__.py`/README).
+- Häufigste Freigabe-Verstöße aller Modelle:
+  - Dateien in `must_change`, die das Schrittziel nicht nennt;
+  - Tests oder Doku, die nur in `must_change` und nicht im Ziel stehen;
+  - Anforderungen, die nur vage abgedeckt sind (z. B. „Token“ statt „jede Anfrage braucht das Token“).
+- Kein Einzelmodell erreicht 3/3 Freigaben. Das stützt den Ansatz Planer + unabhängige Planprüfung (nächster Abschnitt).
