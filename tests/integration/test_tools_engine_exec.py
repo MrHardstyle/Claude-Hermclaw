@@ -26,6 +26,7 @@ from tests.integration.test_tools_support import (
     fetch_test_runs,
     git,
     make_harness,
+    policies,
     reload_step,
     scope,
     tool_calls,
@@ -718,6 +719,24 @@ async def test_commands_without_a_timeout_get_the_short_coder_default(sessionmak
     assert (await h.call("run_command", command="python -m pytest -q")).ok
     assert (await h.call("run_test", command="python -m pytest -q tests", timeout_seconds=500)).ok
     assert [r.timeout_seconds for r in rec.requests] == [180, 500]
+
+
+async def test_complete_step_runs_the_lint_of_the_changed_files(sessionmaker: SM, repo: Path) -> None:
+    """Cycle 2 on rc60, K1 (BUG-283): a review correction added an unused variable; complete_step accepted, the
+    verifier's lint failed and the step was blocked on its last attempt. complete_step runs the verifier's lint
+    command on the changed files and refuses while it reports findings; a lint tool missing from the image is skipped."""
+    pol = policies()
+    pol.verifier.lint_commands = {"python": "! grep -Hn UNUSED {files}"}
+    h = await make_harness(sessionmaker, repo, contract=scope(**SCOPE), policy=pol)
+    assert (await h.call("write_file", path="src/calc.py", content="def add(a, b):\n    UNUSED = 1\n    return a + b\n")).ok
+    refused = await h.call("complete_step", summary="done")
+    assert refused.error_code == E.CHECK_STILL_FAILING and "src/calc.py:2:" in refused.output
+    assert (await h.call("write_file", path="src/calc.py", content="def add(a, b):\n    return a + b\n")).ok
+    assert (await h.call("complete_step", summary="done, lint clean")).ok
+    pol.verifier.lint_commands = {"python": "exit 127"}
+    h = await make_harness(sessionmaker, repo, contract=scope(**SCOPE), policy=pol)
+    assert (await h.call("write_file", path="src/calc.py", content="x = 1\n")).ok
+    assert (await h.call("complete_step", summary="no linter in the image")).ok
 
 
 async def test_complete_step_reruns_the_check_the_correction_names(sessionmaker: SM, repo: Path) -> None:

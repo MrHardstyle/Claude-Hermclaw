@@ -1819,12 +1819,34 @@ class ToolEngine:
                 )
         return out
 
+    async def _lint_commands(self) -> list[str]:
+        """The verifier's lint commands for the files changed now – a review correction on K1 (cycle 2, rc60) brought
+        a new F841 in and the verifier blocked the step on its last attempt (BUG-283)."""
+        from hermclaw.verifier.checks import lint_command
+        from hermclaw.verifier.languages import detect_language
+
+        templates = self.policies.verifier.lint_commands
+        if not templates:
+            return []
+        by_language: dict[str, list[str]] = {}
+        for rel in await self._changed_files() or []:
+            path = self.fs.root / rel
+            if not path.is_file():
+                continue
+            with path.open("rb") as fh:
+                language = detect_language(rel, fh.read(256))
+            if language in templates:
+                by_language.setdefault(language, []).append(rel)
+        return [lint_command(templates[lang], files) for lang, files in sorted(by_language.items())]
+
     async def _still_failing(self, ctx: CallContext, events: list[PendingEvent]) -> tuple[str, str] | None:
-        """The first failed check of the correction that still fails, run as the verifier ran it – on the last turn
-        nothing is re-run (a refusal there would only exhaust the budget); a check that cannot run here is skipped."""
+        """The first failed check of the correction that still fails, or a lint finding in the changed files, run as
+        the verifier runs it – on the last turn nothing is re-run (a refusal there would only exhaust the budget); a
+        check that cannot run here is skipped."""
         if ctx.turn >= self.max_turns:
             return None
-        for command in self._recheck_commands:
+        lint = [c for c in await self._lint_commands() if c not in self._recheck_commands]
+        for command in [*self._recheck_commands, *lint]:
             try:
                 run = await self._sandbox_run(
                     ToolName.run_command, command=command, cwd_raw=".", timeout_seconds=None, purpose="verifier", ctx=ctx, events=events
@@ -1833,8 +1855,8 @@ class ToolEngine:
                 if exc.code == E.COMMAND_REPEATED and not exc.data.get("passed"):
                     return command, self._ran_output.get((".", command), "(output not kept)")
                 continue
-            if run.sandbox_failed or run.result is None or run.result.timed_out or run.result.exit_code == 0:
-                continue
+            if run.sandbox_failed or run.result is None or run.result.timed_out or run.result.exit_code in (0, 126, 127):
+                continue  # 126/127: the tool is not in the image, the verifier skips it too
             return command, self._render_run(command, run, budget=self.output_limit, head_ratio=0.3)[0]
         left = await self._secrets_left() if self._recheck_secrets else []
         if left:
@@ -1868,15 +1890,15 @@ class ToolEngine:
                 "again.",
                 data={"untouched": untouched},
             )
-        failing = await self._still_failing(ctx, events) if self._recheck_commands or self._recheck_secrets else None
+        failing = await self._still_failing(ctx, events)
         if failing is not None:
             # live K1: the correction named ruff findings, the coder re-ran only pytest and the runtime completed the step
             # for it; the verifier failed on the same lint output twice and the plan was replaced (BUG-276)
             command, output = failing
             raise ToolError(
                 E.CHECK_STILL_FAILING,
-                "complete_step refused: the check that failed verification still fails, so the verifier would reject the "
-                f"step again. Fix what its output names, then call complete_step. Its output:\n{output}",
+                "complete_step refused: a check the verifier runs on this step still fails, so the verifier would reject "
+                f"the step. Fix what its output names, then call complete_step. Its output:\n{output}",
                 data={"command": command},
             )
         reported: list[str] = []

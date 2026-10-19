@@ -46,6 +46,12 @@ Noch keine.
 
 ## Behobene Bugs
 
+### BUG-283 – Review-Korrektur bringt einen neuen Lint-Fehler ein, `complete_step` nimmt an, der letzte Versuch ist verbraucht
+- Phase: Testzyklus 2 auf rc60 (K1, Job `582bba63…`, S001 Versuch 3) · Komponente: tools (engine) · Severity: P2 · blockierend: ja (behoben) · Status: **behoben** (`tests/integration/test_tools_engine_exec.py::test_complete_step_runs_the_lint_of_the_changed_files`)
+- Reproduktion: Versuch 1 scheitert an Lint, die Korrektur behebt das. Das Heavy Review fordert berechtigt, `inf`/`nan` abzulehnen und den Header zu prüfen. Die Korrektur dazu führt ein neues F841 ein, `complete_step` nimmt an. Der Verifier blockiert den Schritt (2/2 Korrekturen), es folgt ein Replan von knapp 13 Minuten.
+- Ursache: Seit BUG-276 führt `complete_step` nur die Prüfungen erneut aus, die die Korrektur nennt. Bei einer Review-Korrektur ist das keine. Den Lint der geänderten Dateien sah erst der Verifier.
+- Fix: `complete_step` führt immer auch den Lint-Befehl des Verifiers über die jetzt geänderten Dateien aus (gleiche Vorlage `policies.verifier.lint_commands`, gleiche Spracherkennung) und lehnt ab, solange Befunde bleiben (`CHECK_STILL_FAILING`, mit Ausgabe). Fehlt das Werkzeug im Image (Exit-Code 126/127), wird übersprungen. Im letzten Zug wird nichts ausgeführt (wie bisher).
+
 ### BUG-282 – Pläne verlangen Änderungen an bestehenden Dateien, die weder Schrittziel noch Auftrag nennen
 - Phase: Planer-Bench R-033 (Blindbewertung aller Modelle) und Testzyklus 1 auf rc59 (M2) · Komponente: planner (validation) · Severity: P2 · blockierend: ja (behoben) · Status: **behoben** (`tests/unit/test_planner_validation.py::test_must_change_on_an_existing_file_the_goal_does_not_name_is_dropped`)
 - Reproduktion: In der Blindbewertung war das der häufigste Freigabe-Verstoß aller Planer. Beispiele: `must_change` auf `README.md` oder `ledger/__main__.py`, obwohl das Schrittziel nur die Fehler in `parse.py`/`report.py` beschreibt. In Zyklus 1 brauchte M2 deshalb zwei Replans. BUG-278 fängt das erst zur Laufzeit ab, per Review nach gescheiterten Versuchen.
