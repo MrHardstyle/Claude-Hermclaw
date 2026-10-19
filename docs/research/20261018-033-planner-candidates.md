@@ -153,3 +153,42 @@ Befunde:
   - Tests oder Doku, die nur in `must_change` und nicht im Ziel stehen;
   - Anforderungen, die nur vage abgedeckt sind (z. B. „Token“ statt „jede Anfrage braucht das Token“).
 - Kein Einzelmodell erreicht 3/3 Freigaben. Das stützt den Ansatz Planer + unabhängige Planprüfung (nächster Abschnitt).
+
+## Kombinationen: Planer + unabhängige Planprüfung (2026-10-19)
+
+Aufbau (`bench2.py`): Der Planer erzeugt einen gültigen Plan (echte Validierung inkl. Reparaturzügen). Ein Prüfmodell
+extrahiert die Anforderungen, ordnet sie Schritten und Kriterien zu und meldet Probleme der Arten
+uncovered_requirement, contradiction, invalid_file, missing_dependency, missing_test. Mit Problemen geht der Plan samt
+Befunden zurück an den Planer, höchstens zwei Überarbeitungen. Router-Benchserver auf .224 (llama.cpp b11696,
+`--models-max 1`). Je Auftrag ein Lauf. Blind bewertet mit Rubrik und Freigabeprüfung R1–R5, qwen3.8 allein (Plan aus
+Runde 1) als Referenz.
+
+| Kombination (Planer + Prüfer) | K1 | M2 | M3 | Summe | freigabefähig | gültig | Dauer 3 Pläne |
+|---|---|---|---|---|---|---|---|
+| **qwen3.8 allein** (Referenz) | 29 | **31** ✓ | **34** ✓ | **94** | **2/3** | 3/3 | ~25 min |
+| Agents-A1 + qwen3.8 | 22 | 30 ✓ | 33 ✓ | 85 | 2/3 | 3/3 | 42 min |
+| Agents-A1 + Agents-A1 | 31 | 24 | 29 | 84 | 0/3 | 3/3 | 11 min |
+| qwen3.6 + qwen3.6 | 35 ✓ | 23 | 22 | 80 | 1/3 | 3/3 | 28 min |
+| Ornith 9B + qwen3.8 | **36** ✓ | 20 | 0 | 56 | 1/3 | 2/3 | 44 min |
+| Ornith 9B + Ornith 9B | 31 ✓ | 23 | 0 | 54 | 1/3 | 2/3 | 30 min |
+| qwen3.8 + qwen3.8 | 21 | 0 | 31 | 52 | 0/3 | 2/3 | 87 min |
+
+Befunde:
+- **Kein klarer Sieger, keine klare Struktur.** Die LLM-Planprüfung hebt keinen Planer verlässlich über qwen3.8 allein.
+  Ihr Nutzen schwankt je Auftrag stärker als zwischen den Kombinationen.
+- Die Prüfschleife konvergiert nicht: Nach der ersten Überarbeitung meldete der Prüfer in 8 von 12 Fällen erneut
+  Probleme, oft neue. Der Prüfer erzeugt selbst Rauschen, etwa Widersprüche, die keine sind, oder zusätzliche
+  Pflichtdateien.
+- qwen3.8 streut stark: allein 94 Punkte, als Planer mit Selbstprüfung 52 (K1 mit `must_change` auf fünf nicht
+  verlangten Testdaten-Dateien, M2 ungültig). Ein Lauf je Auftrag reicht für feine Rangfolgen nicht.
+- Drei der 18 Läufe scheiterten schon in der Planvalidierung, alle an derselben Regel (Tests für den Code eines
+  anderen Schritts). Die Modelle setzen die Korrektur in zwei Reparaturzügen nicht um.
+- Wiederkehrende Freigabe-Verstöße über alle Modelle: `must_change` auf Dateien, die keine Änderung brauchen
+  (README, Einstiegspunkt, Eingabedaten), und vage Ziele (JSON, „jede Anfrage braucht das Token“, Zeilennummern).
+
+Entscheidung:
+- Planer und Neuplaner auf qwen3.8-27b (wie nach Runde 1 beschlossen), ohne zusätzliche LLM-Prüfstufe.
+- Statt eines zweiten Modells sollen die wiederkehrenden Verstöße als **deterministische** Planprüfung im Planer-Kern
+  abgefangen bzw. repariert werden (Rückverfolgung Anforderung → Schritt → Kriterium, unnötige `must_change`,
+  verschobene Testpfade). Das ist allgemein und kostet keine Modellzeit. Die LLM-Prüfung wird erneut gemessen, wenn
+  diese Stufe steht und mehrere Läufe je Auftrag möglich sind.
