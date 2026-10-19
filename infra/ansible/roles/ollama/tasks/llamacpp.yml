@@ -71,7 +71,10 @@
   notify: Restart llama-server
 
 - name: Resolve the GGUFs of the llama.cpp models
-  ansible.builtin.include_tasks: llamacpp_model.yml
+  ansible.builtin.include_tasks:
+    file: llamacpp_model.yml
+    apply:
+      tags: [ollama, llamacpp]
   loop: "{{ [ollama_llamacpp_model] + (ollama_llamacpp_models | map(attribute='model') | list) }}"
   loop_control:
     loop_var: ollama_llamacpp_tag
