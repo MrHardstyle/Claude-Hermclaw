@@ -5,6 +5,7 @@ Format: [Keep a Changelog](https://keepachangelog.com/de/1.1.0/), Versionen nach
 ## [Unreleased]
 
 ### Behoben
+- **Tests wandern in den Schritt ihres Codes (BUG-281):** Plant ein Schritt Tests für den Code eines anderen Schritts, verschiebt die Runtime sie in diesen Schritt, statt den Plan abzulehnen. Die Modelle wiederholten den Fehler in jedem Reparaturzug.
 - **llama.cpp-Archiv und Build passen zusammen (BUG-280):** Die Rolle `ollama` lehnt ein Archiv ab, dessen Name einen anderen Build nennt als `ollama_llamacpp_build`. Vorher lief nach einem Deploy unbemerkt der alte llama-server weiter.
 
 ## [0.1.0rc60] – Release Candidate (2026-10-19)

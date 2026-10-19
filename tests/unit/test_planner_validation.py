@@ -599,6 +599,38 @@ def test_tests_for_new_code_belong_in_the_same_step() -> None:
     assert not any("writes tests for code" in e for e in _errors(plan("goal", [code, own])))
 
 
+def test_tests_for_another_steps_code_are_moved_into_that_step() -> None:
+    """R-033 planner bench: three of 18 answers kept the tests of S002's code in S001 through every repair turn and the
+    planner gave up. The move is mechanical, so the runtime makes it: paths keep their field, ``must_change`` on them
+    moves along, tests of the step's own code stay."""
+    code = step("S001", "implement", "coding", "Create the service module.", allowed_new_paths=["app/service.py"])
+    frontend = step(
+        "S002",
+        "implement",
+        "coding",
+        "Create the frontend and the service tests.",
+        allowed_new_paths=["web/frontend.js", "tests/test_service.py", "tests/test_frontend.py"],
+        acceptance=[{"type": "diff", "must_change": ["web/frontend.js", "tests/test_service.py"]}],
+    )
+    moved, notes = prune_unreachable_must_change(PlanContract.model_validate(plan("goal", [code, frontend])), _ctx())
+    s1, s2 = moved.steps
+    assert "tests/test_service.py" in s1.allowed_new_paths and "tests/test_service.py" not in s2.allowed_new_paths
+    assert "tests/test_frontend.py" in s2.allowed_new_paths, "tests of the step's own code stay"
+    assert [g for c in s2.acceptance if c.type == "diff" for g in c.must_change] == ["web/frontend.js"]
+    assert ["tests/test_service.py"] in [c.must_change for c in s1.acceptance if c.type == "diff"]
+    assert notes == ["step S002: moved tests tests/test_service.py to step S001, which writes the code they test"]
+    assert not any("writes tests for code" in e for e in semantic_errors(moved, _ctx()))
+    # a stem named by the code of two steps stays for the planner to decide
+    twin = step("S003", "implement", "coding", "Create the service CLI.", allowed_new_paths=["cli/service.py"])
+    kept, none = prune_unreachable_must_change(PlanContract.model_validate(plan("goal", [code, twin, frontend])), _ctx())
+    assert "tests/test_service.py" in kept.steps[2].allowed_new_paths and not any("moved tests" in n for n in none)
+    # preserved steps of a replan are not touched
+    same, nothing = prune_unreachable_must_change(
+        PlanContract.model_validate(plan("goal", [code, frontend])), _ctx(), preserved=frozenset({"S001"})
+    )
+    assert "tests/test_service.py" in same.steps[1].allowed_new_paths and nothing == []
+
+
 def test_a_step_naming_another_steps_component_must_be_ordered_with_it() -> None:
     """Live G1 on rc39 (BUG-251): frontend ("liest Daten von der lokalen JSON-API des Collectors") and start scripts
     ("startet Collector") sat beside the collector step without a dependency; the scripts ran first and guessed config

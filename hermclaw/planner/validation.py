@@ -551,6 +551,80 @@ def _split_test_errors(plan: PlanContract, new_steps: Sequence[PlanStep], ctx: V
     return errors
 
 
+def _move_foreign_tests(plan: PlanContract, ctx: ValidationContext, preserved: frozenset[str]) -> tuple[PlanContract, list[str]]:
+    """Move test paths named after another step's code into that step, where code and tests are written together.
+
+    A step that writes code of its own and also tests for the code of ANOTHER step (``_split_test_errors``, BUG-250)
+    was rejected with the instruction to move them; three of 18 planner bench answers (R-033) repeated the plan in
+    every repair turn until the planner gave up. The move is mechanical: the paths keep their field (new paths stay
+    new, hints stay hints), ``must_change`` on them goes with them. A test stem named by code of several steps stays
+    an error for the planner to decide."""
+    by_id = {s.id: s for s in plan.steps}
+    mutating = [s for s in plan.steps if s.id not in preserved and s.kind.value in WORKSPACE_MUTATING_KINDS]
+    code_stems: dict[str, set[str]] = {
+        s.id: {_code_stem(p) for p in _step_paths(s, ctx) if not TEST_PATH_RE.search(p) and not DOC_PATH_RE.search(p)} for s in mutating
+    }
+    moves: dict[str, dict[str, set[str]]] = {}  # source step -> target step -> normalised test paths
+    for step in mutating:
+        paths = _step_paths(step, ctx)
+        own = code_stems[step.id]
+        if not own:
+            continue  # a tests-only step is merged by the planner (the repair message says which step to merge into)
+        for test in (p for p in paths if TEST_PATH_RE.search(p)):
+            stem = _tested_stem(test)
+            if not stem or stem in own:
+                continue
+            owners = [o.id for o in mutating if o.id != step.id and stem in code_stems[o.id]]
+            if len(owners) == 1:
+                moves.setdefault(step.id, {}).setdefault(owners[0], set()).add(test)
+    if not moves:
+        return plan, []
+
+    def norm(raw: str) -> str | None:
+        try:
+            return normalise_path(raw)
+        except ValueError:
+            return None
+
+    added: dict[str, dict[str, list[str]]] = {}  # target -> field -> raw entries
+    notes: list[str] = []
+    updated: dict[str, PlanStep] = {}
+    for src_id, targets in moves.items():
+        src = by_id[src_id]
+        moving = set().union(*targets.values())
+        new_paths = [r for r in src.allowed_new_paths if norm(r) not in moving]
+        hints = [h for h in src.repo_hints if norm(h) not in moving]
+        acceptance: list[AcceptanceCriterion] = []
+        carried: dict[str, list[str]] = {}
+        for crit in src.acceptance:
+            if not isinstance(crit, DiffEvidence) or not any(norm(g) in moving for g in crit.must_change):
+                acceptance.append(crit)
+                continue
+            for g in crit.must_change:
+                if norm(g) in moving:
+                    tgt = next(t for t, ps in targets.items() if norm(g) in ps)
+                    carried.setdefault(tgt, []).append(g)
+            keep = [g for g in crit.must_change if norm(g) not in moving]
+            if keep or crit.must_not_change or crit.max_changed_files is not None:
+                acceptance.append(crit.model_copy(update={"must_change": keep}))
+        updated[src_id] = src.model_copy(update={"allowed_new_paths": new_paths, "repo_hints": hints, "acceptance": acceptance})
+        for tgt, ps in targets.items():
+            slot = added.setdefault(tgt, {"allowed_new_paths": [], "repo_hints": [], "must_change": []})
+            slot["allowed_new_paths"] += [r for r in src.allowed_new_paths if norm(r) in ps]
+            slot["repo_hints"] += [h for h in src.repo_hints if norm(h) in ps]
+            slot["must_change"] += carried.get(tgt, [])
+            notes.append(f"step {src_id}: moved tests {', '.join(sorted(ps)[:5])} to step {tgt}, which writes the code they test")
+    for tgt, slot in added.items():
+        base = updated.get(tgt, by_id[tgt])
+        new_paths = [*base.allowed_new_paths, *(r for r in slot["allowed_new_paths"] if r not in base.allowed_new_paths)]
+        hints = [*base.repo_hints, *(h for h in slot["repo_hints"] if h not in base.repo_hints)]
+        acceptance = list(base.acceptance)
+        if slot["must_change"]:
+            acceptance.append(DiffEvidence(must_change=slot["must_change"]))
+        updated[tgt] = base.model_copy(update={"allowed_new_paths": new_paths, "repo_hints": hints, "acceptance": acceptance})
+    return plan.model_copy(update={"steps": [updated.get(s.id, s) for s in plan.steps]}), notes
+
+
 #: file stems too generic to name a component in a goal ("config.toml" vs. "die Konfiguration")
 _GENERIC_STEMS = frozenset({"config", "index", "utils", "helpers", "common", "settings", "setup", "types", "constants", "__init__"})
 
@@ -694,6 +768,8 @@ def prune_unreachable_must_change(
     plan, notes = _drop_existing_manifest_must_change(plan, ctx, preserved)
     plan, contradicting = _drop_self_contradicting_must_not_change(plan, ctx, preserved)
     notes += contradicting
+    plan, moved = _move_foreign_tests(plan, ctx, preserved)
+    notes += moved
     steps: list[PlanStep] = []
     for step in plan.steps:
         paths = _step_paths(step, ctx) if step.id not in preserved and step.kind.value in WORKSPACE_MUTATING_KINDS else []

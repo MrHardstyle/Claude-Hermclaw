@@ -46,6 +46,12 @@ Noch keine.
 
 ## Behobene Bugs
 
+### BUG-281 – Planer gibt auf, statt Tests in den Schritt ihres Codes zu verschieben
+- Phase: Planer-Bench R-033 (Kombinationen, 2026-10-19) · Komponente: planner (validation) · Severity: P2 · blockierend: ja (behoben) · Status: **behoben** (`tests/unit/test_planner_validation.py::test_tests_for_another_steps_code_are_moved_into_that_step`)
+- Reproduktion: Drei von 18 Bench-Läufen (Ornith 9B auf M3 zweimal, qwen3.8 auf M2) endeten mit `PlannerError: model output invalid after 2 repair attempt(s): step S001 writes tests for code of step S002 (…): move these test paths to step S002`. Jeder Reparaturzug wiederholte den Plan unverändert.
+- Ursache: Die Regel aus BUG-250 meldet den Fehler richtig, überlässt die rein mechanische Verschiebung aber dem Modell. Die Modelle setzen sie nicht um.
+- Fix: Die Plan-Bereinigung (`prune_unreachable_must_change`, vor der semantischen Prüfung in Planung und Neuplanung) verschiebt Testpfade, die nach dem Code genau eines anderen Schritts benannt sind, in diesen Schritt. Neue Pfade bleiben neue Pfade, Hinweise bleiben Hinweise, und `must_change` auf diesen Pfaden wandert mit. Der Plan erhält dazu eine Notiz. Ist der Stamm mehrdeutig oder der Schritt im Replan erhalten, bleibt es beim Fehler für den Planer.
+
 ### BUG-280 – Neues llama.cpp-Archiv unter altem Build-Namen: Deploy meldet Erfolg, der alte llama-server läuft weiter
 - Phase: Deploy 0.1.0rc60 (Rolle ollama, `bootstrap.yml --tags ollama` auf .224) · Komponente: infra (ansible, Rolle ollama) · Severity: P2 · blockierend: ja (behoben) · Status: **behoben** (`tests/integration/test_bootstrap_infra.py::test_llamacpp_archive_must_carry_the_build_it_is_installed_as`)
 - Reproduktion:
