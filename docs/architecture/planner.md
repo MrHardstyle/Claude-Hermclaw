@@ -71,7 +71,10 @@ the gateway, never by the planner.
    forbidden paths and command patterns). Build the prompt and emit `planner.invoked` (input statistics and the
    SHA-256 of the input, never the content). No transaction stays open while the model runs.
 2. **Structured output (14.2):** `ChatModel.chat(alias_of_role("planner"), …, json_schema=PlanContract schema)`
-   with the profile's `max_output_tokens`, `temperature` and `timeout_seconds`.
+   with the profile's `max_output_tokens`, `temperature` and `timeout_seconds`. The schema sent to the model bounds
+   the step lists more tightly than the contract (`MODEL_STEP_LIST_BOUNDS`: 12 acceptance criteria, 20 paths, hints
+   and constraints): the grammar closes the array there, so a repetition loop ends after a few items instead of at
+   the contract's 30 (BUG-288).
 3. **Validation**, in this order. Any failure raises an internal `PlanInvalid(phase, errors)`:
    - `parse`: the JSON object of the final content. Fences and surrounding prose are tolerated. An empty answer is an error even when the model produced hidden reasoning, which is never accepted as a plan;
    - `schema` (14.3): `PlanContract` (unknown fields rejected, `S###` ids, duplicate ids, unknown or self dependencies, cycles), with located messages such as `steps[0](S001).kind: …`;

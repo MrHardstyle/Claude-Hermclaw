@@ -75,14 +75,32 @@ PLANNER_ROLE = "planner"
 # allowed_new_paths it could not add them later in the object – in a replan it wrote "I will also include
 # src/main.py in allowed_new_paths" into rerun_reason three times instead (BUG-159). Validation is unchanged.
 MODEL_REQUIRED_STEP_FIELDS: tuple[str, ...] = ("depends_on", "repo_hints", "allowed_new_paths", "acceptance")
+# Tighter list bounds for the model than the contract has: the grammar closes the array at the bound. qwen3.8 repeated
+# two diff criteria until the contract's 30 – K2 on rc60 planned 32 min for a 1000-token plan, and seven stored steps
+# hold 28–30 criteria with two or three distinct ones (BUG-288). Real steps use at most 13 criteria and 13 paths;
+# the runtime still adds its generated criteria up to the contract bound.
+MODEL_STEP_LIST_BOUNDS: dict[str, int] = {
+    "acceptance": 12,
+    "repo_hints": 20,
+    "allowed_new_paths": 20,
+    "forbidden_paths": 20,
+    "constraints": 20,
+    "command_hints": 10,
+    "depends_on": 20,
+}
 
 
 def model_facing_schema(schema: dict[str, Any], step_definition: str) -> dict[str, Any]:
-    """``schema`` with :data:`MODEL_REQUIRED_STEP_FIELDS` required on its step definition (``$defs``)."""
+    """``schema`` with :data:`MODEL_REQUIRED_STEP_FIELDS` required on its step definition (``$defs``) and the step's
+    lists bounded by :data:`MODEL_STEP_LIST_BOUNDS`."""
     step = schema["$defs"][step_definition]
     required = list(step.get("required", []))
     required += [f for f in MODEL_REQUIRED_STEP_FIELDS if f in step["properties"] and f not in required]
     step["required"] = required
+    for name, bound in MODEL_STEP_LIST_BOUNDS.items():
+        prop = step["properties"].get(name)
+        if prop is not None and prop.get("type") == "array":
+            prop["maxItems"] = min(bound, prop.get("maxItems", bound))
     return schema
 
 

@@ -46,6 +46,14 @@ Noch keine.
 
 ## Behobene Bugs
 
+### BUG-288 – Planer wiederholt Akzeptanzkriterien bis zur Vertragsgrenze: 32 Minuten für einen Plan
+- Phase: Testzyklus 2 auf rc60 (K2, Job `0527d6af…`, Erstplan) · Komponente: planner (Schema an das Modell) · Severity: P2 · blockierend: nein (Plan war gültig) · Status: **behoben** (`tests/unit/test_planner_loop.py::test_model_facing_schemas_require_the_scope_fields`)
+- Reproduktion: qwen3.8 erzeugt 3973 Tokens in 32 min (2 Token/s, 27B-Modell großteils auf der CPU). Der gespeicherte Plan hat 3122 Zeichen (rund 1000 Tokens). Das Modell schrieb dieselben zwei `diff`-Kriterien (`form.js`, `tests/form.test.js`) immer wieder; die Normalisierung entfernte die Duplikate.
+- Häufigkeit: Sieben gespeicherte Schritte älterer Pläne haben 28–30 Kriterien mit nur zwei oder drei verschiedenen – dieselbe Schleife bis zur Vertragsgrenze 30. Echte Schritte haben höchstens 13 Kriterien und 13 Pfade.
+- Ursache: Das Schema an das Modell übernahm die Vertragsgrenzen (30 Kriterien, 40 Pfade). Die Grammatik ließ die Wiederholung bis dahin zu; bei 2 Token/s kostet jede Wiederholung Minuten.
+- Fix: `model_facing_schema` begrenzt die Listen eines Schritts im Modell-Schema (`MODEL_STEP_LIST_BOUNDS`: 12 Kriterien, 20 Pfade/Hinweise/Constraints, 10 Befehlshinweise). Die Grammatik schließt das Array dort. Die Verträge bleiben unverändert; die Laufzeit ergänzt ihre generierten Kriterien weiter bis zur Vertragsgrenze.
+- Offen: Live-Nachweis in Zyklus 3 (keine GPU-Versuche während der laufenden Batterie).
+
 ### BUG-287 – Erstpläne lassen Dateien und Statuscodes weg, die der Auftrag ausdrücklich nennt
 - Phase: Fixpaket nach Zyklus 2 (Planprüfung: Anforderungs-Rückverfolgung, Freigabekriterium „100 % der Pflichtanforderungen abgedeckt“) · Komponente: planner (validation, prompt) · Severity: P2 · blockierend: nein · Status: **behoben** (`tests/unit/test_planner_validation.py::test_every_literal_of_the_job_is_named_by_a_step`, `tests/unit/test_planner_prompt.py::test_planner_system_prompt_rules`)
 - Reproduktion: Auswertung aller 90 Erstpläne der Datenbank. J2 („ungültige Eingaben → 400“) und X3 (`inventory.db`): vier Erstpläne nennen den Statuscode bzw. die Datei in keinem Schritt. Alle vier brauchten Replans oder scheiterten; von neun Plänen, die jedes Literal nennen, liefen acht ohne Replan durch.

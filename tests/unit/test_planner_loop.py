@@ -282,6 +282,9 @@ def test_model_facing_schemas_require_the_scope_fields() -> None:
         required = schema["$defs"][name]["required"]
         assert {"depends_on", "repo_hints", "allowed_new_paths", "acceptance"} <= set(required), required
         assert "rerun_reason" not in required
+        # BUG-288 (K2 on rc60): qwen3.8 repeated two diff criteria up to the contract bound for 25 minutes
+        props = schema["$defs"][name]["properties"]
+        assert props["acceptance"]["maxItems"] == 12 and props["repo_hints"]["maxItems"] == 20
     assert (
         PlanStep.model_validate({"id": "S001", "title": "abc", "kind": "research", "capability": "research", "goal": "find it"}).repo_hints
         == []
