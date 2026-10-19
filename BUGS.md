@@ -46,6 +46,12 @@ Noch keine.
 
 ## Behobene Bugs
 
+### BUG-286 – Absturz der Container-Engine (Exit-Code 125) gilt als Lint-Fehler im Code
+- Phase: Fixpaket nach Zyklus 2 (Integrationstest des Schedulers mit echtem Podman) · Komponente: contracts (worker), verifier (commands), tools (engine) · Severity: P2 · blockierend: nein · Status: **behoben** (`tests/unit/test_verifier_units.py::test_a_container_engine_failure_is_not_a_failing_command`)
+- Reproduktion: Rootless Podman ohne subuid/subgid-Eintrag beantwortet jeden Befehl mit Exit-Code 125 und „Error: …“. Der Verifier meldet `lint:python` „lint reported problems (exit code 125)“ gegen korrekten Code; der Schritt scheitert, der Coder bekäme einen Lint-Befund ohne Befund.
+- Ursache: Die Sandbox erkennt den Engine-Fehler (`error="sandbox engine error: …"`), behält aber den Exit-Code 125. Verifier (`failed_to_run`) und Werkzeuge (`sandbox_failed`) werteten nur „kein Exit-Code“ als „lief nicht“.
+- Fix: `CommandResult.did_not_run` – kein Exit-Code ohne Timeout oder Engine-Fehler (gemeinsames Präfix `ENGINE_ERROR_PREFIX`). Verifier und Werkzeug-Engine nutzen es: die Prüfung wird `error` („could not run“), `complete_step` überspringt sie, der Coder sieht „[sandbox] sandbox engine error …“. Ein `exit 125` des Befehls selbst bleibt ein Fehlschlag.
+
 ### BUG-285 – Neuplaner verliert die Anforderungen des gescheiterten Schritts und schreibt alte Lint-Befunde ins Ziel
 - Phase: Testzyklus 2 auf rc60 (K1, Job `582bba63…`, Pläne v2 und v3) · Komponente: planner (replanner, prompt) · Severity: P1 · blockierend: ja (behoben) · Status: **behoben** (`tests/unit/test_planner_validation.py::test_a_replacement_step_keeps_the_requirements_of_the_failed_step`, `tests/unit/test_planner_prompt.py::test_replanner_system_prompt_adds_rerun_rules`)
 - Reproduktion:

@@ -47,7 +47,7 @@ class CommandOutcome:
     @property
     def failed_to_run(self) -> bool:
         """The executor could not run the command at all (as opposed to the command failing)."""
-        return self.result is None or (self.result.error is not None and self.result.exit_code is None and not self.result.timed_out)
+        return self.result is None or (self.result.error is not None and self.result.did_not_run)
 
     @property
     def stdout(self) -> str:

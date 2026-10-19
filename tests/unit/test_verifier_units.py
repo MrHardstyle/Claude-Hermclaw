@@ -326,3 +326,18 @@ def test_pathological_inputs_are_bounded() -> None:
     assert time.monotonic() - started < 2.0
     assert check_python("deep.py", "x = " + "(" * 5000 + ")" * 5000 + "\n").status == "fail"
     assert check_json("deep.json", "[" * 100_000 + "]" * 100_000).status in ("pass", "fail")
+
+
+def test_a_container_engine_failure_is_not_a_failing_command() -> None:
+    """BUG-286: rootless podman without subuid/subgid answered every lint with exit 125 – reported as lint problems."""
+    from hermclaw.contracts.worker import ENGINE_ERROR_PREFIX, CommandResult
+    from hermclaw.verifier.commands import CommandOutcome
+
+    def outcome(**kw: object) -> CommandOutcome:
+        return CommandOutcome("ruff check x.py", "lint", False, 60, result=CommandResult.model_validate({"request_id": "r", **kw}))
+
+    engine = outcome(exit_code=125, error=f"{ENGINE_ERROR_PREFIX}: Error: cannot set up namespace using newuidmap")
+    assert engine.failed_to_run and engine.problem.startswith(ENGINE_ERROR_PREFIX)
+    assert not outcome(exit_code=125, stderr="the command itself exited 125").failed_to_run
+    assert not outcome(exit_code=None, timed_out=True, error="timeout: command exceeded 60s").failed_to_run
+    assert outcome(exit_code=None, error="POLICY: refused").failed_to_run

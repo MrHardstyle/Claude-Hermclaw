@@ -205,7 +205,7 @@ podman run --rm --name=hermclaw-<request_id>
 |---|---|
 | **Timeout (18.5)** | `podman kill -s KILL <name>`, then the client gets `kill_grace_seconds` to exit (after that it is SIGKILLed), then `rm -f`. Result: `timed_out=True`, `exit_code=None`, `error="timeout: …"`. Output captured up to that point is kept |
 | **Cancellation** of the calling task | container killed and removed (shielded), `CancelledError` re-raised |
-| **Engine error** (exit 125 + an `Error:` line from the engine) | `error="sandbox engine error: …"`; a container that was created but not started (and carries our labels) is removed. A plain `exit 125` from the command itself is *not* an engine error |
+| **Engine error** (exit 125 + an `Error:` line from the engine) | `error="sandbox engine error: …"`; a container that was created but not started (and carries our labels) is removed. A plain `exit 125` from the command itself is *not* an engine error. `CommandResult.did_not_run` is true for it, so the verifier reports the check as `error` (could not run) and `complete_step` skips it, instead of reporting a defect in the code (BUG-286) |
 | **Name conflict** with a leftover of the same request (managed label and `hermclaw.request` match) | leftover killed and removed, command retried once. A foreign container with the same name is never touched |
 | **OOM kill** | `exit_code=137`, `error="killed (exit 137): possibly out of memory (limit …)"` |
 | **Engine binary missing** | `exit_code=125`, `error="sandbox engine error: Error: cannot execute …"`; `preflight()` raises `ConfigError` `SANDBOX_ENGINE_UNAVAILABLE` |

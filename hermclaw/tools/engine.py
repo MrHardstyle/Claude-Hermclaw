@@ -217,7 +217,7 @@ class _RunOutcome:
     @property
     def sandbox_failed(self) -> bool:
         """No result, or the sandbox could not run the command at all (no exit code, not a timeout)."""
-        return self.result is None or (self.result.exit_code is None and not self.result.timed_out)
+        return self.result is None or self.result.did_not_run
 
 
 Handler = Callable[[Any, CallContext, list[PendingEvent]], Awaitable[ToolResult]]
@@ -1240,7 +1240,7 @@ class ToolEngine:
         except Exception as exc:  # the command may have partially run: the audit below still applies
             error = f"{type(exc).__name__}: {exc}"
             log.warning("sandbox execution failed", extra={"tool": tool.value, "error_type": type(exc).__name__})
-        if result is not None and result.exit_code is None and not result.timed_out and error is None:
+        if result is not None and result.did_not_run and error is None:
             error = result.error or "the sandbox returned no exit code"
         duration = result.duration_ms if result is not None and result.duration_ms else _duration_ms(started)
         audit = await self.tracker.audit(before, self._decide())

@@ -76,6 +76,9 @@ class CommandRequest(Contract):
     memory: str | None = None
 
 
+ENGINE_ERROR_PREFIX = "sandbox engine error"
+
+
 class CommandResult(Contract):
     request_id: str
     exit_code: int | None
@@ -88,6 +91,15 @@ class CommandResult(Contract):
     sandbox: Literal["podman", "docker", "local"] = "podman"
     container_name: str | None = None
     error: str | None = None
+
+    @property
+    def did_not_run(self) -> bool:
+        """The sandbox could not run the command: no exit code (and no timeout), or the container engine itself
+        failed (exit 125 with the engine's own message). A test run of the scheduler hit rootless podman without
+        subuid/subgid: every lint answered exit 125 and was reported as a lint failure of correct code (BUG-286)."""
+        if self.timed_out:
+            return False
+        return self.exit_code is None or (self.error or "").startswith(ENGINE_ERROR_PREFIX)
 
 
 class WorkspaceSyncManifest(Contract):

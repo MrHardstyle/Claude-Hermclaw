@@ -64,7 +64,7 @@ from typing import Any, ClassVar, Literal, Protocol, runtime_checkable
 
 import yaml
 
-from hermclaw.contracts.worker import CommandRequest, CommandResult
+from hermclaw.contracts.worker import ENGINE_ERROR_PREFIX, CommandRequest, CommandResult
 from hermclaw.core.config import CommandPolicy, SandboxPolicy
 from hermclaw.core.errors import ConfigError, PolicyViolation
 from hermclaw.core.logging import get_logger
@@ -493,7 +493,7 @@ def _finish_result(
     if outcome.timed_out:
         error = f"timeout: command exceeded {timeout}s and was killed"
     elif engine_line is not None:
-        error = f"sandbox engine error: {engine_line[:500]}"
+        error = f"{ENGINE_ERROR_PREFIX}: {engine_line[:500]}"
     elif outcome.returncode == KILLED_EXIT and memory:
         error = f"killed (exit {KILLED_EXIT}): possibly out of memory (limit {memory})"
     return CommandResult(
