@@ -4,6 +4,8 @@ Format: [Keep a Changelog](https://keepachangelog.com/de/1.1.0/), Versionen nach
 
 ## [Unreleased]
 
+## [0.1.0rc60] – Release Candidate (2026-10-19)
+
 ### Geändert
 - **Planer auf eigenem Modell (R-033):** Der llama-server auf dem Modell-Host kann mehrere Modelle bedienen, eines nach dem anderen (Router-Modus, `ollama_llamacpp_models`, `--models-max 1`). Eine Anfrage an ein anderes Modell entlädt das geladene und lädt das angeforderte. Planer und Neuplaner halten dafür die Lease der exklusiven Modellgruppe, wie Coder und Review. Ein Planungsaufruf wechselt das Modell also nie unter einem laufenden Schritt. Doctor erkennt die Modellnamen der Presets (Aliase). Die Validierung „ein llama-server bedient genau ein Modell“ entfällt.
 
