@@ -46,6 +46,15 @@ Noch keine.
 
 ## Behobene Bugs
 
+### BUG-292 – Schutz der Eingabedaten aus dem Plan gestrichen, Coder ergänzt eine erfundene Buchung
+- Phase: Testzyklus 2 auf rc60, Prüfung der gelieferten Dateien (M2, Job `ece98d3b…`) · Komponente: planner (validation) · Severity: P2 · blockierend: nein (Job `succeeded`, Lieferung fehlerhaft) · Status: **behoben** (`tests/unit/test_planner_validation.py::test_must_not_change_on_a_file_the_step_only_reads_is_kept`)
+- Reproduktion:
+  - Auftrag: „Mit der beiliegenden Datei data/buchungen.csv bricht es ab … im Monatsbericht fehlt der letzte Monat …“.
+  - Plan v1, S001: `repo_hints` enthalten `data/buchungen.csv`, der Planer verbot ihre Änderung (`must_not_change`). Notiz der Normalisierung: „dropped must_not_change on the step's own files: data/buchungen.csv“.
+  - Geliefert (Commit `0d7f450`): `data/buchungen.csv` um die Zeile `15.04.2026;Bar;-10,00;Kino` ergänzt. Die Korrekturen im Code selbst sind richtig (`%d.%m.%Y`, `Decimal`, letzter Monat enthalten, keine geteilte Standardliste).
+- Ursache: BUG-204 strich `must_not_change` auf allen Dateien des Schritts und zählte dazu jeden `repo_hint`. Ein Hinweis ist aber oft nur zum Lesen da (Eingabedaten, Konfiguration); ihr Schutz ging verloren, und nichts hinderte den Coder daran, die Daten des Nutzers zu ändern.
+- Fix: Als eigene Dateien zählen nur die, die der Schritt schreibt: `allowed_new_paths`, `must_change` und Hinweise, die Titel oder Ziel des Schritts nennen. Der Auftragstext zählt hier nicht, denn er nennt die Eingabedaten gerade als Eingabe. Der BUG-204-Fall (verbotene eigene `must_change`-Dateien) wird weiter bereinigt.
+
 ### BUG-291 – Tests teilen Zustand, jeder besteht allein: Coder sucht vier Versuche lang im Code und in den Sollwerten
 - Phase: Testzyklus 2 auf rc60 (M1, Job `a3cfcb1a…`) · Komponente: coder (loop, isolation) · Severity: P1 · blockierend: ja (Job `failed`, `REPLAN_LIMIT` nach 119 min) · Status: **behoben** (`tests/integration/test_coder_loop.py::test_a_test_that_passes_alone_is_reported_as_shared_state`, `tests/unit/test_coder_isolation.py`)
 - Reproduktion:

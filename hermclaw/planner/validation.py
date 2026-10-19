@@ -938,14 +938,24 @@ def _drop_self_contradicting_must_not_change(
     """``must_not_change`` on a file the step itself must change or is pointed at can never pass. A degenerate planner
     answer repeated its acceptance blocks and forbade the step's own store.py/test_store.py; the replanner copied the
     criterion twice and the bug-fix job ended with REPLAN_LIMIT (rc19 battery J6, BUG-204). Dropped, with a note –
-    repair turns on such an answer only repeat it."""
+    repair turns on such an answer only repeat it.
+
+    Only files the step writes count as its own: new paths and hints its title or goal names. A hint the step only reads
+    stays protected – cycle 2 M2 on rc60 lost the protection of the job's input data (``data/buchungen.csv``) and the
+    coder added an invented booking to it to test the last month (BUG-292)."""
     notes: list[str] = []
     steps: list[PlanStep] = []
     for step in plan.steps:
         if step.id in preserved or step.kind.value not in WORKSPACE_MUTATING_KINDS:
             steps.append(step)
             continue
-        concrete = [p for p in _step_paths(step, ctx) if not any(c in GLOB_CHARS for c in p) and not p.endswith("/")]
+        text = f"{step.title}\n{step.goal}".lower()
+        new_paths = set(step.allowed_new_paths)
+        concrete = [
+            p
+            for p in _step_paths(step, ctx)
+            if not any(c in GLOB_CHARS for c in p) and not p.endswith("/") and (p in new_paths or _named_in(p, text))
+        ]
         required = {g for c in step.acceptance if isinstance(c, DiffEvidence) for g in c.must_change}
         dropped: list[str] = []
         acceptance: list[AcceptanceCriterion] = []

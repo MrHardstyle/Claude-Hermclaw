@@ -139,6 +139,7 @@ Steps that a replan keeps as completed (`preserved`) take part in the structural
   - If the model gave no substantive criterion, two are added: `DiffEvidence(must_change=<path-like repo_hints, directories as dir/>, falling back to allowed_new_paths; must_not_change=forbidden_paths; allow_empty=false)` and, when a test command was detected, `TestEvidence(command, framework)`.
   - An `implement` step without a test criterion that writes tests, or runs where tests exist, gets `TestEvidence` (the repository's test command, else the standard runner of its language). Tests created by the steps it depends on (transitively, their `allowed_new_paths`) count as existing ones, so a later step in an empty repository is not blocked by the verifier's test-evidence check (BUG-277).
   - `ScopeEvidence` and `SecurityEvidence` are always added when missing.
+  - `must_not_change` on a file the step writes is dropped with a note, because the step could never pass it (BUG-204). The step's own files are its `allowed_new_paths`, its `must_change` entries, and the hints its title or goal names. A hint the step only reads keeps its protection, even when the job names it (BUG-292: cycle 2 M2 added an invented booking to the job's input data).
   - `ssh` and `deploy` work on remote systems, so the model must supply their checks (see the semantic rules).
 - **Risk (14.7):** risk is never lowered below the model's value. `deploy`, `ssh` and `database` are at least
   `medium` (`RiskPolicy.min_risk_by_kind`). An `implement` step without test evidence that touches at least

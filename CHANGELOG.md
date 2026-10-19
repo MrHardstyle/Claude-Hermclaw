@@ -5,6 +5,7 @@ Format: [Keep a Changelog](https://keepachangelog.com/de/1.1.0/), Versionen nach
 ## [Unreleased]
 
 ### Behoben
+- **Nur gelesene Dateien bleiben geschützt (BUG-292):** Der Plan streicht `must_not_change` nur noch bei Dateien, die der Schritt selbst schreibt. Eingabedaten, die der Schritt nur liest, darf der Coder nicht mehr verändern.
 - **Reihenfolgeabhängige Tests werden erkannt (BUG-291):** Scheitern dieselben pytest-Tests nach Änderungen wiederholt, führt die Laufzeit den ersten davon allein aus; besteht er dort, erfährt der Coder, dass die Tests Zustand teilen (gemeinsame Datenbank, globale Variable, Server).
 - **Review prüft gegen die Regel-Dokumente des Auftrags (BUG-290):** Nennt der Auftrag Regeln in einer Repository-Datei („die Regeln im README“), bekommt das Review diese Datei ganz; der Planer fasst solche Regeln nicht mehr im Ziel zusammen.
 - **GitLab-Hintergrundverarbeitung wird erkannt (BUG-289):** Der Push fordert den MR bei GitLab direkt an (`-o merge_request.create`); läuft Sidekiq nicht oder weit hinterher, nennt die MR-Anlage diese Ursache, die Batterie zählt sie als Infrastruktur, und `hermclaw doctor` prüft GitLab.

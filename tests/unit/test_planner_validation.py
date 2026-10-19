@@ -798,6 +798,29 @@ def test_must_not_change_on_the_steps_own_files_is_dropped() -> None:
     assert notes == ["step S001: dropped must_not_change on the step's own files: app/routers/users.py, tests/test_users.py, tests/*.py"]
 
 
+
+def test_must_not_change_on_a_file_the_step_only_reads_is_kept() -> None:
+    """Cycle 2 M2 on rc60: the input data was a hint to read, the job named it, and its protection was dropped as the
+    step's own file; the coder added an invented booking to the data to test the last month (BUG-292)."""
+    data = _impl(
+        "S001",
+        goal="Fix the date format in ledger/parse.py to match the CSV data and add tests.",
+        repo_hints=["ledger/parse.py", "data/buchungen.csv"],
+        acceptance=[
+            {"type": "diff", "must_change": ["ledger/parse.py"]},
+            {"type": "diff", "must_not_change": ["data/buchungen.csv"]},
+        ],
+    )
+    job = ValidationContext.build(
+        get_config(),
+        PlannerInput(known_paths=["ledger/parse.py", "data/buchungen.csv"]),
+        PlannerSettings(),
+        job_text="Mit der beiliegenden Datei data/buchungen.csv bricht ledger ab.",
+    )
+    pruned, notes = prune_unreachable_must_change(PlanContract.model_validate(plan("goal", [data])), job)
+    assert [c.must_not_change for c in pruned.steps[0].acceptance if c.type == "diff"] == [[], ["data/buchungen.csv"]]
+    assert not any("must_not_change" in n for n in notes)
+
 # ------------------------------------------------------------------------------ new dependency manifest (BUG-178)
 def _health_plan(*new_paths: str) -> PlanContract:
     data = step(
