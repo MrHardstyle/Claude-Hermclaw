@@ -4,6 +4,8 @@ Format: [Keep a Changelog](https://keepachangelog.com/de/1.1.0/), Versionen nach
 
 ## [Unreleased]
 
+## [0.1.0rc61] – Release Candidate (2026-10-19)
+
 ### Behoben
 - **Test-Token bleiben für Modelle sichtbar (BUG-293):** Werte nur aus Rollenwörtern wie `test-token-123` oder `wrong-token` werden nicht mehr maskiert – dieselbe Regel, nach der die Geheimnis-Prüfung sie als Platzhalter akzeptiert. Das Review kann gültigen und falschen Token eines Tests wieder unterscheiden.
 - **Nur gelesene Dateien bleiben geschützt (BUG-292):** Der Plan streicht `must_not_change` nur noch bei Dateien, die der Schritt selbst schreibt. Eingabedaten, die der Schritt nur liest, darf der Coder nicht mehr verändern.
