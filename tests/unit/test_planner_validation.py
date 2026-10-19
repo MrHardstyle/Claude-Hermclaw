@@ -726,6 +726,7 @@ def test_existing_manifest_may_change_but_is_not_required_to() -> None:
     description field only to satisfy the criterion and the job counted as adding a dependency (BUG-203)."""
     data = _impl(
         "S001",
+        goal="Add the email filter to the users router.",
         repo_hints=["app/routers/users.py", "pyproject.toml"],
         acceptance=[
             {"type": "diff", "must_change": ["pyproject.toml"]},
@@ -743,11 +744,42 @@ def test_existing_manifest_may_change_but_is_not_required_to() -> None:
     assert none == [] and named.steps[0].acceptance == PlanContract.model_validate(plan("goal", [data])).steps[0].acceptance
 
 
+def test_must_change_on_an_existing_file_the_goal_does_not_name_is_dropped() -> None:
+    """R-033 blind judging and cycle 1 on rc59 (M2, BUG-278): ``must_change`` on files the step goal never names
+    (README, the entry point) failed correct solutions; the worker had no reason to touch them."""
+    data = _impl(
+        "S001",
+        goal="Fix the double counting in the users router and add a test.",
+        repo_hints=["app/routers/users.py", "app/main.py", "README.md"],
+        allowed_new_paths=["tests/test_double_counting.py"],
+        acceptance=[
+            {"type": "diff", "must_change": ["app/routers/users.py", "app/main.py", "README.md"]},
+            {"type": "diff", "must_change": ["tests/test_double_counting.py", "tests/"]},
+        ],
+    )
+    pruned, notes = prune_unreachable_must_change(PlanContract.model_validate(plan("goal", [data])), _ctx())
+    diffs = [c.must_change for c in pruned.steps[0].acceptance if c.type == "diff"]
+    assert diffs == [["app/routers/users.py"], ["tests/test_double_counting.py", "tests/"]], "new files and globs stay"
+    assert notes == ["step S001: app/main.py, README.md may change but is not required to (named neither in the step goal nor in the job)"]
+    assert {"app/main.py", "README.md"} <= set(pruned.steps[0].repo_hints), "still allowed to change"
+    # named by its file name in the goal, or by the job: the change is asked for
+    named = _impl("S001", goal="Update README.md with the new filter.", acceptance=[{"type": "diff", "must_change": ["README.md"]}])
+    kept, none = prune_unreachable_must_change(PlanContract.model_validate(plan("goal", [named])), _ctx())
+    assert none == [] and [c.must_change for c in kept.steps[0].acceptance if c.type == "diff"] == [["README.md"]]
+    job = ValidationContext.build(get_config(), FASTAPI.inputs, PlannerSettings(), job_text="Document the filter in README.md.")
+    unnamed = _impl("S001", acceptance=[{"type": "diff", "must_change": ["README.md"]}])
+    assert prune_unreachable_must_change(PlanContract.model_validate(plan("goal", [unnamed])), job)[1] == []
+    # a generic stem is no name: "the config" does not name app/config.py
+    generic = _impl("S001", goal="Read the port from the config.", acceptance=[{"type": "diff", "must_change": ["app/main.py"]}])
+    assert prune_unreachable_must_change(PlanContract.model_validate(plan("goal", [generic])), _ctx())[1]
+
+
 def test_must_not_change_on_the_steps_own_files_is_dropped() -> None:
     """rc19 battery J6: a degenerate answer forbade the step's own files; every attempt and two replans failed on
     'files that must not change were changed' until REPLAN_LIMIT (BUG-204)."""
     data = _impl(
         "S001",
+        goal="Add the email filter to the users router and test it.",
         repo_hints=["app/routers/users.py", "tests/test_users.py"],
         acceptance=[
             {"type": "diff", "must_change": ["app/routers/users.py", "tests/test_users.py"]},

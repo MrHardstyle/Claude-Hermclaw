@@ -46,6 +46,12 @@ Noch keine.
 
 ## Behobene Bugs
 
+### BUG-282 – Pläne verlangen Änderungen an bestehenden Dateien, die weder Schrittziel noch Auftrag nennen
+- Phase: Planer-Bench R-033 (Blindbewertung aller Modelle) und Testzyklus 1 auf rc59 (M2) · Komponente: planner (validation) · Severity: P2 · blockierend: ja (behoben) · Status: **behoben** (`tests/unit/test_planner_validation.py::test_must_change_on_an_existing_file_the_goal_does_not_name_is_dropped`)
+- Reproduktion: In der Blindbewertung war das der häufigste Freigabe-Verstoß aller Planer. Beispiele: `must_change` auf `README.md` oder `ledger/__main__.py`, obwohl das Schrittziel nur die Fehler in `parse.py`/`report.py` beschreibt. In Zyklus 1 brauchte M2 deshalb zwei Replans. BUG-278 fängt das erst zur Laufzeit ab, per Review nach gescheiterten Versuchen.
+- Ursache: Der Worker sieht vor allem sein Schrittziel. Eine Pflichtänderung an einer Datei, die dort nicht vorkommt, kann er nicht ableiten. Eine korrekte Lösung scheitert dann am Diff-Kriterium.
+- Fix: Die Plan-Bereinigung streicht `must_change` auf bestehende, konkrete Dateien, die weder Titel und Ziel des Schritts noch der Auftrag nennen. Als Nennung zählen der Pfad, der Dateiname oder ein spezifischer Stamm als Wort (`users` für `app/routers/users.py`), nicht aber allgemeine Stämme wie `config` oder `index`. Die Datei bleibt im Scope und darf geändert werden. Neue Dateien und Verzeichnis-Globs bleiben Pflicht. Der Plan erhält eine Notiz.
+
 ### BUG-281 – Planer gibt auf, statt Tests in den Schritt ihres Codes zu verschieben
 - Phase: Planer-Bench R-033 (Kombinationen, 2026-10-19) · Komponente: planner (validation) · Severity: P2 · blockierend: ja (behoben) · Status: **behoben** (`tests/unit/test_planner_validation.py::test_tests_for_another_steps_code_are_moved_into_that_step`)
 - Reproduktion: Drei von 18 Bench-Läufen (Ornith 9B auf M3 zweimal, qwen3.8 auf M2) endeten mit `PlannerError: model output invalid after 2 repair attempt(s): step S001 writes tests for code of step S002 (…): move these test paths to step S002`. Jeder Reparaturzug wiederholte den Plan unverändert.

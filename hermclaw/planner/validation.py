@@ -551,6 +551,63 @@ def _split_test_errors(plan: PlanContract, new_steps: Sequence[PlanStep], ctx: V
     return errors
 
 
+def _named_in(path: str, text: str) -> bool:
+    """Whether ``text`` (lower case) names the file: its path, its name, or a specific stem (``users`` for
+    app/routers/users.py, ``users`` for tests/test_users.py) as a word – not a generic one like ``config``."""
+    name = path.rsplit("/", 1)[-1].lower()
+    if path.lower() in text or name in text:
+        return True
+    stems = {_code_stem(path), _tested_stem(path) or ""} - _GENERIC_STEMS - {""}
+    return any(len(st) >= 3 and re.search(rf"(?<![a-z0-9]){re.escape(st)}(?![a-z0-9])", text) for st in stems)
+
+
+def _drop_unnamed_existing_must_change(
+    plan: PlanContract, ctx: ValidationContext, preserved: frozenset[str]
+) -> tuple[PlanContract, list[str]]:
+    """``must_change`` on an existing file neither the step's title and goal nor the job name: the worker sees its goal, so it
+    has no reason to touch the file, and a correct solution failed the diff check (cycle 1 on rc59 M2: input data and
+    the entry point, BUG-278; R-033 blind judging: the most frequent release violation of every planner model). The
+    file stays in the scope – the step may change it – but a change is no longer demanded. New files and directory
+    globs are untouched: creating them is what the step is for."""
+    notes: list[str] = []
+    steps: list[PlanStep] = []
+    for step in plan.steps:
+        if step.id in preserved or step.kind.value not in WORKSPACE_MUTATING_KINDS:
+            steps.append(step)
+            continue
+        text = f"{step.title}\n{step.goal}\n{ctx.job_text}".lower()
+        dropped: list[str] = []
+        acceptance: list[AcceptanceCriterion] = []
+        for crit in step.acceptance:
+            if not isinstance(crit, DiffEvidence):
+                acceptance.append(crit)
+                continue
+            keep = []
+            for glob in crit.must_change:
+                try:
+                    path = normalise_path(glob)
+                except ValueError:
+                    keep.append(glob)
+                    continue
+                concrete = not any(c in GLOB_CHARS for c in path) and not path.endswith("/")
+                if concrete and ctx.path_exists(path) and not _named_in(path, text):
+                    dropped.append(glob)
+                else:
+                    keep.append(glob)
+            if len(keep) == len(crit.must_change):
+                acceptance.append(crit)
+            elif keep or crit.must_not_change or crit.max_changed_files is not None:
+                acceptance.append(crit.model_copy(update={"must_change": keep}))
+        if dropped:
+            steps.append(step.model_copy(update={"acceptance": acceptance}))
+            notes.append(f"step {step.id}: {', '.join(dropped[:5])} may change but is not required to (named neither in the step goal nor in the job)")
+        else:
+            steps.append(step)
+    if not notes:
+        return plan, []
+    return plan.model_copy(update={"steps": steps}), notes
+
+
 def _move_foreign_tests(plan: PlanContract, ctx: ValidationContext, preserved: frozenset[str]) -> tuple[PlanContract, list[str]]:
     """Move test paths named after another step's code into that step, where code and tests are written together.
 
@@ -770,6 +827,8 @@ def prune_unreachable_must_change(
     notes += contradicting
     plan, moved = _move_foreign_tests(plan, ctx, preserved)
     notes += moved
+    plan, unnamed = _drop_unnamed_existing_must_change(plan, ctx, preserved)
+    notes += unnamed
     steps: list[PlanStep] = []
     for step in plan.steps:
         paths = _step_paths(step, ctx) if step.id not in preserved and step.kind.value in WORKSPACE_MUTATING_KINDS else []
