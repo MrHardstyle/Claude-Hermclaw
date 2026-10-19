@@ -57,7 +57,7 @@ Noch keine.
 - Ursache: Der Neuplaner sah nur das Ziel des zuletzt gescheiterten Schritts und die Befunde. Er schrieb Befunde zeilengenau ins neue Ziel, nichts hielt die ursprünglichen Anforderungen fest. Mit jedem Replan wurde das Ziel enger und widersprüchlicher.
 - Fix:
   - Deterministisch (`carry_replaced_goal`): Jeder neue, nicht abgeschlossene Code-Schritt, der an den Dateien des gescheiterten Schritts arbeitet (`allowed_new_paths` oder Datei-Hinweise, ohne Dokumentation), bekommt dessen Ziel als Constraint „Requirements of the step this replaces (still in force …)“. Trägt der gescheiterte Schritt diese Constraint schon, wird sie unverändert weitergegeben – auch nach mehreren Replans gilt das ursprüngliche Ziel. Notiz in `replan.created`.
-  - Prompt: Ein Ersatzschritt beschreibt das vollständige Ergebnis, keine Bearbeitungsliste; keine Zeilennummern, Lint-Codes oder Einzeländerungen aus den Belegen.
+  - Prompt: Ein Ersatzschritt beschreibt das vollständige Ergebnis, keine Bearbeitungsliste; keine Zeilennummern, Lint-Codes oder Einzeländerungen aus den Belegen. Review-Befunde, die der Auftrag nicht verlangt (Formulierung, Labels, Stil, Zusatzprüfungen), sind keine Anforderungen.
 - Abwägung: Dokumentationsschritte, die die Datei nur nennen, bekommen nichts. Verlangt der Neuplaner bewusst weniger als vorher, gilt trotzdem das alte Ziel – Anforderungen des Auftrags fallen nicht durch einen Replan weg.
 
 ### BUG-284 – Review-Korrekturen kommen nicht zur Ruhe: jedes Review stellt neue Forderungen, auch an unveränderten Code

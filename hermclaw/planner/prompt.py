@@ -500,7 +500,8 @@ def replanner_system_prompt(kind_capability: dict[str, str], capability_names: S
         "its goal as the outcome (the complete behaviour, with what the evidence showed to be missing or wrong), not "
         "as a list of edits. Never copy line numbers, lint codes or single-line edits from the evidence into a goal: "
         "the code has changed since, and the coder sees the current tool output itself (the runtime also keeps the "
-        "failed step's goal as a constraint of the step that replaces it).",
+        "failed step's goal as a constraint of the step that replaces it). Review findings the job text does not "
+        "demand (wording, labels, style, extra checks) are not requirements: never write them into a goal.",
         "open_steps are still part of the job: open steps you leave out are carried over unchanged, with their "
         "dependencies. Do not repeat an open step to keep it; list it only to change it (its id may be reused), and add "
         "new steps only for work no open step covers. A short answer (the changed and new steps) is complete.",

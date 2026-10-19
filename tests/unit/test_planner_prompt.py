@@ -222,6 +222,7 @@ def test_replanner_system_prompt_adds_rerun_rules() -> None:
     assert "need one written interface" in system and "never their own guess" in system
     # K1 on rc60 (BUG-285): the replanned goal was "remove the unused header variable (line 39)"
     assert "Never copy line numbers, lint codes or single-line edits" in system and "everything the failed step" in system
+    assert "Review findings the job text does not demand" in system  # v3 turned a review wish into "German labels"
 
 
 def test_repair_message_lists_every_error() -> None:
