@@ -689,6 +689,52 @@ def _move_foreign_tests(plan: PlanContract, ctx: ValidationContext, preserved: f
 _GENERIC_STEMS = frozenset({"config", "index", "utils", "helpers", "common", "settings", "setup", "types", "constants", "__init__"})
 
 
+_JOB_PATH = re.compile(r"(?<![\w/.@:-])((?:[\w.-]+/)*[A-Za-z_][\w-]*\.[A-Za-z][A-Za-z0-9]{0,5})(?![\w/-])")
+_JOB_TICKED = re.compile(r"`([^`\n]{2,60})`")
+_JOB_ERROR_STATUS = re.compile(r"(?<![\w.])([45]\d\d)(?!\w|\.\d)")
+_HTTP_JOB = re.compile(r"\b(?:api|https?|rest|endpoints?|endpunkte?|status ?codes?)\b", re.IGNORECASE)
+_DOMAIN_SUFFIXES = frozenset({"com", "de", "org", "net", "io", "ai", "dev"})
+
+
+def _is_job_path(token: str) -> bool:
+    if "/" in token:
+        return True
+    stem, _, ext = token.rpartition(".")
+    if len(stem) < 2 or ext.lower() in _DOMAIN_SUFFIXES:
+        return False
+    return not (ext.lower() == "js" and stem[0].isupper())  # Node.js, Vue.js: products, not files
+
+
+def job_literals(job_text: str) -> list[str]:
+    """Language-neutral requirements of the job: file paths, names in backticks and – in an HTTP job – the error
+    status codes it demands. Unlike prose they survive the translation into an English plan word for word."""
+    found = [m.group(1).rstrip(".") for m in _JOB_PATH.finditer(job_text) if _is_job_path(m.group(1).rstrip("."))]
+    found += [m.group(1).strip() for m in _JOB_TICKED.finditer(job_text)]
+    if _HTTP_JOB.search(job_text):
+        found += [m.group(1) for m in _JOB_ERROR_STATUS.finditer(job_text)]
+    return list(dict.fromkeys(f for f in found if f))
+
+
+def _job_literal_errors(plan: PlanContract, ctx: ValidationContext) -> list[str]:
+    """Every literal of the job (``job_literals``) appears in some step: goal, paths, hints or acceptance.
+
+    First plans of J2 and X3 left out the demanded status 400 and the named database file; all four such plans needed
+    replans, while eight of nine plans naming every literal ran without one. A literal no step names is a
+    requirement no coder is asked to deliver (traceability, plan release criteria)."""
+    literals = job_literals(ctx.job_text)
+    if not literals:
+        return []
+    text = json.dumps([s.model_dump(mode="json", exclude={"id", "depends_on"}) for s in plan.steps], ensure_ascii=False).lower()
+    missing = [lit for lit in literals if lit.lower() not in text and lit.rsplit("/", 1)[-1].lower() not in text]
+    if not missing:
+        return []
+    names = ", ".join(repr(m) for m in missing)
+    return [
+        f"the job names {names}, but no step mentions it: write each into the goal and an acceptance criterion of the "
+        "step that delivers it (a file to read or create, a status code to answer)"
+    ]
+
+
 def _reachable(plan: PlanContract, start: str) -> set[str]:
     by_id = {s.id: s for s in plan.steps}
     seen: set[str] = set()
@@ -1124,6 +1170,8 @@ def semantic_errors(
     errors.extend(_split_test_errors(plan, new_steps, ctx, preserved))
     errors.extend(_unordered_reference_errors(plan, new_steps, ctx, preserved))
     errors.extend(_check_only_creation_errors(new_steps))
+    if not preserved:  # a replan keeps the replaced step's requirements as a constraint instead (BUG-285)
+        errors.extend(_job_literal_errors(plan, ctx))
     for step in new_steps:
         errors.extend(_must_change_errors(step, ctx))
         errors.extend(_step_size_errors(step, ctx))

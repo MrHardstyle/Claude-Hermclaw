@@ -874,6 +874,31 @@ def test_open_steps_without_a_replacement_are_carried_over_with_remapped_depende
     assert "S008" not in {c.id for c in carried}  # a new test step covers the open one
 
 
+def test_every_literal_of_the_job_is_named_by_a_step() -> None:
+    """Traceability: first plans of J2 and X3 left out status 400 and inventory.db – all such plans needed replans."""
+    from hermclaw.planner.validation import job_literals
+
+    text = "Entwickle eine REST-API (Python-Standardbibliothek, wie Node.js). Ohne Token 401. Ungültige Eingaben 400, z.B. "
+    text += "Wert 2390.0000000000005; unbekannte Notizen 404. Endpunkte in docs/api.md, Daten aus `notes.db`."
+    assert job_literals(text) == ["docs/api.md", "notes.db", "401", "400", "404"]
+    assert job_literals("Werte bis 404 Zeilen in data/x.csv") == ["data/x.csv"], "status codes only in an HTTP job"
+    ctx = ValidationContext.build(get_config(), FASTAPI.inputs, PlannerSettings(), job_text=text)
+    api = _impl(
+        "S001",
+        goal="Implement the notes API backed by notes.db; answer 401 without a token and 400 on invalid input.",
+        allowed_new_paths=["app/notes.py"],
+    )
+    errors = [e for e in _errors(plan("goal", [api]), ctx) if "the job names" in e]
+    assert errors == [
+        "the job names 'docs/api.md', '404', but no step mentions it: write each into the goal and an acceptance "
+        "criterion of the step that delivers it (a file to read or create, a status code to answer)"
+    ]
+    docs = step("S002", "documentation", "documentation", "Document every endpoint.", depends_on=["S001"], allowed_new_paths=["api.md"])
+    api["acceptance"] = [{"type": "presence", "path_glob": "app/notes.py", "pattern": "404"}]
+    assert not [e for e in _errors(plan("goal", [api, docs]), ctx) if "the job names" in e], "a basename and acceptance count"
+    assert not [e for e in _errors(plan("goal", [api]), ctx, preserved=frozenset({"S000"})) if "the job names" in e], "replan"
+
+
 def test_a_replacement_step_keeps_the_requirements_of_the_failed_step() -> None:
     """BUG-285 (K1 on rc60): the replanned goal listed only lint fixes; columns, warnings and README were gone."""
     from hermclaw.planner.replan_contract import ReplanStep

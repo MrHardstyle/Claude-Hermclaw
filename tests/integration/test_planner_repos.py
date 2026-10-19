@@ -356,7 +356,7 @@ async def test_inventory_paths_outside_files_ground_hints_end_to_end(sessionmake
         update={"repository_inventory": {**YAML_CONFIG.inputs.repository_inventory, "helm": {"charts": ["deploy/chart/values.yaml"]}}}
     )
     answer = YAML_CONFIG.answer()
-    answer["steps"][0]["repo_hints"] = ["config/app.yaml", "deploy/chart/values.yaml"]
+    answer["steps"][0]["repo_hints"] = ["config/app.yaml", "config/logging.yaml", "deploy/chart/values.yaml"]
     chat = ScriptedChat([answer])
     result = await Planner(chat, sm, get_config()).create_plan(job_id, inputs)
     assert result.repair_attempts == 0 and len(chat.calls) == 1

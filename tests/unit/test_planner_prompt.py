@@ -182,6 +182,7 @@ def test_planner_system_prompt_rules() -> None:
     assert "You never write code" in system
     assert "implement->coding" in system and "research->research" in system
     assert "plan->" not in system and "replan->" not in system  # runtime-only kinds are not offered
+    assert "Every file, name in backticks and HTTP status code the job names is a requirement" in system  # traceability
     for ev in EVIDENCE_TYPES:
         assert ev in system
     assert "Never invent paths" in system and "At most 30 steps" in system

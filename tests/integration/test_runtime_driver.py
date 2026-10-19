@@ -186,9 +186,11 @@ async def world(sessionmaker: Any, tmp_path: Path, clean_jobs: None) -> World:
     return await make_world(sessionmaker, tmp_path)
 
 
-async def _job(world: World, *, repo: bool = True, title: str = "Set VALUE to two") -> uuid.UUID:
+async def _job(
+    world: World, *, repo: bool = True, title: str = "Set VALUE to two", prompt: str = "Change VALUE in src/module.py to 2."
+) -> uuid.UUID:
     async with world.sessionmaker() as s:
-        job = Job(title=title, prompt="Change VALUE in src/module.py to 2.", repository_id=world.repo.id if repo else None)
+        job = Job(title=title, prompt=prompt, repository_id=world.repo.id if repo else None)
         s.add(job)
         await s.commit()
         return job.id
@@ -470,7 +472,7 @@ async def test_triage_failure_is_not_fatal_and_job_without_repository(world: Wor
     )
     chat = Chat([research_only], triage=ModelError("router down", code="MODEL_UNAVAILABLE"))
     driver = _driver(world, chat, tmp_path)
-    jid = await _job(world, repo=False, title="Proxy research")
+    jid = await _job(world, repo=False, title="Proxy research", prompt="Research the current TLS defaults of nginx and Caddy.")
     jobs = await _run(world, driver, [ResearchHandler()], [jid])
     assert jobs[jid].status == "succeeded", (jobs[jid].error_code, jobs[jid].error_message)
     texts = [e.payload.get("text", "") for e in await _events(world, jid) if e.event_type == "status"]

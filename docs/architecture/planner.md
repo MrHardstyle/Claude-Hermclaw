@@ -114,6 +114,7 @@ whose capability uses the `coder` model role, otherwise `0`. `max_attempts = pol
   - a symbol must be a known symbol or appear as a whole word in the provided context;
   - absolute paths and `..` are rejected, and so are policy-forbidden paths.
 - A workspace-mutating step whose goal names a repository file (an existing one or one another step lists in `allowed_new_paths`; a bare file name counts when it is unique) must list that file in its `repo_hints` or `allowed_new_paths`, directly or through a directory/glob. Otherwise the scope leaves it out, and the step reaches the file only as an adopted leftover (BUG-268).
+- Traceability (BUG-287): every language-neutral literal of the job – a file path (`docs/api.md`, `data/buchungen.csv`; not `Node.js` or a domain), a name in backticks and, in an HTTP job, each 4xx/5xx status code – must appear in some step (goal, paths, hints or acceptance; a path also by its file name). A plan of a new job that leaves one out gets one error listing them; replans are exempt, the replaced step's goal is carried as a constraint there (BUG-285).
 - Scope stays explicit: catch-all patterns made only of wildcards and slashes (`*`, `**`, `**/*`) are rejected as `repo_hints` and as `allowed_new_paths`.
 - Acceptance sanity:
   - remote mutating kinds (`ssh`, `deploy`) need substantive model-provided acceptance;

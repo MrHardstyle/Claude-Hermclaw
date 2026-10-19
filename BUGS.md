@@ -46,6 +46,16 @@ Noch keine.
 
 ## Behobene Bugs
 
+### BUG-287 – Erstpläne lassen Dateien und Statuscodes weg, die der Auftrag ausdrücklich nennt
+- Phase: Fixpaket nach Zyklus 2 (Planprüfung: Anforderungs-Rückverfolgung, Freigabekriterium „100 % der Pflichtanforderungen abgedeckt“) · Komponente: planner (validation, prompt) · Severity: P2 · blockierend: nein · Status: **behoben** (`tests/unit/test_planner_validation.py::test_every_literal_of_the_job_is_named_by_a_step`, `tests/unit/test_planner_prompt.py::test_planner_system_prompt_rules`)
+- Reproduktion: Auswertung aller 90 Erstpläne der Datenbank. J2 („ungültige Eingaben → 400“) und X3 (`inventory.db`): vier Erstpläne nennen den Statuscode bzw. die Datei in keinem Schritt. Alle vier brauchten Replans oder scheiterten; von neun Plänen, die jedes Literal nennen, liefen acht ohne Replan durch.
+- Ursache: Der Planer-Kern prüfte nicht, ob die Anforderungen des Auftrags im Plan ankommen. Prosa lässt sich deutsch→englisch nicht deterministisch abgleichen, Literale schon.
+- Fix:
+  - `job_literals`: Dateipfade (ohne Produktnamen wie `Node.js` und Domains), Namen in Backticks und – nur in einem HTTP-Auftrag – 4xx/5xx-Statuscodes.
+  - `_job_literal_errors`: Ein Literal, das kein Schritt nennt (Ziel, Pfade, Hinweise, Akzeptanz; ein Pfad auch über den Dateinamen), ist ein Planfehler mit Reparaturhinweis. Nur Erstpläne; im Replan gilt BUG-285.
+  - Planer-Prompt: Jede genannte Datei, jeder Name in Backticks und jeder HTTP-Statuscode gehört in Ziel und Akzeptanz des liefernden Schritts.
+- Abwägung: Kosten im Fehlerfall eine Reparaturrunde (qwen3.8 einige Minuten) statt eines Replans nach dem Coden. Integrationstest `test_inventory_paths_outside_files_ground_hints_end_to_end` ließ `config/logging.yaml` aus dem Plan fallen, obwohl der Auftrag die Datei nennt, und `test_triage_failure_is_not_fatal_and_job_without_repository` plante eine TLS-Recherche zum Auftrag „VALUE in src/module.py ändern“ – Testdaten korrigiert.
+
 ### BUG-286 – Absturz der Container-Engine (Exit-Code 125) gilt als Lint-Fehler im Code
 - Phase: Fixpaket nach Zyklus 2 (Integrationstest des Schedulers mit echtem Podman) · Komponente: contracts (worker), verifier (commands), tools (engine) · Severity: P2 · blockierend: nein · Status: **behoben** (`tests/unit/test_verifier_units.py::test_a_container_engine_failure_is_not_a_failing_command`)
 - Reproduktion: Rootless Podman ohne subuid/subgid-Eintrag beantwortet jeden Befehl mit Exit-Code 125 und „Error: …“. Der Verifier meldet `lint:python` „lint reported problems (exit code 125)“ gegen korrekten Code; der Schritt scheitert, der Coder bekäme einen Lint-Befund ohne Befund.

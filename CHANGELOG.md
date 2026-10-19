@@ -5,6 +5,7 @@ Format: [Keep a Changelog](https://keepachangelog.com/de/1.1.0/), Versionen nach
 ## [Unreleased]
 
 ### Behoben
+- **Planprüfung: Rückverfolgung der Auftrags-Literale (BUG-287):** Dateien, Namen in Backticks und HTTP-Statuscodes, die der Auftrag nennt, müssen in einem Schritt des Erstplans vorkommen; sonst Reparaturrunde vor dem ersten Coder.
 - **Engine-Fehler sind keine Code-Fehler (BUG-286):** Scheitert die Container-Engine selbst (Exit-Code 125 mit Engine-Meldung), meldet der Verifier „konnte nicht laufen“ statt eines Lint- oder Testfehlers.
 - **Replans behalten die Anforderungen (BUG-285):** Ein Ersatzschritt, der an den Dateien des gescheiterten Schritts arbeitet, bekommt dessen ursprüngliches Ziel als Constraint – auch über mehrere Replans. Der Neuplaner schreibt keine Zeilennummern und Lint-Codes mehr ins Ziel.
 - **Review-Korrekturen kommen zur Ruhe (BUG-284):** Das Review eines Korrekturversuchs kennt die Befunde, die korrigiert werden sollten. Neue `major`-Forderungen blockieren dort nicht mehr, Blocker weiterhin. Neues Feld `origin` an Review-Befunden.
