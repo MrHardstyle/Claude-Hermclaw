@@ -321,3 +321,21 @@ def test_a_correction_review_sees_the_findings_it_corrects() -> None:
     assert user.index("## SCOPE") < user.index("## EARLIER REVIEW FINDINGS") < user.index("## DETERMINISTIC VERIFIER REPORT")
     assert "## EARLIER REVIEW FINDINGS" not in _user(_file("export.py", 5))[0], "a first review has no such section"
     assert '"origin": "earlier" | "introduced" | "new"' in REVIEW_SYSTEM_PROMPT and "do not move" in REVIEW_SYSTEM_PROMPT
+
+
+def test_documents_the_job_names_as_its_rules_are_part_of_the_review() -> None:
+    """BUG-290 (K2 on rc60): the job said "die Regeln im README"; the plan paraphrased them without "ganze Zahl", and
+    the review – which saw only the goal and search snippets – passed parseInt("17.5") as an age."""
+    from hermclaw.review.workspace import requirement_doc_paths
+
+    step = _step(goal="Korrigiere die Prüfregeln aus dem README.", repo_hints=["form.js", "README.md", "docs/api.md", "docs/*.md"])
+    assert requirement_doc_paths(step, "Prüfe die Eingaben, wie es die Regeln im README verlangen.") == ["README.md"]
+    assert requirement_doc_paths(step, "Endpunkte stehen in docs/api.md.") == ["README.md", "docs/api.md"]
+    assert requirement_doc_paths(_step(repo_hints=["README.md"]), "Fix the export.") == [], "not named: not a rule source"
+    rules = "- Alter: optional; wenn angegeben, ganze Zahl von 16 bis 120"
+    user, _ = _user(_file("form.js", 5), requirement_docs=[("README.md", rules)])
+    assert "## REQUIREMENT DOCUMENTS" in user and "### README.md" in user and "ganze Zahl von 16 bis 120" in user
+    assert user.index("## JOB GOAL") < user.index("## REQUIREMENT DOCUMENTS") < user.index("## PLAN STEP")
+    assert "## REQUIREMENT DOCUMENTS" not in _user(_file("form.js", 5))[0]
+    assert "JOB GOAL or a REQUIREMENT DOCUMENT states is enforced exactly" in REVIEW_SYSTEM_PROMPT
+    assert "the type (a whole number, a date), optional versus required" in REVIEW_SYSTEM_PROMPT

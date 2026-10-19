@@ -18,6 +18,7 @@ import asyncio
 import re
 import uuid
 from collections.abc import Sequence
+from pathlib import Path
 from typing import Any, Literal
 
 from sqlalchemy import select
@@ -47,6 +48,26 @@ def is_test_path(path: str) -> bool:
     """Generic test-file heuristic (directory ``tests``/``__tests__``/``spec`` or ``test_*``/``*_test.*``/``*.spec.*``)."""
     parts = path.replace("\\", "/").strip("/").split("/")
     return any(p.lower() in _TEST_DIRS for p in parts[:-1]) or bool(_TEST_FILE.match(parts[-1]))
+
+
+_DOC_SUFFIXES = (".md", ".markdown", ".txt", ".rst", ".adoc")
+_DOC_MAX_BYTES = 64_000
+
+
+def requirement_doc_paths(step: StepContract, goal: str) -> list[str]:
+    """Documentation files among the step's ``repo_hints`` that the job or the step goal names (file name or stem,
+    e.g. "die Regeln im README"): the job's rules live there, not in the goal text (BUG-290)."""
+    text = f"{goal}\n{step.title}\n{step.goal}".lower()
+    out: list[str] = []
+    for hint in step.repo_hints:
+        path = hint.strip().removeprefix("./")
+        name = path.rsplit("/", 1)[-1].lower()
+        stem = name.rsplit(".", 1)[0]
+        if not name.endswith(_DOC_SUFFIXES) or any(c in path for c in "*?["):
+            continue
+        if name in text or (len(stem) >= 3 and re.search(rf"(?<![\w.-]){re.escape(stem)}(?![\w-])", text)):
+            out.append(path)
+    return list(dict.fromkeys(out))
 
 
 def _protected(path: str, globs: Sequence[str]) -> bool:
@@ -143,6 +164,7 @@ class WorkspaceReviewer:
             changed = list(dict.fromkeys(await self.git.changed_files(workspace)))
             commands = await self._commands(step_id, attempt_id)
         snippets = await self._snippets(step, workspace, changed)
+        docs = await asyncio.to_thread(self._requirement_docs, step, workspace, goal)
         return ReviewInput(
             job_id=job_id,
             step_id=step_id,
@@ -155,7 +177,20 @@ class WorkspaceReviewer:
             command_log=commands,
             changed_files=changed,
             earlier_findings=tuple(earlier),
+            requirement_docs=docs,
         )
+
+    def _requirement_docs(self, step: StepContract, workspace: WorkspaceHandle, goal: str) -> list[tuple[str, str]]:
+        root = Path(workspace.path).resolve()
+        protected = self.reviewer.config.policies.scope.always_forbidden
+        out: list[tuple[str, str]] = []
+        for rel in requirement_doc_paths(step, goal):
+            target = (root / rel).resolve()
+            if _protected(rel, protected) or not target.is_relative_to(root) or not target.is_file():
+                continue
+            with target.open("rb") as fh:
+                out.append((rel, fh.read(_DOC_MAX_BYTES).decode("utf-8", errors="replace")))
+        return out
 
     # ------------------------------------------------------------------------------------------------ sources
     async def _goal(self, job_id: uuid.UUID) -> str:

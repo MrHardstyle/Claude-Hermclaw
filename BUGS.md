@@ -46,6 +46,18 @@ Noch keine.
 
 ## Behobene Bugs
 
+### BUG-290 – Regeln aus einem Dokument des Repositorys gehen im Plan verloren, das Review prüft gegen die Zusammenfassung
+- Phase: Testzyklus 2 auf rc60, Prüfung der gelieferten Dateien (K2, Job `0527d6af…`) · Komponente: review (workspace, prompt), planner (prompt) · Severity: P2 · blockierend: nein (Job `succeeded`) · Status: **behoben** (`tests/unit/test_review_prompt.py::test_documents_the_job_names_as_its_rules_are_part_of_the_review`, `tests/integration/test_review_workspace.py::test_documents_named_as_rules_are_read_from_the_workspace`, `tests/unit/test_planner_prompt.py::test_planner_system_prompt_rules`)
+- Reproduktion:
+  - Auftrag: „prüft die Eingaben nicht so, wie es die Regeln im README verlangen“. README: „Alter: optional; wenn angegeben, ganze Zahl von 16 bis 120“.
+  - Planziel S001: „… die Regeln aus dem README exakt umzusetzen (Trimming, E-Mail-Format mit Punkt, Alter 16-120, Nachricht max 500 Zeichen)“ – „ganze Zahl“ fehlt.
+  - Geliefert: `parseInt(value, 10)` – `"17.5"` und `"20abc"` gelten als gültiges Alter. Alle 10 Tests grün, keiner prüft ein nicht ganzzahliges Alter. Das Heavy Review gab frei.
+  - Zweiter Mangel: Das Zurücksetzen der Fehlermeldungen nutzt `Object.keys(validate({}))`; ein leeres Alter ist gültig, die Meldung eines korrigierten Alters bleibt stehen.
+- Ursache: Die Regeln standen nur im README. Der Planer fasste sie im Ziel zusammen und ließ Details weg; das Review sah das Jobziel („gemäß README“), das zusammengefasste Schrittziel und höchstens zufällig einen Suchtreffer aus dem README. Die Review-Regel „jeder Bereich, jedes Format des JOB GOAL exakt“ griff ins Leere.
+- Fix:
+  - Review: Dokumentationsdateien in den `repo_hints` des Schritts, die Auftrag oder Schrittziel nennen (Dateiname oder Stamm), kommen ganz aus dem Workspace in den neuen Abschnitt „REQUIREMENT DOCUMENTS“ (gekürzt wie das Jobziel; geschützte Pfade nie). Die Regel „exakt durchgesetzt“ gilt für sie wie für das Jobziel, ausdrücklich auch Typ (ganze Zahl) und optional/Pflicht.
+  - Planer-Prompt: Verweist der Auftrag auf Regeln in einem Dokument, nennt der Schritt das Dokument in `repo_hints` und verlangt jede Regel daraus – keine Zusammenfassung im Ziel.
+
 ### BUG-289 – Merge Request fehlt trotz erfolgreichem Push: GitLab kennt den Zweig im MR-API noch nicht
 - Phase: Testzyklus 2 auf rc60 (K2, Job `0527d6af…`) · Komponente: gitops (engine, gitlab) · Severity: P2 · blockierend: nein (Job `succeeded`, Batterie FAIL nur durch fehlenden MR) · Status: **behoben** (`tests/integration/test_gitops_push.py::test_merge_request_is_requested_with_the_push`, `::test_a_server_without_push_options_gets_a_plain_push`)
 - Reproduktion: Push um 14:28:37 erfolgreich. Die MR-Anlage wiederholt sich 3,5 Minuten lang und scheitert um 14:32:10 mit `HTTP 400 {'source_branch': ['does not exist']}`. Eine Stunde später liefert die Zweig-API den Zweig (200), der Spiegel hat ihn – ein MR existiert nicht.

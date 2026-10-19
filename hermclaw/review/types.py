@@ -94,6 +94,8 @@ class ReviewInput:
     command_log: Sequence[str] = ()  # executed commands – change evidence for steps that mutate outside the repo
     changed_files: Sequence[str] | None = None  # defaults to the verifier's changed_files / the diff's files
     earlier_findings: Sequence[str] = ()  # review findings the current correction attempt had to address (BUG-284)
+    # (path, text) of documentation files the job or step names as the source of its rules (BUG-290)
+    requirement_docs: Sequence[tuple[str, str]] = ()
 
 
 @dataclass(frozen=True)

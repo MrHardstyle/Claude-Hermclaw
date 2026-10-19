@@ -419,6 +419,9 @@ def _base_rules(kind_capability: dict[str, str], capability_names: Sequence[str]
         "step and names the file in its goal and repo_hints. Both sides follow the file, never their own guess.",
         "Every file, name in backticks and HTTP status code the job names is a requirement: write it into the goal and "
         "an acceptance criterion of the step that delivers it (the runtime rejects a plan that leaves one out).",
+        'When the job points to rules in a repository document ("the rules in the README"), the implementing step '
+        "lists that document in repo_hints and its goal says to implement every rule of it; never summarise the rules "
+        "in the goal – a summary drops some (type, optional/required), and the coder and the review follow the goal.",
         "Choose the simplest solution that fully meets the job. Use the language's standard library and the tools the "
         "repository or the sandbox already has (e.g. its test runner) unless the job explicitly asks for a framework or "
         "library, or the repository already uses one. Every external dependency is an extra failure source: a "

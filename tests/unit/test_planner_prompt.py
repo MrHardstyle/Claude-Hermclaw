@@ -183,6 +183,7 @@ def test_planner_system_prompt_rules() -> None:
     assert "implement->coding" in system and "research->research" in system
     assert "plan->" not in system and "replan->" not in system  # runtime-only kinds are not offered
     assert "Every file, name in backticks and HTTP status code the job names is a requirement" in system  # traceability
+    assert "never summarise the rules" in system  # K2 on rc60 (BUG-290): "Alter 16-120" lost "ganze Zahl"
     for ev in EVIDENCE_TYPES:
         assert ev in system
     assert "Never invent paths" in system and "At most 30 steps" in system

@@ -85,6 +85,26 @@ async def test_collects_diff_goal_commands_and_snippets(sessionmaker: SM, tmp_re
     assert "Add subtraction" in repo_ctx.queries[0] and "app.py" in repo_ctx.queries[0]
 
 
+async def test_documents_named_as_rules_are_read_from_the_workspace(sessionmaker: SM, tmp_repo: Path) -> None:
+    """BUG-290: README.md named in the step goal and hinted reaches the review whole; a protected or unnamed document
+    and a path outside the workspace do not."""
+    base = _change_repo(tmp_repo)
+    write(tmp_repo, "README.md", "# Calculator\n\nRules: sub(a, b) accepts whole numbers only.\n")
+    write(tmp_repo, "NOTES.md", "unrelated notes\n")
+    job_id, step_id = await make_job_step(sessionmaker)
+    chat = ScriptedChatModel([{"verdict": "pass", "findings": [], "summary": "fine"}])
+    adapter = WorkspaceReviewer(HeavyReviewer(chat, sessionmaker, config()), GitCliReader(), StaticRepoContext(hits=[]))
+    step = make_step(
+        job_id,
+        step_id,
+        goal="Add sub(a, b) to app.py following the rules in README.md.",
+        repo_hints=["app.py", "README.md", "NOTES.md", "../outside.md", ".env.md"],
+    )
+    inp = await adapter.collect(step, handle(tmp_repo, job_id, base), report(), job_id=job_id, step_id=step_id, attempt_id=None)
+    assert [p for p, _ in inp.requirement_docs] == ["README.md"]
+    assert "whole numbers only" in inp.requirement_docs[0][1]
+
+
 async def test_review_outcome_persists_run(sessionmaker: SM, tmp_repo: Path) -> None:
     base = _change_repo(tmp_repo)
     job_id, step_id = await make_job_step(sessionmaker)
