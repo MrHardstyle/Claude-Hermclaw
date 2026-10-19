@@ -229,6 +229,59 @@ async def test_merge_request_failure_does_not_fail_push(sessionmaker, tmp_path):
             await client.aclose()
 
 
+async def test_merge_request_is_requested_with_the_push(sessionmaker, tmp_path):
+    """BUG-289 (K2 on rc60, and BUG-202/220 before): 3.5 minutes after a successful push GitLab's MR API still
+    answered ``source_branch does not exist`` while its branch API listed the branch. The push now asks GitLab to open
+    the MR itself (``-o merge_request.create``) – processed together with the branch, no race."""
+    with FakeGitLab() as gl:
+        gl.branch_unknown = True  # the API path would never succeed
+        client = GitLabClient(gl.base_url, token=gl.token, retries=0)
+        client.branch_settle_delays = (0.01, 0.01)
+        world = await make_world(sessionmaker, tmp_path, gitlab=client, provider="gitlab", gitlab_project_id="grp/demo")
+        try:
+            bare = Path(world.upstream.bare)
+            git("config", "receive.advertisePushOptions", "true", cwd=bare)
+            gl.push_options_file = tmp_path / "push-options.txt"
+            hook = bare / "hooks" / "post-receive"
+            hook.write_text(
+                "#!/bin/sh\nread old new ref\ni=0\n"
+                'while [ $i -lt "${GIT_PUSH_OPTION_COUNT:-0}" ]; do\n'
+                '  eval "opt=\\$GIT_PUSH_OPTION_$i"\n'
+                f'  printf "%s\\t%s\\n" "${{ref#refs/heads/}}" "$opt" >> {gl.push_options_file}\n'
+                "  i=$((i + 1))\ndone\n",
+                encoding="utf-8",
+            )
+            hook.chmod(0o755)
+            job_id, _step, ws, commit = await _committed_workspace(world, title="Add MR")
+            res = await world.engine.push_job_branch(ws, create_merge_request=True)
+            assert world.upstream.head(ws.branch) == commit.sha
+            assert res.merge_request is not None and res.merge_request.created, res.merge_request_error
+            mr = gl.mrs[0]
+            assert (mr["title"], mr["target_branch"], mr["labels"]) == ("Hermclaw: Add MR", "main", "hermclaw")
+            assert commit.sha in mr["description"], "the multi-line description is set after the push"
+            assert not [r for r in gl.requests if r[0] == "POST"], "no API creation needed"
+            ops_ = {o.operation: o for o in await world.git_ops(job_id)}
+            assert ops_["push"].details["merge_request_push_option"] is True and ops_["merge_request.create"].status == "ok"
+        finally:
+            await client.aclose()
+
+
+async def test_a_server_without_push_options_gets_a_plain_push(sessionmaker, tmp_path):
+    """BUG-289: a remote that does not advertise push options refuses ``-o``; the push is repeated without them and
+    the MR is created through the API as before."""
+    with FakeGitLab() as gl:
+        client = GitLabClient(gl.base_url, token=gl.token, retries=0)
+        world = await make_world(sessionmaker, tmp_path, gitlab=client, provider="gitlab", gitlab_project_id="grp/demo")
+        try:
+            _job, _step, ws, commit = await _committed_workspace(world, title="Plain")
+            res = await world.engine.push_job_branch(ws, create_merge_request=True)
+            assert world.upstream.head(ws.branch) == commit.sha
+            assert res.merge_request is not None and res.merge_request.created
+            assert [r[0] for r in gl.requests].count("POST") == 1
+        finally:
+            await client.aclose()
+
+
 async def test_merge_request_skipped_for_generic_provider(world):
     _job, _step, ws, _commit = await _committed_workspace(world)
     res = await world.engine.push_job_branch(ws, create_merge_request=True)

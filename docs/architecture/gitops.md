@@ -141,6 +141,12 @@ event and the state change in **one** transaction.
   commits someone else added to the job branch are never overwritten (`PUSH_REJECTED`, reason
   `foreign_commits`). `require_current_base=True` refuses a stale base first. MR creation (policy
   `create_merge_request` or argument) never fails the push; errors land in `PushResult.merge_request_error`.
+  On GitLab the push itself requests the MR (`-o merge_request.create`, `merge_request.target`, `.title`,
+  `.label=hermclaw`): GitLab opens it while it processes the push, after the branch is registered. The MR API checks
+  the source branch against a cache that lags behind the push (`source_branch does not exist` minutes after a
+  successful push, BUG-289). The engine then finds that MR, records it as `merge_request.create` and sets the
+  multi-line description with a `PUT`. The API `POST` (with the branch-settle retries) remains the fallback; a
+  remote without push options gets the same push again without `-o`.
 - **Stale base (6.11):** the mirror is fetched, the workspace tracking ref refreshed, and `base_sha` compared with
   the upstream branch tip (`commits_behind`, `rewritten` when the old base is no longer an ancestor).
 - **Conflicts (6.12):** `update_to_base` stashes uncommitted work (incl. untracked), runs `rebase --onto <new>

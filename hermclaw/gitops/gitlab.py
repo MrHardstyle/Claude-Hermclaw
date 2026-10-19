@@ -187,11 +187,17 @@ class GitLabClient:
         description: str = "",
         remove_source_branch: bool = False,
         labels: list[str] | None = None,
+        requested_by_push: bool = False,
     ) -> MergeRequestInfo:
-        """Create an MR unless an open one for the same source/target exists (duplicate detection)."""
+        """Create an MR unless an open one for the same source/target exists (duplicate detection).
+
+        ``requested_by_push``: the push carried ``-o merge_request.create``. GitLab opens that MR in the same
+        post-receive processing that registers the branch, so it never sees the branch as missing; the API POST is
+        only the fallback. The pushed MR counts as created here and gets the multi-line description a push option
+        cannot carry (BUG-289)."""
         existing = await self.find_open_merge_request(project_id, source_branch=source_branch, target_branch=target_branch)
         if existing is not None:
-            return existing
+            return await self._adopt_pushed(project_id, existing, description) if requested_by_push else existing
         body: dict[str, Any] = {
             "source_branch": source_branch,
             "target_branch": target_branch,
@@ -206,6 +212,10 @@ class GitLabClient:
             if not _branch_not_yet_known(resp):
                 break
             await asyncio.sleep(delay)
+            if requested_by_push:
+                pushed = await self.find_open_merge_request(project_id, source_branch=source_branch, target_branch=target_branch)
+                if pushed is not None:
+                    return await self._adopt_pushed(project_id, pushed, description)
             resp = await self._request("POST", f"/projects/{_project(project_id)}/merge_requests", json=body)
         if resp.status_code == 201:
             data = resp.json()
@@ -217,6 +227,18 @@ class GitLabClient:
             if again is not None:
                 return again
         raise self._error(resp, "merge request creation")
+
+    async def _adopt_pushed(self, project_id: str | int, mr: MergeRequestInfo, description: str) -> MergeRequestInfo:
+        """The MR GitLab opened for ``-o merge_request.create``, with its description set (best effort)."""
+        if description:
+            resp = await self._request(
+                "PUT",
+                f"/projects/{_project(project_id)}/merge_requests/{mr.iid}",
+                json={"description": DEFAULT_REDACTOR.text(description)[:100_000]},
+            )
+            if resp.status_code != 200:
+                log.warning("merge request description not set", extra={"iid": mr.iid, "status": resp.status_code})
+        return mr.model_copy(update={"created": True})
 
     async def delete_branch(self, project_id: str | int, branch: str) -> bool:
         resp = await self._request("DELETE", f"/projects/{_project(project_id)}/repository/branches/{quote(branch, safe='')}")

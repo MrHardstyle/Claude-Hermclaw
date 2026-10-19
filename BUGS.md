@@ -46,6 +46,17 @@ Noch keine.
 
 ## Behobene Bugs
 
+### BUG-289 – Merge Request fehlt trotz erfolgreichem Push: GitLab kennt den Zweig im MR-API noch nicht
+- Phase: Testzyklus 2 auf rc60 (K2, Job `0527d6af…`) · Komponente: gitops (engine, gitlab) · Severity: P2 · blockierend: nein (Job `succeeded`, Batterie FAIL nur durch fehlenden MR) · Status: **behoben** (`tests/integration/test_gitops_push.py::test_merge_request_is_requested_with_the_push`, `::test_a_server_without_push_options_gets_a_plain_push`)
+- Reproduktion: Push um 14:28:37 erfolgreich. Die MR-Anlage wiederholt sich 3,5 Minuten lang und scheitert um 14:32:10 mit `HTTP 400 {'source_branch': ['does not exist']}`. Eine Stunde später liefert die Zweig-API den Zweig (200), der Spiegel hat ihn – ein MR existiert nicht.
+- Häufigkeit: Vier von 46 MR-Anlagen seit rc19 (J2, X5, K1 aus Zyklus 1, K2). BUG-202 und BUG-220 hatten nur die Wartezeit verlängert.
+- Ursache: Das MR-API prüft den Quellzweig gegen einen Zweig-Cache, den GitLab erst in der asynchronen Push-Verarbeitung aktualisiert. Ist diese verzögert, hilft kein Warten auf Hermclaw-Seite.
+- Fix:
+  - Der Push fordert den MR selbst an (`-o merge_request.create`, Ziel, Titel, Label `hermclaw`). GitLab öffnet ihn in derselben Verarbeitung, die den Zweig registriert – kein Wettlauf mit dem Cache.
+  - Die Engine sucht den MR in der Warteschleife, zählt ihn als angelegt (`merge_request.create`) und setzt die mehrzeilige Beschreibung per `PUT`.
+  - Der API-POST bleibt Rückfallweg. Ein Server ohne Push-Optionen bekommt denselben Push ohne `-o`.
+- Selbstprüfung: kein drittes Verlängern der Wartezeit, sondern ein Weg ohne den verzögerten Cache. Live-Nachweis in Zyklus 3.
+
 ### BUG-288 – Planer wiederholt Akzeptanzkriterien bis zur Vertragsgrenze: 32 Minuten für einen Plan
 - Phase: Testzyklus 2 auf rc60 (K2, Job `0527d6af…`, Erstplan) · Komponente: planner (Schema an das Modell) · Severity: P2 · blockierend: nein (Plan war gültig) · Status: **behoben** (`tests/unit/test_planner_loop.py::test_model_facing_schemas_require_the_scope_fields`)
 - Reproduktion: qwen3.8 erzeugt 3973 Tokens in 32 min (2 Token/s, 27B-Modell großteils auf der CPU). Der gespeicherte Plan hat 3122 Zeichen (rund 1000 Tokens). Das Modell schrieb dieselben zwei `diff`-Kriterien (`form.js`, `tests/form.test.js`) immer wieder; die Normalisierung entfernte die Duplikate.

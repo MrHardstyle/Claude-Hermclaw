@@ -1195,11 +1195,13 @@ class GitEngine:
         allowed when that remote SHA is one the runtime itself pushed for this job or saw when it created the
         workspace – commits someone else added to the job branch are never overwritten (``PUSH_REJECTED``).
         """
+        want_mr = self.git_policy.create_merge_request if create_merge_request is None else create_merge_request
         async with self._locked(ws) as (info, repo, path):
             if repo is None:
                 raise WorkspaceStateError("workspace has no repository", details={"workspace_id": str(info.id)})
             ref = f"refs/heads/{info.branch}"
             url = repo.url
+            mr_options = await self._merge_request_push_options(info, repo, title) if want_mr else []
             rec = OpRecord(
                 operation="push",
                 job_id=info.job_id,
@@ -1230,12 +1232,15 @@ class GitEngine:
                             details={"branch": info.branch, "reason": "foreign_commits", "remote_sha": remote_before, "head_sha": head},
                         )
                     lease = f"--force-with-lease={ref}:{remote_before or ''}"
-                    res = await self.runner.run(
-                        ["push", "--porcelain", "--no-verify", lease, url, f"{ref}:{ref}"],
-                        cwd=path,
-                        check=False,
-                        timeout_s=self.timeouts.network,
-                    )
+                    argv = ["push", "--porcelain", "--no-verify", lease, url, f"{ref}:{ref}"]
+                    if mr_options:
+                        res = await self.runner.run(
+                            [*argv[:-2], *mr_options, *argv[-2:]], cwd=path, check=False, timeout_s=self.timeouts.network
+                        )
+                        if res.returncode != 0 and "push options" in res.err:  # a server without push options
+                            mr_options = []
+                    if not mr_options:
+                        res = await self.runner.run(argv, cwd=path, check=False, timeout_s=self.timeouts.network)
                     results = [r for r in parse_push_porcelain(res.text) if r.destination == ref]
                     if res.returncode != 0 or not results or not results[0].ok:
                         reason = results[0].reason or results[0].summary if results else None
@@ -1252,6 +1257,8 @@ class GitEngine:
                         )
                     forced = results[0].flag == "+"
                 rec.details.update({"forced": forced, "up_to_date": up_to_date, "remote_sha_before": remote_before})
+                if mr_options:
+                    rec.details["merge_request_push_option"] = True
                 async with self._sm() as session:
                     row = await session.get(Workspace, info.id)
                     if row is None:
@@ -1260,11 +1267,12 @@ class GitEngine:
                     row.status = "pushed"
                     op_row = await write_audit(session, rec, status="ok")
                     await session.commit()
-        want_mr = self.git_policy.create_merge_request if create_merge_request is None else create_merge_request
         mr: MergeRequestInfo | None = None
         mr_error: str | None = None
         if want_mr:
-            mr, mr_error = await self._ensure_merge_request(info, repo, head, title=title, description=description)
+            mr, mr_error = await self._ensure_merge_request(
+                info, repo, head, title=title, description=description, requested_by_push=bool(mr_options)
+            )
         return PushResult(
             branch=info.branch,
             sha=head,
@@ -1348,8 +1356,42 @@ class GitEngine:
             raise GitLabError(f"merge request not created: {error}", details={"workspace_id": str(info.id), "reason": error})
         return mr
 
+    async def _merge_request_title(self, info: WorkspaceInfo, title: str | None) -> str:
+        if title:
+            return title
+        async with self._sm() as session:
+            job = await session.get(Job, info.job_id)
+            return f"Hermclaw: {job.title if job is not None else info.job_id}"
+
+    async def _merge_request_push_options(self, info: WorkspaceInfo, repo: RepositoryInfo, title: str | None) -> list[str]:
+        """``git push -o`` options that let GitLab open the MR while it registers the pushed branch.
+
+        The MR API checks the source branch against a cache GitLab refreshes only after processing the push; the
+        battery saw ``source_branch does not exist`` 3.5 minutes after a successful push, while the branch API already
+        listed the branch (BUG-202, BUG-220, BUG-289). Options carry no newlines: the description is set afterwards."""
+        if self.gitlab is None or repo.provider != "gitlab":
+            return []
+        one_line = " ".join(DEFAULT_REDACTOR.text(await self._merge_request_title(info, title)).split())[:255]
+        return [
+            "-o",
+            "merge_request.create",
+            "-o",
+            f"merge_request.target={info.base_branch}",
+            "-o",
+            f"merge_request.title={one_line}",
+            "-o",
+            "merge_request.label=hermclaw",
+        ]
+
     async def _ensure_merge_request(
-        self, info: WorkspaceInfo, repo: RepositoryInfo, head: str, *, title: str | None, description: str | None
+        self,
+        info: WorkspaceInfo,
+        repo: RepositoryInfo,
+        head: str,
+        *,
+        title: str | None,
+        description: str | None,
+        requested_by_push: bool = False,
     ) -> tuple[MergeRequestInfo | None, str | None]:
         if self.gitlab is None:
             return None, "no GitLab client configured"
@@ -1358,10 +1400,7 @@ class GitEngine:
         project = repo.gitlab_project_id or project_path_from_url(repo.url)
         if not project:
             return None, "repository has no GitLab project id"
-        async with self._sm() as session:
-            job = await session.get(Job, info.job_id)
-            job_title = job.title if job is not None else str(info.job_id)
-        mr_title = title or f"Hermclaw: {job_title}"
+        mr_title = await self._merge_request_title(info, title)
         mr_description = description or "\n".join(
             [
                 "Created by the Hermclaw runtime after deterministic verification.",
@@ -1389,6 +1428,7 @@ class GitEngine:
                     title=mr_title,
                     description=mr_description,
                     labels=["hermclaw"],
+                    requested_by_push=requested_by_push,
                 )
                 rec.details.update({"iid": mr.iid, "mr_id": mr.id, "web_url": mr.web_url, "created": mr.created})
                 if not mr.created:

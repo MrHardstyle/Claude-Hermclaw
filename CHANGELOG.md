@@ -5,6 +5,7 @@ Format: [Keep a Changelog](https://keepachangelog.com/de/1.1.0/), Versionen nach
 ## [Unreleased]
 
 ### Behoben
+- **Merge Requests über Push-Optionen (BUG-289):** Der Push fordert den MR bei GitLab direkt an; das MR-API meldete den frisch gepushten Zweig in vier von 46 Fällen minutenlang als nicht vorhanden. Der API-Weg bleibt Rückfall.
 - **Planer-Wiederholungsschleifen enden früh (BUG-288):** Das Schema an das Modell begrenzt Akzeptanzkriterien (12) und Pfadlisten (20) eines Schritts; eine Wiederholung kostete in K2 rund 25 Minuten Planungszeit.
 - **Planprüfung: Rückverfolgung der Auftrags-Literale (BUG-287):** Dateien, Namen in Backticks und HTTP-Statuscodes, die der Auftrag nennt, müssen in einem Schritt des Erstplans vorkommen; sonst Reparaturrunde vor dem ersten Coder.
 - **Engine-Fehler sind keine Code-Fehler (BUG-286):** Scheitert die Container-Engine selbst (Exit-Code 125 mit Engine-Meldung), meldet der Verifier „konnte nicht laufen“ statt eines Lint- oder Testfehlers.

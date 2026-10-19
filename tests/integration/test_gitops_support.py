@@ -210,6 +210,10 @@ class FakeGitLab:
         self.requests: list[tuple[str, str, dict[str, str]]] = []
         self.fail_status: int | None = None
         self.fail_count = 0
+        # BUG-289: GitLab's MR API checks a branch cache refreshed only after the push is processed
+        self.branch_unknown = False
+        # push options recorded by the upstream's post-receive hook; GitLab opens the MR while processing the push
+        self.push_options_file: Path | None = None
         outer = self
 
         class Handler(BaseHTTPRequestHandler):
@@ -246,6 +250,7 @@ class FakeGitLab:
                 if rest == ["protected_branches"] and method == "GET":
                     self._send(200, [{"name": n} for n in outer.protected], {"X-Next-Page": ""})
                 elif rest == ["merge_requests"] and method == "GET":
+                    outer._process_pushes(project)
                     rows = [
                         m
                         for m in outer.mrs
@@ -255,9 +260,21 @@ class FakeGitLab:
                         and m["target_branch"] == query.get("target_branch", m["target_branch"])
                     ]
                     self._send(200, rows, {"X-Next-Page": ""})
+                elif len(rest) == 2 and rest[0] == "merge_requests" and method == "PUT":
+                    length = int(self.headers.get("Content-Length", "0"))
+                    body = json.loads(self.rfile.read(length) or b"{}")
+                    for m in outer.mrs:
+                        if m["project"] == project and str(m["iid"]) == rest[1]:
+                            m.update({k: v for k, v in body.items() if k in ("description", "title")})
+                            self._send(200, m)
+                            return
+                    self._send(404, {"message": "404 Not found"})
                 elif rest == ["merge_requests"] and method == "POST":
                     length = int(self.headers.get("Content-Length", "0"))
                     body = json.loads(self.rfile.read(length) or b"{}")
+                    if outer.branch_unknown:
+                        self._send(400, {"message": {"source_branch": ["does not exist"]}})
+                        return
                     for m in outer.mrs:
                         if m["project"] == project and m["state"] == "opened" and m["source_branch"] == body["source_branch"]:
                             self._send(409, {"message": ["Another open merge request already exists for this source branch"]})
@@ -289,8 +306,39 @@ class FakeGitLab:
             def do_DELETE(self) -> None:
                 self._handle("DELETE")
 
+            def do_PUT(self) -> None:
+                self._handle("PUT")
+
         self.server = ThreadingHTTPServer(("127.0.0.1", 0), Handler)
         self.thread = threading.Thread(target=self.server.serve_forever, daemon=True)
+
+    def _process_pushes(self, project: str) -> None:
+        """Open the MRs requested with ``-o merge_request.create`` (lines ``<branch>\t<option>`` from the hook)."""
+        if self.push_options_file is None or not self.push_options_file.exists():
+            return
+        wanted: dict[str, dict[str, str]] = {}
+        for line in self.push_options_file.read_text(encoding="utf-8").splitlines():
+            branch, _, option = line.partition("\t")
+            key, _, value = option.partition("=")
+            wanted.setdefault(branch, {})[key] = value
+        for branch, opts in wanted.items():
+            if "merge_request.create" not in opts or any(m["source_branch"] == branch for m in self.mrs):
+                continue
+            iid = len([m for m in self.mrs if m["project"] == project]) + 1
+            self.mrs.append(
+                {
+                    "id": 1000 + len(self.mrs),
+                    "iid": iid,
+                    "project": project,
+                    "state": "opened",
+                    "title": opts.get("merge_request.title", branch),
+                    "description": "",
+                    "source_branch": branch,
+                    "target_branch": opts.get("merge_request.target", "main"),
+                    "labels": opts.get("merge_request.label", ""),
+                    "web_url": f"http://gitlab.test/{project}/-/merge_requests/{iid}",
+                }
+            )
 
     @property
     def base_url(self) -> str:
