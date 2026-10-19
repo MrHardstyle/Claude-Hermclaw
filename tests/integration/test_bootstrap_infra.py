@@ -680,6 +680,39 @@ def test_llamacpp_unit_and_firewall_cover_the_llama_server_port(tmp_path: Path) 
             assert check.returncode == 0, check.stderr
 
 
+def test_llamacpp_archive_must_carry_the_build_it_is_installed_as(tmp_path: Path) -> None:
+    """A new archive under the old ``ollama_llamacpp_build`` was skipped by the extract step (``creates:``) and the old
+    llama-server kept running (rc60 deploy); the role refuses an archive whose name names another build."""
+    ansible = shutil.which("ansible")
+    if ansible is None:
+        pytest.skip("ansible not installed")
+    tasks = yaml.safe_load((ANSIBLE_DIR / "roles/ollama/tasks/llamacpp.yml").read_text(encoding="utf-8"))
+    that = next(t for t in tasks if t.get("name") == "Validate the llama.cpp settings")["ansible.builtin.assert"]["that"]
+    rule = next(c for c in that if "basename" in c)
+
+    def holds(build: str, archive: str) -> bool:
+        res = _run(
+            [
+                ansible,
+                "localhost",
+                "-c",
+                "local",
+                "-m",
+                "ansible.builtin.assert",
+                "-a",
+                json.dumps({"that": [rule]}),
+                "-e",
+                json.dumps({"ollama_llamacpp_build": build, "ollama_llamacpp_archive_src": archive}),
+            ],
+            cwd=tmp_path,
+        )
+        return res.returncode == 0
+
+    assert holds("b11696", "/srv/dist/llamacpp-b11696-sm61.tgz")
+    assert not holds("b11361", "/srv/dist/llamacpp-b11696-sm61.tgz")
+    assert not holds("b1169", "/srv/dist/llamacpp-b11696-sm61.tgz"), "a prefix of the build is another build"
+
+
 def test_llamacpp_router_mode_serves_further_models_under_their_ollama_tags(tmp_path: Path) -> None:
     """R-033: with ollama_llamacpp_models the llama-server runs in router mode – one preset per model, the served name
     is the Ollama tag (alias; a section name with ':' would be upper-cased by llama-server), the main model keeps its

@@ -129,7 +129,7 @@ Lint, mypy, ShellCheck, ansible-lint (production) sauber.
 - Embeddings: `embeddinggemma:300m` (768 dim; EmbeddingGemma 2 erst, wenn Ollama es unter Linux/CUDA ausführt, D-010)
 
 ## Bugs
-- 279 gefunden, **279 behoben** – `BUGS.md`. Live-Abnahme: BUG-143 bis BUG-279. BUG-275–279 sind behoben, aber noch nicht deployt (Fixpaket nach Zyklus 1).
+- 280 gefunden, **280 behoben** – `BUGS.md`. Live-Abnahme: BUG-143 bis BUG-280. BUG-275–280 sind mit 0.1.0rc60 behoben (Fixpaket nach Zyklus 1).
   BUG-143–274 sind produktiv (0.1.0rc59, deployt 2026-10-18 16:46 mit laufendem G1; rc58 16:32; rc57 15:14; rc56 14:25; rc55 14:18; rc54 13:49; rc53 13:25; rc52 13:02; rc51 12:39; rc50 12:26; rc49 11:46; rc48 11:38; rc47 11:24; rc46 11:11; rc45 10:53; rc44 10:35; rc43 10:00; rc42 09:48; rc41 09:17; rc40 08:41; rc39 07:26; rc38 07:03; rc37 06:44; rc36 06:00; SearXNG mit Bing/Yahoo; rc33 05:06; rc29 04:23; rc28 03:48 mit laufendem G1, Worker-Ausfall beim Fortsetzen ohne Versuchsverlust (BUG-227 live bestätigt); rc26 02:55, `coder-main.max_output_tokens` 8192 im Inventory-Override; rc25 deployt 01:50 mit laufendem G1, Schritt per Checkpoint unterbrochen und fortgesetzt; rc24 deployt 2026-10-18 01:10; rc20 deployt 2026-10-17 20:40, Scheduler-Neustart mit laufendem Job live geprüft: Job lief nach dem Deployment weiter).
 - Externe Blocker: BLOCKER-002 (Tag-Push)
 

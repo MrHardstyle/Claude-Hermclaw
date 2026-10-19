@@ -9,6 +9,9 @@
     that:
       - ollama_llamacpp_build is match('^b[0-9]+$')
       - ollama_llamacpp_archive_src | length > 0
+      # the build directory is named after ollama_llamacpp_build: a new archive under the old build name was skipped
+      # by the extract step (creates:) and the old binary kept running
+      - (ollama_llamacpp_archive_src | basename).startswith('llamacpp-' ~ ollama_llamacpp_build ~ '-')
       - ollama_llamacpp_archive_sha256 is match('^[0-9a-f]{64}$')
       - ollama_llamacpp_install_root is match('^/[A-Za-z0-9._/-]+$')
       - ollama_llamacpp_model is match('^[a-z0-9][a-z0-9._-]*(:[A-Za-z0-9._-]+)?$')
@@ -24,7 +27,8 @@
       - ollama_llamacpp_preset_settings | map(attribute='key') | map('string') | reject('match', '^[a-z][a-z0-9-]*$') | list | length == 0
       - ollama_llamacpp_preset_settings | map(attribute='value') | map('string') | reject('match', '^[A-Za-z0-9._:,/-]+$') | list | length == 0
     fail_msg: >-
-      invalid llama.cpp settings: ollama_llamacpp_archive_src/ollama_llamacpp_archive_sha256 come from scripts/ops/build-llamacpp.sh,
+      invalid llama.cpp settings: ollama_llamacpp_archive_src/ollama_llamacpp_archive_sha256 come from scripts/ops/build-llamacpp.sh
+      and the archive name carries ollama_llamacpp_build (llamacpp-<build>-sm<arch>.tgz),
       ollama_llamacpp_model and every ollama_llamacpp_models[].model are distinct Ollama tags, preset settings are
       llama-server option names with plain values, the port must differ from Ollama's
     quiet: true

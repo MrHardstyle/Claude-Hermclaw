@@ -46,6 +46,16 @@ Noch keine.
 
 ## Behobene Bugs
 
+### BUG-280 – Neues llama.cpp-Archiv unter altem Build-Namen: Deploy meldet Erfolg, der alte llama-server läuft weiter
+- Phase: Deploy 0.1.0rc60 (Rolle ollama, `bootstrap.yml --tags ollama` auf .224) · Komponente: infra (ansible, Rolle ollama) · Severity: P2 · blockierend: ja (behoben) · Status: **behoben** (`tests/integration/test_bootstrap_infra.py::test_llamacpp_archive_must_carry_the_build_it_is_installed_as`)
+- Reproduktion:
+  - Das Inventar zeigt `ollama_llamacpp_archive_src` auf `llamacpp-b11696-sm61.tgz`, `ollama_llamacpp_build` bleibt beim Standard `b11361`.
+  - Der Lauf endet mit `failed=0`. Das Entpacken nach `/opt/llamacpp/b11361` wird übersprungen (`creates:` findet den alten `llama-server`).
+  - Unter `current` läuft weiter b11361. Im Router-Modus listet `/v1/models` nur das Hauptmodell, qwen3.8 fehlt.
+- Ursache: Den Zielordner bestimmt allein `ollama_llamacpp_build`. Die Rolle prüfte nicht, ob das Archiv zu diesem Build gehört.
+- Fix: Die Validierung verlangt, dass der Archivname mit `llamacpp-<ollama_llamacpp_build>-` beginnt (Namensschema von `scripts/ops/build-llamacpp.sh`). Ein abweichendes Archiv bricht den Lauf vor jeder Änderung ab. Inventar: `ollama_llamacpp_build: b11696`.
+- Nebenbefund beim Testlauf vor rc60: Die Include-Schleife der Router-Modelle trug keine `apply`-Tags. Mit `--tags ollama` wären die Modell-Tasks übersprungen worden. Behoben vor dem Release (`test_dynamic_includes_apply_their_tags`).
+
 ### BUG-279 – Gemeldete Beispiel-Tokens bleiben stehen: maskierte Zeilen werden unverändert zurückgeschrieben und als „ersetzt“ quittiert
 - Phase: Testzyklus 1 auf rc59 (M3, Job `37213799…`, S001 Versuche 2–3) · Komponente: tools (engine), verifier (secrets), coder (handler) · Severity: P1 · blockierend: ja (behoben) · Status: **behoben** (`tests/integration/test_tools_engine_read_write.py::test_a_flagged_secret_stays_until_a_placeholder_replaces_it`, `tests/unit/test_verifier_secrets.py::test_secret_findings_in_docs_ask_for_a_placeholder_the_scanner_accepts`)
 - Reproduktion:
