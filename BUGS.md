@@ -46,6 +46,13 @@ Noch keine.
 
 ## Behobene Bugs
 
+### BUG-304 – Turnierwertung: ein Programm, das nicht startet, ist kein K.o.
+- Phase: Coder-Turnier 0.1.0rc62, 2026-10-21 (Auswertung des vollen Turniers) · Komponente: tournament (scoring, runner) · Severity: P2 · blockierend: nein (Sieger unverändert) · Status: **behoben im Repository** (`tests/unit/test_tournament.py::test_a_program_the_hidden_checks_cannot_run_is_knocked_out`)
+- Reproduktion: Ornith 35B, A7 #3 meldet „succeeded“, der gelieferte Server startet nicht: „3 passed, 28 errors“ in den versteckten Prüfungen (Setup-Fehler `python -m … ` bei jedem Test). Ebenso A8 #1–#3 („1 passed, 22 errors“). Die Läufe bekamen Punkte für „abgeschlossen“ und „keine unnötigen Änderungen“ wie ein laufendes Programm.
+- Ursache: Die mit dem Nutzer vereinbarten K.-o.-Regeln nennen „unvollständige Programme“. Umgesetzt war nur, dass Aufwand und Dauer allein korrekte Läufe belohnen; Setup-Fehler zählten wie fehlgeschlagene Prüfungen.
+- Fix: Die Bewertung zählt Setup-Fehler getrennt (`hidden_errors`). Erreichen sie mindestens die Hälfte der versteckten Prüfungen, ist der Lauf K.o. („incomplete program: 28 of 31 hidden checks could not run it“). Ältere Läufe lesen die Zahl aus der gespeicherten Bewertungsausgabe nach.
+- Auswirkung auf das Turnier (rc62, A1–A9 × 3): coder-main 77,3 (unverändert Sieger), Qwen3.5-9B 52,4, Ornith 35B 51,0 (5 K.o. statt 1). Platz 2 und 3 tauschen; die frühere Aussage „an der Reihenfolge ändert das nichts“ war falsch.
+
 ### BUG-303 – Ein Verifier, der seine Befehle nicht ausführen konnte, verbraucht die Korrekturen des Modells
 - Phase: Nachbereitung des Coder-Turniers, 2026-10-21 (Code-Durchsicht nach BUG-286; live seit 16.10. nicht aufgetreten, keine Prüfung mit Status `error` in der Datenbank) · Komponente: coder (Implement-Handler), verifier, scheduler · Severity: P2 · blockierend: nein · Status: **behoben im Repository, Auslieferung mit dem Release nach dem Coder-Turnier** (`tests/integration/test_coder_handler.py::test_a_verifier_that_could_not_run_is_repeated_not_corrected`, `tests/failure/test_verifier_failures.py::test_executor_outage_is_an_error_and_redacted`)
 - Reproduktion: Der Ausführungs-Worker ist nicht erreichbar oder der Sandbox-Container startet nicht (Podman-Engine-Fehler, BUG-286). Alle Befehlsprüfungen werden `error` („could not be executed“), `test_evidence` wird `fail` („no test command executed and passed“). Der Implement-Handler startet eine Korrekturrunde mit diesen Befunden; nach zwei solchen Runden ist das Korrekturbudget leer und der Schritt geht an den Replanner, obwohl die Änderung nie geprüft wurde.

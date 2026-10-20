@@ -42,6 +42,7 @@ Workspace = Callable[[uuid.UUID], Awaitable[tuple[Path, str] | None]]  # job -> 
 
 # ``FAILED path::name`` (pytest) and ``not ok 3 - name`` (node --test / TAP)
 _FAILED = re.compile(r"^(?:FAILED\s+(\S+)|not ok \d+ - (.+?))(?:\s+-\s.*)?$", re.MULTILINE)
+_ERRORS = re.compile(r"\b(\d+) errors?\b")  # pytest summary line: "3 passed, 28 errors in 10.43s"
 _WAITING = (
     JobStatus.queued,
     JobStatus.blocked,
@@ -81,10 +82,11 @@ def failed_names(output: str) -> list[str]:
 @dataclasses.dataclass
 class Grade:
     passed: int = 0
-    failed: int = 0
+    failed: int = 0  # failed and erred
     failed_names: list[str] = dataclasses.field(default_factory=list)
     error: str | None = None
     output: str = ""
+    errors: int = 0  # erred in setup: the check could not exercise the program
 
 
 async def grade(  # noqa: PLR0917 - the grading inputs of one run
@@ -124,7 +126,7 @@ async def grade(  # noqa: PLR0917 - the grading inputs of one run
     names = failed_names(output)
     if summary.passed + summary.failed + summary.errors == 0:
         return Grade(error=f"hidden checks produced no result (exit {res.exit_code})", output=output[-4000:])
-    return Grade(summary.passed, summary.failed + summary.errors, names, None, output[-4000:])
+    return Grade(summary.passed, summary.failed + summary.errors, names, None, output[-4000:], errors=summary.errors)
 
 
 async def request_cancel(sm: async_sessionmaker[AsyncSession], job_id: uuid.UUID, reason: str) -> None:
@@ -188,11 +190,25 @@ class TournamentRunner:
         if not self.runs_file.exists():
             return []
         fields = {f.name for f in dataclasses.fields(RunRecord)}
-        return [
-            RunRecord(**{k: v for k, v in json.loads(line).items() if k in fields})
-            for line in self.runs_file.read_text().splitlines()
-            if line
-        ]
+        runs = []
+        for line in self.runs_file.read_text().splitlines():
+            if not line:
+                continue
+            raw = json.loads(line)
+            record = RunRecord(**{k: v for k, v in raw.items() if k in fields})
+            if "hidden_errors" not in raw:  # recorded before the count was kept: read it from the stored grading output
+                record.hidden_errors = self._stored_errors(record)
+            runs.append(record)
+        return runs
+
+    def _stored_errors(self, r: RunRecord) -> int:
+        path = self.out / "grading" / f"{r.model}-{r.task}-{r.rep}-{r.job_id}.txt"
+        try:
+            lines = path.read_text(encoding="utf-8").splitlines()
+        except OSError:
+            return 0
+        found = _ERRORS.search(lines[-1]) if lines else None
+        return int(found.group(1)) if found else 0
 
     def _append(self, record: RunRecord) -> None:
         with self.runs_file.open("a", encoding="utf-8") as fh:
@@ -271,6 +287,7 @@ class TournamentRunner:
             hidden_passed=g.passed,
             hidden_failed=g.failed,
             hidden_failed_names=g.failed_names,
+            hidden_errors=g.errors,
             hidden_error=g.error,
             changed_files=files,
             unexpected_changes=[f for f in files if task.expected_changes and not _matches(f, task.expected_changes)],

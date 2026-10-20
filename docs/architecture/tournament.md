@@ -47,7 +47,11 @@ hidden checks; they test the job text, not the prescribed plan.
 | changes | 10, minus 25 % per changed file outside `expected_changes` |
 | completed | 5 when the job status is `succeeded` |
 
-A change to a `protected` path or a failed hidden check whose name contains `security` disqualifies the run (0 points).
+A change to a `protected` path, a failed hidden check whose name contains `security`, or an **incomplete program**
+disqualifies the run (0 points). A program is incomplete when at least half of the hidden checks erred in setup – they
+could not even exercise it (the server did not start, the module did not import); a running program with wrong results
+is graded by the share of passed checks (BUG-304). `Grade.errors`/`RunRecord.hidden_errors` hold that count; records
+written before it existed get it from the stored grading output (`grading/<model>-<task>-<rep>-<job>.txt`).
 Runs that ended on an infrastructure error (engine, GitLab, model host unreachable, grading could not run) are retried
 up to twice and never scored; the report lists them separately.
 

@@ -4,7 +4,9 @@ Rules on top of the weights:
 
 * correctness comes first – effort and duration points only go to a run whose hidden checks all pass, so speed never
   makes up for an incomplete program;
-* a failed hidden check named ``security``, or a change to a protected path, disqualifies the run (score 0);
+* a failed hidden check named ``security``, a change to a protected path, or an incomplete program disqualifies the run
+  (score 0) – the knock-out rules agreed with the weights. A program is incomplete when at least half of the hidden
+  checks could not even exercise it (pytest setup errors: the server did not start, the module did not import);
 * a run that ended on an infrastructure error is not the model's: it is reported apart and not scored.
 """
 
@@ -29,7 +31,7 @@ class RunRecord:
     duration_minutes: float
     timed_out: bool
     hidden_passed: int
-    hidden_failed: int
+    hidden_failed: int  # failed and erred hidden checks
     hidden_failed_names: list[str]
     hidden_error: str | None  # the hidden check could not run (infrastructure of the grading)
     changed_files: list[str]
@@ -45,6 +47,7 @@ class RunRecord:
     model_seconds: float
     score: dict[str, float] = field(default_factory=dict)
     disqualified: str | None = None
+    hidden_errors: int = 0  # hidden checks that could not exercise the program (setup errors), part of hidden_failed
 
     @property
     def hidden_total(self) -> int:
@@ -68,6 +71,8 @@ def disqualification(r: RunRecord) -> str | None:
     security = [n for n in r.hidden_failed_names if "security" in n.lower()]
     if security:
         return "security check failed: " + ", ".join(security[:3])
+    if r.hidden_total and r.hidden_errors * 2 >= r.hidden_total:
+        return f"incomplete program: {r.hidden_errors} of {r.hidden_total} hidden checks could not run it"
     return None
 
 

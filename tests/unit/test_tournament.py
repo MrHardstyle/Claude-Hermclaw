@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import subprocess
 from pathlib import Path
 from typing import Any
@@ -8,7 +9,7 @@ import pytest
 import yaml
 
 from hermclaw.core import job_metadata
-from hermclaw.tournament.runner import _matches, changed_files, export_base, failed_names
+from hermclaw.tournament.runner import TournamentRunner, _matches, changed_files, export_base, failed_names
 from hermclaw.tournament.scoring import RunRecord, render_markdown, score_runs, summarise
 from hermclaw.tournament.settings import tournament_of
 from hermclaw.tournament.spec import WEIGHTS, load_spec
@@ -83,6 +84,26 @@ def test_disqualification_and_infrastructure() -> None:
     rows = summarise([protected, insecure, infra, corrected], ["a", "b", "c", "d"])
     assert rows[0]["model"] == "d" and {r["model"]: r["infrastructure_runs"] for r in rows}["c"] == 1
     assert "| d |" in render_markdown([protected, corrected], ["a", "d"], "T")
+
+
+def test_a_program_the_hidden_checks_cannot_run_is_knocked_out(tmp_path: Path) -> None:
+    """Agreed knock-out rule "unvollständige Programme": Ornith A7 #3 reported success, but its server did not start –
+    3 passed, 28 errors in setup. It scored on the completed and changes weights like a working program (BUG-304)."""
+    broken = run("ornith", status="succeeded", hidden_passed=3, hidden_failed=28, hidden_errors=28)
+    wrong = run("qwen", status="failed", hidden_passed=11, hidden_failed=12, hidden_failed_names=["t"] * 12)
+    score_runs([broken, wrong], WEIGHTS)
+    assert broken.score["total"] == 0 and broken.disqualified == "incomplete program: 28 of 31 hidden checks could not run it"
+    assert wrong.disqualified is None and wrong.score["correct"] > 0  # a running program with wrong results is graded
+
+    out = tmp_path / "out"
+    (out / "grading").mkdir(parents=True)
+    legacy = {k: v for k, v in broken.as_dict().items() if k not in ("hidden_errors", "score", "disqualified")}
+    (out / "runs.jsonl").write_text(json.dumps(legacy) + "\n", encoding="utf-8")
+    (out / "grading" / "ornith-A1-1-j.txt").write_text("ERROR _hidden/t.py::test_a\n3 passed, 28 errors in 10.43s\n", encoding="utf-8")
+    runner = TournamentRunner.__new__(TournamentRunner)
+    runner.out, runner.runs_file = out, out / "runs.jsonl"
+    [loaded] = runner.load_runs()
+    assert loaded.hidden_errors == 28  # recorded before the count was kept: read from the stored grading output
 
 
 def test_failed_check_names_and_globs() -> None:
