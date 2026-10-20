@@ -5,6 +5,7 @@ Format: [Keep a Changelog](https://keepachangelog.com/de/1.1.0/), Versionen nach
 ## [Unreleased]
 
 ### Behoben
+- **Doctor und GGUF-Modelle (BUG-300):** Profile auf dem llama-server prüft nur noch `llamacpp:<host>`; Modelle aus GGUF-Dateien gelten nicht mehr als „nicht installiert“. Kommt mit dem Release nach dem Coder-Turnier.
 - **Abgebrochenes Deployment startet beim nächsten Lauf neu (BUG-299):** Ein Neustart, den ein Lauf beschlossen, aber nicht mehr erreicht hat, bleibt unter `/run` vorgemerkt. Vorher lief nach einem Abbruch zwischen Umschalten und Start der alte Release weiter.
 - **Deployment mit GGUF-Modellen (BUG-298):** Modelle, die der llama.cpp-Router aus einer GGUF-Datei lädt, holt die Rolle `hermclaw_worker` nicht mehr über `ollama pull`. Das Deployment von rc62 brach daran ab (nur Ansible, ausgerollt mit rc62).
 

@@ -46,6 +46,13 @@ Noch keine.
 
 ## Behobene Bugs
 
+### BUG-300 – Doctor verlangt Ollama-Tags für Modelle, die llama.cpp aus GGUF-Dateien lädt
+- Phase: Deployment 0.1.0rc62, 2026-10-20 · Komponente: doctor · Severity: P2 · blockierend: ja für die Abschlussprüfung des Deployments (`Stop when the installation is not able to run jobs`), nicht für Jobs · Status: **behoben im Repository, Auslieferung mit dem Release nach dem Coder-Turnier** (rc62 bleibt eingefroren) (`tests/integration/test_doctor.py::test_llamacpp_server_is_checked_for_the_profiles_that_use_it`)
+- Reproduktion: Profile `coder-ornith-35b` u. a. mit `backend: llamacpp`, Modell aus `ollama_llamacpp_models[].path`. Doctor meldet „FAIL models:model-224 not installed: devstral-small-2:24b, ornith-1.5:35b, …“, während „llamacpp:model-224 healthy, serves … ornith-1.5:35b …“ grün ist.
+- Ursache: Die Modellprüfung verlangte für jedes Profil des Hosts einen Ollama-Tag. Profile auf dem llama-server prüft aber schon `llamacpp:<host>` gegen die tatsächlich bedienten Aliase. Ein Modell aus einer GGUF-Datei hat keinen Ollama-Tag.
+- Fix: `models:<host>` prüft nur noch Profile, die Ollama bedient; llama.cpp-Profile prüft allein `llamacpp:<host>`.
+- Betrieb: Die `ollama`-Rolle (Router-Presets in `models.ini`) läuft nur im Bootstrap. Für rc62 wurde sie einzeln auf .224 angewandt (`roles: [ollama]`, `--tags ollama`), weil der Bootstrap-Preflight 80 GiB frei verlangt (39 GiB frei durch die Kandidaten-Modelle).
+
 ### BUG-299 – Abgebrochenes Deployment holt den Neustart nicht nach, alter Release läuft weiter
 - Phase: Deployment 0.1.0rc62, 2026-10-20 · Komponente: deploy (Rollen `hermclaw_worker`, `hermclaw_orchestrator`) · Severity: P1 · blockierend: ja (Wiederholung scheitert an „Wait for the worker /health (version 0.1.0rc62)“) · Status: **behoben** (`tests/integration/test_deploy_infra.py::test_nothing_live_changes_before_the_schema_decision`)
 - Reproduktion:

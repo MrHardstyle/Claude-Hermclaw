@@ -133,7 +133,7 @@ names, no benchmark special cases and no project data. Host-specific values come
 | `hermclaw_orchestrator` | operator CLI wrapper, LiteLLM venv (`litellm.yml`, not active) and its switch + config (`litellm_activate.yml`), schema decision, drain, migration, live configuration, restart, LiteLLM gate (`health_litellm.yml`), SearXNG, backup timer, API health, admin token |
 | `hermclaw_worker` | sandbox images (`.222`), media packages and Ollama models of `models.yaml` (`.224`: `hermclaw-model-pull` for the fixed role set, `pull_tag.yml` for a tag the inventory changed; a model the llama.cpp router loads from a GGUF file, `ollama_llamacpp_models[].path`, is never pulled, BUG-298), live configuration right before the switch, worker daemon, `/health` |
 | `hermclaw_ui` | UI build directories, webroot migration, symlink switch, prune, `nginx -t` then reload, health checks |
-| `hermclaw_verify` | final `hermclaw doctor` with `hermclaw_verify_doctor_tolerate` for checks expected to warn |
+| `hermclaw_verify` | final `hermclaw doctor` with `hermclaw_verify_doctor_tolerate` for checks expected to warn (models: `models:<host>` checks the Ollama tags of Ollama profiles, `llamacpp:<host>` the aliases the llama-server serves, BUG-300) |
 | `nginx` (bootstrap role, extended) | one site template for bootstrap and deployment: SSE location, CSP and security headers, optional TLS (provided or self-signed ECDSA P-256 with SAN, renewed 30 days before expiry), HTTP→HTTPS |
 
 ## Ordering on the orchestrator

@@ -310,6 +310,16 @@ async def test_llamacpp_server_is_checked_for_the_profiles_that_use_it(db: Any, 
     ep2.llama_aliases = {"qwen3.6-35b": ["qwen3.6:35b"]}
     checks = by_name(await doctor(cfg2, settings(tmp_path), db, ep2).run())
     assert checks["llamacpp:model-224"].status == "fail" and "qwen3.8:27b" in checks["llamacpp:model-224"].detail
+    # BUG-300: a candidate the router loads from a GGUF file has no Ollama tag; the llamacpp check covers it
+    candidate = [p.model_copy(update={"model": "ornith-1.5:9b"}) if p.role == "planner" else p for p in profiles]
+    cfg3 = cfg.model_copy(update={"models": cfg.models.model_copy(update={"profiles": candidate})})
+    ep3 = Endpoints(cfg3)
+    ep3.installed = [m for m in ep3.installed if m != "ornith-1.5:9b"]
+    ep3.llama_served = ["qwen3.6-35b", "ornith-1.5-9b"]
+    ep3.llama_aliases = {"qwen3.6-35b": ["qwen3.6:35b"], "ornith-1.5-9b": ["ornith-1.5:9b"]}
+    checks = by_name(await doctor(cfg3, settings(tmp_path), db, ep3).run())
+    assert checks["models:model-224"].status == "ok", checks["models:model-224"].detail
+    assert checks["llamacpp:model-224"].status == "ok" and "ornith-1.5:9b" in checks["llamacpp:model-224"].detail
     ep.llama_served = ["other:1b"]
     checks = by_name(await doctor(cfg, settings(tmp_path), db, ep).run())
     assert checks["llamacpp:model-224"].status == "fail" and "--alias" in checks["llamacpp:model-224"].detail

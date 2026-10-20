@@ -402,7 +402,9 @@ class Doctor:
     async def _models(self, host: HostConfig, row: Any) -> None:
         from hermclaw.workers.client import ModelWorkerClient
 
-        wanted = sorted({p.model for p in self.enabled_profiles() if p.host == host.id})
+        # llama.cpp profiles are checked against the llama-server (_llamacpp): a model it loads from a GGUF file has no
+        # Ollama tag, and the deploy of rc62 failed on four tournament candidates "not installed" (BUG-300)
+        wanted = sorted({p.model for p in self.enabled_profiles() if p.host == host.id and p.backend != "llamacpp"})
         try:
             client = self._client(ModelWorkerClient, row)
         except Exception as exc:
