@@ -10,6 +10,7 @@ test.describe("Navigation (31.1)", () => {
       ["Ressourcen", /\/resources$/, "Ressourcen"],
       ["Medien", /\/media$/, "Medien"],
       ["Bugs", /\/bugs$/, "Bugs"],
+      ["Wissen", /\/wissen$/, "Wissen"],
       ["Dashboard", /\/$/, "Dashboard"],
     ] as const) {
       await nav.getByRole("link", { name: label, exact: true }).click();
@@ -96,6 +97,43 @@ test.describe("Bugs", () => {
     await expect(rows.first()).toContainText("BUG-UI-E2E-2");
     await page.getByLabel("Status").selectOption("wontfix");
     await expect(page.getByText("Keine Bugs erfasst.")).toBeVisible();
+  });
+});
+
+test.describe("Wissen", () => {
+  test("Einträge filtern, anlegen, zurückziehen und wie ein Modell abfragen", async ({ authed: page }) => {
+    await page.goto("/wissen");
+    const rows = page.getByTestId("memory-row");
+    await expect(rows).toHaveCount(2);
+    await page.getByLabel("Status", { exact: true }).first().selectOption("candidate");
+    await expect(page).toHaveURL(/\/wissen\?status=candidate$/);
+    await expect(rows).toHaveCount(1);
+    await expect(rows.first()).toContainText("replace_text: Leerzeichen am Zeilenende");
+    await expect(rows.first()).toContainText("Kandidat");
+    await rows.first().getByTestId("memory-activate").click();
+    await expect(page.getByTestId("memory-notice")).toContainText("aktiv");
+    await expect(page.getByText("Keine Einträge.")).toBeVisible();
+    await page.goto("/wissen");
+
+    await page.getByTestId("memory-new").click();
+    const form = page.getByTestId("memory-form");
+    await form.getByLabel("Titel *").fill("PowerShell: ein Objekt ist kein Array");
+    await form.getByLabel("Text (Markdown) *").fill("ConvertTo-Json mit -AsArray aufrufen, wenn ein Array erwartet wird.");
+    await form.getByLabel("Gilt für").fill("irgendwo");
+    await page.getByTestId("memory-save").click();
+    await expect(form.getByText("Leer, repo:<Schlüssel> oder model:<Alias>.")).toBeVisible();
+    await form.getByLabel("Gilt für").fill("");
+    await page.getByTestId("memory-save").click();
+    await expect(page.getByTestId("memory-notice")).toContainText("PowerShell: ein Objekt ist kein Array");
+    await expect(rows).toHaveCount(3);
+
+    await page.getByLabel("Frage").fill("PowerShell Array Objekt");
+    await page.getByTestId("memory-probe-run").click();
+    await expect(page.getByTestId("memory-probe-hits")).toContainText("PowerShell: ein Objekt ist kein Array");
+
+    const row = rows.filter({ hasText: "PowerShell" });
+    await row.getByTestId("memory-retire").click();
+    await expect(row).toContainText("zurückgezogen");
   });
 });
 

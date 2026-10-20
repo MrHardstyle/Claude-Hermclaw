@@ -11,6 +11,7 @@ import { Login } from "./pages/Login";
 import { Media } from "./pages/Media";
 import { NotFound } from "./pages/NotFound";
 import { Resources } from "./pages/Resources";
+import { Wissen } from "./pages/Wissen";
 import { Workers } from "./pages/Workers";
 
 function Routes() {
@@ -23,6 +24,7 @@ function Routes() {
   if (matchRoute("/resources", path)) return <Resources />;
   if (matchRoute("/media", path)) return <Media />;
   if (matchRoute("/bugs", path)) return <Bugs />;
+  if (matchRoute("/wissen", path)) return <Wissen />;
   return <NotFound />;
 }
 

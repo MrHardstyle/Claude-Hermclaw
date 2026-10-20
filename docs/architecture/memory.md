@@ -42,7 +42,7 @@ Nothing is deleted through the API: a wrong entry is retired and stays visible.
 |---|---|
 | Coder | tool `recall(query, k)` (read-only, offered only when the knowledge store exists); scope `repo:<key>` of the job |
 | Planner, replanner | `PlannerInput.knowledge`: the `planner_entries` active entries closest to the job text, as input key `knowledge` (3 % of the prompt budget); the system prompt says they are hints and the job and repository decide |
-| Operator | page "Wissen" (`/api/memory`) |
+| Operator | page "Wissen" (`ui/src/pages/Wissen.tsx`, `/api/memory`): filters, edit form, activate/retire, recall probe |
 
 ## API
 

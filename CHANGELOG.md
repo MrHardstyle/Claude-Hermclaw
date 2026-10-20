@@ -6,6 +6,7 @@ Format: [Keep a Changelog](https://keepachangelog.com/de/1.1.0/), Versionen nach
 
 ### Hinzugefügt
 - **Gedächtnis (D-019), Teil 1:** Wissensspeicher in `memory_entries` (Migration 0003) für Lehren, Recherche, Vorfälle, Werkzeug-Bug-Verdacht und Konventionen, mit semantischer Suche und Wortsuche als Rückfall. Der Coder schlägt mit dem neuen Werkzeug `recall` nach, Planner und Replanner bekommen die passendsten aktiven Einträge als `knowledge`. API `/api/memory` für die Kontrollraum-Seite „Wissen“; Richtlinie `policies.memory`.
+- **Gedächtnis (D-019), Teil 2 – Seite „Wissen“ im Kontrollraum:** Einträge nach Art, Status und Text filtern, Text, Schlagwörter, Signatur, Belege, Vorkommen und Abrufe sehen, Einträge anlegen und bearbeiten, Kandidaten aktivieren und falsche Einträge zurückziehen (gelöscht wird nichts). Die Testabfrage „Was würde ein Modell finden?“ zeigt, was `recall` für eine Frage liefern würde.
 
 ### Behoben
 - **Lint-Befunde direkt nach dem Schreiben (BUG-302):** Schreibwerkzeuge hängen die Befunde des Verifier-Lints für die geschriebenen Dateien an ihr Ergebnis. Vorher erfuhr der Coder erst bei `complete_step` davon und verlor Runden mit erfundenen ruff-Aufrufen.

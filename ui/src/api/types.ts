@@ -551,6 +551,49 @@ export interface BugRecord {
   updated_at: IsoDate;
 }
 
+/** Knowledge entry (D-019, `/api/memory`): what Hermclaw learned; models see only `active` entries. */
+export type MemoryKind = "lesson" | "research" | "incident" | "tool_bug" | "convention" | "note";
+export type MemoryStatus = "candidate" | "active" | "retired";
+
+export interface MemoryEntry {
+  id: Uuid;
+  kind: MemoryKind;
+  kind_label: string;
+  title: string;
+  content: string;
+  status: MemoryStatus;
+  source: "system" | "operator" | "research";
+  scope: string | null;
+  tags: string[];
+  signature: string | null;
+  occurrences: number;
+  recalls: number;
+  job_id: Uuid | null;
+  evidence: Record<string, Json>;
+  /** whether the entry has a vector (semantic search); the vector itself stays on the server */
+  embedded: boolean;
+  expires_at: IsoDate | null;
+  created_at: IsoDate;
+  updated_at: IsoDate;
+}
+
+export interface MemoryWriteBody {
+  kind: MemoryKind;
+  title: string;
+  content: string;
+  status: MemoryStatus;
+  scope: string | null;
+  tags: string[];
+}
+
+export interface MemorySearchHit {
+  id: Uuid;
+  kind: MemoryKind;
+  title: string;
+  score: number;
+  scope: string | null;
+}
+
 export interface StatsResponse {
   jobs_by_status: Record<string, number>;
   jobs_total: number;

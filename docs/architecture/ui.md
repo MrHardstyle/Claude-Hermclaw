@@ -49,7 +49,7 @@ the router is about 70 lines on the History API, and the DAG is our own SVG layo
 | `ui/src/lib/jobForm.ts` | create-job form validation → `JobCreateBody` (limits, branch-name check, constraints parsing) |
 | `ui/src/lib/useApi.ts` | `useApi(key, fetcher, {pollMs, version})` (abortable, keeps data on refresh), `useNow`, `useThrottled` |
 | `ui/src/components/*` | `Layout` (nav, skip link, focus management), `Tabs` (ARIA tabs, arrow/Home/End), `DagView`, `DiffViewer`, `EventList`, `StepDetailView`, `Evidence`, `JobControls`, `ConfirmDialog` (native `<dialog>`), `Artifacts`/`MediaGallery`, `JobCreateForm`, `ui.tsx` primitives |
-| `ui/src/pages/*` | `Dashboard`, `Jobs`, `JobDetail` (+ `job/*` tabs), `Workers`, `Resources`, `Media`, `Bugs`, `Login`, `NotFound` |
+| `ui/src/pages/*` | `Dashboard`, `Jobs`, `JobDetail` (+ `job/*` tabs), `Workers`, `Resources`, `Media`, `Bugs`, `Wissen`, `Login`, `NotFound` |
 | `ui/tests/unit/*.test.ts` | vitest: diff parser, DAG layout, SSE client (reconnect/backoff/de-dup/watchdog), helpers (events, controls, config, routes, URL sanitising) |
 | `ui/tests/e2e/*` | Playwright against the real backend: `global-setup.ts`, `seed.py`, `net-chaos.ts`, `fixtures.ts`, `*.spec.ts` |
 
@@ -70,6 +70,7 @@ the router is about 70 lines on the History API, and the DAG is our own SVG layo
 | 31.13 media | Media page + job Media tab: image/video previews through authenticated blob URLs, download, media events | `GET /api/jobs/{id}/artifacts`, `GET /api/artifacts/{id}/download`, events `media.*` |
 | 31.14 errors | Errors tab: job error (code/message), error/warning/critical events, `*.failed`, scope violations, stagnation; count shown on the tab | job + events |
 | 31.15 controls | cancel/pause/resume/retry/replan buttons in the job header; enabled per status (`controlStates`) with the reason as tooltip and screen-reader text; confirmation dialog (reason for cancel/replan); 409 conflicts shown in the dialog and the job reloaded | `POST /api/jobs/{id}/{action}?reason=` |
+| D-019 knowledge | Wissen page: entries with kind/status/text filters in the URL, text, tags, failure signature, evidence, occurrences and recalls, link to the job; new entry and edit form (`lib/memoryForm.ts`, scope empty / `repo:` / `model:`), activate and retire (nothing is deleted); probe "Was würde ein Modell finden?" (active entries, not counted) | `GET/POST /api/memory`, `PATCH /api/memory/{id}`, `GET /api/memory/search` |
 
 Additional tabs from Bauplan §33: Overview, Repository (repo/branch/commit metadata, repo events), Artifacts
 (downloads), Git (git events), Deployment (deployment events/artifacts).

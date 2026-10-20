@@ -686,6 +686,29 @@ async def _seed_db(state: dict[str, Any], api_job_ids: dict[str, str]) -> dict[s
                     m.BugRecord(bug_key="BUG-UI-E2E-2", title="Tippfehler im Dashboard", severity="P3", component="ui", status="fixed"),
                 ]
             )
+            # ------------------------------------------------------------------ knowledge (D-019)
+            s.add_all(
+                [
+                    m.MemoryEntry(
+                        kind="lesson",
+                        title="ruff-Funde sofort beheben",
+                        content="Jeden Fund, den lint nennt, beheben – auch in Testdateien.",
+                        status="active",
+                        source="operator",
+                        tags=["ruff"],
+                    ),
+                    m.MemoryEntry(
+                        kind="tool_bug",
+                        title="replace_text: Leerzeichen am Zeilenende",
+                        content="Leerzeilen mit Einrückung passten nicht (BUG-301).",
+                        status="candidate",
+                        signature="replace_text:TEXT_NOT_FOUND",
+                        occurrences=2,
+                        job_id=main_id,
+                        evidence={"jobs": [str(main_id)]},
+                    ),
+                ]
+            )
             for alias, status, latency in (
                 ("planner-gemma", "succeeded", 4200),
                 ("planner-gemma", "succeeded", 3800),

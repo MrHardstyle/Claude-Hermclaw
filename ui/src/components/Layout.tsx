@@ -10,6 +10,7 @@ const NAV: { to: string; label: string; match: (p: string) => boolean }[] = [
   { to: "/resources", label: "Ressourcen", match: (p) => p.startsWith("/resources") },
   { to: "/media", label: "Medien", match: (p) => p.startsWith("/media") },
   { to: "/bugs", label: "Bugs", match: (p) => p.startsWith("/bugs") },
+  { to: "/wissen", label: "Wissen", match: (p) => p.startsWith("/wissen") },
 ];
 
 export function Layout({ children, onLogout }: { children: ReactNode; onLogout: () => void }) {

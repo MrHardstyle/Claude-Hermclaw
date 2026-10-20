@@ -11,6 +11,9 @@ import type {
   JobCreateBody,
   JobDetail,
   JobList,
+  MemoryEntry,
+  MemorySearchHit,
+  MemoryWriteBody,
   ModelsResponse,
   PlanVersion,
   Repository,
@@ -42,7 +45,7 @@ export class ApiError extends Error {
 type Query = Record<string, string | number | boolean | null | undefined>;
 
 interface RequestOptions {
-  method?: "GET" | "POST" | "DELETE";
+  method?: "GET" | "POST" | "PATCH" | "DELETE";
   query?: Query;
   body?: unknown;
   signal?: AbortSignal;
@@ -158,6 +161,15 @@ export const api = {
   resources: (signal?: AbortSignal) => request<ResourcesResponse>("/resources", { signal }),
   repositories: (signal?: AbortSignal) => request<Repository[]>("/repositories", { signal }),
   bugs: (status?: string, signal?: AbortSignal) => request<BugRecord[]>("/bugs", { query: { status }, signal }),
+  memory: (query: { kind?: string; status?: string; q?: string } = {}, signal?: AbortSignal) =>
+    request<MemoryEntry[]>("/memory", { query, signal }),
+  /** what a model's recall would get (active entries only; not counted as a recall) */
+  memorySearch: (q: string, signal?: AbortSignal) => request<MemorySearchHit[]>("/memory/search", { query: { q }, signal }),
+  /** control: a new entry by the operator (active at once unless the status says otherwise) */
+  createMemory: (body: MemoryWriteBody) => request<MemoryEntry>("/memory", { method: "POST", body }),
+  /** control: change an entry; retiring is a status change, nothing is deleted */
+  updateMemory: (id: string, body: Partial<MemoryWriteBody>) =>
+    request<MemoryEntry>(`/memory/${encodeURIComponent(id)}`, { method: "PATCH", body }),
   sshApprovals: (id: string, signal?: AbortSignal) => request<SshApprovals>(`/jobs/${encodeURIComponent(id)}/ssh-approvals`, { signal }),
   /** admin: approve one execution of a pending mutating SSH command */
   approveSsh: (id: string, token: string, note: string) =>
