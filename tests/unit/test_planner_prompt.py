@@ -110,6 +110,29 @@ def test_planner_payload_keys_redaction_and_test_command() -> None:
     assert stats["context"]["included"] == 3
 
 
+def test_the_planner_gets_the_knowledge_of_earlier_jobs_within_its_budget() -> None:
+    """D-019: active knowledge entries reach planner and replanner as hints, redacted and within their share."""
+    entries = [f"[lesson] ruff F401\nremove every unused import, also {SECRET}", *[f"[note] filler {i} " + "x" * 400 for i in range(40)]]
+    inputs = FASTAPI.inputs.model_copy(update={"knowledge": entries})
+    budget = PromptBudget.from_total(60_000)
+    payload, stats = planner_user_payload(
+        job={"goal": "g"}, inputs=inputs, constraints=[], capabilities=[], risk_policy={}, test_command=None, budget=budget
+    )
+    assert payload["knowledge"][0].startswith("[lesson] ruff F401") and SECRET not in compact_json(payload["knowledge"])
+    assert stats["knowledge_omitted"] > 0 and len(compact_json(payload["knowledge"])) <= budget.knowledge_chars
+    replan, _ = replan_user_payload(
+        job={"goal": "g"},
+        inputs=inputs,
+        constraints=[],
+        capabilities=[],
+        risk_policy={},
+        test_command=None,
+        package={"trigger": {}},
+        budget=budget,
+    )
+    assert replan["knowledge"][0].startswith("[lesson] ruff F401")
+
+
 def test_fit_to_budget_bounds_huge_inputs_deterministically() -> None:
     profile = get_config().models.by_role("planner")
     settings = PlannerSettings()

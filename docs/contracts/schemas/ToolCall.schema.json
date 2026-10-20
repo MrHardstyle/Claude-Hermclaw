@@ -8,6 +8,7 @@
         "find_text",
         "search_repo",
         "search_symbol",
+        "recall",
         "git_status",
         "git_diff",
         "write_file",

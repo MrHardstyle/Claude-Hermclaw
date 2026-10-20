@@ -46,6 +46,13 @@ Noch keine.
 
 ## Behobene Bugs
 
+### BUG-302 – Lint-Befunde erreichen den Coder erst beim Abschluss, er arbeitet nur den ersten ab
+- Phase: Coder-Turnier 0.1.0rc62, 2026-10-20 (Agents-A1, A3 Lauf 1) · Komponente: tools (Schreibwerkzeuge, `complete_step`) · Severity: P2 · blockierend: nein (Lauf bestanden, 20 statt ~7 Modellaufrufe) · Status: **behoben im Repository, Auslieferung mit dem Release nach dem Coder-Turnier** (`tests/integration/test_tools_engine_exec.py::test_a_write_reports_the_lint_findings_of_the_written_file`)
+- Reproduktion: Der Coder schreibt `messwerte.py` und `tests/test_messwerte.py` mit je einem ungenutzten Import. Erst `complete_step` meldet `CHECK_STILL_FAILING` mit beiden F401-Befunden. Der Coder entfernt nur den ersten und ruft danach siebenmal ruff mit erfundenen Optionen auf (`--config /dev/null`, `--per-file-ignores F401:messwerte.py`), bevor er den zweiten Import entfernt.
+- Ursache: Die Lint-Prüfung des Verifiers lief nur beim Abschluss. Dann hält der Coder den Schritt für fertig und behandelt den Befund als Hindernis statt als Teil der Arbeit an der Datei.
+- Fix: Jeder erfolgreiche Schreibzugriff (`write_file`, `replace_text`, `apply_patch`) führt den Lint-Befehl des Verifiers auf den geschriebenen Dateien aus und hängt die Befunde an das Ergebnis an („lint, run as the verifier runs it, finds problems in the file(s) just written …“). Ein sauberer Lauf, ein fehlender Linter (126/127) und ein aus einer abgeschnittenen Antwort geretteter Teil (BUG-252, `SALVAGE_DECISION`) fügen nichts an. `complete_step` wertet einen wiederholten Lint-Lauf mit fehlendem Werkzeug weiter als übersprungen.
+- Anregung: Nutzer im Turnier („man könnte den Fund in der Testdatei doch früher schon mitgeben“).
+
 ### BUG-301 – `replace_text` scheitert an Leerzeilen mit Einrückungsleerzeichen, der Hinweis führt in die Irre
 - Phase: Coder-Turnier 0.1.0rc62, 2026-10-20 (GLM-4.7-Flash, A3 Lauf 1) · Komponente: tools (`replace_text`) · Severity: P2 · blockierend: nein (der Lauf endete im Zeitlimit) · Status: **behoben im Repository, Auslieferung mit dem Release nach dem Coder-Turnier** (`tests/integration/test_tools_engine_read_write.py::test_spaces_at_line_ends_do_not_decide_a_match`)
 - Reproduktion: Der Coder schreibt `messwerte.py` mit Leerzeilen, die 16 Leerzeichen enthalten. Sein späteres `replace_text` hat in `old` echte Leerzeilen. Viermal `TEXT_NOT_FOUND` mit „its first line appears at line(s) 42 – re-read that range, indentation must match“; `read_range` zeigt keinen Unterschied, das Modell liest die Datei immer wieder und gibt auf.

@@ -490,6 +490,33 @@ async def test_invalid_planner_output_fails_preparation(world: World, tmp_path: 
     assert jobs[jid].status == "failed" and jobs[jid].error_code == "PLANNER_INVALID_OUTPUT"
 
 
+async def test_the_planner_gets_the_active_knowledge_of_this_repository(world: World, tmp_path: Path) -> None:
+    """D-019: planning a job looks up the active knowledge entries closest to the job text – global ones and those of
+    this repository – and gives them to the planner; a candidate or another repository's entry is not given."""
+    from sqlalchemy import delete
+
+    from hermclaw.core.config import MemoryPolicy
+    from hermclaw.memory.store import MemoryStore
+    from hermclaw.persistence.models import MemoryEntry
+    from tests.integration.test_repo_intelligence_support import HashingEmbedder
+
+    async with world.sessionmaker() as s:
+        await s.execute(delete(MemoryEntry))
+        await s.commit()
+    store = MemoryStore(world.sessionmaker, HashingEmbedder(), MemoryPolicy(min_score=0.1))
+    await store.add(kind="lesson", title="VALUE constants", content="change VALUE in module.py, keep its tests", status="active")
+    await store.add(kind="lesson", title="VALUE unproven", content="change VALUE in module.py", status="candidate")
+    await store.add(kind="convention", title="VALUE elsewhere", content="VALUE module.py", status="active", scope="repo:other")
+    chat = Chat([_plan()])
+    driver = _driver(world, chat, tmp_path)
+    driver.memory = store
+    jid = await _job(world)
+    await _run(world, driver, [ImplementHandler(world), ReviewHandler()], [jid])
+    planner_prompt = chat.calls[0].messages[-1].content
+    assert "[lesson] VALUE constants" in planner_prompt
+    assert "unproven" not in planner_prompt and "elsewhere" not in planner_prompt
+
+
 async def test_prepare_is_reentrant_after_crash(world: World, tmp_path: Path) -> None:
     """A crash after planning (job still 'planning', plan stored) must not plan twice."""
     chat = Chat([_plan()])

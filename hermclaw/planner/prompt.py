@@ -32,10 +32,15 @@ PLANNER_INPUT_KEYS = (
     "repository_inventory",
     "retrieved_context",
     "research_summary",
+    "knowledge",
     "capabilities",
     "constraints",
     "existing_tests",
     "risk_policy",
+)
+KNOWLEDGE_NOTE = (
+    "knowledge lists what earlier jobs taught Hermclaw (lessons, known tool problems, conventions): use an entry when "
+    "it fits this job; the job text and the repository decide over it."
 )
 MUTATING_KINDS_TEXT = ", ".join(sorted(k.value for k in MUTATING_STEP_KINDS))
 
@@ -134,6 +139,7 @@ class PromptBudget:
     context_chars: int
     context_item_chars: int
     research_chars: int
+    knowledge_chars: int
     tests_chars: int
     constraints_chars: int
     misc_chars: int
@@ -149,7 +155,7 @@ class PromptBudget:
     @classmethod
     def from_total(cls, total: int) -> PromptBudget:
         """Section shares sum to 0.99 of ``total`` (capabilities and risk policy each use ``misc_chars``)."""
-        context = int(total * 0.45)
+        context = int(total * 0.42)
         return cls(
             total_chars=total,
             job_chars=max(int(total * 0.10), 1000),
@@ -157,6 +163,7 @@ class PromptBudget:
             context_chars=max(context, 1000),
             context_item_chars=max(min(context // 4, 6000), 400),
             research_chars=max(int(total * 0.10), 400),
+            knowledge_chars=max(int(total * 0.03), 300),
             tests_chars=max(int(total * 0.05), 300),
             constraints_chars=max(int(total * 0.04), 300),
             misc_chars=max(int(total * 0.04), 600),
@@ -267,6 +274,9 @@ def planner_user_payload(
     research, res_trunc = shrink_json(DEFAULT_REDACTOR.obj(dict(inputs.research_summary)), budget.research_chars)
     stats["research_truncated"] = res_trunc
 
+    knowledge, knowledge_omitted = budget_strings(inputs.knowledge, budget.knowledge_chars)
+    stats["knowledge_omitted"] = knowledge_omitted
+
     cons, cons_omitted = budget_strings(constraints, budget.constraints_chars)
     stats["constraints_omitted"] = cons_omitted
     tests, tests_omitted = budget_strings(inputs.existing_tests, budget.tests_chars)
@@ -279,6 +289,7 @@ def planner_user_payload(
         "repository_inventory": inventory,
         "retrieved_context": context,
         "research_summary": research,
+        "knowledge": knowledge,
         "capabilities": caps,
         "constraints": cons,
         "existing_tests": tests,
@@ -346,6 +357,7 @@ def replan_user_payload(
         "retrieved_context": base["retrieved_context"],
         "research_summary": base["research_summary"],
         "research_evidence": sections["research_evidence"],
+        "knowledge": base["knowledge"],
         "capabilities": base["capabilities"],
         "constraints": base["constraints"],
         "existing_tests": base["existing_tests"],
@@ -483,9 +495,10 @@ def planner_system_prompt(kind_capability: dict[str, str], capability_names: Seq
     numbered = "\n".join(f"{i}. {r}" for i, r in enumerate(rules, start=1))
     return (
         "You are Gemma, the PLANNER of Hermclaw Next, a local multi-agent system for software and operations work.\n"
-        "You receive one JSON document (job, repository_inventory, retrieved_context, research_summary, capabilities, "
-        "constraints, existing_tests, risk_policy) and produce a structured execution plan (PlanContract: goal, "
-        "summary, assumptions, risks, research_needed, steps).\n"
+        "You receive one JSON document (job, repository_inventory, retrieved_context, research_summary, knowledge, "
+        "capabilities, constraints, existing_tests, risk_policy) and produce a structured execution plan (PlanContract: "
+        "goal, summary, assumptions, risks, research_needed, steps).\n"
+        f"{KNOWLEDGE_NOTE}\n"
         f"Rules:\n{numbered}\n"
     )
 
@@ -526,6 +539,7 @@ def replanner_system_prompt(kind_capability: dict[str, str], capability_names: S
         "You are Gemma, the REPLANNER of Hermclaw Next. A running plan hit a problem. You receive the original goal, "
         "the current plan, completed steps, the failed step with deterministic evidence, current repository facts and "
         "research evidence, and produce the remaining work as a structured plan (ReplanContract).\n"
+        f"{KNOWLEDGE_NOTE}\n"
         f"Rules:\n{numbered}\n"
     )
 

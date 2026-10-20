@@ -225,6 +225,7 @@ async def make_harness(
     git_reader: Any = None,
     policy: PoliciesConfig | None = None,
     step_fields: dict[str, Any] | None = None,
+    memory: Any = None,
 ) -> Harness:
     pol = policy or policies()
     step = await make_step(sm, **(step_fields or {}))
@@ -240,6 +241,8 @@ async def make_harness(
         repo_provider or ScriptedRepo(),
         callbacks or RecordingCallbacks(),
         permissions=permissions,
+        memory=memory,
+        memory_scopes=[f"repo:{ws.repository_key}"] if memory is not None else None,
     )
     return Harness(engine, step, ws, repo, sm, uuid.uuid4())
 

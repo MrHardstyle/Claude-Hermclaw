@@ -627,15 +627,37 @@ class BugRecord(TimestampMixin, Base):
     fix_commit: Mapped[str | None] = mapped_column(String(64))
 
 
-class MemoryEntry(CreatedMixin, Base):
-    """Reserved for later memory features – disabled by default (Bauplan §10)."""
+class MemoryEntry(TimestampMixin, Base):
+    """Hermclaw's knowledge (D-019): lessons, research findings, incidents, tool-bug suspicions and conventions that
+    planner and coder look up (``recall``) and the operator reads and edits on the "Wissen" page. Only ``active``
+    entries reach a model; ``candidate`` entries wait for evidence or the operator."""
 
     __tablename__ = "memory_entries"
     id: Mapped[uuid.UUID] = _uuid_pk()
-    kind: Mapped[str] = mapped_column(String(32), nullable=False)
-    content: Mapped[str] = mapped_column(Text, nullable=False)
+    kind: Mapped[str] = mapped_column(String(32), nullable=False)  # lesson|research|incident|tool_bug|convention|note
+    title: Mapped[str] = mapped_column(String(300), nullable=False, default="")
+    content: Mapped[str] = mapped_column(Text, nullable=False)  # Markdown
+    status: Mapped[str] = mapped_column(String(16), nullable=False, default="candidate")  # candidate|active|retired
+    source: Mapped[str] = mapped_column(String(32), nullable=False, default="system")  # system|operator|research
+    scope: Mapped[str | None] = mapped_column(String(300))  # None = everywhere, "repo:<key>", "model:<alias>"
+    tags: Mapped[list[str]] = _json(list)
+    signature: Mapped[str | None] = mapped_column(String(300), index=True)  # normalised failure pattern of incidents
+    occurrences: Mapped[int] = mapped_column(Integer, nullable=False, default=1)
+    recalls: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    job_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), ForeignKey("jobs.id", ondelete="SET NULL"), index=True)
+    evidence: Mapped[dict[str, Any]] = _json(dict)
     embedding: Mapped[list[float] | None] = mapped_column(Vector(EMBEDDING_DIM))
-    enabled: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    embedding_model: Mapped[str | None] = mapped_column(String(100))
+    expires_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    __table_args__ = (
+        Index("ix_memory_entries_kind_status", "kind", "status"),
+        Index(
+            "ix_memory_entries_embedding_hnsw",
+            "embedding",
+            postgresql_using="hnsw",
+            postgresql_ops={"embedding": "vector_cosine_ops"},
+        ),
+    )
 
 
 # ============================================================================================= repository intelligence

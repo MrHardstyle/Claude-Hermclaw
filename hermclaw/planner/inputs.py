@@ -42,6 +42,7 @@ class PlannerInput(BaseModel):
     repository_inventory: dict[str, Any] = Field(default_factory=dict)
     retrieved_context: list[ContextSnippet] = Field(default_factory=list)
     research_summary: dict[str, Any] = Field(default_factory=dict)
+    knowledge: list[str] = Field(default_factory=list, description="active knowledge entries relevant to the job (D-019)")
     capabilities: list[str] | None = Field(default=None, description="available capability names; None = all configured")
     constraints: list[str] = Field(default_factory=list)
     existing_tests: list[str] = Field(default_factory=list)

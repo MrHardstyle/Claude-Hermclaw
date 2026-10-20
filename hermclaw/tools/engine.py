@@ -31,7 +31,7 @@ from collections.abc import Awaitable, Callable, Iterable, Mapping
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from pydantic import BaseModel
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
@@ -39,12 +39,23 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 from hermclaw.contracts.common import Severity
 from hermclaw.contracts.events import EventType
 from hermclaw.contracts.scope import Operation, ScopeExpansionRequest
-from hermclaw.contracts.tools import OPS_TOOLS, TERMINAL_TOOLS, BlockReport, CoderAction, CompletionReport, ToolName, ToolResult
+from hermclaw.contracts.tools import (
+    MUTATING_TOOLS,
+    OPS_TOOLS,
+    SALVAGE_DECISION,
+    TERMINAL_TOOLS,
+    BlockReport,
+    CoderAction,
+    CompletionReport,
+    ToolName,
+    ToolResult,
+)
 from hermclaw.contracts.worker import CommandResult
 from hermclaw.core.config import PoliciesConfig
 from hermclaw.core.interfaces import CommandExecutor, ExecutionRequest, GitReader, RepoContextProvider, RepoHit, WorkspaceHandle
 from hermclaw.core.logging import get_logger
 from hermclaw.core.redaction import DEFAULT_REDACTOR, REDACTED, Redactor
+from hermclaw.models.protocols import CallContext as ModelCallContext
 from hermclaw.research.questions import unanswerable_reason
 from hermclaw.scope.guard import ScopeGuard
 from hermclaw.tools import errors as E
@@ -66,6 +77,7 @@ from hermclaw.tools.registry import (
     ListFilesArgs,
     ReadFileArgs,
     ReadRangeArgs,
+    RecallArgs,
     ReplaceTextArgs,
     RequestReplanArgs,
     RequestResearchArgs,
@@ -91,6 +103,9 @@ from hermclaw.tools.workspace import (
     regex_is_risky,
     search_files,
 )
+
+if TYPE_CHECKING:
+    from hermclaw.memory.store import MemoryStore
 
 log = get_logger(__name__)
 
@@ -249,6 +264,8 @@ class ToolEngine:
         ops: OpsToolProvider | None = None,
         capability: str | None = None,
         artifacts_dir: Path | None = None,
+        memory: MemoryStore | None = None,
+        memory_scopes: list[str] | None = None,
     ) -> None:
         self.policies = policies
         self.workspace = workspace
@@ -265,6 +282,8 @@ class ToolEngine:
         self.ops = ops
         self.capability = capability
         self.artifacts_dir = artifacts_dir  # ops tool outputs are stored as ``ops_output`` artifacts (acceptance evidence)
+        self.memory = memory  # Hermclaw's knowledge (D-019); without it the recall tool is not offered
+        self.memory_scopes = memory_scopes
         self._sm = sessionmaker
         self.output_limit = max(500, policies.coder.tool_output_chars)
         self.fs = WorkspaceFS(workspace.path, read_forbidden=policies.scope.always_forbidden)
@@ -313,6 +332,7 @@ class ToolEngine:
             ToolName.find_text: self._find_text,
             ToolName.search_repo: self._search_repo,
             ToolName.search_symbol: self._search_symbol,
+            ToolName.recall: self._recall,
             ToolName.git_status: self._git_status,
             ToolName.git_diff: self._git_diff,
             ToolName.write_file: self._write_file,
@@ -349,6 +369,8 @@ class ToolEngine:
         return self.permissions.max_turns or self.policies.coder.max_turns
 
     def _provided(self, tool: ToolName) -> bool:
+        if tool is ToolName.recall:
+            return self.memory is not None
         return tool not in OPS_TOOLS or (self.ops is not None and self.ops.provides(tool))
 
     def available_tools(self) -> list[ToolName]:
@@ -424,7 +446,10 @@ class ToolEngine:
         try:
             self._precheck(spec, ctx)
             args = validate_args(spec, action.args)
-            return await self._handlers[spec.name](args, ctx, events)
+            result = await self._handlers[spec.name](args, ctx, events)
+            if result.ok and spec.name in MUTATING_TOOLS and result.mutated_paths and action.decision != SALVAGE_DECISION:
+                result = await self._lint_after_write(result, ctx, events)
+            return result
         except ToolError as exc:
             return ToolResult(tool=spec.name, ok=False, output=exc.message, error_code=exc.code, data=exc.data)
         except Exception as exc:  # never leak a traceback to the model; keep the runtime alive
@@ -825,6 +850,27 @@ class ToolEngine:
         return self._ok(
             ToolName.search_symbol, out, truncated=clipped, data={"hits": n, "paths": [h.path for h in hits if not self._hidden(h.path)]}
         )
+
+    async def _recall(self, args: RecallArgs, ctx: CallContext, events: list[PendingEvent]) -> ToolResult:
+        """Active knowledge entries closest to the query (D-019)."""
+        if self.memory is None:
+            raise ToolError(E.MEMORY_UNAVAILABLE, "recall is not available in this installation")
+        call = ModelCallContext(purpose="memory", job_id=ctx.job_id, step_id=ctx.step_id, attempt_id=ctx.attempt_id)
+        try:
+            hits = await self.memory.search(args.query, k=args.k, scopes=self.memory_scopes, ctx=call)
+        except Exception as exc:
+            raise ToolError(E.MEMORY_UNAVAILABLE, f"the knowledge store is unavailable: {type(exc).__name__}") from exc
+        if not hits:
+            return self._ok(
+                ToolName.recall,
+                "no knowledge entry matches this query; go on with the task (another query with the exact error code or "
+                "tool name may find one)",
+                data={"hits": 0},
+            )
+        limit = self.policies.memory.max_entry_chars
+        text = "\n\n".join(f"{n}. {h.render(limit)}\n(relevance {h.score:.2f})" for n, h in enumerate(hits, start=1))
+        out, clipped = clip_head(text, self.output_limit)
+        return self._ok(ToolName.recall, out, truncated=clipped, data={"hits": len(hits), "ids": [str(h.id) for h in hits]})
 
     # ============================================================================================ 17.2 git read
     async def _git_status(self, args: BaseModel, ctx: CallContext, events: list[PendingEvent]) -> ToolResult:
@@ -1881,9 +1927,41 @@ class ToolEngine:
                 )
         return out
 
-    async def _lint_commands(self) -> list[str]:
-        """The verifier's lint commands for the files changed now – a review correction on K1 (cycle 2, rc60) brought
-        a new F841 in and the verifier blocked the step on its last attempt (BUG-283)."""
+    async def _lint_after_write(self, result: ToolResult, ctx: CallContext, events: list[PendingEvent]) -> ToolResult:
+        """The verifier's lint findings in the files just written, added to the write's result: Agents-A1 (tournament
+        A3) learned of an unused import only at complete_step, fixed one of two findings and spent seven turns calling
+        ruff with invented options (BUG-302). A lint that cannot run here adds nothing."""
+        commands = await self._lint_commands(result.mutated_paths)
+        if not commands or ctx.turn >= self.max_turns:
+            return result
+        found: list[str] = []
+        for command in commands:
+            try:
+                run = await self._sandbox_run(
+                    ToolName.run_command,
+                    command=command,
+                    cwd_raw=".",
+                    timeout_seconds=None,
+                    purpose="lint-after-write",
+                    ctx=ctx,
+                    events=events,
+                )
+            except ToolError:
+                continue
+            if run.sandbox_failed or run.result is None or run.result.timed_out or run.result.exit_code in (0, 126, 127):
+                continue
+            found.append(self._render_run(command, run, budget=self.output_limit // 2, head_ratio=0.5)[0])
+        if not found:
+            return result
+        note = (
+            "\n\nlint, run as the verifier runs it, finds problems in the file(s) just written. Fix every finding now "
+            "(the step cannot complete with them; if you are still writing the file in parts, finish it first):\n"
+        )
+        return result.model_copy(update={"output": result.output + note + "\n".join(found), "data": result.data | {"lint_findings": True}})
+
+    async def _lint_commands(self, paths: list[str] | None = None) -> list[str]:
+        """The verifier's lint commands for the files changed now, or for ``paths`` – a review correction on K1 (cycle
+        2, rc60) brought a new F841 in and the verifier blocked the step on its last attempt (BUG-283)."""
         from hermclaw.verifier.checks import lint_command
         from hermclaw.verifier.languages import detect_language
 
@@ -1891,7 +1969,7 @@ class ToolEngine:
         if not templates:
             return []
         by_language: dict[str, list[str]] = {}
-        for rel in await self._changed_files() or []:
+        for rel in paths if paths is not None else await self._changed_files() or []:
             path = self.fs.root / rel
             if not path.is_file():
                 continue
@@ -1914,7 +1992,9 @@ class ToolEngine:
                     ToolName.run_command, command=command, cwd_raw=".", timeout_seconds=None, purpose="verifier", ctx=ctx, events=events
                 )
             except ToolError as exc:
-                if exc.code == E.COMMAND_REPEATED and not exc.data.get("passed"):
+                previous = self._ran.get((".", command.strip()))
+                missing_tool = previous is not None and previous[2] in ("exit code 126", "exit code 127")
+                if exc.code == E.COMMAND_REPEATED and not exc.data.get("passed") and not missing_tool:
                     return command, self._ran_output.get((".", command), "(output not kept)")
                 continue
             if run.sandbox_failed or run.result is None or run.result.timed_out or run.result.exit_code in (0, 126, 127):

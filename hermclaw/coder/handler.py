@@ -50,6 +50,7 @@ from hermclaw.tournament.settings import TournamentSettings, tournament_of
 
 if TYPE_CHECKING:
     from hermclaw.gitops.engine import GitEngine
+    from hermclaw.memory.store import MemoryStore
     from hermclaw.runtime.scratch import ScratchWorkspaces
     from hermclaw.scope.audit import ScopeAuditor
     from hermclaw.scope.engine import ScopeEngine
@@ -187,6 +188,7 @@ class ImplementDeps:
     ops: OpsToolProvider | None = None  # P26–P28 operations tools (SSH/DB/container), gated by step capability
     scratch: ScratchWorkspaces | None = None  # R-026: scratch workspace for jobs without a repository
     artifacts_dir: Path | None = None  # ops tool outputs are stored as ``ops_output`` step artifacts
+    memory: MemoryStore | None = None  # Hermclaw's knowledge (D-019): the recall tool
 
 
 # ----------------------------------------------------------------------------- helpers
@@ -497,6 +499,8 @@ class ImplementStepHandler:
             ops=self.deps.ops,
             capability=row.capability,
             artifacts_dir=self.deps.artifacts_dir,
+            memory=self.deps.memory,
+            memory_scopes=[f"repo:{handle.repository_key}"],
         )
         tournament = await self._tournament(ctx.job_id)
         coder_alias = tournament.coder_alias if tournament is not None else None

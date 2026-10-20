@@ -4,7 +4,11 @@ Format: [Keep a Changelog](https://keepachangelog.com/de/1.1.0/), Versionen nach
 
 ## [Unreleased]
 
+### Hinzugefügt
+- **Gedächtnis (D-019), Teil 1:** Wissensspeicher in `memory_entries` (Migration 0003) für Lehren, Recherche, Vorfälle, Werkzeug-Bug-Verdacht und Konventionen, mit semantischer Suche und Wortsuche als Rückfall. Der Coder schlägt mit dem neuen Werkzeug `recall` nach, Planner und Replanner bekommen die passendsten aktiven Einträge als `knowledge`. API `/api/memory` für die Kontrollraum-Seite „Wissen“; Richtlinie `policies.memory`.
+
 ### Behoben
+- **Lint-Befunde direkt nach dem Schreiben (BUG-302):** Schreibwerkzeuge hängen die Befunde des Verifier-Lints für die geschriebenen Dateien an ihr Ergebnis. Vorher erfuhr der Coder erst bei `complete_step` davon und verlor Runden mit erfundenen ruff-Aufrufen.
 - **`replace_text` und Leerzeichen am Zeilenende (BUG-301):** Eine Leerzeile mit Einrückungsleerzeichen in der Datei passt jetzt zu einer leeren Zeile im `old` eines mehrzeiligen Ersatzes. Vorher scheiterte GLM-4.7-Flash im Turnier viermal an einem unsichtbaren Unterschied, der Hinweis nannte die Einrückung.
 - **Doctor und GGUF-Modelle (BUG-300):** Profile auf dem llama-server prüft nur noch `llamacpp:<host>`; Modelle aus GGUF-Dateien gelten nicht mehr als „nicht installiert“. Kommt mit dem Release nach dem Coder-Turnier.
 - **Abgebrochenes Deployment startet beim nächsten Lauf neu (BUG-299):** Ein Neustart, den ein Lauf beschlossen, aber nicht mehr erreicht hat, bleibt unter `/run` vorgemerkt. Vorher lief nach einem Abbruch zwischen Umschalten und Start der alte Release weiter.

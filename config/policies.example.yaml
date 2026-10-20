@@ -127,3 +127,12 @@ wake_on_lan:
   idle_command_timeout_seconds: 60
   # pause between two failed readiness probes (TCP/HTTP/SSH) while a woken host boots
   probe_interval_seconds: 2
+# Hermclaw's knowledge (D-019, page "Wissen"): recall tool, lessons in planner/coder prompts, learning after jobs
+memory:
+  enabled: true
+  recall_k: 5            # entries one recall returns at most
+  planner_entries: 4     # active entries given to planner/replanner with the job
+  coder_entries: 2       # active entries matching a failure, given with the correction
+  min_score: 0.55        # cosine similarity below which an entry is not relevant
+  learn: true            # record incidents of failed or stalled work after each job
+  promote_after: 2       # jobs with the same incident before its lesson becomes active

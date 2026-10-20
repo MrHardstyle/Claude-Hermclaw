@@ -17,6 +17,7 @@ class ToolName(StrEnum):
     find_text = "find_text"
     search_repo = "search_repo"
     search_symbol = "search_symbol"
+    recall = "recall"  # Hermclaw's knowledge (D-019): lessons, research, known tool problems, conventions
     git_status = "git_status"
     git_diff = "git_diff"
     write_file = "write_file"
@@ -53,6 +54,9 @@ class ToolName(StrEnum):
 
 
 MUTATING_TOOLS = frozenset({ToolName.write_file, ToolName.replace_text, ToolName.apply_patch})
+# the decision of a write_file the runtime rebuilt from an answer cut off at the output limit (BUG-252): the file is
+# incomplete on purpose, so nothing judges it yet (BUG-302)
+SALVAGE_DECISION = "salvage-cut-off-write"
 TERMINAL_TOOLS = frozenset({ToolName.complete_step, ToolName.block_step, ToolName.request_replan})
 
 DEPENDENCY_TOOLS = frozenset({ToolName.install_dependencies})

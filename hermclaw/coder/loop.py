@@ -31,7 +31,7 @@ from hermclaw.context_builder import (
     record_context_report,
 )
 from hermclaw.contracts.events import EventType
-from hermclaw.contracts.tools import CoderAction, ToolName, ToolResult
+from hermclaw.contracts.tools import SALVAGE_DECISION, CoderAction, ToolName, ToolResult
 from hermclaw.core.errors import ModelError, ModelOutputInvalid, ModelOutputTruncated
 from hermclaw.core.interfaces import WorkspaceHandle
 from hermclaw.core.logging import get_logger
@@ -52,6 +52,7 @@ _READ_ONLY = frozenset(
         ToolName.find_text,
         ToolName.search_repo,
         ToolName.search_symbol,
+        ToolName.recall,
         ToolName.git_status,
         ToolName.git_diff,
     }
@@ -415,7 +416,7 @@ class CoderLoop:
                         tool=ToolName.write_file,
                         args={"path": salvaged.path, "content": salvaged.content, "append": salvaged.append},
                         status=f"{salvaged.path}: {salvaged.lines} Zeilen geschrieben (Ausgabelimit erreicht)",
-                        decision="salvage-cut-off-write",
+                        decision=SALVAGE_DECISION,
                     )
                     result = await self.engine.execute(action, job_id=job_id, step_id=step_id, attempt_id=attempt_id, turn=turn)
                     if result.ok:

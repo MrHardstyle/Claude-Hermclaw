@@ -46,7 +46,7 @@ plan_json_schema() / replan_json_schema()   # JSON schema sent as structured-out
 ```
 
 `PlannerInput` holds `repository_inventory`, `retrieved_context: list[ContextSnippet]` (`ContextSnippet.from_hit(RepoHit)`),
-`research_summary`, `capabilities` (subset of configured capabilities, `None` means all), `constraints`,
+`research_summary`, `knowledge` (the active knowledge entries closest to the job text, D-019, filled by the driver from `policies.memory.planner_entries`), `capabilities` (subset of configured capabilities, `None` means all), `constraints`,
 `existing_tests`, `risk_policy` (overrides that can only make the policy stricter), `known_paths`, `known_symbols`,
 `test_command`, `test_framework`. The `job` section comes from the `jobs` row and `job_inputs` constraints.
 

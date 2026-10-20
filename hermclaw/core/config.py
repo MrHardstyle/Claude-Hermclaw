@@ -377,6 +377,19 @@ class WakeOnLanPolicy(_Strict):
     probe_interval_seconds: float = Field(default=2.0, gt=0, le=60)
 
 
+class MemoryPolicy(_Strict):
+    """Hermclaw's knowledge (D-019): what planner and coder are given and what the runtime learns by itself."""
+
+    enabled: bool = True  # the recall tool, lessons in planner/coder prompts, learning after jobs
+    recall_k: int = Field(default=5, ge=1, le=20)  # entries a recall returns at most
+    planner_entries: int = Field(default=4, ge=0, le=20)  # active entries given to planner/replanner with the job
+    coder_entries: int = Field(default=2, ge=0, le=10)  # active entries matching a failure, given with the correction
+    min_score: float = Field(default=0.55, ge=0.0, le=1.0)  # cosine similarity below which an entry is not relevant
+    max_entry_chars: int = Field(default=1200, ge=200, le=8000)  # one entry as a model sees it
+    learn: bool = True  # record incidents of failed/stalled work after a job
+    promote_after: int = Field(default=2, ge=1, le=20)  # jobs with the same incident before its lesson becomes active
+
+
 class PoliciesConfig(_Strict):
     commands: CommandPolicy = Field(default_factory=CommandPolicy)
     sandbox: SandboxPolicy = Field(default_factory=SandboxPolicy)
@@ -392,6 +405,7 @@ class PoliciesConfig(_Strict):
     leases: LeasePolicy = Field(default_factory=LeasePolicy)
     ssh: SshPolicy = Field(default_factory=SshPolicy)
     wake_on_lan: WakeOnLanPolicy = Field(default_factory=WakeOnLanPolicy)
+    memory: MemoryPolicy = Field(default_factory=MemoryPolicy)
 
 
 # ----------------------------------------------------------------------------------------------- capabilities

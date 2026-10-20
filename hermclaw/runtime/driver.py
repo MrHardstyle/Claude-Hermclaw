@@ -47,6 +47,7 @@ from hermclaw.tournament.settings import tournament_of
 if TYPE_CHECKING:
     from hermclaw.gitops.engine import GitEngine
     from hermclaw.gitops.types import WorkspaceInfo
+    from hermclaw.memory.store import MemoryStore
     from hermclaw.planner import Planner, Replanner
     from hermclaw.runtime.scratch import ScratchWorkspaces
 
@@ -191,8 +192,10 @@ class RuntimeJobDriver:
         settings: DriverSettings | None = None,
         scratch: ScratchWorkspaces | None = None,
         resources: ModelLeases | None = None,
+        memory: MemoryStore | None = None,
     ) -> None:
         self.sm = sessionmaker
+        self.memory = memory  # Hermclaw's knowledge (D-019): lessons for planner and replanner
         self.scratch = scratch  # R-026: finalize pushes a repository-less job's scratch branch into its local scratch repo
         self.config = config
         self.planner = planner
@@ -313,12 +316,28 @@ class RuntimeJobDriver:
         return PlannerInput(
             repository_inventory=inventory,
             retrieved_context=hits,
+            knowledge=await self._knowledge(job, ws),
             constraints=constraints,
             existing_tests=test_files,
             known_paths=known,
             test_command=cmd,
             test_framework=framework,  # type: ignore[arg-type]
         )
+
+    async def _knowledge(self, job: Job, ws: WorkspaceInfo | None) -> list[str]:
+        """The active knowledge entries closest to the job text (D-019); planning never fails for the knowledge."""
+        policy = self.config.policies.memory
+        if self.memory is None or not policy.enabled or policy.planner_entries <= 0:
+            return []
+        scopes = [f"repo:{ws.to_handle().repository_key}"] if ws is not None else []
+        try:
+            hits = await self.memory.search(
+                job.prompt[:4000], k=policy.planner_entries, scopes=scopes, ctx=CallContext(purpose="memory", job_id=job.id)
+            )
+        except Exception as exc:
+            log.warning("knowledge for the planner unavailable", extra={"job_id": str(job.id), "error_type": type(exc).__name__})
+            return []
+        return [h.render(policy.max_entry_chars) for h in hits]
 
     # ------------------------------------------------------------------ JobDriver
     async def prepare(self, job_id: uuid.UUID, token: CancelToken) -> JobPhaseResult:

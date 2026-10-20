@@ -42,6 +42,7 @@ from hermclaw.core.logging import get_logger
 from hermclaw.core.settings import Settings
 from hermclaw.gitops.engine import GitEngine
 from hermclaw.media.handler import MediaSettings, MediaStepHandler
+from hermclaw.memory.store import MemoryStore
 from hermclaw.models.protocols import ChatModel, EmbeddingModel
 from hermclaw.planner.planner import Planner
 from hermclaw.planner.replanner import Replanner
@@ -210,6 +211,7 @@ class RuntimeServices:
     wake: WakePort | None = None
     disk: DiskMonitor | None = None
     ops: OpsBundle | None = None  # operations tools (provider, SSH runner for the idle-sleep hook, SSH approvals)
+    memory: MemoryStore | None = None  # Hermclaw's knowledge (D-019)
     _closers: list[Callable[[], Awaitable[Any]]] = field(default_factory=list)
 
     @property
@@ -274,6 +276,9 @@ def build_services(
     else:
         chat = ov.chat
         embedder = ov.embedder
+
+    # knowledge (D-019): recall tool, lessons in prompts, learning after jobs
+    memory = MemoryStore(sessionmaker, embedder, config.policies.memory) if config.policies.memory.enabled else None
 
     # git + repository context
     git = GitEngine.from_config(config, settings, sessionmaker, gitlab=ov.gitlab)
@@ -356,6 +361,7 @@ def build_services(
         scratch=scratch,
         ops=ops_bundle.provider,
         artifacts_dir=artifacts,
+        memory=memory,
     )
     if ov.lease_keeper_interval is not None:
         deps = dataclasses.replace(deps, lease_keeper_interval=ov.lease_keeper_interval)
@@ -396,6 +402,7 @@ def build_services(
         settings=ov.driver_settings or DriverSettings(artifacts_dir=artifacts),
         scratch=scratch,
         resources=resources,
+        memory=memory,
     )
     disk = DiskMonitor(
         sessionmaker,
@@ -425,6 +432,7 @@ def build_services(
         wake=ov.wake,
         disk=disk,
         ops=ops_bundle,
+        memory=memory,
         _closers=closers,
     )
 

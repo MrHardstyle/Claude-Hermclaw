@@ -72,6 +72,11 @@ class SearchRepoArgs(ToolArgs):
     k: int = Field(default=10, ge=1, le=50)
 
 
+class RecallArgs(ToolArgs):
+    query: str = Field(min_length=1, max_length=500, description="what you need to know: the error, tool, format or task")
+    k: int = Field(default=5, ge=1, le=10)
+
+
 class SearchSymbolArgs(ToolArgs):
     name: str = Field(min_length=1, max_length=200)
     k: int = Field(default=10, ge=1, le=50)
@@ -267,6 +272,13 @@ _SPECS: list[ToolSpec] = [
     ),
     _spec(ToolName.search_repo, SearchRepoArgs, "read", "Semantic/lexical repository search via repository intelligence."),
     _spec(ToolName.search_symbol, SearchSymbolArgs, "read", "Find definitions of a symbol (function, class, ...) by name."),
+    _spec(
+        ToolName.recall,
+        RecallArgs,
+        "read",
+        "Look up Hermclaw's knowledge: lessons from earlier jobs, research findings, known tool problems and conventions. "
+        "Use it when a check keeps failing, a tool refuses an action, or before an unfamiliar tool or file format.",
+    ),
     _spec(ToolName.git_status, NoArgs, "git", "Show changed/untracked files of the workspace (read-only)."),
     _spec(ToolName.git_diff, GitDiffArgs, "git", "Show the current diff of the workspace, optionally limited to paths (read-only)."),
     _spec(

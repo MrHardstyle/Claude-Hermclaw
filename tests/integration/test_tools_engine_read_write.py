@@ -393,6 +393,36 @@ async def test_replace_text_exact_unique_and_count(sessionmaker: SM, repo: Path)
     assert res.ok and "password = hunter2hunter2" in (repo / "config.ini").read_text()
 
 
+async def test_recall_finds_active_knowledge_of_this_repository(sessionmaker: SM, repo: Path) -> None:
+    """D-019: the coder looks up Hermclaw's knowledge – active entries, global or of this repository, nearest first;
+    without a knowledge store the tool is not offered."""
+    from sqlalchemy import delete
+
+    from hermclaw.core.config import MemoryPolicy
+    from hermclaw.memory.store import MemoryStore
+    from hermclaw.persistence.models import MemoryEntry
+    from tests.integration.test_repo_intelligence_support import HashingEmbedder
+
+    async with sessionmaker() as s:
+        await s.execute(delete(MemoryEntry))
+        await s.commit()
+    store = MemoryStore(sessionmaker, HashingEmbedder(), MemoryPolicy(min_score=0.2))
+    lesson = await store.add(
+        kind="lesson", title="ruff F401 in tests", content="remove every unused import ruff names, tests too", status="active"
+    )
+    await store.add(kind="lesson", title="ruff F401 elsewhere", content="ruff unused import", status="active", scope="repo:other")
+    await store.add(kind="lesson", title="ruff F401 unproven", content="ruff unused import", status="candidate")
+    h = await make_harness(sessionmaker, repo, memory=store)
+    assert ToolName.recall in h.engine.available_tools()
+    res = await h.call("recall", query="ruff F401 unused import")
+    assert res.ok and "[lesson] ruff F401 in tests" in res.output and "elsewhere" not in res.output and "unproven" not in res.output
+    assert res.data["ids"] == [str(lesson)]
+    none = await h.call("recall", query="kubernetes helm chart")
+    assert none.ok and none.data["hits"] == 0 and "no knowledge entry matches" in none.output
+    plain = await make_harness(sessionmaker, repo)
+    assert ToolName.recall not in plain.engine.available_tools()
+
+
 async def test_replace_text_handles_crlf_files(sessionmaker: SM, repo: Path) -> None:
     (repo / "src" / "calc.py").write_bytes(b"def mul(a, b):\r\n    return a * b\r\n")
     h = await make_harness(sessionmaker, repo, contract=scope(target_paths=["src/calc.py"]))

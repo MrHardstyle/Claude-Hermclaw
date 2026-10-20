@@ -12,7 +12,7 @@ import pytest
 
 from hermclaw.contracts.events import EventType
 from hermclaw.contracts.scope import ScopeContract
-from hermclaw.contracts.tools import CoderAction, ToolName
+from hermclaw.contracts.tools import SALVAGE_DECISION, CoderAction, ToolName
 from hermclaw.core.redaction import REDACTED
 from hermclaw.tools import errors as E
 from hermclaw.tools.context import ScopeExpansionOutcome, ToolPermissions
@@ -577,6 +577,11 @@ class TimeoutRecorder:
         return CommandResult(request_id="r", exit_code=None, timed_out=True, stdout="Server running on port 3000\n", sandbox="podman")
 
 
+def _runs(rec: Any) -> list[Any]:
+    """The sandbox requests of the commands themselves, without the lint a write runs (BUG-302)."""
+    return [r for r in rec.requests if r.purpose != "lint-after-write"]
+
+
 async def test_a_command_that_timed_out_is_not_rerun_on_an_unchanged_workspace(sessionmaker: SM, repo: Path) -> None:
     """BUG-164 (live job e3cab55e): the coder started `node src/app.js` (a server) and a test that never closed the
     server more than 15 times with run_test – each run blocked for the full 600 s timeout. A timeout now explains
@@ -587,12 +592,12 @@ async def test_a_command_that_timed_out_is_not_rerun_on_an_unchanged_workspace(s
     assert not res.ok and "timed out" in res.output and "[hint] Commands must exit on their own" in res.output
     again = await h.call("run_test", command="node src/app.js ")
     assert again.error_code == E.COMMAND_TIMEOUT and "no file changed since" in again.output
-    assert len(rec.requests) == 1  # the repeat never reached the sandbox
+    assert len(_runs(rec)) == 1  # the repeat never reached the sandbox
     await h.call("run_command", command="node src/app.js", timeout_seconds=30)
-    assert len(rec.requests) == 2  # another timeout is another command
+    assert len(_runs(rec)) == 2  # another timeout is another command
     assert (await h.call("write_file", path="src/gen_fix.py", content="FIXED = 1\n")).ok
     await h.call("run_test", command="node src/app.js")
-    assert len(rec.requests) == 3  # after a file change the command may succeed now
+    assert len(_runs(rec)) == 3  # after a file change the command may succeed now
 
 
 async def test_reinstalling_an_unchanged_manifest_is_refused_and_missing_modules_are_named(sessionmaker: SM, repo: Path) -> None:
@@ -639,13 +644,13 @@ async def test_identical_command_on_unchanged_files_is_not_rerun(sessionmaker: S
     assert (await h.call("run_test", command="python -m unittest")).ok
     again = await h.call("run_test", command="python -m unittest")
     assert again.error_code == E.COMMAND_REPEATED and "already ran in turn" in again.output and "complete_step" in again.output
-    assert len(rec.requests) == 1
+    assert len(_runs(rec)) == 1
     # rc22 battery X2: the same green command with an explicit timeout ran again (BUG-211)
     assert (await h.call("run_test", command="python -m unittest", timeout_seconds=30)).error_code == E.COMMAND_REPEATED
     assert (await h.call("run_command", command="python -m unittest -v")).ok  # a different command runs
     assert (await h.call("write_file", path="src/gen_new.py", content="X = 1\n")).ok
     assert (await h.call("run_test", command="python -m unittest")).ok  # after a file change it runs again
-    assert len(rec.requests) == 3
+    assert len(_runs(rec)) == 3
 
 
 async def test_a_refused_repeat_of_a_failed_command_carries_its_output(sessionmaker: SM, repo: Path) -> None:
@@ -737,6 +742,27 @@ async def test_complete_step_runs_the_lint_of_the_changed_files(sessionmaker: SM
     h = await make_harness(sessionmaker, repo, contract=scope(**SCOPE), policy=pol)
     assert (await h.call("write_file", path="src/calc.py", content="x = 1\n")).ok
     assert (await h.call("complete_step", summary="no linter in the image")).ok
+
+
+async def test_a_write_reports_the_lint_findings_of_the_written_file(sessionmaker: SM, repo: Path) -> None:
+    """Tournament Agents-A1 A3 (BUG-302): the coder learned of two unused imports only at complete_step, fixed one and
+    spent seven turns calling ruff with invented options. A write now carries the verifier's lint findings of the file
+    it wrote; a clean file, a missing linter and a write rebuilt from a cut-off answer add nothing."""
+    pol = policies()
+    pol.verifier.lint_commands = {"python": "! grep -Hn UNUSED {files}"}
+    h = await make_harness(sessionmaker, repo, contract=scope(**SCOPE), policy=pol)
+    res = await h.call("write_file", path="src/calc.py", content="import os\nUNUSED = 1\n")
+    assert res.ok and "lint, run as the verifier runs it" in res.output and "src/calc.py:2:" in res.output, res.output
+    assert res.data.get("lint_findings") is True
+    fixed = await h.call("replace_text", path="src/calc.py", old="UNUSED = 1", new="USED = 1")
+    assert fixed.ok and "lint" not in fixed.output, fixed.output
+    cut = await h.engine.execute(
+        CoderAction(tool=ToolName.write_file, args={"path": "src/calc.py", "content": "UNUSED = 2\n"}, decision=SALVAGE_DECISION)
+    )
+    assert cut.ok and "lint" not in cut.output
+    pol.verifier.lint_commands = {"python": "exit 127"}
+    h = await make_harness(sessionmaker, repo, contract=scope(**SCOPE), policy=pol)
+    assert "lint" not in (await h.call("write_file", path="src/calc.py", content="UNUSED = 3\n")).output
 
 
 async def test_complete_step_reruns_the_check_the_correction_names(sessionmaker: SM, repo: Path) -> None:
