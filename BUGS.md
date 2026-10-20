@@ -46,6 +46,13 @@ Noch keine.
 
 ## Behobene Bugs
 
+### BUG-301 – `replace_text` scheitert an Leerzeilen mit Einrückungsleerzeichen, der Hinweis führt in die Irre
+- Phase: Coder-Turnier 0.1.0rc62, 2026-10-20 (GLM-4.7-Flash, A3 Lauf 1) · Komponente: tools (`replace_text`) · Severity: P2 · blockierend: nein (der Lauf endete im Zeitlimit) · Status: **behoben im Repository, Auslieferung mit dem Release nach dem Coder-Turnier** (`tests/integration/test_tools_engine_read_write.py::test_spaces_at_line_ends_do_not_decide_a_match`)
+- Reproduktion: Der Coder schreibt `messwerte.py` mit Leerzeilen, die 16 Leerzeichen enthalten. Sein späteres `replace_text` hat in `old` echte Leerzeilen. Viermal `TEXT_NOT_FOUND` mit „its first line appears at line(s) 42 – re-read that range, indentation must match“; `read_range` zeigt keinen Unterschied, das Modell liest die Datei immer wieder und gibt auf.
+- Ursache: Der Vergleich war exakt, auch für unsichtbare Leerzeichen am Zeilenende. Der Hinweis nannte die Einrückung, die stimmte.
+- Fix: Liefert der exakte Vergleich nichts, gelten Leerzeichen und Tabs vor einem Zeilenumbruch innerhalb eines mehrzeiligen `old` als gleich. Die letzte Zeile wird weiter exakt verglichen, ein einzeiliges `old` also nie lockerer als vorher. `count` gilt wie beim exakten Treffer; das Ergebnis sagt „spaces at line ends were ignored“.
+- Turnier: Der GLM-Lauf A3 #1 wird als durch BUG-301 belastet gekennzeichnet; GLM wird mit der neuen Runtime neben coder-main als Referenz nachgetestet.
+
 ### BUG-300 – Doctor verlangt Ollama-Tags für Modelle, die llama.cpp aus GGUF-Dateien lädt
 - Phase: Deployment 0.1.0rc62, 2026-10-20 · Komponente: doctor · Severity: P2 · blockierend: ja für die Abschlussprüfung des Deployments (`Stop when the installation is not able to run jobs`), nicht für Jobs · Status: **behoben im Repository, Auslieferung mit dem Release nach dem Coder-Turnier** (rc62 bleibt eingefroren) (`tests/integration/test_doctor.py::test_llamacpp_server_is_checked_for_the_profiles_that_use_it`)
 - Reproduktion: Profile `coder-ornith-35b` u. a. mit `backend: llamacpp`, Modell aus `ollama_llamacpp_models[].path`. Doctor meldet „FAIL models:model-224 not installed: devstral-small-2:24b, ornith-1.5:35b, …“, während „llamacpp:model-224 healthy, serves … ornith-1.5:35b …“ grün ist.

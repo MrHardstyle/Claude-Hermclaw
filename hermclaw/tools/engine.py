@@ -987,6 +987,13 @@ class ToolEngine:
                 mutated_paths=[rel],
                 data={"path": rel, "operation": "modify", "replacements": 1, "first_line": first_line, "kept_masked": kept_masked},
             )
+        if count == 0 and REDACTED not in old and "\r\n" not in text:
+            loose = _line_end_matches(text, old)
+            if loose:
+                # live tournament GLM A3: the file's blank lines held the indentation spaces, the coder's 'old' had
+                # empty lines; four replaces failed with "indentation must match" while read_range showed no
+                # difference (BUG-301). Spaces at the end of a line are invisible, so they do not decide a match.
+                return await self._replace_spans(rel, target, text, loose, new=new, want=args.count, mode=tf.mode, events=events)
         if count == 0:
             raise ToolError(E.TEXT_NOT_FOUND, self._not_found_hint(rel, text, old))
         if count != args.count:
@@ -1007,6 +1014,43 @@ class ToolEngine:
             f"replaced {count} occurrence(s) in {rel} (first at line {first_line}); file now has {len(data)} bytes",
             mutated_paths=[rel],
             data={"path": rel, "operation": "modify", "replacements": count, "first_line": first_line},
+        )
+
+    async def _replace_spans(
+        self,
+        rel: str,
+        target: Path,
+        text: str,
+        spans: list[tuple[int, int]],
+        *,
+        new: str,
+        want: int,
+        mode: int | None,
+        events: list[PendingEvent],
+    ) -> ToolResult:
+        """Replace the matches of an 'old' that differs from the file only in spaces at line ends (BUG-301)."""
+        lines = [text.count("\n", 0, a) + 1 for a, _ in spans]
+        if len(spans) != want:
+            raise ToolError(
+                E.TEXT_COUNT_MISMATCH,
+                f"'old' occurs {len(spans)} times in {rel} (lines {', '.join(map(str, lines[:20]))}, ignoring spaces at "
+                f"line ends) but count={want}; add surrounding context to make it unique or pass count={len(spans)}",
+                data={"occurrences": len(spans), "lines": lines[:50]},
+            )
+        parts, pos = [], 0
+        for a, b in spans:
+            parts += [text[pos:a], new]
+            pos = b
+        updated = "".join(parts) + text[pos:]
+        data = updated.encode("utf-8")
+        await asyncio.to_thread(self.fs.atomic_write, target, data, mode=mode)
+        self._file_changed(ToolName.replace_text, [{"path": rel, "operation": "modify", "replacements": len(spans)}], events)
+        return self._ok(
+            ToolName.replace_text,
+            f"replaced {len(spans)} occurrence(s) in {rel} (first at line {lines[0]}; spaces at line ends were ignored "
+            f"for the match); file now has {len(data)} bytes",
+            mutated_paths=[rel],
+            data={"path": rel, "operation": "modify", "replacements": len(spans), "first_line": lines[0], "line_end_spaces": True},
         )
 
     def _masked_replace(self, text: str, old: str, new: str) -> tuple[str, int, bool] | None:
@@ -1944,6 +1988,17 @@ class ToolEngine:
             terminal=True,
             data={"report": args.model_dump()},
         )
+
+
+def _line_end_matches(text: str, old: str) -> list[tuple[int, int]]:
+    """Spans of ``old`` in ``text`` when spaces and tabs before a line break inside ``old`` are not compared – a
+    blank line with indentation spaces equals an empty one (BUG-301). The last line of ``old`` is compared as it is,
+    so a one-line 'old' never matches more loosely than before."""
+    if "\n" not in old:
+        return []
+    *heads, last = old.split("\n")
+    pattern = "".join(re.escape(ln.rstrip(" \t")) + r"[ \t]*\n" for ln in heads) + re.escape(last)
+    return [(m.start(), m.end()) for m in re.finditer(pattern, text)]
 
 
 def _occurrence_lines(text: str, needle: str) -> list[int]:

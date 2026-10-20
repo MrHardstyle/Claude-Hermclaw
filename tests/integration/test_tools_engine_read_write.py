@@ -401,6 +401,28 @@ async def test_replace_text_handles_crlf_files(sessionmaker: SM, repo: Path) -> 
     assert (repo / "src" / "calc.py").read_bytes() == b"def mul(a, b):\r\n    return b * a\r\n"
 
 
+async def test_spaces_at_line_ends_do_not_decide_a_match(sessionmaker: SM, repo: Path) -> None:
+    """Live tournament GLM A3 (BUG-301): the file's blank lines held the indentation spaces, the coder's 'old' had
+    empty lines, and four replaces failed with "indentation must match" while read_range showed no difference."""
+    body = "def f(rows):\n    for r in rows:\n        a = r[0]\n        \n        if not a:  \n            continue\n"
+    (repo / "src" / "util.py").write_text(body)
+    h = await make_harness(sessionmaker, repo, contract=scope(target_paths=["src/util.py"]))
+    old = "        a = r[0]\n\n        if not a:\n            continue"
+    res = await h.call(
+        "replace_text", path="src/util.py", old=old, new="        a = r[0].strip()\n\n        if not a:\n            continue"
+    )
+    assert res.ok and "spaces at line ends were ignored" in res.output, res.output
+    assert (repo / "src" / "util.py").read_text() == (
+        "def f(rows):\n    for r in rows:\n        a = r[0].strip()\n\n        if not a:\n            continue\n"
+    )
+    # the last line is still compared exactly, and a loose match must be unique like an exact one
+    (repo / "src" / "util.py").write_text("x = 1  \ny = 2\nx = 1 \ny = 2\n")
+    assert (await h.call("replace_text", path="src/util.py", old="x = 1\ny = 2", new="z")).error_code == E.TEXT_COUNT_MISMATCH
+    assert (await h.call("replace_text", path="src/util.py", old="y = 2  ", new="z")).error_code == E.TEXT_NOT_FOUND
+    res = await h.call("replace_text", path="src/util.py", old="x = 1\ny = 2", new="z", count=2)
+    assert res.ok and (repo / "src" / "util.py").read_text() == "z\nz\n"
+
+
 # ------------------------------------------------------------------------------------------------ 17.4 patch
 PATCH_OK = (
     "diff --git a/src/calc.py b/src/calc.py\n"
