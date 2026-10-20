@@ -4,6 +4,9 @@ Format: [Keep a Changelog](https://keepachangelog.com/de/1.1.0/), Versionen nach
 
 ## [Unreleased]
 
+### Behoben
+- **Deployment mit GGUF-Modellen (BUG-298):** Modelle, die der llama.cpp-Router aus einer GGUF-Datei lädt, holt die Rolle `hermclaw_worker` nicht mehr über `ollama pull`. Das Deployment von rc62 brach daran ab (nur Ansible, ausgerollt mit rc62).
+
 ## [0.1.0rc62] – Release Candidate (2026-10-20)
 
 ### Hinzugefügt

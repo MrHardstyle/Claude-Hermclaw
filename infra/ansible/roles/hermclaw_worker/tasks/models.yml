@@ -8,14 +8,19 @@
       {{ hermclaw_config_data.models.profiles | rejectattr('enabled', 'defined') | list
          + (hermclaw_config_data.models.profiles | selectattr('enabled', 'defined') | selectattr('enabled') | list) }}
 
+# A model the llama.cpp router serves from a GGUF file (ollama_llamacpp_models[].path, coder tournament candidates)
+# is not an Ollama tag: pulling it failed the deploy for lack of disk space (rc62).
 - name: Collect the wanted tags
+  vars:
+    hermclaw_worker_file_models: >-
+      {{ ollama_llamacpp_models | default([]) | selectattr('path', 'defined') | map(attribute='model') | list }}
   ansible.builtin.set_fact:
     hermclaw_worker_wanted_models: >-
-      {{ hermclaw_worker_profiles
-         | selectattr('host', 'undefined') | map(attribute='model') | list
-         + (hermclaw_worker_profiles | selectattr('host', 'defined')
-            | selectattr('host', 'equalto', systemd_skeleton_worker_id | default(hermclaw_worker_id)) | map(attribute='model') | list)
-         | unique | sort }}
+      {{ (hermclaw_worker_profiles
+          | selectattr('host', 'undefined') | map(attribute='model') | list
+          + (hermclaw_worker_profiles | selectattr('host', 'defined')
+             | selectattr('host', 'equalto', systemd_skeleton_worker_id | default(hermclaw_worker_id)) | map(attribute='model') | list))
+         | unique | reject('in', hermclaw_worker_file_models) | sort }}
     hermclaw_worker_embedding_model: >-
       {{ (hermclaw_worker_profiles | selectattr('role', 'equalto', 'embedding') | map(attribute='model') | list + [''])[0] }}
     hermclaw_worker_planner_fallback: >-

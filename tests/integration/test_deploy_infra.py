@@ -1085,6 +1085,15 @@ def test_model_pull_follows_models_yaml_and_survives_a_dry_run(model_host: dict[
     res = _pull(model_host, hermclaw_config_data={"models": changed})
     assert res.returncode != 0
     assert "still missing on localhost: qwen3:9b-does-not-exist" in res.stdout and "manifest not found" in res.stdout
+    # a model the llama.cpp router loads from a GGUF file is no Ollama tag: never pulled
+    for p in changed["profiles"]:
+        if p["role"] == "fast":
+            p["model"] = "ornith-1.5:9b"
+    gguf = [{"model": "ornith-1.5:9b", "path": "/var/lib/hcbench/models/Ornith-1.5-9B-Q5_K_M.gguf"}]
+    before = len(_log(model_host))
+    res = _pull(model_host, hermclaw_config_data={"models": changed}, ollama_llamacpp_models=gguf)
+    assert res.returncode == 0, res.stdout[-3000:]
+    assert not [c for c in _log(model_host)[before:] if "ornith-1.5:9b" in c], _log(model_host)[before:]
     # tags become arguments of ollama pull: an option-like tag is refused before anything runs
     for p in changed["profiles"]:
         if p["role"] == "fast":

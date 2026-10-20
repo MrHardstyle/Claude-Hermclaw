@@ -46,6 +46,18 @@ Noch keine.
 
 ## Behobene Bugs
 
+### BUG-298 – Deployment will Modelle aus GGUF-Dateien über Ollama laden und bricht ab
+- Phase: Deployment 0.1.0rc62, 2026-10-20 · Komponente: deploy (Rolle `hermclaw_worker`, models.yml) · Severity: P1 · blockierend: ja (Deployment auf .224 bricht ab) · Status: **behoben** (`tests/integration/test_deploy_infra.py::test_model_pull_follows_models_yaml_and_survives_a_dry_run`)
+- Reproduktion:
+  - Inventory mit `ollama_llamacpp_models: [{model: "ornith-1.5:35b", path: /var/lib/hcbench/models/….gguf}, …]` und passenden Profilen.
+  - Die Rolle will die Tags über `ollama pull` laden: „ornith-1.5:35b, ornith-1.5:9b, qwen3.5:9b, devstral-small-2:24b need about 90.0 GB …, 40 GB are free“.
+- Ursache:
+  - Die Rolle `ollama` kennt seit rc62 Modelle per GGUF-Pfad, die Rolle `hermclaw_worker` zählte aber jedes Profilmodell als Ollama-Tag.
+  - Dazu ein Vorrangfehler im Jinja-Ausdruck: `a + (b) | unique | sort` wendete die Filter nur auf die hostgebundenen Profile an.
+- Fix:
+  - Modelle mit `path` in `ollama_llamacpp_models` werden nie über Ollama geladen.
+  - Der ganze Ausdruck ist geklammert, `unique` und `sort` gelten für alle Tags.
+
 ### BUG-297 – Planziel darf geschützte Eingabedaten nicht nennen, ohne ihren Schutz zu verlieren
 - Phase: Vorbereitung Coder-Turnier (Planprüfung der Aufgaben A1, A2, A4, A5), 2026-10-20 · Komponente: planner (validation) · Severity: P2 · blockierend: nein (Schutz geht still verloren) · Status: **behoben** (`tests/unit/test_planner_validation.py::test_a_goal_may_name_the_file_it_protects`)
 - Reproduktion:
