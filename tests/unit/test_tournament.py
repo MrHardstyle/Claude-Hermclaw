@@ -12,7 +12,7 @@ from hermclaw.core import job_metadata
 from hermclaw.tournament.runner import TournamentRunner, _matches, changed_files, export_base, failed_names
 from hermclaw.tournament.scoring import RunRecord, render_markdown, score_runs, summarise
 from hermclaw.tournament.settings import tournament_of
-from hermclaw.tournament.spec import WEIGHTS, load_spec
+from hermclaw.tournament.spec import SYSTEM, WEIGHTS, load_spec
 
 PLAN = {
     "goal": "fix",
@@ -150,3 +150,51 @@ def test_spec_loads_plans_hidden_dirs_and_weights(tmp_path: Path) -> None:
     path.write_text(yaml.safe_dump({"repository": "r", "models": ["m"], "tasks": [{**task, "hidden": {"dir": "B", "command": "x"}}]}))
     with pytest.raises(ValueError, match="hidden check directory"):
         load_spec(path)
+
+
+async def test_the_ladder_stops_at_the_first_failure_and_retries_that_level_next_time(tmp_path: Path) -> None:
+    """Agreed 2026-10-21: a solved task leads to a harder one until one fails; after the fix the same task is run
+    again, and only when it succeeds the climb goes on. System runs plan for themselves (no prescribed plan)."""
+    for level in ("L1", "L2", "L3"):
+        (tmp_path / "hidden" / level).mkdir(parents=True)
+    tasks = [
+        {
+            "id": level,
+            "title": f"level {level}",
+            "prompt": "p",
+            "base_branch": "acceptance/empty",
+            "hidden": {"dir": level, "command": "pytest"},
+        }
+        for level in ("L1", "L2", "L3")
+    ]
+    path = tmp_path / "ladder.yaml"
+    path.write_text(yaml.safe_dump({"repository": "r", "models": [SYSTEM], "tasks": tasks}))
+    spec = load_spec(path)
+    created: list[dict[str, Any]] = []
+    outcomes = {("L1", 1): True, ("L2", 1): False, ("L2", 2): True, ("L3", 1): True}
+
+    async def create(job: dict[str, Any]) -> str:
+        created.append(job)
+        return f"job-{len(created)}"
+
+    runner = TournamentRunner(None, spec, tmp_path / "out", create=create, workspace=None, executor_for=None, log=lambda _m: None)  # type: ignore[arg-type]
+
+    async def run_one(model: str, task: Any, rep: int) -> RunRecord:
+        await create({"tournament": None, "task": task.id})
+        ok = outcomes[(task.id, rep)]
+        return run(
+            model, task.id, rep=rep, hidden_passed=4 if ok else 2, hidden_failed=0 if ok else 2, status="succeeded" if ok else "failed"
+        )
+
+    runner.run_one = run_one  # type: ignore[method-assign]
+    await runner.ladder(SYSTEM, spec.tasks)
+    assert [j["task"] for j in created] == ["L1", "L2"]
+    ladder = (tmp_path / "out" / "ladder.md").read_text(encoding="utf-8")
+    assert "Erreicht: Stufe 1 von 3; offen ab L2." in ladder and "| 3 | L3 – level L3 | 0 | nicht erreicht |" in ladder
+
+    await runner.ladder(SYSTEM, spec.tasks)  # after the fix: L2 again (run #2), then the next level
+    assert [j["task"] for j in created] == ["L1", "L2", "L2", "L3"]
+    assert "Erreicht: Stufe 3 von 3." in (tmp_path / "out" / "ladder.md").read_text(encoding="utf-8")
+
+    with pytest.raises(ValueError, match="only system runs"):
+        await TournamentRunner.run_one(runner, "coder-main", spec.tasks[0], 1)

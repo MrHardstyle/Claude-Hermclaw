@@ -160,3 +160,38 @@ def render_markdown(runs: Sequence[RunRecord], models: Sequence[str], title: str
             f"{r.model_calls} | {note or ''} |"
         )
     return "\n".join(out) + "\n"
+
+
+def render_ladder(runs: Sequence[RunRecord], model: str, levels: Sequence[tuple[str, str]]) -> str:
+    """The difficulty ladder of ``model``: levels climbed (a fully correct run), the level it stopped at, the rest."""
+    mine = [r for r in runs if r.model == model and r.scored]
+    rows, climbed, stop = [], 0, None
+    for n, (task_id, title) in enumerate(levels, start=1):
+        tries = sorted((r for r in mine if r.task == task_id), key=lambda r: r.rep)
+        ok = [r for r in tries if r.correct and disqualification(r) is None]
+        last = ok[0] if ok else (tries[-1] if tries else None)
+        if ok and stop is None:
+            climbed = n
+            state = "geschafft"
+        elif tries:
+            stop = stop or task_id
+            state = "geschafft" if ok else f"offen (zuletzt {last.disqualified or last.status if last else '?'})"
+        else:
+            state = "nicht erreicht"
+        hidden = f"{last.hidden_passed}/{last.hidden_total}" if last else "–"
+        minutes = f"{last.duration_minutes}" if last else "–"
+        calls = f"{last.model_calls}" if last else "–"
+        rows.append(f"| {n} | {task_id} – {title} | {len(tries)} | {state} | {hidden} | {minutes} | {calls} |")
+    head = f"Erreicht: Stufe {climbed} von {len(levels)}" + (f"; offen ab {stop}." if stop else ".")
+    return "\n".join(
+        [
+            f"# Schwierigkeitsleiter – {model}",
+            "",
+            head,
+            "",
+            "| Stufe | Aufgabe | Läufe | Ergebnis | versteckt | Minuten | Modellaufrufe |",
+            "|---|---|---|---|---|---|---|",
+            *rows,
+            "",
+        ]
+    )

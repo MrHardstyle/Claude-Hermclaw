@@ -64,3 +64,24 @@ sudo -u hermclaw hermclaw coder-tournament /var/lib/hermclaw/tournament/coder-to
 
 `--model` and `--task` narrow the run. `runs.jsonl` in the output directory makes a run resumable; `report.md` and
 `report.json` are rewritten after every job. A job that exceeds `limit_minutes` is cancelled like a cancel from the API.
+
+## System runs and the difficulty ladder (D-020)
+
+`--model system` runs a task as any job: no tournament metadata, so the planner plans (a task's `plan` is ignored, a
+task may have none), the configured coder profile codes, the review and replans work as in production. Only the grading
+is the tournament's: the same hidden checks, `runs.jsonl`, `report.md`.
+
+`--ladder` climbs the tasks in the order of `--task` (easiest first) for one model: each level runs once; a fully
+correct run (no knock-out) climbs to the next level, anything else stops the climb. The next call runs the open level
+again as a new repetition – after the fix of what made it fail – and climbs on when it succeeds. `ladder.md` shows the
+levels climbed, the open level and the rest:
+
+```
+sudo -u hermclaw hermclaw coder-tournament /var/lib/hermclaw/tournament/coder-tournament.yaml --model system --ladder \
+     --task A1 --task A6 --task A5 --task A2 --task A3 --task A4 --task A7 --task A9 --task A8 \
+     --out /var/lib/hermclaw/tournament/ladder
+```
+
+The order follows the rc62 tournament (share of fully correct runs over all models, then duration). Harder levels
+are added as new tasks with hidden checks at the end of the order. Ladder jobs use the model host like tournament
+jobs: never at the same time as a tournament or a GPU benchmark.

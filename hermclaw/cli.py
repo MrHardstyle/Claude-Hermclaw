@@ -282,16 +282,28 @@ def cmd_coder_tournament(ns: argparse.Namespace) -> int:  # pragma: no cover - n
     from hermclaw.runtime.images import ImageDefaultingExecutor
     from hermclaw.runtime.services import build_services
     from hermclaw.tournament.runner import TournamentRunner
-    from hermclaw.tournament.spec import load_spec
+    from hermclaw.tournament.spec import SYSTEM, load_spec
 
     spec = load_spec(ns.spec)
     models = ns.model or spec.models
-    tasks = [t for t in spec.tasks if not ns.task or t.id in set(ns.task)]
+    by_id = {t.id: t for t in spec.tasks}
+    unknown = [t for t in ns.task or [] if t not in by_id]
+    if unknown:
+        print(f"unknown task id(s): {', '.join(unknown)}", file=sys.stderr)
+        return 2
+    tasks = [by_id[t] for t in dict.fromkeys(ns.task)] if ns.task else list(spec.tasks)  # the order given: the ladder's
     config, settings = get_config(), get_settings()
-    known = {p.alias for p in config.models.profiles}
+    known = {p.alias for p in config.models.profiles} | {SYSTEM}
     missing = [m for m in models if m not in known]
     if missing:
         print(f"unknown model alias(es): {', '.join(missing)}", file=sys.stderr)
+        return 2
+    planless = [t.id for t in tasks if t.plan is None]
+    if planless and any(m != SYSTEM for m in models):
+        print(f"task(s) without a plan run only as '{SYSTEM}': {', '.join(planless)}", file=sys.stderr)
+        return 2
+    if ns.ladder and len(models) != 1:
+        print("--ladder climbs for exactly one model (--model)", file=sys.stderr)
         return 2
 
     async def run(sm: Any) -> Any:
@@ -305,7 +317,7 @@ def cmd_coder_tournament(ns: argparse.Namespace) -> int:  # pragma: no cover - n
                 title=job["title"],
                 repo=job["repo"],
                 base_branch=job["base_branch"],
-                created_by="tournament",
+                created_by="ladder" if job["tournament"] is None else "tournament",
                 tournament=job["tournament"],
             )
             return row.id
@@ -330,10 +342,13 @@ def cmd_coder_tournament(ns: argparse.Namespace) -> int:  # pragma: no cover - n
             log=lambda m: print(m, flush=True),
         )
         try:
-            await runner.run(models, tasks, reps=ns.reps)
+            if ns.ladder:
+                await runner.ladder(models[0], tasks)
+            else:
+                await runner.run(models, tasks, reps=ns.reps)
         finally:
             await services.aclose()
-        return runner.out / "report.md"
+        return runner.out / ("ladder.md" if ns.ladder else "report.md")
 
     print(f"report: {asyncio.run(_with_db(run))}")
     return 0
@@ -428,9 +443,14 @@ def build_parser() -> argparse.ArgumentParser:
     ct.add_argument("spec", type=Path, help="tournament specification (YAML, see config/coder-tournament.example.yaml)")
     ct.add_argument("--out", type=Path, default=Path("/var/lib/hermclaw/tournament/run"))
     ct.add_argument("--model", action="append", help="run only this coder alias (repeatable; default: the spec's models)")
-    ct.add_argument("--task", action="append", help="run only this task id (repeatable)")
+    ct.add_argument("--task", action="append", help="run only this task id (repeatable, in this order)")
     ct.add_argument("--reps", type=int, default=None, help="repetitions per task (default: the spec's)")
     ct.add_argument("--poll", type=float, default=20.0, help="status poll interval in seconds")
+    ct.add_argument(
+        "--ladder",
+        action="store_true",
+        help="difficulty ladder: the tasks in order, one run each, stop at the first not fully correct (again: retry it)",
+    )
     ct.set_defaults(fn=cmd_coder_tournament)
     lc = sub.add_parser("litellm-config", help="generate the LiteLLM proxy config")
     lc.add_argument("out", type=Path)

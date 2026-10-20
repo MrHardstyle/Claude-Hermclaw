@@ -11,7 +11,8 @@
         title: Python – fix one lint finding
         base_branch: tournament/t-lint
         prompt: "..."                    # the job text every candidate gets
-        plan: {goal: ..., summary: ..., steps: [...]}   # PlanContract, identical for every candidate
+        plan: {goal: ..., summary: ..., steps: [...]}   # PlanContract, identical for every candidate; without a
+                                         # plan the task is for system runs (model "system": planner, review, replans)
         hidden: {dir: A1, command: "python -m pytest -q -p no:cacheprovider _hidden", image: python}
         expected_changes: [accounts/stats.py]   # changed files outside these globs count as unnecessary
         protected: [data/**]             # a change here disqualifies the run
@@ -28,6 +29,8 @@ from pydantic import BaseModel, ConfigDict, Field
 
 from hermclaw.contracts.plan import PlanContract
 
+#: the model name of a system run: the job runs as any job (planner, coder profile, review, replans), only graded here
+SYSTEM = "system"
 WEIGHTS: dict[str, float] = {"correct": 50, "first_try": 15, "effort": 10, "duration": 10, "changes": 10, "completed": 5}
 
 
@@ -47,7 +50,7 @@ class TaskSpec(BaseModel):
     title: str
     prompt: str
     base_branch: str
-    plan: dict[str, Any]
+    plan: dict[str, Any] | None = None  # prescribed plan of a model comparison; None: the planner plans (system runs)
     hidden: HiddenCheck
     expected_changes: list[str] = Field(default_factory=list)
     protected: list[str] = Field(default_factory=list)
@@ -86,7 +89,8 @@ def load_spec(path: str | Path) -> TournamentSpec:
     data = yaml.safe_load(p.read_text(encoding="utf-8")) or {}
     spec = TournamentSpec.model_validate({**data, "source": p.resolve()})
     for task in spec.tasks:
-        PlanContract.model_validate(task.plan)  # schema errors surface before the first job
+        if task.plan is not None:
+            PlanContract.model_validate(task.plan)  # schema errors surface before the first job
         if not spec.hidden_dir(task).is_dir():
             raise ValueError(f"task {task.id}: hidden check directory {spec.hidden_dir(task)} missing")
     if set(spec.weights) != set(WEIGHTS):

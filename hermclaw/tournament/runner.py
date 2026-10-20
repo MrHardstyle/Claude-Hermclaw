@@ -32,9 +32,9 @@ from hermclaw.core.interfaces import CommandExecutor, ExecutionRequest, Workspac
 from hermclaw.persistence.models import Event, Job, ModelInvocation
 from hermclaw.runtime.transitions import transition_job
 from hermclaw.tools.testparse import summarise
-from hermclaw.tournament.scoring import RunRecord, render_markdown, score_runs
+from hermclaw.tournament.scoring import RunRecord, disqualification, render_ladder, render_markdown, score_runs
 from hermclaw.tournament.settings import TournamentSettings
-from hermclaw.tournament.spec import TaskSpec, TournamentSpec
+from hermclaw.tournament.spec import SYSTEM, TaskSpec, TournamentSpec
 
 CreateJob = Callable[[dict[str, Any]], Awaitable[uuid.UUID]]
 ExecutorFor = Callable[[WorkspaceHandle], Awaitable[CommandExecutor]]
@@ -231,15 +231,52 @@ class TournamentRunner:
                     self.write_report(done, models)
         return done
 
+    async def ladder(self, model: str, tasks: list[TaskSpec]) -> list[RunRecord]:
+        """Climb ``tasks`` (easiest first), one run per call and level: a level counts as climbed once a run of it is
+        fully correct. The first level not climbed yet is run; correct, the climb goes on, otherwise it stops there –
+        fix what failed, call again, and the same level is run first (new repetition)."""
+        done = self.load_runs()
+        for task in tasks:
+            mine = [r for r in done if r.model == model and r.task == task.id]
+            if any(r.scored and r.correct and disqualification(r) is None for r in mine):
+                continue
+            rep = max((r.rep for r in mine), default=0) + 1
+            tries: list[RunRecord] = []
+            while not any(r.scored for r in tries) and len(tries) <= self.infra_retries:
+                if tries:
+                    self.log(f"{model} {task.id}#{rep}: infrastructure ({tries[-1].infrastructure}) – repeated")
+                record = await self.run_one(model, task, rep)
+                self._append(record)
+                done.append(record)
+                tries.append(record)
+            self.write_report(done, [model])
+            self.write_ladder(done, model, tasks)
+            last = tries[-1]
+            if not (last.scored and last.correct and disqualification(last) is None):
+                self.log(f"ladder: {model} stops at {task.id} (run #{rep}: {last.disqualified or last.status})")
+                break
+        else:
+            self.write_ladder(done, model, tasks)
+        return done
+
+    def write_ladder(self, runs: list[RunRecord], model: str, tasks: list[TaskSpec]) -> Path:
+        path = self.out / "ladder.md"
+        path.write_text(render_ladder(runs, model, [(t.id, t.title) for t in tasks]), encoding="utf-8")
+        return path
+
     async def run_one(self, model: str, task: TaskSpec, rep: int) -> RunRecord:
-        settings = TournamentSettings(plan=task.plan, coder_alias=model, task=task.id, run=f"{model}/{task.id}/{rep}")
+        system = model == SYSTEM
+        if not system and task.plan is None:
+            raise ValueError(f"task {task.id} has no plan: only system runs can run it")
+        run = f"{model}/{task.id}/{rep}"
+        settings = None if system else TournamentSettings(plan=task.plan or {}, coder_alias=model, task=task.id, run=run)
         job_id = await self.create(
             {
                 "prompt": task.prompt,
-                "title": f"[tournament {task.id} {model} #{rep}] {task.title}",
+                "title": f"[{'ladder' if system else 'tournament'} {task.id} {model} #{rep}] {task.title}",
                 "repo": task.repository or self.spec.repository,
                 "base_branch": task.base_branch,
-                "tournament": settings.model_dump(),
+                "tournament": settings.model_dump() if settings is not None else None,
             }
         )
         self.log(f"{model} {task.id}#{rep}: job {job_id}")
