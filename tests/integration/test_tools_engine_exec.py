@@ -54,6 +54,39 @@ SCOPE = {"target_paths": ["src/calc.py"], "allowed_new_paths": ["src/gen_*.py"]}
 
 
 # ------------------------------------------------------------------------------------------------ 17.5 commands
+async def test_a_failed_run_brings_the_matching_lesson_once(sessionmaker: SM, repo: Path) -> None:
+    """D-019: the error lines of a failed command are looked up in the knowledge; the matching active lesson comes
+    with the output once per attempt (tournament A9: Pester failed on Get-Service for a whole run)."""
+    from sqlalchemy import delete
+
+    from hermclaw.core.config import MemoryPolicy
+    from hermclaw.memory.store import MemoryStore
+    from hermclaw.persistence.models import MemoryEntry
+    from tests.integration.test_repo_intelligence_support import HashingEmbedder
+
+    async with sessionmaker() as s:
+        await s.execute(delete(MemoryEntry))
+        await s.commit()
+    store = MemoryStore(sessionmaker, HashingEmbedder(), MemoryPolicy(min_score=0.3))
+    lesson = await store.add(
+        kind="convention",
+        title="Pester on Linux: Get-Service does not exist",
+        content="CommandNotFoundException: Could not find Command Get-Service. Define a stub before Mock.",
+        status="active",
+    )
+    await store.add(kind="lesson", title="Helm chart values", content="kubernetes helm chart values are merged", status="active")
+    h = await make_harness(sessionmaker, repo, memory=store)
+    fail = "echo 'CommandNotFoundException: Could not find Command Get-Service' >&2; exit 1"
+    first = await h.call("run_command", command=fail)
+    assert first.error_code == E.COMMAND_FAILED and "Hermclaw's knowledge that matches this failure" in first.output
+    assert "Define a stub before Mock." in first.output and "helm" not in first.output
+    assert first.data["knowledge"] == [str(lesson)]
+    again = await h.call("run_command", command=f"true; {fail}")
+    assert again.error_code == E.COMMAND_FAILED and "Hermclaw's knowledge" not in again.output
+    ok = await h.call("run_command", command="echo Get-Service")
+    assert ok.ok and "Hermclaw's knowledge" not in ok.output
+
+
 async def test_run_command_executes_persists_and_redacts(sessionmaker: SM, repo: Path) -> None:
     h = await make_harness(sessionmaker, repo, contract=scope(**SCOPE))
     res = await h.call("run_command", command="echo hello; echo 'token=abcdef123456' >&2; ls src")

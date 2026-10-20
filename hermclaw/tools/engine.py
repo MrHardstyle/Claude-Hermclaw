@@ -58,6 +58,7 @@ from hermclaw.core.redaction import DEFAULT_REDACTOR, REDACTED, Redactor
 from hermclaw.models.protocols import CallContext as ModelCallContext
 from hermclaw.research.questions import unanswerable_reason
 from hermclaw.scope.guard import ScopeGuard
+from hermclaw.stagnation.fingerprints import key_error_lines, normalise_text
 from hermclaw.tools import errors as E
 from hermclaw.tools.classify import CommandClassification, CommandClassifier, package_install
 from hermclaw.tools.context import CallContext, NullCallbacks, ScopeExpansionOutcome, ToolCallbacks, ToolPermissions
@@ -206,6 +207,9 @@ SNIPPET_CHARS = 600
 _SLACK = 400  # markers appended after clipping
 # refusals that tell nothing about how to act: the step is over, the budget spent, the knowledge itself unavailable
 _NO_KNOWLEDGE = frozenset({E.STEP_FINISHED, E.TURN_BUDGET_EXHAUSTED, E.MEMORY_UNAVAILABLE})
+# runs that executed and failed: their error lines are looked up in the knowledge (D-019)
+_FAILED_RUNS = frozenset({E.COMMAND_FAILED, E.TESTS_FAILED, E.TEST_ERROR})
+_FAILURE_QUERY_CHARS = 600
 _SOURCE_FILE_BYTES = 2_000_000  # larger files are not read for [source] lines
 
 
@@ -311,6 +315,8 @@ class ToolEngine:
         # keyed without the timeout: a command that finished is not changed by another timeout (BUG-211)
         self._ran: dict[tuple[str, str], tuple[int, int, str]] = {}
         self._hinted: set[tuple[str, str]] = set()  # (tool, error code) whose knowledge this attempt was given (D-019)
+        self._shown: set[uuid.UUID] = set()  # knowledge entries this attempt was given with a refusal or failed run
+        self._looked_up: set[str] = set()  # error lines of failed runs already looked up in the knowledge
         self._ran_output: dict[tuple[str, str], str] = {}  # rendered output of a failed run, repeated in its refusal
         # identical reads: (file-change count, turn). The context of every turn already shows the files read in this
         # attempt; the coder still re-read the same unchanged file turn after turn instead of acting (BUG-179)
@@ -430,7 +436,7 @@ class ToolEngine:
                     )
                 )
                 raise
-            result = self._finalise(result)
+            result = await self._with_failure_knowledge(self._finalise(result), ctx)
             if result.ok and result.terminal:
                 self._finished_by = spec.name
             duration = _duration_ms(started)
@@ -878,6 +884,7 @@ class ToolEngine:
             return result
         if not hits:
             return result
+        self._shown.update(h.id for h in hits[:want])
         limit = self.policies.memory.max_entry_chars
         note = "\n\nHermclaw's knowledge about this refusal (from earlier jobs; the files and outputs here decide):\n" + "\n\n".join(
             h.render(limit) for h in hits[:want]
@@ -885,6 +892,38 @@ class ToolEngine:
         return result.model_copy(
             update={"output": result.output + note, "data": result.data | {"knowledge": [str(h.id) for h in hits[:want]]}}
         )
+
+    async def _with_failure_knowledge(self, result: ToolResult, ctx: CallContext) -> ToolResult:
+        """Lessons matching the error lines of a command or test run that failed, each entry once per attempt (D-019).
+        The knowledge reached the coder only with a refused tool call; a Pester run failing on a missing Windows cmdlet
+        (tournament A9) or a server crashing on an import never brought the lesson recorded for it. Added after the
+        output was clipped, so a long log does not cut the note off; ``coder_entries`` bounds its size."""
+        want = self.policies.memory.coder_entries
+        if self.memory is None or want <= 0 or result.error_code not in _FAILED_RUNS:
+            return result
+        norm = normalise_text(strip_ansi(result.output))
+        lines = key_error_lines(norm) or norm.split("\n")[-8:]
+        query = "\n".join(lines)[:_FAILURE_QUERY_CHARS].strip()
+        if not query or query in self._looked_up:
+            return result
+        self._looked_up.add(query)
+        call = ModelCallContext(purpose="memory", job_id=ctx.job_id, step_id=ctx.step_id, attempt_id=ctx.attempt_id)
+        try:
+            hits = await self.memory.search(
+                query, k=want + len(self._shown), scopes=self.memory_scopes, kinds=("lesson", "convention", "research"), ctx=call
+            )
+        except Exception as exc:  # the failed run itself still reaches the model
+            log.warning("knowledge for a failed run unavailable", extra={"error_type": type(exc).__name__})
+            return result
+        fresh = [h for h in hits if h.id not in self._shown][:want]
+        if not fresh:
+            return result
+        self._shown.update(h.id for h in fresh)
+        limit = self.policies.memory.max_entry_chars
+        note = "\n\nHermclaw's knowledge that matches this failure (from earlier jobs; the files and outputs here decide):\n" + (
+            "\n\n".join(h.render(limit) for h in fresh)
+        )
+        return result.model_copy(update={"output": result.output + note, "data": result.data | {"knowledge": [str(h.id) for h in fresh]}})
 
     async def _recall(self, args: RecallArgs, ctx: CallContext, events: list[PendingEvent]) -> ToolResult:
         """Active knowledge entries closest to the query (D-019)."""
