@@ -34,6 +34,7 @@ from hermclaw.tools.workspace import has_git_segment, regex_is_risky
 from hermclaw.verifier.changes import acceptance_matching, read_text
 from hermclaw.verifier.commands import TestRecord
 from hermclaw.verifier.context import VerifyContext
+from hermclaw.verifier.report import EXECUTOR_ERROR
 from hermclaw.verifier.schema import SchemaParseError, parse_document, validate
 from hermclaw.verifier.text import pg_safe
 
@@ -290,6 +291,7 @@ async def command_evidence(ctx: VerifyContext, index: int, ev: CommandEvidence) 
     out = await ctx.runner.run(ev.command, purpose="verifier", timeout_seconds=ev.timeout_seconds, network=network)
     evidence = {**base, "exit_code": out.exit_code, "duration_ms": out.duration_ms, "output": ctx.runner.clip(out.output, 3000)}
     if out.failed_to_run:
+        evidence[EXECUTOR_ERROR] = True
         return ctx.check("command", name, "error", f"command could not be executed: {out.problem or 'executor error'}", evidence)
     if out.timed_out:
         return ctx.check("command", name, "fail", f"command timed out after {ev.timeout_seconds}s", evidence)
@@ -341,6 +343,7 @@ async def run_test_evidence(ctx: VerifyContext, index: int, ev: TestEvidence) ->
     }
     record_status = summary.status
     if out.failed_to_run:
+        evidence[EXECUTOR_ERROR] = True
         check = ctx.check(category, name, "error", f"test command could not be executed: {out.problem or 'executor error'}", evidence)
         result = TestOutcome(check, None, False)
         record_status = "error"

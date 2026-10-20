@@ -10,6 +10,7 @@ completely again (23.5 regression rerun). When the correction budget is exhauste
 
 from __future__ import annotations
 
+import asyncio
 import contextlib
 import dataclasses
 import uuid
@@ -47,6 +48,7 @@ from hermclaw.tools.context import ScopeExpansionOutcome, ToolPermissions
 from hermclaw.tools.engine import ToolEngine
 from hermclaw.tools.ops import OpsToolProvider
 from hermclaw.tournament.settings import TournamentSettings, tournament_of
+from hermclaw.verifier.report import executor_failure
 
 if TYPE_CHECKING:
     from hermclaw.gitops.engine import GitEngine
@@ -63,6 +65,9 @@ CODE_STEP_KINDS = frozenset({StepKind.implement.value, StepKind.documentation.va
 #: scope engine's rule for the kind (``ssh``/``deploy`` read-only deny-all-write, ``database``/``docker`` scoped files)
 OPS_STEP_KINDS = frozenset({StepKind.ssh.value, StepKind.database.value, StepKind.docker.value, StepKind.deploy.value})
 TOOL_STEP_KINDS = CODE_STEP_KINDS | OPS_STEP_KINDS
+#: the verifier could not run its commands, again after VERIFIER_RETRY_SECONDS: an outage, not a fault of the change
+VERIFIER_UNAVAILABLE = "VERIFIER_UNAVAILABLE"
+VERIFIER_RETRY_SECONDS = (5.0, 20.0)
 _BLOCK_REASONS = {
     "scope_unavailable": "scope_unavailable",
     "missing_dependency": "missing_dependency",
@@ -280,6 +285,7 @@ class ImplementStepHandler:
         self.sm = sessionmaker
         self.config = config
         self.deps = deps
+        self.verifier_retry_seconds: Sequence[float] = VERIFIER_RETRY_SECONDS
 
     async def _load(self, step_id: uuid.UUID) -> Step:
         async with self.sm() as s:
@@ -671,6 +677,19 @@ class ImplementStepHandler:
             return await self._correction(ctx, row, "budget", items, "TURN_BUDGET_EXHAUSTED", result.detail)
         return await self._verify_review_commit(run, result)
 
+    async def _verify(self, run: _Run) -> VerificationOutcome:
+        """The verification of the step; a run whose commands the executor could not run at all is repeated after a
+        pause (a sandbox container that failed to start, a worker that dropped the connection) – BUG-303."""
+        ctx, step, handle = run.ctx, run.step, run.handle
+        outcome = await self.deps.verifier.verify(step, handle, job_id=ctx.job_id, step_id=ctx.step_id, attempt_id=ctx.attempt_id)
+        for pause in self.verifier_retry_seconds:
+            if not executor_failure(outcome.report):
+                break
+            await self._status(ctx, f"Verifier konnte {run.row.step_key} nicht ausführen – neuer Versuch in {pause:.0f}s")
+            await asyncio.sleep(pause)
+            outcome = await self.deps.verifier.verify(step, handle, job_id=ctx.job_id, step_id=ctx.step_id, attempt_id=ctx.attempt_id)
+        return outcome
+
     async def _verify_review_commit(
         self, run: _Run, result: CoderResult, *, budget_items: Sequence[CorrectionItem] = (), waived: Sequence[str] = ()
     ) -> StepOutcome:
@@ -685,8 +704,18 @@ class ImplementStepHandler:
             ]
             return await self._correction(ctx, row, "scope", items, "SCOPE_VIOLATION", f"{len(audit.violations)} out-of-scope change(s)")
         await self._status(ctx, f"Verifier prüft {row.step_key}")
-        outcome = await self.deps.verifier.verify(step, handle, job_id=ctx.job_id, step_id=ctx.step_id, attempt_id=ctx.attempt_id)
+        outcome = await self._verify(run)
         if not outcome.report.passed:
+            if executor_failure(outcome.report):
+                # the change was never judged: a correction could not fix anything and would spend the model's budget;
+                # the scheduler retries the step as after a model outage (BUG-303)
+                return StepOutcome(
+                    "failed",
+                    summary="the verifier could not run its commands",
+                    error_code=VERIFIER_UNAVAILABLE,
+                    error_message=outcome.report.summary[:2000],
+                    retryable=True,
+                )
             defects = acceptance_defects(outcome.report)
             if defects and len(defects) == len(outcome.report.failures):
                 # the code may be right; only the plan can change the step's acceptance: a correction attempt could

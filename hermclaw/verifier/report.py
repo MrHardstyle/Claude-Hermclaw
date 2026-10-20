@@ -8,6 +8,8 @@ from hermclaw.contracts.verification import VerificationCheck, VerificationRepor
 from hermclaw.verifier.text import pg_safe
 
 MAX_SUMMARY_FAILURES = 8
+#: evidence flag of a check whose command the executor could not run at all (sandbox/worker failure, not the code)
+EXECUTOR_ERROR = "executor_error"
 
 
 def build_report(checks: Sequence[VerificationCheck], changed_files: Sequence[str]) -> VerificationReport:
@@ -39,3 +41,10 @@ def run_status(report: VerificationReport) -> str:
     if failures and all(c.status == "error" for c in failures):
         return "error"
     return "failed"
+
+
+def executor_failure(report: VerificationReport) -> bool:
+    """Every blocking failure is a command the executor could not run: the change was not judged at all, so nothing
+    in it can be corrected (BUG-303)."""
+    failures = report.failures
+    return bool(failures) and all(c.status == "error" and c.evidence.get(EXECUTOR_ERROR) for c in failures)

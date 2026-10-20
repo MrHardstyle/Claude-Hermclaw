@@ -236,6 +236,62 @@ async def test_verifier_failure_triggers_correction_with_evidence(world: World, 
     assert st.correction_count == 1 and st.attempt_count == 2
 
 
+class ExecutorDown(ScriptedVerifier):
+    """The executor cannot run the verifier's commands for the first ``down`` verifications (BUG-303)."""
+
+    def __init__(self, world: World, down: int) -> None:
+        super().__init__(world, [True])
+        self.down = down
+
+    async def verify(self, step: StepContract, workspace: WorkspaceHandle, **kw: Any) -> VerificationOutcome:
+        if self.down <= 0:
+            return await super().verify(step, workspace, **kw)
+        self.down -= 1
+        self.calls += 1
+        check = VerificationCheck(
+            check_type="test",
+            name="pytest -q",
+            status="error",
+            message="test command could not be executed: sandbox container failed to start",
+            evidence={"command": "pytest -q", "executor_error": True},
+        )
+        report = VerificationReport(passed=False, checks=[check], summary="Verification failed: 1 blocking problem(s)")
+        async with self.world.sessionmaker() as s:
+            vr = VerificationRun(job_id=kw["job_id"], step_id=kw["step_id"], passed=False, status="error", summary=report.summary)
+            s.add(vr)
+            await s.commit()
+        return VerificationOutcome(report=report, run_id=vr.id)
+
+
+async def test_a_verifier_that_could_not_run_is_repeated_not_corrected(world: World, tmp_path: Path) -> None:
+    """Tournament (rc62): an engine error of the verifier counted as a failed verification and used up a correction of
+    the model, although the change was never judged (BUG-303). The verification is repeated; still unable to run,
+    the step is retried like after a model outage – no correction, no attempt of the model's budget."""
+    models = Models([_plan()], [EDIT, DONE])
+    verifier = ExecutorDown(world, 1)
+    handler = _handler(world, models, verifier, None)
+    handler.verifier_retry_seconds = (0.0, 0.0)
+    jid = await _job(world)
+    jobs = await _run(world, _driver(world, models, tmp_path), [handler, ReviewHandler()], [jid])
+    assert jobs[jid].status == "succeeded", (jobs[jid].error_code, jobs[jid].error_message)
+    async with world.sessionmaker() as s:
+        st = (await s.execute(select(Step).where(Step.job_id == jid, Step.step_key == "S001"))).scalar_one()
+    assert verifier.calls == 2 and st.correction_count == 0 and st.attempt_count == 1
+
+    models = Models([_plan()], [EDIT, DONE, DONE])
+    verifier = ExecutorDown(world, 3)  # the first verification and both repeats: the step is retried
+    handler = _handler(world, models, verifier, None)
+    handler.verifier_retry_seconds = (0.0, 0.0)
+    jid = await _job(world)
+    jobs = await _run(world, _driver(world, models, tmp_path), [handler, ReviewHandler()], [jid], model_outage_retry_seconds=(0,))
+    assert jobs[jid].status == "succeeded", (jobs[jid].error_code, jobs[jid].error_message)
+    attempts = [(a.kind, a.error_code) for a in await _attempts(world, jid) if a.step_id is not None and a.attempt_no <= 2]
+    assert ("initial", "VERIFIER_UNAVAILABLE") in attempts and not any(kind == "correction" for kind, _ in attempts)
+    async with world.sessionmaker() as s:
+        st = (await s.execute(select(Step).where(Step.job_id == jid, Step.step_key == "S001"))).scalar_one()
+    assert verifier.calls == 4 and st.correction_count == 0 and st.max_attempts == 4  # the outage attempt is not counted
+
+
 READ = act("read_file", path="src/module.py")
 
 

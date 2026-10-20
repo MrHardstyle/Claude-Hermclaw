@@ -110,6 +110,10 @@ report = await verifier.verify(...)  # same, report only
 
 `VerificationReport.passed` is true iff no **blocking** check has status `fail` or `error`; `skip` never fails.
 Run status: `passed`, `failed`, or `error` when all blocking problems are errors (the verifier could not judge).
+A check whose command the executor could not run at all (`CommandResult.did_not_run`: worker unreachable, sandbox engine
+error) carries `evidence.executor_error = true` – command, test, compile, lint and sandbox syntax checks, and
+`test_evidence` when no test command could run. `executor_failure(report)` is true when every blocking failure is such a
+check: the change was not judged (BUG-303).
 
 ## Secret scan (21.7)
 

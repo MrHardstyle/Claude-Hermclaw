@@ -20,6 +20,7 @@ from hermclaw.verifier.conflicts import scan_conflicts
 from hermclaw.verifier.context import VerifyContext
 from hermclaw.verifier.imports import MISSING_EXIT_CODE, interpreter_for, new_unresolved_candidates, resolve_command
 from hermclaw.verifier.languages import CODE_LANGUAGES, detect_language, repo_has_tests
+from hermclaw.verifier.report import EXECUTOR_ERROR
 from hermclaw.verifier.secrets import SecretScanner
 from hermclaw.verifier.syntax import (
     IN_PROCESS,
@@ -307,6 +308,7 @@ async def compile_checks(ctx: VerifyContext) -> list[VerificationCheck]:
         res = await ctx.runner.run(command, purpose="verifier", timeout_seconds=timeout, network=ctx.step.network)
         evidence.update({"exit_code": res.exit_code, "duration_ms": res.duration_ms, "output": ctx.runner.clip(res.output, 4000)})
         if res.failed_to_run:
+            evidence[EXECUTOR_ERROR] = True
             out.append(ctx.check("compile", name, "error", f"{command} could not run: {res.problem or 'executor error'}", evidence))
         elif res.timed_out:
             out.append(ctx.check("compile", name, "fail", f"{command} timed out after {timeout}s", evidence))
@@ -413,6 +415,7 @@ async def lint_checks(ctx: VerifyContext) -> list[VerificationCheck]:
         if len(files) == 1:
             evidence["path"] = files[0]
         if res.failed_to_run:
+            evidence[EXECUTOR_ERROR] = True
             out.append(ctx.check("lint", name, "error", f"lint command could not run: {res.problem or 'executor error'}", evidence))
         elif res.timed_out:
             out.append(ctx.check("lint", name, "fail", f"lint timed out after {timeout}s", evidence))
@@ -451,4 +454,8 @@ async def require_tests_check(ctx: VerifyContext, outcomes: Sequence[tuple[Verif
         return ctx.check("test_evidence", "test_evidence", "pass", f"{len(executed_ok)} test command(s) executed and passed", evidence)
     if all(ok for _c, _e, ok in outcomes):
         return ctx.check("test_evidence", "test_evidence", "fail", "test commands passed but did not execute any test", evidence)
+    if all(c.status == "error" and c.evidence.get(EXECUTOR_ERROR) for c, _e, _ok in outcomes):
+        # nothing ran: the missing evidence is the executor's failure, not the change's (BUG-303)
+        evidence[EXECUTOR_ERROR] = True
+        return ctx.check("test_evidence", "test_evidence", "error", "no test command could be executed: the executor failed", evidence)
     return ctx.check("test_evidence", "test_evidence", "fail", "no test command executed and passed", evidence)

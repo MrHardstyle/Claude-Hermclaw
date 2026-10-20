@@ -132,8 +132,9 @@ FINALIZE_TRANSIENT_CODES = frozenset({"GIT_NETWORK", "GIT_TIMEOUT", "GIT_LOCK_TI
 #: preparation failures that say nothing about the job: the model host or the git remote is unavailable (BUG-263)
 PREPARE_OUTAGE_CODES = MODEL_OUTAGE_CODES | {"GIT_NETWORK", "GIT_TIMEOUT"}
 #: step failures that did no work: the model host is down, the GPU lease was not granted in time, or no execution worker
-#: is ready yet (right after a deployment the scheduler resumes before the sandbox worker re-registered, BUG-227)
-STEP_OUTAGE_CODES = MODEL_OUTAGE_CODES | {ResourceUnavailable.code, WorkerUnreachable.code, "SEARCH_UNAVAILABLE"}
+#: is ready yet (right after a deployment the scheduler resumes before the sandbox worker re-registered, BUG-227), or the
+#: verifier could not run its commands (BUG-303)
+STEP_OUTAGE_CODES = MODEL_OUTAGE_CODES | {ResourceUnavailable.code, WorkerUnreachable.code, "SEARCH_UNAVAILABLE", "VERIFIER_UNAVAILABLE"}
 
 
 def transient_db_error(exc: BaseException) -> bool:

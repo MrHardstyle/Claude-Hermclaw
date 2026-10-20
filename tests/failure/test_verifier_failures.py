@@ -18,6 +18,7 @@ from hermclaw.verifier import Verifier
 from hermclaw.verifier import checks as generic
 from hermclaw.verifier import commands as commands_mod
 from hermclaw.verifier import engine as engine_mod
+from hermclaw.verifier.report import executor_failure
 from tests.integration.test_verifier_support import (
     BrokenGitReader,
     HangingExecutor,
@@ -75,7 +76,9 @@ async def test_executor_outage_is_an_error_and_redacted(sessionmaker: Any, tmp_p
     assert names["acceptance[0]:command"].status == "error"
     assert names["acceptance[1]:test"].status == "error"
     assert names["syntax:a.php"].status == "error"
-    assert names["test_evidence"].status == "fail"
+    # nothing ran: the missing test evidence is the executor's failure too, so the run is an outage (BUG-303)
+    assert names["test_evidence"].status == "error" and names["test_evidence"].evidence["executor_error"] is True
+    assert executor_failure(outcome.report)
     assert executor.calls == 3
     async with sessionmaker() as s:
         rows = (

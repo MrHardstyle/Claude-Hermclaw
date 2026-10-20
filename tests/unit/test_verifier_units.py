@@ -17,7 +17,7 @@ from hermclaw.verifier.context import make_check
 from hermclaw.verifier.engine import _KeyedLocks
 from hermclaw.verifier.evidence import categorise_test, clean_glob, compile_pattern, label
 from hermclaw.verifier.languages import detect_language, is_lock_or_data_file, repo_has_tests
-from hermclaw.verifier.report import build_report, run_status
+from hermclaw.verifier.report import build_report, executor_failure, run_status
 from hermclaw.verifier.schema import SchemaParseError, parse_document, validate, validate_builtin
 from hermclaw.verifier.syntax import (
     build_batch_script,
@@ -249,6 +249,9 @@ def test_report_passes_iff_no_blocking_failure_or_error() -> None:
     assert "- [scope] scope-fail: fail message" in failed.summary
     errored = build_report([chk("error")], [])
     assert run_status(errored) == "error"
+    assert not executor_failure(errored)  # an error the executor did not cause (e.g. a lint command missing)
+    down = make_check("test", "pytest", "error", "could not be executed", {"executor_error": True})
+    assert executor_failure(build_report([down], [])) and not executor_failure(build_report([down, chk("fail")], []))
     many = build_report([make_check("x", f"n{i}", "fail", "m") for i in range(12)], [])
     assert "… 4 more" in many.summary
 

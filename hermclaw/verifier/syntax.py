@@ -27,6 +27,7 @@ from typing import Any
 import yaml
 
 from hermclaw.verifier.commands import CommandRunner
+from hermclaw.verifier.report import EXECUTOR_ERROR
 
 SYNTAX_TIMEOUT_SECONDS = 300
 _TEMPLATE_MARKERS = ("{{", "{%")
@@ -229,7 +230,8 @@ async def check_in_sandbox(runner: CommandRunner, language: str, paths: Sequence
     outcome = await runner.run(script, purpose="verifier", timeout_seconds=SYNTAX_TIMEOUT_SECONDS, network=network)
     if outcome.failed_to_run or outcome.timed_out:
         reason = "timed out" if outcome.timed_out else (outcome.problem or "executor error")
-        return [SyntaxResult(p, language, "error", f"{tool} syntax check could not run: {reason}") for p in paths]
+        flag = {} if outcome.timed_out else {EXECUTOR_ERROR: True}
+        return [SyntaxResult(p, language, "error", f"{tool} syntax check could not run: {reason}", dict(flag)) for p in paths]
     parsed = parse_batch_output(outcome.stdout, len(paths), nonce)
     results: list[SyntaxResult] = []
     for idx, rel in enumerate(paths):
