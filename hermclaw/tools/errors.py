@@ -66,6 +66,8 @@ COMMAND_SCOPE_VIOLATION = "COMMAND_SCOPE_VIOLATION"
 SANDBOX_ERROR = "SANDBOX_ERROR"
 TESTS_FAILED = "TESTS_FAILED"
 TEST_ERROR = "TEST_ERROR"
+# a command or test that ran and failed: the outcome of the code under work, not a refusal of the tool
+RUN_FAILED = frozenset({COMMAND_FAILED, COMMAND_TIMEOUT, TESTS_FAILED, TEST_ERROR})
 GIT_UNAVAILABLE = "GIT_UNAVAILABLE"
 REPO_UNAVAILABLE = "REPO_UNAVAILABLE"
 MEMORY_UNAVAILABLE = "MEMORY_UNAVAILABLE"  # recall without knowledge store, or the store failed (D-019)

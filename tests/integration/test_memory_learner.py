@@ -188,3 +188,14 @@ async def test_stalls_are_documented_with_their_cause_and_research_is_kept(sessi
     [research] = await _entries(sessionmaker, "research")
     assert research.status == "active" and research.source == "research" and research.expires_at is not None
     assert "-AsArray forces an array" in research.content and "https://learn.microsoft.com/powershell" in research.content
+
+
+async def test_red_test_runs_are_work_in_progress_not_refusals(sessionmaker: SM, learner: MemoryLearner) -> None:
+    """BUG-306: failed test and command runs counted as refusals of run_test; two models with red runs would have made
+    a tool-bug suspicion against run_test."""
+    red = [("run_test", "TESTS_FAILED", "."), ("run_command", "COMMAND_FAILED", "."), ("run_test", "TESTS_FAILED", ".")] * 2
+    await _job(sessionmaker, model="coder-main", calls=red, status="failed", error="STEP_FAILED")
+    await _job(sessionmaker, model="coder-glm47-flash", calls=red, status="failed", error="STEP_FAILED")
+    report = await learner.run_once()
+    assert report.suspicions == 0 and await _entries(sessionmaker, "tool_bug") == []
+    assert [e.signature for e in await _entries(sessionmaker, "incident")] == ["job:STEP_FAILED"]

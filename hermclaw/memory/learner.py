@@ -36,13 +36,15 @@ from hermclaw.core.config import MemoryPolicy
 from hermclaw.core.logging import get_logger
 from hermclaw.memory.store import MemoryStore
 from hermclaw.persistence.models import BugRecord, Event, Job, ResearchClaim, ResearchRun, ResearchSource, Step, StepAttempt, ToolCallRow
+from hermclaw.tools import errors as E
 
 log = get_logger(__name__)
 
 LEARNED_KEY = "memory_learned_at"
 FINISHED = ("succeeded", "failed")
-# refusals that say nothing about a tool or the task: the step was over, the budget spent, the call cancelled
-_NOT_LEARNED = frozenset({"CANCELLED", "STEP_FINISHED", "TURN_BUDGET_EXHAUSTED"})
+# refusals that say nothing about a tool or the task: the step was over, the budget spent, the call cancelled; and
+# runs that executed and failed – a red test run is work in progress, not a refusal (BUG-306)
+_NOT_LEARNED = frozenset({"CANCELLED", "STEP_FINISHED", "TURN_BUDGET_EXHAUSTED", E.SANDBOX_ERROR, *E.RUN_FAILED})
 _STALL_DIRECTIVES = ("diagnose", "stop")
 _MAX_EXAMPLES = 5
 

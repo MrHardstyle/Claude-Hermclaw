@@ -207,8 +207,6 @@ SNIPPET_CHARS = 600
 _SLACK = 400  # markers appended after clipping
 # refusals that tell nothing about how to act: the step is over, the budget spent, the knowledge itself unavailable
 _NO_KNOWLEDGE = frozenset({E.STEP_FINISHED, E.TURN_BUDGET_EXHAUSTED, E.MEMORY_UNAVAILABLE})
-# runs that executed and failed: their error lines are looked up in the knowledge (D-019)
-_FAILED_RUNS = frozenset({E.COMMAND_FAILED, E.TESTS_FAILED, E.TEST_ERROR})
 _FAILURE_QUERY_CHARS = 600
 _SOURCE_FILE_BYTES = 2_000_000  # larger files are not read for [source] lines
 
@@ -899,7 +897,7 @@ class ToolEngine:
         (tournament A9) or a server crashing on an import never brought the lesson recorded for it. Added after the
         output was clipped, so a long log does not cut the note off; ``coder_entries`` bounds its size."""
         want = self.policies.memory.coder_entries
-        if self.memory is None or want <= 0 or result.error_code not in _FAILED_RUNS:
+        if self.memory is None or want <= 0 or result.error_code not in E.RUN_FAILED:
             return result
         norm = normalise_text(strip_ansi(result.output))
         lines = key_error_lines(norm) or norm.split("\n")[-8:]

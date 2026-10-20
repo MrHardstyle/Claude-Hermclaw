@@ -46,6 +46,12 @@ Noch keine.
 
 ## Behobene Bugs
 
+### BUG-306 – Das Selbstlernen zählt rote Testläufe als Werkzeug-Ablehnung
+- Phase: Nachbereitung D-019 Teil 3, 2026-10-21 (Durchsicht gegen die Werkzeugaufrufe der Produktions-DB, vor jedem Release des Lerners) · Komponente: memory (`learner.py`) · Severity: P2 · blockierend: nein · Status: **behoben im Repository** (`tests/integration/test_memory_learner.py::test_red_test_runs_are_work_in_progress_not_refusals`)
+- Reproduktion: Zwei beendete Jobs zweier Modelle mit je zwei `run_test` → `TESTS_FAILED` ohne späteren grünen Lauf. Der Lerner legt den Vorfall `tool:run_test:TESTS_FAILED` an und meldet einen Werkzeug-Bug-Verdacht mit Bug-Eintrag `AUTO-…` gegen `run_test`. In der Produktions-DB sind `TESTS_FAILED` (523) und `COMMAND_FAILED` (369) nach `COMMAND_REPEATED` die häufigsten Fehlercodes; fast jeder Job hätte solche Vorfälle erzeugt.
+- Ursache: Der Lerner wertete jeden Werkzeugaufruf mit Fehlercode als Ablehnung. Ein Befehl oder Test, der lief und fehlschlug, ist aber das Ergebnis des Codes in Arbeit, keine Ablehnung des Werkzeugs. Der Status der Zeile (`failed`/`refused`) trennt das nicht: auch `TEXT_NOT_FOUND` ist `failed`.
+- Fix: `errors.RUN_FAILED` (`COMMAND_FAILED`, `COMMAND_TIMEOUT`, `TESTS_FAILED`, `TEST_ERROR`) und `SANDBOX_ERROR` (Infrastruktur) zählen für den Lerner nicht als Ablehnung. Was ein fehlgeschlagener Lauf lehrt, erreicht den Coder über das Wissen zu seinen Fehlerzeilen.
+
 ### BUG-305 – Ein Testbericht neben den Tests macht jeden Testlauf zum Scope-Verstoß und verdeckt die Fehlschläge
 - Phase: Coder-Turnier 0.1.0rc62, 2026-10-21 (Auswertung: coder-main A9, PowerShell) · Komponente: tools (Befehls-Seiteneffekte, `snapshot.py`) · Severity: P2 · blockierend: nein · Status: **behoben im Repository** (`tests/integration/test_tools_engine_exec.py::test_test_reports_a_command_writes_are_cleaned_not_violations`)
 - Reproduktion: `pwsh -NoProfile -Command "Invoke-Pester -Path tests -CI"` schreibt `testResults.xml` ins Arbeitsverzeichnis. Jeder Lauf endet mit `COMMAND_SCOPE_VIOLATION` („creating 'testResults.xml' is outside allowed_new_paths … (reverted)“). Die eigentliche Meldung darüber („9 failed – Could not find Command Get-Service“) geht unter; coder-main ändert achtmal die Tests und ruft den Lauf viermal identisch erneut auf (`COMMAND_REPEATED`).

@@ -52,7 +52,7 @@ The scheduler process runs `MemoryLearner` next to the workspace janitor: every 
 
 | Source | Entry | Signature |
 |---|---|---|
-| a tool refused with one error code at least `min_repeats` times in the job | `incident`: how often, models, typical message, **what helped** (the calls up to the next success of the same tool on the same file in that attempt, e.g. `read_file → replace_text`) or that nothing did | `tool:<tool>:<code>` |
+| a tool refused with one error code at least `min_repeats` times in the job (a command or test that ran and failed – `errors.RUN_FAILED` – and sandbox errors are not refusals, BUG-306) | `incident`: how often, models, typical message, **what helped** (the calls up to the next success of the same tool on the same file in that attempt, e.g. `read_file → replace_text`) or that nothing did | `tool:<tool>:<code>` |
 | `stagnation.detected` with directive `diagnose` or `stop` (one per stall kind and job) | `incident`: cause (`edit_mechanics`, `loop`, `knowledge`, …), step, model, turn, reasons, repeated signal, how the step ended | `stall:<cause>:<tool or signal>:<code>` |
 | failed job | `incident` with the job's error | `job:<error code>` |
 | completed research run | `research` (source `research`, active, expires after `research_days`): question, synthesis, claims with confidence ≥ 0.6, sources; the same question updates the entry | `research:<hash of the question>` |
