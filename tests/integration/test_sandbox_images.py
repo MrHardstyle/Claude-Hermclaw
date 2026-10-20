@@ -99,6 +99,9 @@ async def test_language_alias_only_when_configured(sessionmaker: Any, tmp_path: 
     assert await SandboxImageSelector(sessionmaker, policy(), FakeRepo(["python"])).image_for(ws) is None
     assert await SandboxImageSelector(sessionmaker, policy(python=PYTHON_IMAGE), FakeRepo(["go"])).image_for(ws) is None
     assert await SandboxImageSelector(sessionmaker, policy(python=PYTHON_IMAGE), None).image_for(ws) is None
+    # a PowerShell repository runs in the PowerShell toolchain (K3 could not run its script at all)
+    ps = policy(python=PYTHON_IMAGE, powershell="localhost/hermclaw-sandbox-powershell:1")
+    assert await SandboxImageSelector(sessionmaker, ps, FakeRepo(["powershell"])).image_for(ws) == "powershell"
 
 
 async def test_disallowed_repository_image_falls_back(sessionmaker: Any, tmp_path: Path) -> None:

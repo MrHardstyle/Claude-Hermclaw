@@ -29,6 +29,7 @@ versions, steps, dependencies and events.
 ```python
 Planner(chat: ChatModel, sessionmaker, config: HermclawConfig | None = None, *, settings: PlannerSettings | None = None)
     async create_plan(job_id: UUID, inputs: PlannerInput) -> PlanResult
+    async adopt_plan(job_id: UUID, inputs: PlannerInput, data: dict) -> PlanResult   # prescribed plan, no model
 
 Replanner(chat: ChatModel, sessionmaker, config=None, *, settings=None)
     async replan(job_id: UUID, trigger: ReplanTrigger, inputs: PlannerInput | None = None) -> PlanResult
@@ -116,8 +117,8 @@ whose capability uses the `coder` model role, otherwise `0`. `max_attempts = pol
   - a path must exist among the known paths. These are the explicit list, the inventory's `files` and `paths`, every path-shaped string elsewhere in the inventory (values and keys), the retrieved-context paths and the files of `existing_tests` (`a.py::test_x` counts as `a.py`). A path that another step of the plan lists in `allowed_new_paths` is valid when the hinting step depends on that step (transitively); otherwise the error names the step to add to `depends_on` (BUG-262);
   - a symbol must be a known symbol or appear as a whole word in the provided context;
   - absolute paths and `..` are rejected, and so are policy-forbidden paths.
-- A workspace-mutating step whose goal names a repository file (an existing one or one another step lists in `allowed_new_paths`; a bare file name counts when it is unique) must list that file in its `repo_hints` or `allowed_new_paths`, directly or through a directory/glob. Otherwise the scope leaves it out, and the step reaches the file only as an adopted leftover (BUG-268).
-- Traceability (BUG-287): every language-neutral literal of the job – a file path (`docs/api.md`, `data/buchungen.csv`; not `Node.js` or a domain), a name in backticks and, in an HTTP job, each 4xx/5xx status code – must appear in some step (goal, paths, hints or acceptance; a path also by its file name). A plan of a new job that leaves one out gets one error listing them; replans are exempt, the replaced step's goal is carried as a constraint there (BUG-285).
+- A workspace-mutating step whose goal names a repository file (an existing one or one another step lists in `allowed_new_paths`; a bare file name counts when it is unique) must list that file in its `repo_hints` or `allowed_new_paths`, directly or through a directory/glob. Otherwise the scope leaves it out, and the step reaches the file only as an adopted leftover (BUG-268). A file covered by one of the step's `must_not_change` globs is exempt: the goal names it to protect it, and listing it as a hint would make it the step's own file and drop the protection (BUG-297).
+- Traceability (BUG-287): every language-neutral literal of the job – a file path (`docs/api.md`, `data/buchungen.csv`; not `Node.js` or a domain), a name in backticks and, in an HTTP job, each 4xx/5xx status code – must appear in some step (goal, paths, hints or acceptance; a path also by its file name). The search runs over the step's strings as written, so quotes and backslashes in a literal such as `{"error": "..."}` match (BUG-296). A plan of a new job that leaves one out gets one error listing them; replans are exempt, the replaced step's goal is carried as a constraint there (BUG-285).
 - Scope stays explicit: catch-all patterns made only of wildcards and slashes (`*`, `**`, `**/*`) are rejected as `repo_hints` and as `allowed_new_paths`.
 - Acceptance sanity:
   - remote mutating kinds (`ssh`, `deploy`) need substantive model-provided acceptance;
@@ -148,6 +149,13 @@ Steps that a replan keeps as completed (`preserved`) take part in the structural
   `risk_policy` overrides can only raise floors or lower the threshold. Unknown kinds or fields are rejected.
 
 Every enrichment is recorded in `PlanResult.notes` and in the `planner.plan.created` / `replan.created` payloads.
+
+## Prescribed plans (`adopt_plan`, coder tournament)
+
+`adopt_plan` stores a plan that was written beforehand (`jobs.metadata.tournament.plan`, see `tournament.md`). It runs
+the same validator as `create_plan` – schema, semantic rules including the job-literal rule (BUG-287), and the
+deterministic enrichment – but without a model and without repair turns: an invalid plan fails the job. The plan
+version has `source = prescribed`.
 
 ## Replanning flow (`replan`)
 

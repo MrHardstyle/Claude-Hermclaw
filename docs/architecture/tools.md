@@ -28,7 +28,7 @@ Invariants:
 | `gitlocal.py` | `LocalGit` – minimal git plumbing on the orchestrator copy (ls-files, status, ls-tree, apply, checkout-index) | 17.2, 17.4, 17.5 |
 | `snapshot.py` | `WorkspaceTracker` – snapshot / detect / revert of command side effects, git-metadata protection | 17.5 |
 | `classify.py` | `CommandClassifier` (forbidden/destructive/mutate/read/unknown, obfuscation-resistant views, built-in git-mutation detection) | 17.5 |
-| `testparse.py` | runner output parsers (pytest, unittest, jest, vitest, mocha, phpunit, go test, cargo test, generic) + verdict | 17.6 |
+| `testparse.py` | runner output parsers (pytest, unittest, jest, vitest, mocha, node:test, phpunit, go test, cargo test, Pester (BUG-295), generic) + verdict | 17.6 |
 | `executors.py` | `LocalSandboxExecutor`, `SubprocessExecutor` (dev/test only), `SandboxUnavailable` | 17.5 |
 | `errors.py` / `output.py` | `ToolError` + stable error codes; clipping helpers | – |
 | `locations.py` | `source_locations()` – the source lines a failed command's output names (`path:line`, `path(line,col)`, sandbox paths), each with the definition it belongs to (BUG-294) | – |

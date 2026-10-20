@@ -46,6 +46,33 @@ Noch keine.
 
 ## Behobene Bugs
 
+### BUG-297 – Planziel darf geschützte Eingabedaten nicht nennen, ohne ihren Schutz zu verlieren
+- Phase: Vorbereitung Coder-Turnier (Planprüfung der Aufgaben A1, A2, A4, A5), 2026-10-20 · Komponente: planner (validation) · Severity: P2 · blockierend: nein (Schutz geht still verloren) · Status: **behoben** (`tests/unit/test_planner_validation.py::test_a_goal_may_name_the_file_it_protects`)
+- Reproduktion:
+  - Schrittziel: „… die Eingabedaten `data/buchungen.csv` bleiben unverändert“, dazu `must_not_change: [data/**]`.
+  - Die Planprüfung verlangte: „its goal names data/buchungen.csv, which is not among the step's files: add it to repo_hints“.
+  - Als Hinweis eingetragen, zählte die Datei als eigene Datei des Schritts, und `must_not_change` wurde gestrichen („dropped must_not_change on the step's own files“).
+- Ursache: Zwei Regeln widersprachen sich. BUG-268 verlangte jede im Ziel genannte Datei unter den Dateien des Schritts. BUG-292 wertete einen im Ziel genannten Hinweis als „schreibt der Schritt“. Eine Datei, die das Ziel nennt, um sie zu schützen, war damit nie geschützt. Ein Planer-Modell hatte nur die Wahl zwischen Reparaturrunde und verlorenem Schutz.
+- Fix:
+  - Eine Datei, die ein `must_not_change` des Schritts abdeckt, darf das Ziel nennen, ohne Hinweis zu sein.
+  - Der Fehlertext nennt diesen Weg für Dateien, die der Schritt nur liest.
+
+### BUG-296 – Auftrags-Literal mit Anführungszeichen wird in keinem Plan gefunden
+- Phase: Vorbereitung Coder-Turnier (Planprüfung der Aufgaben A7, A8, A9), 2026-10-20 · Komponente: planner (validation) · Severity: P1 · blockierend: ja (Plan wird in jeder Reparaturrunde abgelehnt) · Status: **behoben** (`tests/unit/test_planner_validation.py::test_a_job_literal_with_quotes_is_found_in_the_step`)
+- Reproduktion:
+  - Auftrag mit „Fehlerantworten sind JSON `{"error": "..."}`“.
+  - Ein Schrittziel enthält den Text wörtlich, trotzdem meldet die Prüfung „the job names '{"error": "..."}', but no step mentions it“.
+- Ursache: Die Rückverfolgung der Auftrags-Literale (BUG-287) durchsuchte die Schritte als JSON-Text (`json.dumps`). Dort steht jedes `"` als `\"` und jeder Backslash doppelt. Literale mit Anführungszeichen oder Backslash konnten nie gefunden werden. Ein API-Auftrag mit JSON-Beispielen in Backticks endete so in Reparaturschleifen bis `PLANNER_INVALID_OUTPUT`.
+- Fix: Die Prüfung durchsucht die Zeichenketten der Schritte so, wie sie geschrieben sind.
+
+### BUG-295 – Pester-Tests werden nicht gezählt
+- Phase: Vorbereitung Coder-Turnier (Aufgabe A9, PowerShell), 2026-10-20 · Komponente: tools (testparse) · Severity: P2 · blockierend: ja für PowerShell-Schritte mit Testkriterium · Status: **behoben** (`tests/unit/test_tools_testparse.py::test_pester_summary_is_counted`)
+- Reproduktion: Ein Testkriterium `pwsh -Command "Invoke-Pester -Path tests -CI"` mit `min_passed: 3` und grünen Tests. Gezählt wurden 0 bestandene Tests, also wurde das Kriterium verfehlt.
+- Ursache: `testparse` kannte keine Pester-Zusammenfassung, und für PowerShell gab es nur den Exit-Code. Live K3 (rc59–rc61) hatte zudem kein PowerShell im Sandbox-Image, das Skript lief nie.
+- Fix:
+  - Neuer Parser für „Tests Passed: N, Failed: M, Skipped: K[, Inconclusive: I]“ (Pester 5 und 6, auch farbig).
+  - Neues Sandbox-Image `powershell` mit PowerShell 7 LTS und Pester.
+
 ### BUG-294 – Lint-Befund mit Zeilennummer, Coder ändert 35 Minuten den falschen, gleich gebauten Test
 - Phase: Testzyklus 3 auf rc61 (M1, Job `6b99148d…`, Plan v3) · Komponente: tools (engine, Ausgabe fehlgeschlagener Befehle) · Severity: P1 · blockierend: ja (`REPLAN_LIMIT` nach 130,9 min) · Status: **behoben** (`tests/unit/test_tools_locations.py`, `tests/integration/test_tools_engine_exec.py::test_a_failed_run_shows_the_source_lines_its_output_names`)
 - Reproduktion:

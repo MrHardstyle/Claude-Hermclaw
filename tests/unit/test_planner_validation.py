@@ -432,6 +432,24 @@ def test_a_file_the_goal_names_must_be_among_the_steps_files() -> None:
     assert not any("its goal names" in e for e in _errors(plan("Widget", [research]), ctx))  # only workspace-mutating steps
 
 
+def test_a_goal_may_name_the_file_it_protects() -> None:
+    """BUG-297: "the input data data/buchungen.csv stays unchanged" had to list the file as a hint, which made it the
+    step's own file and dropped its must_not_change (BUG-292) – a goal could never name the data it must keep."""
+    ctx = _ctx(PlannerInput(repository_inventory={"files": ["ledger/parse.py", "data/buchungen.csv"]}))
+    fix = step(
+        "S001",
+        "implement",
+        "coding",
+        "Fix the date format in ledger/parse.py; the input data data/buchungen.csv stays unchanged.",
+        repo_hints=["ledger/parse.py"],
+        acceptance=[{"type": "diff", "must_change": ["ledger/parse.py"], "must_not_change": ["data/**"]}],
+    )
+    assert not any("its goal names" in e for e in _errors(plan("Ledger", [fix]), ctx))
+    unprotected = {**fix, "acceptance": [{"type": "diff", "must_change": ["ledger/parse.py"]}]}
+    errors = _errors(plan("Ledger", [unprotected]), ctx)
+    assert any("its goal names data/buchungen.csv" in e and "must_not_change" in e for e in errors), errors
+
+
 @pytest.mark.parametrize("pattern", ["**", "*", "**/*", "*/**", "./**"])
 def test_catch_all_patterns_are_rejected(pattern: str) -> None:
     """Scope stays explicit: hints and new-path patterns must name a concrete location."""
@@ -920,6 +938,18 @@ def test_every_literal_of_the_job_is_named_by_a_step() -> None:
     api["acceptance"] = [{"type": "presence", "path_glob": "app/notes.py", "pattern": "404"}]
     assert not [e for e in _errors(plan("goal", [api, docs]), ctx) if "the job names" in e], "a basename and acceptance count"
     assert not [e for e in _errors(plan("goal", [api]), ctx, preserved=frozenset({"S000"})) if "the job names" in e], "replan"
+
+
+def test_a_job_literal_with_quotes_is_found_in_the_step() -> None:
+    """BUG-296: the plan text was searched as JSON, where every quote is escaped – `{"error": "..."}` never matched."""
+    text = 'Eine REST-API für Notizen. Fehlerantworten sind JSON `{"error": "..."}`, Pfade wie `C:\\daten`.'
+    ctx = ValidationContext.build(get_config(), FASTAPI.inputs, PlannerSettings(), job_text=text)
+    api = _impl(
+        "S001",
+        goal='Implement the notes API; errors are JSON `{"error": "..."}`, paths like C:\\daten.',
+        allowed_new_paths=["app/notes.py"],
+    )
+    assert not [e for e in _errors(plan("goal", [api]), ctx) if "the job names" in e]
 
 
 def test_a_replacement_step_keeps_the_requirements_of_the_failed_step() -> None:

@@ -24,12 +24,15 @@
       - ollama_llamacpp_extra_args | map('string') | reject('match', '^[A-Za-z0-9._:=,/-]+$') | list | length == 0
       - ollama_llamacpp_models | map(attribute='model') | reject('match', '^[a-z0-9][a-z0-9._-]*(:[A-Za-z0-9._-]+)?$') | list | length == 0
       - ollama_llamacpp_model not in (ollama_llamacpp_models | map(attribute='model') | list)
+      # a model given as a GGUF path (coder tournament candidates): absolute, plain characters, a .gguf file
+      - ollama_llamacpp_models | selectattr('path', 'defined') | map(attribute='path') | reject('match', '^/[A-Za-z0-9._/-]+\\.gguf$') | list | length == 0
       - ollama_llamacpp_preset_settings | map(attribute='key') | map('string') | reject('match', '^[a-z][a-z0-9-]*$') | list | length == 0
       - ollama_llamacpp_preset_settings | map(attribute='value') | map('string') | reject('match', '^[A-Za-z0-9._:,/-]+$') | list | length == 0
     fail_msg: >-
       invalid llama.cpp settings: ollama_llamacpp_archive_src/ollama_llamacpp_archive_sha256 come from scripts/ops/build-llamacpp.sh
       and the archive name carries ollama_llamacpp_build (llamacpp-<build>-sm<arch>.tgz),
-      ollama_llamacpp_model and every ollama_llamacpp_models[].model are distinct Ollama tags, preset settings are
+      ollama_llamacpp_model and every ollama_llamacpp_models[].model are distinct Ollama tags (or names with an absolute
+      .gguf path), preset settings are
       llama-server option names with plain values, the port must differ from Ollama's
     quiet: true
 
@@ -79,9 +82,33 @@
     file: llamacpp_model.yml
     apply:
       tags: [ollama, llamacpp]
-  loop: "{{ [ollama_llamacpp_model] + (ollama_llamacpp_models | map(attribute='model') | list) }}"
+  loop: "{{ [ollama_llamacpp_model] + (ollama_llamacpp_models | rejectattr('path', 'defined') | map(attribute='model') | list) }}"
   loop_control:
     loop_var: ollama_llamacpp_tag
+
+- name: Check the GGUF files given by path
+  ansible.builtin.stat:
+    path: "{{ item.path }}"
+  loop: "{{ ollama_llamacpp_models | selectattr('path', 'defined') | list }}"
+  loop_control:
+    label: "{{ item.model }}"
+  register: ollama_llamacpp_path_st
+
+- name: Refuse a missing GGUF file
+  ansible.builtin.assert:
+    that: item.stat.exists and item.stat.isreg
+    fail_msg: "{{ item.item.path }} ({{ item.item.model }}) is missing on {{ inventory_hostname }}"
+    quiet: true
+  loop: "{{ ollama_llamacpp_path_st.results }}"
+  loop_control:
+    label: "{{ item.item.model }}"
+
+- name: Record the GGUFs given by path
+  ansible.builtin.set_fact:
+    ollama_llamacpp_model_paths: "{{ ollama_llamacpp_model_paths | default({}) | combine({item.model: item.path}) }}"
+  loop: "{{ ollama_llamacpp_models | selectattr('path', 'defined') | list }}"
+  loop_control:
+    label: "{{ item.model }}"
 
 - name: Path of the main llama.cpp model
   ansible.builtin.set_fact:

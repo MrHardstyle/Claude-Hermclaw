@@ -598,7 +598,9 @@ def test_configuration_from_examples_inventory_and_overrides(tmp_path: Path) -> 
     assert policies["coder"]["max_turns"] == 24 and policies["git"]["create_merge_request"] is True
     assert policies["coder"]["tool_output_chars"] == 12000, "deep merge keeps the other keys"
     assert policies["sandbox"]["image"] == "localhost/hermclaw-sandbox-generic:7"
-    assert policies["sandbox"]["images"] == {t: f"localhost/hermclaw-sandbox-{t}:7" for t in ("python", "node", "php", "generic")}
+    assert policies["sandbox"]["images"] == {
+        t: f"localhost/hermclaw-sandbox-{t}:7" for t in ("python", "node", "php", "generic", "powershell")
+    }
     assert (
         policies["commands"]["forbidden_patterns"]
         == yaml.safe_load((REPO / "config" / "policies.example.yaml").read_text())["commands"]["forbidden_patterns"]

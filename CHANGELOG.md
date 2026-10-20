@@ -4,7 +4,21 @@ Format: [Keep a Changelog](https://keepachangelog.com/de/1.1.0/), Versionen nach
 
 ## [Unreleased]
 
+### Hinzugefügt
+- **Coder-Turnier (D-018):** `hermclaw coder-tournament SPEC` vergleicht Coder-Modelle unter gleichen Bedingungen:
+  vorgegebener Plan (geprüft wie ein Modellplan, `source = prescribed`), kein Triage, kein Review, kein Replan, kein
+  Push. Bewertung mit versteckten Tests in der Sandbox, Gewichte 50/15/10/10/10/5, Infrastrukturfehler getrennt.
+  Spezifikation und versteckte Prüfungen unter `tests/live/tournament/`, Fixtures `t-lint`, `t-sqlite`, `t-review`.
+- **PowerShell-Sandbox-Image:** `hermclaw-sandbox-powershell` (PowerShell LTS, Pester 5) für PowerShell-Aufträge.
+- **Modelle per GGUF-Pfad:** Einträge in `ollama_llamacpp_models` können statt eines Ollama-Namens eine `.gguf`-Datei
+  (`path`) nennen.
+
 ### Behoben
+- **Geschützte Dateien im Planziel (BUG-297):**
+  - Ein Schrittziel darf eine Datei nennen, die der Schritt per `must_not_change` schützt („die Eingabedaten bleiben unverändert“), ohne sie als Hinweis zu führen.
+  - Vorher ging der Schutz dabei verloren.
+- **Auftrags-Literale mit Anführungszeichen (BUG-296):** Die Planprüfung findet Literale wie `{"error": "..."}` wieder im Schritt. Vorher suchte sie im JSON-Text, wo jedes Anführungszeichen maskiert war, und lehnte jeden Plan ab.
+- **Pester-Ergebnisse werden gezählt (BUG-295):** PowerShell-Testläufe liefern bestandene und fehlgeschlagene Tests statt nur des Exit-Codes.
 - **Fehlerorte mit Quellzeile (BUG-294):** Schlägt ein Befehl fehl, hängt die Runtime jede Zeile an, die seine Ausgabe als
   `pfad:zeile` nennt – mit der Funktion bzw. Klasse, in der sie steht. Ein Lint-Befund in einem von zwei gleich gebauten
   Tests führt den Coder nicht mehr in den falschen.

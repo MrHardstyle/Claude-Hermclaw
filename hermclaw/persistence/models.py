@@ -116,7 +116,7 @@ class PlanVersion(CreatedMixin, Base):
     plan_id: Mapped[uuid.UUID] = _fk("plans.id", nullable=False)
     job_id: Mapped[uuid.UUID] = _fk("jobs.id", nullable=False)
     version: Mapped[int] = mapped_column(Integer, nullable=False)
-    source: Mapped[str] = mapped_column(String(32), nullable=False)  # planner|replanner|fallback|manual
+    source: Mapped[str] = mapped_column(String(32), nullable=False)  # planner|replanner|fallback|manual|prescribed
     model_alias: Mapped[str | None] = mapped_column(String(100))
     plan_json: Mapped[dict[str, Any]] = mapped_column(JSONB, nullable=False)
     validation_errors: Mapped[list[Any]] = _json(list)

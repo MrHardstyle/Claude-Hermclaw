@@ -47,6 +47,7 @@ from hermclaw.runtime.state_machines import (
 )
 from hermclaw.runtime.transitions import emit_status, transition_job, transition_step
 from hermclaw.scheduler.handlers import CancelToken, JobDriver, StepHandler, StepOutcome, StepRunContext
+from hermclaw.tournament.settings import tournament_of
 from hermclaw.workers.errors import WorkerUnreachable
 
 log = get_logger(__name__)
@@ -471,7 +472,13 @@ class Scheduler:
         """Another replan fits the budget (the same limits the scheduler applies before replanning)."""
         policy = self.config.policies.correction
         used = job_metadata.replans_used(job.replan_count + 1, job.metadata_ or {})
-        return used < policy.max_replans_per_job and job.replan_count + 1 < policy.max_replans_total
+        return used < self._replan_limit(job) and job.replan_count + 1 < policy.max_replans_total
+
+    def _replan_limit(self, job: Job) -> int:
+        """Replans per job: the policy, lowered for a coder tournament run (none by default – it measures the coder)."""
+        limit = self.config.policies.correction.max_replans_per_job
+        tournament = tournament_of(job.metadata_)
+        return min(limit, tournament.replans) if tournament is not None else limit
 
     def _deferred(self, job_id: uuid.UUID) -> bool:
         outage = self._outages.get(job_id)
@@ -1024,7 +1031,7 @@ class Scheduler:
                     completed_now = counts.get(StepStatus.completed.value, 0)
                     budget_meta = progress_budget(job.replan_count, job.metadata_, completed_now)
                     used = job_metadata.replans_used(job.replan_count, {**(job.metadata_ or {}), **budget_meta})
-                    if (used >= policy.max_replans_per_job or job.replan_count >= policy.max_replans_total) and not manual_replan:
+                    if (used >= self._replan_limit(job) or job.replan_count >= policy.max_replans_total) and not manual_replan:
                         failed_keys = [
                             k
                             for (k,) in (

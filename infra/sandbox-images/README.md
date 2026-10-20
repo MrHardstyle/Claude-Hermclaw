@@ -10,6 +10,7 @@ such as `pytest -q` would fail. These Containerfiles add the toolchains; project
 | `node` | `localhost/hermclaw-sandbox-node:1` | Node 22, npm, TypeScript |
 | `php` | `localhost/hermclaw-sandbox-php:1` | PHP 8.3 CLI, Composer |
 | `generic` | `localhost/hermclaw-sandbox-generic:1` | bash, make, gcc, jq, shellcheck, yamllint, sqlite3, psql, python3 |
+| `powershell` | `localhost/hermclaw-sandbox-powershell:1` | PowerShell 7 LTS (`pwsh`), Pester 5 |
 
 Build on `.222` as the worker user (rootless podman):
 

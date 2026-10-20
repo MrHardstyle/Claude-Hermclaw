@@ -100,11 +100,14 @@ class ContextBuilderConfig:
         )
 
     @classmethod
-    def from_config(cls, config: HermclawConfig, *, role: str = "coder", **overrides: Any) -> ContextBuilderConfig:
-        """Coder budget: ``models.by_role(role)`` window, ``policies.coder.max_output_tokens`` (the requested output,
-        at least the profile's), ``policies.scope.always_forbidden`` as prompt exclusions and
-        ``policies.coder.tool_output_chars`` as the per-read cap."""
-        profile = config.models.by_role(role)
+    def from_config(
+        cls, config: HermclawConfig, *, role: str = "coder", alias: str | None = None, **overrides: Any
+    ) -> ContextBuilderConfig:
+        """Coder budget: ``models.by_role(role)`` window (or that of the profile ``alias`` names, a coder tournament
+        run), ``policies.coder.max_output_tokens`` (the requested output, at least the profile's),
+        ``policies.scope.always_forbidden`` as prompt exclusions and ``policies.coder.tool_output_chars`` as the per-read
+        cap."""
+        profile = config.models.by_alias(alias) if alias else config.models.by_role(role)
         out = profile.max_output_tokens
         if role == "coder":
             out = max(out, config.policies.coder.max_output_tokens)

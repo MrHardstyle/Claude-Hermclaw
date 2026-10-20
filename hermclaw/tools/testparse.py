@@ -1,6 +1,7 @@
 """Parse test-runner output into counts (P17 17.6).
 
-Supported: pytest, unittest, jest, vitest, mocha, node:test (TAP and spec reporter), phpunit, go test, cargo test;
+Supported: pytest, unittest, jest, vitest, mocha, node:test (TAP and spec reporter), phpunit, go test, cargo test,
+Pester (PowerShell);
 everything else falls back to ``generic`` (exit code only).
 Parsers only read the runner's own summary lines – no project-specific knowledge.
 """
@@ -14,9 +15,9 @@ from typing import Literal
 
 from hermclaw.tools.output import strip_ansi
 
-Framework = Literal["pytest", "unittest", "jest", "vitest", "mocha", "node", "phpunit", "go", "cargo", "generic"]
+Framework = Literal["pytest", "unittest", "jest", "vitest", "mocha", "node", "phpunit", "go", "cargo", "pester", "generic"]
 TestStatus = Literal["passed", "failed", "error"]
-FRAMEWORKS: tuple[Framework, ...] = ("pytest", "unittest", "jest", "vitest", "mocha", "node", "phpunit", "go", "cargo", "generic")
+FRAMEWORKS: tuple[Framework, ...] = ("pytest", "unittest", "jest", "vitest", "mocha", "node", "phpunit", "go", "cargo", "pester", "generic")
 
 
 @dataclass(frozen=True)
@@ -192,6 +193,20 @@ def parse_node(out: str) -> TestCounts | None:
     )
 
 
+# ---------------------------------------------------------------------------------------------- pester
+# Pester 5/6 ends with "Tests Passed: 2, Failed: 1, Skipped: 0, Inconclusive: 0, NotRun: 0" (5.x without
+# Inconclusive). Without this parser a PowerShell test step counted 0 passed tests (BUG-295).
+_PESTER_SUMMARY = re.compile(r"^\s*Tests Passed: (\d+), Failed: (\d+), Skipped: (\d+)(?:,? Inconclusive: (\d+))?", re.M)
+
+
+def parse_pester(out: str) -> TestCounts | None:
+    found = _PESTER_SUMMARY.findall(out)
+    if not found:
+        return None
+    passed, failed, skipped, inconclusive = found[-1]
+    return TestCounts("pester", passed=int(passed), failed=int(failed), skipped=int(skipped) + int(inconclusive or 0))
+
+
 # ---------------------------------------------------------------------------------------------- phpunit
 _PHPUNIT_OK = re.compile(r"^OK \((\d+) tests?, \d+ assertions?\)", re.M)
 _PHPUNIT_SUMMARY = re.compile(r"^Tests: (\d+), Assertions: \d+(.*)$", re.M)
@@ -260,6 +275,7 @@ PARSERS: dict[Framework, Callable[[str], TestCounts | None]] = {
     "vitest": parse_vitest,
     "mocha": parse_mocha,
     "node": parse_node,
+    "pester": parse_pester,
 }
 
 

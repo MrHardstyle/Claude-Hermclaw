@@ -1,0 +1,5 @@
+[
+  {"Name": "Alpha", "DisplayName": "Alpha-Dienst", "Status": "Running", "StartType": "Automatic"},
+  {"Name": "Beta", "DisplayName": "Dienst für Überwachung", "Status": "Stopped", "StartType": "Manual"},
+  {"Name": "Gamma", "DisplayName": "Gamma", "Status": "Running", "StartType": "Disabled"}
+]

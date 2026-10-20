@@ -49,6 +49,8 @@ LAST_REPLAN = "last_replan"
 ALLOW_NETWORK_RESEARCH = "allow_network_research"
 AUTO_COMMIT = "auto_commit"
 CREATE_MERGE_REQUEST = "create_merge_request"
+# --- coder tournament (hermclaw/tournament/; set only by the operator CLI) ---------------------------------------
+TOURNAMENT = "tournament"
 
 RESERVED_KEYS: Mapping[str, str] = MappingProxyType(
     {
@@ -68,6 +70,7 @@ RESERVED_KEYS: Mapping[str, str] = MappingProxyType(
         ALLOW_NETWORK_RESEARCH: "typed field allow_network_research of POST /api/jobs",
         AUTO_COMMIT: "typed field auto_commit of POST /api/jobs",
         CREATE_MERGE_REQUEST: "typed field create_merge_request of POST /api/jobs",
+        TOURNAMENT: "coder tournament run: prescribed plan, coder alias, review and replan switches (CLI coder-tournament)",
     }
 )
 RESERVED_PREFIXES: tuple[str, ...] = ("_", "hermclaw.")
@@ -142,6 +145,7 @@ __all__ = [
     "RETRY_REQUESTED",
     "SSH_APPROVALS",
     "SSH_APPROVALS_CONSUMED",
+    "TOURNAMENT",
     "TRIAGE",
     "check_client_metadata",
     "describe_reserved",

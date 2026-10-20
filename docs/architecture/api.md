@@ -59,6 +59,7 @@ The registry `hermclaw/core/job_metadata.py` now declares every such key once. E
 | `planner_model_alias`, `last_replan` | planner / replanner | none (provenance shown in the API and UI) |
 | `planner_model_fallback`, `planner_fallback_alias` | planner `record_fallback` | none ("no silent model switch" provenance) |
 | `allow_network_research`, `auto_commit`, `create_merge_request` | `POST /api/jobs`, from the typed fields | UI display |
+| `tournament` | operator CLI `hermclaw coder-tournament` only (`cli._create_job`) | driver: adopts the prescribed plan, no triage, no push; scheduler: replan limit; implement handler: coder alias, no review (`hermclaw/tournament/settings.py`) |
 
 Matching rules:
 

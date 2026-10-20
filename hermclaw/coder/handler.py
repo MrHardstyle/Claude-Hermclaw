@@ -46,6 +46,7 @@ from hermclaw.scheduler.handlers import StepOutcome, StepRunContext
 from hermclaw.tools.context import ScopeExpansionOutcome, ToolPermissions
 from hermclaw.tools.engine import ToolEngine
 from hermclaw.tools.ops import OpsToolProvider
+from hermclaw.tournament.settings import TournamentSettings, tournament_of
 
 if TYPE_CHECKING:
     from hermclaw.gitops.engine import GitEngine
@@ -249,6 +250,7 @@ class _Run:
     ws: Any
     handle: WorkspaceHandle
     earlier_findings: tuple[str, ...] = ()  # review findings this correction attempt had to address (BUG-284)
+    review: bool = True  # False in a coder tournament run: the review would measure a second model
 
 
 class _Callbacks:
@@ -496,7 +498,9 @@ class ImplementStepHandler:
             capability=row.capability,
             artifacts_dir=self.deps.artifacts_dir,
         )
-        builder_cfg = ContextBuilderConfig.from_config(self.config)
+        tournament = await self._tournament(ctx.job_id)
+        coder_alias = tournament.coder_alias if tournament is not None else None
+        builder_cfg = ContextBuilderConfig.from_config(self.config, alias=coder_alias)
         builder = ContextBuilder(self.deps.repo, self.deps.git.reader(), builder_cfg)
         settings = CoderSettings(
             **{
@@ -505,6 +509,7 @@ class ImplementStepHandler:
                 # request exactly the output the context budget reserves: the loop's default (6144) cut answers off at
                 # 6144 tokens although the profile allowed and the budget reserved 8192 (live G1, BUG-235)
                 "max_output_tokens": builder_cfg.max_output_tokens,
+                **({"alias": coder_alias} if coder_alias else {}),
             }
         )
         stagnation = await self.deps.stagnation_factory(ctx) if self.deps.stagnation_factory else None
@@ -523,7 +528,7 @@ class ImplementStepHandler:
         )
         await self._status(ctx, f"Coder startet {row.step_key} ({ctx.attempt_kind}, max {settings.max_turns} Turns)")
         try:
-            async with self._model(ctx, "coder", preemptible=True):
+            async with self._model(ctx, "coder", preemptible=True, alias=coder_alias):
                 result = await loop.run(
                     step=dataclasses.replace(
                         StepBrief.from_contract(step),
@@ -544,7 +549,8 @@ class ImplementStepHandler:
             return StepOutcome("failed", error_code=exc.code, error_message=exc.message, retryable=True)
         try:
             earlier = tuple(c.message for c in corrections if c.source == "review")
-            return await self._after_loop(_Run(ctx, row, step, ws, handle, earlier), result)
+            review = tournament is None or tournament.review
+            return await self._after_loop(_Run(ctx, row, step, ws, handle, earlier, review=review), result)
         except ResourceUnavailable as exc:  # heavy-review lease not granted in time
             return StepOutcome("failed", error_code=exc.code, error_message=exc.message, retryable=True)
 
@@ -561,11 +567,22 @@ class ImplementStepHandler:
         kept = [c for c in corrections if c.source != "verifier"]
         return kept if outcome.report.passed else [*kept, *CorrectionItem.from_verification(outcome.report)]
 
-    def _model(self, ctx: StepRunContext, role: str, *, preemptible: bool) -> contextlib.AbstractAsyncContextManager[Any]:
-        """Hold the GPU model lease for ``role``; a preemption request (video/image) makes the coder checkpoint."""
+    async def _tournament(self, job_id: uuid.UUID) -> TournamentSettings | None:
+        async with self.sm() as s:
+            job = await s.get(Job, job_id)
+        return None if job is None else tournament_of(job.metadata_)
+
+    def _reviews(self, run: _Run) -> bool:
+        return run.review and self.deps.reviewer is not None and self.deps.reviewer.should_review(run.row.kind, True)
+
+    def _model(
+        self, ctx: StepRunContext, role: str, *, preemptible: bool, alias: str | None = None
+    ) -> contextlib.AbstractAsyncContextManager[Any]:
+        """Hold the GPU model lease for ``role`` (or the profile ``alias`` names); a preemption request (video/image)
+        makes the coder checkpoint."""
         if self.deps.resources is None:
             return contextlib.nullcontext()
-        profile = self.config.models.by_role(role)
+        profile = self.config.models.by_alias(alias) if alias else self.config.models.by_role(role)
 
         def on_preempt(*_: Any) -> None:
             ctx.token.request_checkpoint(f"GPU needed by a higher-priority job ({role} lease preempted)")
@@ -613,8 +630,10 @@ class ImplementStepHandler:
                     source="stagnation", label="stagnation", message=f"stagnation detected: {result.detail}. Change the approach."
                 )
             ]
-            if result.recommendation == "heavy_review" and self.deps.reviewer is not None:
+            if result.recommendation == "heavy_review" and self.deps.reviewer is not None and run.review:
                 return await self._review_and_correct(run, VerificationReport(passed=False, checks=[], summary="stagnation"), items)
+            if result.recommendation == "heavy_review":  # no review in a tournament run: the stagnation note is the correction
+                return await self._correction(ctx, row, "stagnation", items, "STAGNATION", f"stagnation: {result.detail}")
             if result.recommendation == "research" and self.deps.research is not None:
                 question = (
                     f"Step '{row.title}' ({row.kind}) is stuck: {result.detail}. "
@@ -678,7 +697,7 @@ class ImplementStepHandler:
                     replan_evidence={"source": "verifier", "acceptance_defect": True, "detail": DEFAULT_REDACTOR.text(detail)[:2000]},
                 )
             unmet = [] if waived else unmet_change_demands(outcome.report)
-            if unmet and self.deps.reviewer is not None and self.deps.reviewer.should_review(row.kind, True):
+            if unmet and self._reviews(run):
                 # live M2: the plan demanded changes to the input data and the entry point the step only reads; the code
                 # was right (27 of 30 checks passed), two corrections and two replans could not change the plan's demand.
                 # Whether the goal needs those files is the review's judgement, on the step without the demand (BUG-278)
@@ -688,7 +707,7 @@ class ImplementStepHandler:
                 )
             items = [*budget_items, *CorrectionItem.from_verification(outcome.report)]
             return await self._correction(ctx, row, "verifier", items, "VERIFIER_FAILED", outcome.report.summary or "verification failed")
-        if self.deps.reviewer is not None and self.deps.reviewer.should_review(row.kind, True):
+        if self.deps.reviewer is not None and self._reviews(run):
             await self._status(ctx, f"Heavy Review für {row.step_key}")
             async with self._model(ctx, "heavy", preemptible=False):
                 raw_review = await self.deps.reviewer.review(

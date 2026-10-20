@@ -67,7 +67,7 @@ asyncio_default_fixture_loop_scope = "session"
 asyncio_default_test_loop_scope = "session"
 testpaths = ["tests"]
 # live job fixtures are repositories of their own (pushed to the test repository), not part of this suite
-norecursedirs = ["tests/live/fixtures", ".*", "node_modules", "__pycache__"]
+norecursedirs = ["tests/live/fixtures", "tests/live/tournament", ".*", "node_modules", "__pycache__"]
 markers = [
   "integration: needs local PostgreSQL/git/podman",
   "slow: long running",
@@ -79,7 +79,7 @@ filterwarnings = ["ignore::DeprecationWarning:tree_sitter.*"]
 [tool.ruff]
 line-length = 140
 target-version = "py312"
-extend-exclude = ["ui", ".venv", "migrations/versions", "tests/live/fixtures"]
+extend-exclude = ["ui", ".venv", "migrations/versions", "tests/live/fixtures", "tests/live/tournament/hidden"]
 
 [tool.ruff.lint]
 select = ["E", "F", "W", "I", "B", "UP", "S", "ASYNC", "RUF", "SIM", "PL"]
@@ -105,5 +105,5 @@ python_version = "3.12"
 strict = true
 ignore_missing_imports = true
 plugins = ["pydantic.mypy"]
-exclude = ["^ui/", "^migrations/", "^tests/fixtures/", "^tests/live/fixtures/"]
+exclude = ["^ui/", "^migrations/", "^tests/fixtures/", "^tests/live/fixtures/", "^tests/live/tournament/hidden/"]
 warn_unused_ignores = false

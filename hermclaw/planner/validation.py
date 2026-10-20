@@ -14,7 +14,7 @@ import re
 from collections.abc import Iterable, Sequence
 from dataclasses import dataclass, field
 from pathlib import PurePosixPath
-from typing import Literal
+from typing import Any, Literal
 
 from hermclaw.contracts.acceptance import (
     AbsenceEvidence,
@@ -715,6 +715,18 @@ def job_literals(job_text: str) -> list[str]:
     return list(dict.fromkeys(f for f in found if f))
 
 
+def _strings(value: Any) -> list[str]:
+    """Every string in a JSON-like value, as written. The JSON text of the plan escaped quotes and backslashes, so a
+    literal such as `{"error": "..."}` could never be found and the plan was rejected in every repair turn (BUG-296)."""
+    if isinstance(value, str):
+        return [value]
+    if isinstance(value, dict):
+        return [t for v in value.values() for t in _strings(v)]
+    if isinstance(value, list):
+        return [t for v in value for t in _strings(v)]
+    return []
+
+
 def _job_literal_errors(plan: PlanContract, ctx: ValidationContext) -> list[str]:
     """Every literal of the job (``job_literals``) appears in some step: goal, paths, hints or acceptance.
 
@@ -724,7 +736,7 @@ def _job_literal_errors(plan: PlanContract, ctx: ValidationContext) -> list[str]
     literals = job_literals(ctx.job_text)
     if not literals:
         return []
-    text = json.dumps([s.model_dump(mode="json", exclude={"id", "depends_on"}) for s in plan.steps], ensure_ascii=False).lower()
+    text = "\n".join(_strings([s.model_dump(mode="json", exclude={"id", "depends_on"}) for s in plan.steps])).lower()
     missing = [lit for lit in literals if lit.lower() not in text and lit.rsplit("/", 1)[-1].lower() not in text]
     if not missing:
         return []
@@ -798,10 +810,15 @@ def _goal_file_errors(step: PlanStep, plan: PlanContract, ctx: ValidationContext
     """A step whose goal names a repository file – one that exists or another step creates – must list it among its
     files (repo_hints or allowed_new_paths). Unlisted, the scope leaves it out: the replanned config step of G1 was to
     "implement the data models in collector.py" with only README/config/docs in scope, worked on collector.py as an
-    adopted leftover and was measured on the 28 failing collector tests of later steps until it stagnated (BUG-268)."""
+    adopted leftover and was measured on the 28 failing collector tests of later steps until it stagnated (BUG-268).
+
+    A file the step protects with ``must_not_change`` may be named without being listed: "the input data
+    data/buchungen.csv stays unchanged" names it to protect it. Listed as a hint it counted as the step's own file and
+    lost the protection (BUG-292), so a goal could never name the data it must not touch (BUG-297)."""
     if step.kind.value not in WORKSPACE_MUTATING_KINDS:
         return []
     own = _step_paths(step, ctx)
+    protected = [g for c in step.acceptance if isinstance(c, DiffEvidence) for g in c.must_not_change]
     files = set(ctx.known_paths)
     for other in plan.steps:
         if other.id != step.id:
@@ -818,9 +835,12 @@ def _goal_file_errors(step: PlanStep, plan: PlanContract, ctx: ValidationContext
         path = named[0]
         if any(path == o or _globs_overlap(path, o) or _globs_overlap(o, path) for o in own):
             continue
+        if any(acceptance_glob_matches(path, g) for g in protected):
+            continue
         errors.append(
             f"step {step.id}: its goal names {path}, which is not among the step's files: add it to repo_hints (or "
-            "allowed_new_paths when the step creates it), or leave it out of the goal if another step changes it"
+            "allowed_new_paths when the step creates it), or leave it out of the goal if another step changes it; a file the "
+            "step only reads and must keep as it is: protect it with must_not_change"
         )
     return errors
 

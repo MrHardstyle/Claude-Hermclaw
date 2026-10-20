@@ -108,5 +108,5 @@ hermclaw_cli_wrapper: /usr/local/sbin/hermclaw
 # referenced by policies.sandbox (orchestrator and worker): localhost/hermclaw-sandbox-<toolchain>:<version>.
 # hermclaw_sandbox_image_version (default "1", the tag; bump it in the inventory, all.vars, to rebuild them,
 # existing tags are never rebuilt): defaults of the roles hermclaw_release, hermclaw_config and hermclaw_worker.
-hermclaw_sandbox_toolchains: [python, node, php, generic]
+hermclaw_sandbox_toolchains: [python, node, php, generic, powershell]
 hermclaw_sandbox_default_toolchain: generic

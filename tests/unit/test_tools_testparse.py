@@ -172,3 +172,17 @@ def test_summarise_verdicts() -> None:
     assert summarise("x", None).status == "error"
     line = summarise(JEST, 1).line()
     assert line.startswith("jest: failed – 10 passed, 1 failed")
+
+
+def test_pester_summary_is_counted() -> None:
+    """BUG-295: a PowerShell test step counted 0 passed tests; Pester 5 and 6 summaries (coloured) are parsed."""
+    pester6 = (
+        "\x1b[95mPester v6.2.0\x1b[0m\n\x1b[91m  [-] array for one\x1b[0m\n"
+        "\x1b[97mTests Passed: 2, \x1b[0m\x1b[91mFailed: 1, \x1b[0m\x1b[90mSkipped: 0, \x1b[0m"
+        "\x1b[90mInconclusive: 1, \x1b[0m\x1b[90mNotRun: 0\x1b[0m\n"
+    )
+    counts = parse_counts(pester6)
+    assert counts is not None and (counts.framework, counts.passed, counts.failed, counts.skipped) == ("pester", 2, 1, 1)
+    pester5 = "Tests completed in 1.2s\nTests Passed: 4, Failed: 0, Skipped: 1 NotRun: 0\n"
+    summary = summarise(pester5, 0, framework=None)
+    assert (summary.framework, summary.status, summary.passed, summary.skipped) == ("pester", "passed", 4, 1)

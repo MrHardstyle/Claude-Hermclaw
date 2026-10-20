@@ -30,6 +30,7 @@ from pathlib import Path
 from typing import Any
 
 from hermclaw import __version__
+from hermclaw.core import job_metadata
 
 
 def _print(obj: Any) -> None:
@@ -185,6 +186,7 @@ async def _create_job(
     priority: int = 50,
     constraints: Sequence[str] = (),
     created_by: str = "cli",
+    tournament: dict[str, Any] | None = None,
 ) -> Any:
     from hermclaw.contracts.events import EventType
     from hermclaw.events.store import append_event
@@ -200,6 +202,8 @@ async def _create_job(
             priority=priority,
             created_by=created_by,
         )
+        if tournament is not None:  # operator-set runtime key: only this CLI writes it, never POST /api/jobs
+            job.metadata_ = {job_metadata.TOURNAMENT: tournament}
         s.add(job)
         await s.flush()
         s.add(JobInput(job_id=job.id, kind="prompt", content=prompt))
@@ -269,6 +273,70 @@ def cmd_acceptance_jobs(ns: argparse.Namespace) -> int:
     js, md = write_report(rep, ns.out, datetime.now(UTC).strftime("%Y%m%dT%H%M%SZ"))
     print(f"report: {md} ({js})")
     return 0 if rep["passed"] else 1
+
+
+def cmd_coder_tournament(ns: argparse.Namespace) -> int:  # pragma: no cover - needs the production services
+    """``hermclaw coder-tournament SPEC`` – compare coder models on prescribed plans and hidden checks (2026-10-20)."""
+    from hermclaw.core.config import get_config
+    from hermclaw.core.settings import get_settings
+    from hermclaw.runtime.images import ImageDefaultingExecutor
+    from hermclaw.runtime.services import build_services
+    from hermclaw.tournament.runner import TournamentRunner
+    from hermclaw.tournament.spec import load_spec
+
+    spec = load_spec(ns.spec)
+    models = ns.model or spec.models
+    tasks = [t for t in spec.tasks if not ns.task or t.id in set(ns.task)]
+    config, settings = get_config(), get_settings()
+    known = {p.alias for p in config.models.profiles}
+    missing = [m for m in models if m not in known]
+    if missing:
+        print(f"unknown model alias(es): {', '.join(missing)}", file=sys.stderr)
+        return 2
+
+    async def run(sm: Any) -> Any:
+        services = build_services(config, settings, sm, holder_id=f"tournament@{settings.instance_id}")
+        git = services.git
+
+        async def create(job: dict[str, Any]) -> Any:
+            row = await _create_job(
+                sm,
+                job["prompt"],
+                title=job["title"],
+                repo=job["repo"],
+                base_branch=job["base_branch"],
+                created_by="tournament",
+                tournament=job["tournament"],
+            )
+            return row.id
+
+        async def workspace(job_id: Any) -> Any:
+            for ws in await git.list_workspaces(job_id):
+                if ws.status not in ("cleaned", "removed"):  # the delivered work tree, until the retention cleanup
+                    return Path(ws.path), ws.base_sha
+            return None
+
+        async def executor_for(handle: Any) -> Any:
+            return ImageDefaultingExecutor(await services.execution.executor(handle, None), None)
+
+        runner = TournamentRunner(
+            sm,
+            spec,
+            ns.out,
+            create=create,
+            workspace=workspace,
+            executor_for=executor_for,
+            poll_s=ns.poll,
+            log=lambda m: print(m, flush=True),
+        )
+        try:
+            await runner.run(models, tasks, reps=ns.reps)
+        finally:
+            await services.aclose()
+        return runner.out / "report.md"
+
+    print(f"report: {asyncio.run(_with_db(run))}")
+    return 0
 
 
 def cmd_api(_: argparse.Namespace) -> int:  # pragma: no cover - process entry point
@@ -356,6 +424,14 @@ def build_parser() -> argparse.ArgumentParser:
     aj.add_argument("--only", action="append", help="run only this job id (repeatable)")
     aj.add_argument("--poll", type=float, default=30.0, help="status poll interval in seconds")
     aj.set_defaults(fn=cmd_acceptance_jobs)
+    ct = sub.add_parser("coder-tournament", help="compare coder models on prescribed plans and hidden checks")
+    ct.add_argument("spec", type=Path, help="tournament specification (YAML, see config/coder-tournament.example.yaml)")
+    ct.add_argument("--out", type=Path, default=Path("/var/lib/hermclaw/tournament/run"))
+    ct.add_argument("--model", action="append", help="run only this coder alias (repeatable; default: the spec's models)")
+    ct.add_argument("--task", action="append", help="run only this task id (repeatable)")
+    ct.add_argument("--reps", type=int, default=None, help="repetitions per task (default: the spec's)")
+    ct.add_argument("--poll", type=float, default=20.0, help="status poll interval in seconds")
+    ct.set_defaults(fn=cmd_coder_tournament)
     lc = sub.add_parser("litellm-config", help="generate the LiteLLM proxy config")
     lc.add_argument("out", type=Path)
     lc.add_argument("--config-dir", type=Path, default=None)

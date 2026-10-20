@@ -86,5 +86,6 @@ ollama_llamacpp_health_retries: 60         # x 5 s: a cold page cache loads ~20 
 # the server unloads the loaded one and loads the requested one (the RAM of the model host holds one large model).
 # Each entry: {model: <Ollama tag, also the served name>, settings: {<llama-server option without dashes>: <value>}};
 # the main model keeps -ngl 99/--n-cpu-moe and loads at start. Example (R-033: the planner on a dense model that
-# --fit splits between GPU and CPU): [{model: "qwen3.8:27b", settings: {fit: "on"}}]
+# --fit splits between GPU and CPU): [{model: "qwen3.8:27b", settings: {fit: "on"}}]. A model outside Ollama's store
+# (coder tournament candidates, 2026-10-20) names its GGUF: {model: "ornith-1.5:35b", path: /var/lib/hcbench/models/x.gguf}
 ollama_llamacpp_models: []

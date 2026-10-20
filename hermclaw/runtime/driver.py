@@ -42,6 +42,7 @@ from hermclaw.runtime.report import collect_report_data, render_report, write_re
 from hermclaw.runtime.state_machines import can_transition_job
 from hermclaw.runtime.transitions import emit_status, transition_job
 from hermclaw.scheduler.handlers import CancelToken, JobPhaseResult
+from hermclaw.tournament.settings import tournament_of
 
 if TYPE_CHECKING:
     from hermclaw.gitops.engine import GitEngine
@@ -332,15 +333,21 @@ class RuntimeJobDriver:
                 ws = await self._ensure_workspace(job)
             if token.cancelled:
                 return JobPhaseResult(ok=False, error_code="CANCELLED")
+            tournament = tournament_of(job.metadata_)
             await self._advance(job_id, JobStatus.discovering, "Bestandsanalyse und Triage")
-            triage = await self._triage(job)
+            # a tournament job measures the coder alone: no triage or planner model is loaded for it
+            triage = None if tournament else await self._triage(job)
             inputs = await self._planner_input(job, ws, triage)
             if token.cancelled:
                 return JobPhaseResult(ok=False, error_code="CANCELLED")
-            await self._advance(job_id, JobStatus.planning, "Gemma plant den Job")
             try:
-                async with self._planner_lease(job_id):
-                    result = await self.planner.create_plan(job_id, inputs)
+                if tournament is not None:
+                    await self._advance(job_id, JobStatus.planning, "Vorgegebener Plan wird übernommen (Coder-Turnier)")
+                    result = await self.planner.adopt_plan(job_id, inputs, tournament.plan)
+                else:
+                    await self._advance(job_id, JobStatus.planning, "Gemma plant den Job")
+                    async with self._planner_lease(job_id):
+                        result = await self.planner.create_plan(job_id, inputs)
             except PlanConflict as exc:
                 if exc.code != "PLAN_EXISTS":
                     raise
@@ -404,7 +411,10 @@ class RuntimeJobDriver:
                 # a regression after the base update still fails the job, but the work is delivered as a draft
                 # instead of being lost (BUG-210)
                 regressed = result.error_code == "REGRESSION_FAILED"
-                if (result.ok or regressed) and not token.cancelled:
+                if (result.ok or regressed) and not token.cancelled and tournament_of(job.metadata_) is not None:
+                    # a tournament run is graded on the work tree; pushing it would only fill GitLab with branches
+                    notes.append("Coder-Turnier: Ergebnis bleibt im Workspace (kein Push, kein MR)")
+                elif (result.ok or regressed) and not token.cancelled:
                     if await self.git.changed_files(ws) or (await self._has_commits(ws)):
                         title, description = job.title, f"Hermclaw job {job.id}"
                         if regressed:

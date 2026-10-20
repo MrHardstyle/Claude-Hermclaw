@@ -17,6 +17,7 @@ No database transaction is held while the model runs. Job state transitions belo
 from __future__ import annotations
 
 import uuid
+from collections.abc import Callable
 from typing import Any
 
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
@@ -67,6 +68,7 @@ from hermclaw.planner.validation import (
 )
 
 log = get_logger(__name__)
+PRESCRIBED_SOURCE = "prescribed"  # plan_versions.source of a plan given with the job (coder tournament)
 PLANNER_ROLE = "planner"
 
 
@@ -262,18 +264,7 @@ class Planner(PlannerBase):
             )
             await session.commit()
 
-        advice = AdviceOnce()
-
-        def validate(data: dict[str, Any]) -> EnrichmentResult:
-            plan = validate_schema(PlanContract, data, limit=self.settings.max_errors_reported)
-            plan, pruned = prune_unreachable_must_change(plan, vctx)
-            errors = semantic_errors(plan, vctx, limit=self.settings.max_errors_reported)
-            errors += advice(new_manifest_notes(plan, vctx))
-            if errors:
-                raise PlanInvalid("semantic", errors)
-            enriched = enrich_plan(plan, vctx, risk_policy)
-            enriched.notes[:0] = pruned
-            return enriched
+        validate = self._validator(vctx, risk_policy)
 
         async def on_repair(record: AttemptRecord, remaining: int) -> None:
             await self.record_repair(job_id, "plan", record, remaining)
@@ -292,6 +283,41 @@ class Planner(PlannerBase):
         except Exception as exc:
             await self.report_failure(job_id, exc, mode="plan")
             raise
+
+    def _validator(self, vctx: ValidationContext, risk_policy: RiskPolicy) -> Callable[[dict[str, Any]], EnrichmentResult]:
+        """The deterministic check and enrichment every plan answer goes through."""
+        advice = AdviceOnce()
+
+        def validate(data: dict[str, Any]) -> EnrichmentResult:
+            plan = validate_schema(PlanContract, data, limit=self.settings.max_errors_reported)
+            plan, pruned = prune_unreachable_must_change(plan, vctx)
+            errors = semantic_errors(plan, vctx, limit=self.settings.max_errors_reported)
+            errors += advice(new_manifest_notes(plan, vctx))
+            if errors:
+                raise PlanInvalid("semantic", errors)
+            enriched = enrich_plan(plan, vctx, risk_policy)
+            enriched.notes[:0] = pruned
+            return enriched
+
+        return validate
+
+    async def adopt_plan(self, job_id: uuid.UUID, inputs: PlannerInput, data: dict[str, Any]) -> PlanResult:
+        """Version 1 from a prescribed plan (coder tournament): the same deterministic check and enrichment as a model
+        answer, without a model call or repair turns – every candidate coder gets the identical plan."""
+        risk_policy = RiskPolicy.effective(inputs.risk_policy, self.settings)
+        async with self.sessionmaker() as session:
+            job = await load_job(session, job_id)
+            if await load_plan(session, job_id) is not None:
+                raise PlanConflict(f"job {job_id} already has a plan; use the replanner", code=PLAN_EXISTS)
+            constraints = await job_constraints(session, job, inputs.constraints)
+            job_text = "\n".join([job.title, job.prompt, *constraints])
+        vctx = ValidationContext.build(self.config, inputs, self.settings, extra_text=job_text, job_text=job_text)
+        try:
+            enriched = self._validator(vctx, risk_policy)(data)
+        except Exception as exc:
+            await self.report_failure(job_id, exc, mode="plan")
+            raise
+        return await self._store(job_id, enriched, source=PRESCRIBED_SOURCE, alias=PRESCRIBED_SOURCE)
 
     def build_prompt(
         self,
@@ -318,8 +344,22 @@ class Planner(PlannerBase):
         return build_messages(system, payload, stats)
 
     async def _persist(self, job_id: uuid.UUID, outcome: LoopOutcome[EnrichmentResult]) -> PlanResult:
-        enriched = outcome.value
         source = "fallback" if outcome.fallback_used else "planner"
+        return await self._store(job_id, outcome.value, source=source, alias=outcome.result.alias, outcome=outcome)
+
+    async def _store(
+        self,
+        job_id: uuid.UUID,
+        enriched: EnrichmentResult,
+        *,
+        source: str,
+        alias: str,
+        outcome: LoopOutcome[EnrichmentResult] | None = None,
+    ) -> PlanResult:
+        repairs = outcome.repair_attempts if outcome else 0
+        history = outcome.validation_history if outcome else []
+        fallback = outcome.fallback_used if outcome else False
+        duration = outcome.duration_ms if outcome else 0
         async with self.sessionmaker() as session:
             job = await lock_job(session, job_id)
             if await load_plan(session, job_id, for_update=True) is not None:
@@ -333,16 +373,16 @@ class Planner(PlannerBase):
                 job=job,
                 version=1,
                 source=source,
-                model_alias=outcome.result.alias,
+                model_alias=alias,
                 contract=enriched.plan,
-                validation_errors=outcome.validation_history,
-                repair_attempts=outcome.repair_attempts,
+                validation_errors=history,
+                repair_attempts=repairs,
                 reason=None,
             )
             job.current_plan_version = 1
             job.row_version += 1
-            merge_job_metadata(job, {job_metadata.PLANNER_MODEL_ALIAS: outcome.result.alias})
-            if outcome.fallback_used:
+            merge_job_metadata(job, {job_metadata.PLANNER_MODEL_ALIAS: alias})
+            if outcome is not None and outcome.fallback_used:
                 await self.record_fallback(session, job, outcome, mode="plan")
             await append_event(
                 session,
@@ -350,14 +390,14 @@ class Planner(PlannerBase):
                 source_type=SOURCE_TYPE,
                 source_id=self.actor,
                 job_id=job_id,
-                duration_ms=outcome.duration_ms,
+                duration_ms=duration,
                 payload={
                     "plan_version": 1,
                     "source": source,
-                    "model_alias": outcome.result.alias,
+                    "model_alias": alias,
                     "steps": [s.id for s in enriched.plan.steps],
-                    "repair_attempts": outcome.repair_attempts,
-                    "fallback_used": outcome.fallback_used,
+                    "repair_attempts": repairs,
+                    "fallback_used": fallback,
                     "research_steps": enriched.generated_research_steps,
                     "notes": enriched.notes,
                 },
@@ -372,13 +412,13 @@ class Planner(PlannerBase):
                 plan_version_id=version.id,
                 version=1,
                 source=source,
-                model_alias=outcome.result.alias,
+                model_alias=alias,
                 plan=enriched.plan,
                 step_ids={k: r.id for k, r in rows.items()},
                 created_step_keys=list(rows),
-                repair_attempts=outcome.repair_attempts,
-                validation_errors=outcome.validation_history,
-                fallback_used=outcome.fallback_used,
+                repair_attempts=repairs,
+                validation_errors=history,
+                fallback_used=fallback,
                 notes=enriched.notes,
-                duration_ms=outcome.duration_ms,
+                duration_ms=duration,
             )

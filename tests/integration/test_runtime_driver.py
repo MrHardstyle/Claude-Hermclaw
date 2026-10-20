@@ -540,3 +540,39 @@ async def test_replan_reason_mapping() -> None:
     assert replan_reason_code("blocked_or_failed_steps", ev("BROKEN")) == "step_failed"
     assert replan_reason_code("blocked_or_failed_steps", ev("X", rr="not-a-reason")) == "step_failed"
     assert TriageResult.model_validate({"intent": "media"}).risk == "medium"
+
+
+async def _tournament_job(world: World, **settings: Any) -> uuid.UUID:
+    meta = {job_metadata.TOURNAMENT: {"plan": _plan(), "coder_alias": "coder-main", "task": "T1", "run": "coder-main/T1/1", **settings}}
+    async with world.sessionmaker() as s:
+        job = Job(title="Set VALUE to two", prompt="Change VALUE in src/module.py to 2.", repository_id=world.repo.id, metadata_=meta)
+        s.add(job)
+        await s.commit()
+        return job.id
+
+
+async def test_a_tournament_job_adopts_its_plan_without_a_model_and_is_not_pushed(world: World, tmp_path: Path) -> None:
+    """Coder tournament (2026-10-20): every candidate coder gets the identical prescribed plan. The driver adopts it
+    through the planner's deterministic check – no triage or planner model is loaded – and the result stays in the work
+    tree for the hidden checks instead of going to GitLab."""
+    chat = Chat([])  # any planner or triage call would fail the test
+    driver = _driver(world, chat, tmp_path)
+    jid = await _tournament_job(world)
+    jobs = await _run(world, driver, [ImplementHandler(world), ReviewHandler()], [jid])
+    assert jobs[jid].status == "succeeded", (jobs[jid].error_code, jobs[jid].error_message)
+    assert chat.triage_calls == 0 and chat.calls == []
+    created = [e for e in await _events(world, jid) if e.event_type == "planner.plan.created"]
+    assert created[0].payload["source"] == "prescribed" and created[0].payload["steps"] == ["S001", "S002"]
+    assert "git.pushed" not in [e.event_type for e in await _events(world, jid)]
+    assert not git("branch", "--list", "hermclaw/*", cwd=world.upstream.bare).strip()
+    assert "Coder-Turnier" in await _report(world, jid)
+
+
+async def test_a_tournament_job_gets_no_replan(world: World, tmp_path: Path) -> None:
+    """A replan would bring in the planner model; a tournament run measures the coder, so a blocked step ends the job."""
+    chat = Chat([])
+    driver = _driver(world, chat, tmp_path)
+    jid = await _tournament_job(world)
+    jobs = await _run(world, driver, [ImplementHandler(world, outcome="blocked"), ReviewHandler()], [jid])
+    assert (jobs[jid].status, jobs[jid].error_code, jobs[jid].replan_count) == ("failed", "REPLAN_LIMIT", 0)
+    assert chat.calls == []

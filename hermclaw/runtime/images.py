@@ -48,6 +48,7 @@ LANGUAGE_IMAGE_ALIASES: dict[str, str] = {
     "javascript": "node",
     "tsx": "node",
     "php": "php",
+    "powershell": "powershell",
 }
 
 

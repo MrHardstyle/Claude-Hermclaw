@@ -1,0 +1,368 @@
+# Coder tournament (strategy of 2026-10-20): which local model develops most reliably on its own on the model host?
+# Only the coder is measured: every candidate gets the same job text and the same prescribed plan (no planner, triage,
+# review or replan), works from the same fixture branch, and is graded with hidden checks it never sees
+# (hidden/<task>/). Weights 50/15/10/10/10/5 (hermclaw/tournament/scoring.py); a failed security check or a change to
+# protected files disqualifies a run, and effort/duration points only go to complete programs.
+#
+#   sudo -u hermclaw scripts/ops/acceptance-fixtures.sh <repo-url> t-lint t-sqlite t-review   # fixture branches
+#   sudo -u hermclaw hermclaw coder-tournament /var/lib/hermclaw/tournament/coder-tournament.yaml \
+#        --task A1 --task A3 --task A5 --reps 1 --out /var/lib/hermclaw/tournament/prelim     # preliminary round
+repository: hermclaw-test
+hidden_root: hidden
+models: [coder-main, coder-ornith-35b, coder-ornith-9b, coder-qwen35-9b, coder-devstral-24b]
+defaults: {reps: 3, limit_minutes: 20}
+tasks:
+  - id: A1
+    title: Python – fix exactly one lint finding
+    size: small
+    base_branch: acceptance/t-lint
+    prompt: |-
+      Im Projekt meldet `ruff check .` diesen Befund:
+      accounts/stats.py:19:5: F841 Local variable `names` is assigned to but never used
+      Behebe genau diesen Befund. Ändere nichts anderes: das Verhalten aller Funktionen und die vorhandenen Tests
+      bleiben unverändert.
+    expected_changes: [accounts/stats.py]
+    protected: [tests/*]
+    hidden: {dir: A1, image: python, command: "python -m pytest -q -p no:cacheprovider _hidden --ignore=_hidden/_base"}
+    plan:
+      goal: Fix the F841 finding in accounts/stats.py without changing behaviour
+      summary: Remove the unused local variable that ruff reports at accounts/stats.py:19 and keep everything else as it is.
+      steps:
+        - id: S001
+          title: Fix the unused variable reported at accounts/stats.py:19
+          kind: implement
+          capability: coding
+          goal: >-
+            `ruff check .` reports `accounts/stats.py:19:5: F841 Local variable names is assigned to but never used`. Fix exactly
+            this finding in the function that contains line 19. Do not change any other function (several functions in
+            the file look alike), the behaviour, or the tests in tests/test_stats.py.
+          repo_hints: [accounts/stats.py]
+          acceptance:
+            - {type: test, command: "python -m pytest -q", framework: pytest, description: existing tests still pass}
+            - {type: command, command: "ruff check --no-cache .", description: "ruff check . reports nothing"}
+            - {type: diff, must_change: [accounts/stats.py], must_not_change: ["tests/**"]}
+
+  - id: A3
+    title: Python – CSV evaluation with error handling
+    size: small
+    base_branch: acceptance/empty
+    prompt: |-
+      Schreibe ein Python-Kommandozeilenprogramm `messwerte.py`, das eine CSV-Datei mit Messwerten auswertet.
+      - Aufruf: `python messwerte.py DATEI`. Die Datei ist kommagetrennt, erste Zeile ist die Kopfzeile
+        `zeitpunkt,sensor,wert`.
+      - Ausgabe auf stdout: je Sensor eine Zeile, alphabetisch nach Sensor sortiert, im Format
+        `sensor: anzahl=N min=X max=Y mittel=Z`; X, Y und Z mit genau zwei Nachkommastellen.
+      - Leerzeichen um die Werte einer Zeile werden ignoriert.
+      - Fehlerhafte Zeilen (nicht genau drei Spalten, leerer Sensor, leerer oder nicht numerischer Wert) werden
+        übersprungen und auf stderr als `Warnung: Zeile N: <Grund>` gemeldet; N ist die Zeilennummer in der Datei
+        (die Kopfzeile ist Zeile 1). Leere Zeilen werden ohne Warnung übersprungen.
+      - Leere Datei, nur Kopfzeile oder keine gültige Zeile: Ausgabe `Keine gültigen Messwerte.`, Exit-Code 0.
+      - Fehlende oder nicht lesbare Datei: Meldung auf stderr, Exit-Code 2, kein Traceback.
+      Nur Standardbibliothek. Sichere die Regeln mit Tests unter `tests/` ab (pytest).
+    expected_changes: [messwerte.py, "tests/*", README.md]
+    hidden: {dir: A3, image: python, command: "python -m pytest -q -p no:cacheprovider _hidden --ignore=_hidden/_base"}
+    plan:
+      goal: Command-line CSV evaluation messwerte.py with warnings for bad rows, with tests
+      summary: Create messwerte.py (standard library only) that implements every rule of the job and tests for each rule.
+      steps:
+        - id: S001
+          title: Create messwerte.py and its tests
+          kind: implement
+          capability: coding
+          goal: >-
+            Create messwerte.py (standard library only) and tests/test_messwerte.py implementing every rule of the job:
+            call `python messwerte.py DATEI`; comma-separated with header `zeitpunkt,sensor,wert`; one stdout line per
+            sensor sorted by name `sensor: anzahl=N min=X max=Y mittel=Z` with two decimals; spaces around values are
+            ignored; rows without exactly three columns, with an empty sensor or an empty or non-numeric value are
+            skipped with `Warnung: Zeile N: <Grund>` on stderr (header is line 1, empty lines skipped silently); empty
+            file, header only or no valid row prints `Keine gültigen Messwerte.` with exit code 0; a missing or
+            unreadable file prints a message on stderr with exit code 2 and no traceback. Test every rule.
+          allowed_new_paths: [messwerte.py, "tests/**"]
+          acceptance:
+            - {type: presence, path_glob: messwerte.py}
+            - {type: test, command: "python -m pytest -q", framework: pytest, min_passed: 6, description: one test per rule}
+
+  - id: A5
+    title: Python – tests that fail only in the full suite
+    size: small
+    base_branch: acceptance/t-sqlite
+    prompt: |-
+      In der CI schlagen `tests/test_store.py::NoteStoreTest::test_list_contains_the_new_note` und
+      `tests/test_store.py::NoteStoreTest::test_mark_done_hides_note_from_open_list` fehl. Einzeln ausgeführt bestehen
+      beide. Finde die Ursache und behebe sie. Die erwarteten Werte der Tests und das Verhalten von `notes/store.py`
+      bleiben unverändert.
+    expected_changes: ["tests/*"]
+    protected: [notes/*]
+    hidden: {dir: A5, image: python, command: "python -m pytest -q -p no:cacheprovider _hidden --ignore=_hidden/_base"}
+    plan:
+      goal: The note store tests pass in the full suite, not only alone
+      summary: Find why two tests fail in the full run but pass alone, and fix the cause in the tests.
+      steps:
+        - id: S001
+          title: Make the note store tests pass in the full suite
+          kind: implement
+          capability: coding
+          goal: >-
+            Two tests in tests/test_store.py fail when the whole file runs but pass when run alone. Find the cause and
+            fix it in the tests. The expected values in the tests and notes/store.py stay unchanged.
+          repo_hints: [tests/test_store.py]
+          acceptance:
+            - {type: test, command: "python -m pytest -q", framework: pytest, min_passed: 5}
+            - {type: diff, must_change: [tests/test_store.py], must_not_change: [notes/store.py]}
+
+  - id: A6
+    title: Python – corrections from review findings
+    size: small
+    base_branch: acceptance/t-review
+    prompt: |-
+      Das Review der Preisberechnung (`shop/pricing.py`) hat drei Befunde ergeben. Korrigiere sie:
+      1. Eine Menge von 0 oder weniger liefert stillschweigend 0,00 € – sie muss einen `ValueError` auslösen.
+      2. Der Gutschein wird nur in exakter Schreibweise erkannt (`if coupon in COUPONS`): ` sommer ` oder `Sommer`
+         werden ignoriert. Groß-/Kleinschreibung und Leerzeichen am Rand dürfen keine Rolle spielen.
+      3. Bei genau 50 Stück gilt 5 % statt 10 % Rabatt; Ursache ist der Vergleich `quantity > 50` in `discount_rate`.
+      Alle übrigen Regeln aus dem README gelten unverändert weiter. Sichere jede Korrektur mit einem Test ab.
+    expected_changes: [shop/pricing.py, "tests/*"]
+    hidden: {dir: A6, image: python, command: "python -m pytest -q -p no:cacheprovider _hidden --ignore=_hidden/_base"}
+    plan:
+      goal: Fix the three review findings in shop/pricing.py, keep every README rule
+      summary: Correct quantity validation, coupon matching and the 50-piece discount boundary, each with a test.
+      steps:
+        - id: S001
+          title: Fix the three review findings in shop/pricing.py with tests
+          kind: implement
+          capability: coding
+          goal: >-
+            In shop/pricing.py: (1) quantity <= 0 raises ValueError instead of returning 0.00; (2) the coupon code is
+            matched ignoring case and surrounding spaces (`if coupon in COUPONS` misses ' sommer ' and 'Sommer'); (3) the 10 % discount applies from exactly 50 pieces
+            (`quantity > 50` in discount_rate is the cause). Every other rule of README.md stays as it is. Add a test for
+            each correction to tests/test_pricing.py.
+          repo_hints: [shop/pricing.py, tests/test_pricing.py, README.md]
+          acceptance:
+            - {type: test, command: "python -m pytest -q", framework: pytest, min_passed: 7}
+            - {type: diff, must_change: [shop/pricing.py, tests/test_pricing.py]}
+
+  - id: A2
+    title: JavaScript – repair form validation and submit handling
+    size: small
+    base_branch: acceptance/form
+    prompt: |-
+      Das Kontaktformular (`form.js`, `index.html`) hält die Regeln im README nicht ein, und nach dem Absenden verhält
+      sich die Seite falsch: Die Seite wird neu geladen, und Fehlermeldungen eines früheren Absendens bleiben stehen.
+      Korrigiere `form.js`:
+      - Die Prüffunktionen setzen jede Regel des README genau um; sie geben bei gültiger Eingabe `null` zurück, sonst
+        eine Fehlermeldung.
+      - `attachForm` verhindert das Neuladen der Seite (`event.preventDefault()`), leert vor jeder Prüfung alle
+        Fehlermeldungen und zeigt die Erfolgsmeldung nur, wenn es keinen Fehler gibt. Die Werte werden weiter mit
+        `new FormData(form)` gelesen; Fehlermeldungen stehen in `[data-error-for=<feld>]`, die Erfolgsmeldung in `#result`.
+      Teste die Randfälle jeder Regel unter `tests/` mit dem eingebauten Test-Runner von Node (`node --test`). Das README
+      bleibt unverändert.
+    expected_changes: [form.js, "tests/*"]
+    protected: [README.md, index.html]
+    hidden: {dir: A2, image: node, command: "node --test --test-reporter=tap _hidden/hidden_a2.test.mjs"}
+    plan:
+      goal: The contact form validates every README rule and submits without reloading or stale errors
+      summary: Fix the validation functions and attachForm in form.js and test the edge cases of every rule.
+      steps:
+        - id: S001
+          title: Fix validation and submit handling in form.js with edge-case tests
+          kind: implement
+          capability: coding
+          goal: >-
+            In form.js make every validation function implement the rules of README.md exactly (name: required, at
+            least 2 characters after trimming; email: required, a part before and after the @ and a domain with a dot;
+            age: optional, a whole number from 16 to 120; message: required, at most 500 characters), returning `null`
+            for valid input and an error message otherwise. In `attachForm` call `event.preventDefault()`, clear every
+            error element before validating and show the success message in `#result` only without errors; keep reading
+            the values with `new FormData(form)` and writing errors to `[data-error-for=<feld>]`. Test the edge cases of
+            every rule in tests/ with `node --test`. README.md and index.html stay unchanged.
+          repo_hints: [form.js, tests/form.test.js]
+          acceptance:
+            - {type: test, command: "node --test", framework: npm, min_passed: 6, description: edge cases of every rule}
+            - {type: diff, must_change: [form.js], must_not_change: [README.md, index.html]}
+
+  - id: A4
+    title: Python – four bug reports in an inherited tool
+    size: large
+    limit_minutes: 30
+    base_branch: acceptance/legacy
+    prompt: |-
+      Fehlerberichte zum Werkzeug ledger (`python -m ledger data/buchungen.csv`):
+      1. Mit der beiliegenden Datei `data/buchungen.csv` bricht es ab.
+      2. Salden zeigen krumme Werte wie `2390.0000000000005`. Salden sollen mit genau zwei Nachkommastellen ausgegeben
+         werden (z. B. `Giro: 1234.50`).
+      3. Im Monatsbericht fehlt der letzte Monat.
+      4. Wird `read_bookings` innerhalb eines Programmlaufs zweimal aufgerufen, enthält das zweite Ergebnis die
+         Buchungen doppelt.
+      Finde die Ursachen, behebe sie und sichere jede Korrektur mit einem Test ab
+      (`python -m unittest discover -s tests`). Die Eingabedaten unter `data/` bleiben unverändert.
+    expected_changes: ["ledger/*", "tests/*"]
+    protected: ["data/*"]
+    hidden: {dir: A4, image: python, command: "python -m pytest -q -p no:cacheprovider _hidden --ignore=_hidden/_base"}
+    plan:
+      goal: Fix the four reported ledger bugs, each with a test, without touching the input data
+      summary: Find and fix the causes of the crash, the float balances, the missing last month and the doubled bookings.
+      steps:
+        - id: S001
+          title: Fix the four reported bugs in ledger with a test for each
+          kind: implement
+          capability: coding
+          goal: >-
+            Fix the causes of the four bug reports in the ledger package: (1) `python -m ledger data/buchungen.csv`
+            crashes on the shipped file; (2) balances print values like `2390.0000000000005` – print them with exactly
+            two decimals (`Giro: 1234.50`); (3) the monthly report misses the last month; (4) calling `read_bookings`
+            twice in one run doubles the bookings of the second result. Add a test for each correction under tests/
+            (`python -m unittest discover -s tests`). The input data in data/ stays unchanged.
+          repo_hints: [ledger/parse.py, ledger/report.py, ledger/__main__.py, tests/test_report.py]
+          acceptance:
+            - {type: test, command: "python -m unittest discover -s tests", framework: unittest, min_passed: 5}
+            - {type: command, command: "python -m ledger data/buchungen.csv", description: the shipped file is processed}
+            - {type: diff, must_not_change: ["data/**"]}
+
+  - id: A7
+    title: Python – REST API for notes with Bearer authentication
+    size: large
+    limit_minutes: 40
+    base_branch: acceptance/empty
+    prompt: |-
+      Entwickle eine REST-API für Notizen mit der Python-Standardbibliothek als Paket `notes_api`, gestartet mit
+      `python -m notes_api`.
+      - Port aus der Umgebungsvariable `PORT` (Standard 8080), Adresse 127.0.0.1.
+      - Jeder Zugriff braucht den Header `Authorization: Bearer <token>`; der Token steht in der Umgebungsvariable
+        `NOTES_API_TOKEN`. Ohne oder mit falschem Token antwortet die API mit 401. Ist `NOTES_API_TOKEN` nicht gesetzt
+        oder leer, startet der Server nicht (Meldung auf stderr, Exit-Code ungleich 0).
+      - Endpunkte, alle mit JSON: `POST /notes` mit `{"title": ..., "text": ...}` → 201 und die neue Notiz
+        `{"id", "title", "text"}` (id ganzzahlig); `GET /notes` → 200 und die Liste aller Notizen;
+        `GET /notes/<id>` → 200 und die Notiz; `PUT /notes/<id>` mit `title` und `text` → 200 und die geänderte Notiz;
+        `DELETE /notes/<id>` → 204 ohne Inhalt.
+      - `title` ist ein nicht leerer String mit höchstens 200 Zeichen, `text` ein String; beide sind bei POST und PUT
+        Pflicht. Ungültiges JSON, kein JSON-Objekt, fehlende Felder oder falsche Typen → 400. Unbekannte oder ungültige
+        Notiz-IDs → 404. Fehlerantworten sind JSON `{"error": "..."}`.
+      - Die Notizen dürfen im Speicher liegen.
+      Mit Tests unter `tests/` (pytest) und einer Dokumentation in `docs/api.md`, die jeden Endpunkt in der Form
+      `METHODE /pfad` nennt, dazu Authentifizierung und Fehlercodes.
+    expected_changes: ["notes_api/*", "tests/*", "docs/*", README.md]
+    hidden: {dir: A7, image: python, command: "python -m pytest -q -p no:cacheprovider _hidden --ignore=_hidden/_base"}
+    plan:
+      goal: Notes REST API notes_api with Bearer authentication, tests and docs/api.md
+      summary: Build the standard-library HTTP server with the five endpoints, token check, validation, tests and docs.
+      steps:
+        - id: S001
+          title: Build the notes REST API with authentication, tests and documentation
+          kind: implement
+          capability: coding
+          goal: >-
+            Create the package notes_api (standard library only), started with `python -m notes_api`, listening on
+            127.0.0.1 and the port from `PORT` (default 8080). Every request needs `Authorization: Bearer <token>`
+            matching `NOTES_API_TOKEN`, otherwise 401; without `NOTES_API_TOKEN` (unset or empty) the server does not
+            start (message on stderr, non-zero exit code). Endpoints with JSON: `POST /notes` with `{"title": ..., "text": ...}`
+            → 201 with the new note
+            {"id", "title", "text"}; `GET /notes` → 200 with all notes; `GET /notes/<id>` → 200; `PUT /notes/<id>`
+            → 200 with the changed note; `DELETE /notes/<id>` → 204. `title` is a non-empty string of at most 200
+            characters and `text` a string, both required for POST and PUT; invalid JSON, a non-object, missing fields
+            or wrong types → 400; unknown or invalid note ids → 404; errors are JSON {"error": "..."}. Notes may live in
+            memory. Write pytest tests under tests/ and docs/api.md naming each endpoint as `METHODE /pfad` with
+            authentication and error codes.
+          allowed_new_paths: ["notes_api/**", "tests/**", "docs/**"]
+          acceptance:
+            - {type: presence, path_glob: notes_api/__main__.py}
+            - {type: presence, path_glob: docs/api.md}
+            - {type: test, command: "python -m pytest -q", framework: pytest, min_passed: 6}
+
+  - id: A8
+    title: Python – task manager web application with SQLite
+    size: large
+    limit_minutes: 40
+    base_branch: acceptance/empty
+    prompt: |-
+      Baue eine kleine Aufgabenverwaltung als Webanwendung im Paket `tasks_app`, gestartet mit `python -m tasks_app`;
+      nur Python-Standardbibliothek, Daten in SQLite.
+      - Port aus der Umgebungsvariable `PORT` (Standard 8080), Adresse 127.0.0.1, Datenbankdatei aus `TASKS_DB`
+        (Standard `tasks.db`). Die Tabelle wird beim Start angelegt, falls sie fehlt; die Daten bleiben über einen
+        Neustart erhalten.
+      - JSON-API: `GET /api/tasks?status=all|open|done` (ohne Parameter: all) → 200 und die Liste
+        `[{"id", "title", "done"}]` aufsteigend nach id; `POST /api/tasks` mit `{"title": ...}` → 201 und die neue
+        Aufgabe (`done` ist false, der Titel wird ohne Leerzeichen am Rand gespeichert);
+        `PATCH /api/tasks/<id>` mit `{"done": true|false}` → 200 und die Aufgabe; `DELETE /api/tasks/<id>` → 204.
+      - Leerer oder fehlender Titel, Titel über 200 Zeichen, ungültiges JSON, `done` kein Boolean, unbekannter
+        `status` → 400; unbekannte oder ungültige Aufgaben-IDs → 404. Fehlerantworten sind JSON `{"error": "..."}`.
+      - `GET /` liefert eine schlichte Weboberfläche (HTML, CSS und JavaScript ohne externe Ressourcen), die über diese
+        API Aufgaben anlegt, als erledigt markiert, löscht und gefiltert anzeigt.
+      Mit Tests für Datenhaltung und HTTP-Schnittstelle unter `tests/` (pytest).
+    expected_changes: ["tasks_app/*", "tests/*", README.md]
+    hidden: {dir: A8, image: python, command: "python -m pytest -q -p no:cacheprovider _hidden --ignore=_hidden/_base"}
+    plan:
+      goal: Task manager tasks_app with SQLite storage, JSON API, web page and tests
+      summary: First the SQLite storage and the JSON API with tests, then the web page served at / that uses the API.
+      steps:
+        - id: S001
+          title: SQLite storage and JSON API of tasks_app with tests
+          kind: implement
+          capability: coding
+          goal: >-
+            Create the package tasks_app (standard library only), started with `python -m tasks_app`, listening on
+            127.0.0.1 and the port from `PORT` (default 8080), with the SQLite file from `TASKS_DB` (default
+            `tasks.db`); create the table at start when it is missing so data survives a restart. JSON API:
+            `GET /api/tasks?status=all|open|done` (default all) → 200 with [{"id", "title", "done"}] ordered by id;
+            `POST /api/tasks` with `{"title": ...}` → 201 with the new task (done false, title stored without surrounding
+            spaces); `PATCH /api/tasks/<id>` with {"done": true|false} → 200 with the task; `DELETE /api/tasks/<id>`
+            → 204. An empty or missing title, a title over 200 characters, invalid JSON, a non-boolean done or an
+            unknown status → 400; unknown or invalid ids → 404; errors are JSON {"error": "..."}. Use SQL parameters,
+            never string formatting. Write pytest tests for the storage and the HTTP interface under tests/.
+          allowed_new_paths: ["tasks_app/**", "tests/**"]
+          acceptance:
+            - {type: presence, path_glob: tasks_app/__main__.py}
+            - {type: test, command: "python -m pytest -q", framework: pytest, min_passed: 6}
+        - id: S002
+          title: Web page of tasks_app served at /
+          kind: implement
+          capability: coding
+          depends_on: [S001]
+          goal: >-
+            Serve a plain web page at `GET /` of tasks_app (HTML, CSS and JavaScript without external resources) that
+            uses the JSON API of S001 to create tasks, mark them done, delete them and show them filtered by status
+            (all, open, done). Write task titles as text, not as HTML. Add a test under tests/ that `GET /` returns the
+            page as text/html.
+          repo_hints: [tasks_app/__main__.py]
+          allowed_new_paths: ["tasks_app/**", "tests/**"]
+          acceptance:
+            - {type: test, command: "python -m pytest -q", framework: pytest, min_passed: 7}
+
+  - id: A9
+    title: PowerShell – Windows services as JSON
+    size: small
+    base_branch: acceptance/empty
+    prompt: |-
+      Schreibe das PowerShell-Skript `Get-ServiceReport.ps1` (im Wurzelverzeichnis) für Windows: Es liest die Dienste
+      mit `Get-Service` und gibt sie als JSON-Array aus, je Dienst ein Objekt mit `Name`, `DisplayName`, `Status` und
+      `StartType`. Status und Starttyp stehen als Text im JSON (z. B. `"Running"`, `"Automatic"`), nicht als Zahl.
+      - Parameter `-Status` (optional, `Running` oder `Stopped`) gibt nur Dienste mit diesem Status aus; andere Werte
+        lehnt das Skript mit einem Fehler ab.
+      - Parameter `-OutFile` (optional): Das JSON wird als UTF-8 in diese Datei geschrieben statt auf die
+        Standardausgabe.
+      - Auch bei genau einem Dienst ist die Ausgabe ein JSON-Array, ohne Dienst `[]`.
+      Beschreibe Aufruf und Parameter im `README.md` und sichere das Verhalten mit Pester-Tests unter `tests/` ab, die
+      `Get-Service` durch einen Mock ersetzen (die Tests laufen auch ohne Windows).
+    expected_changes: [Get-ServiceReport.ps1, README.md, "tests/*"]
+    hidden: {dir: A9, image: powershell, command: "pwsh -NoProfile -File _hidden/run.ps1"}
+    plan:
+      goal: PowerShell script Get-ServiceReport.ps1 that reports services as JSON, with README and Pester tests
+      summary: Write the script with its two parameters, document the call in README.md and test it with mocked services.
+      steps:
+        - id: S001
+          title: Write Get-ServiceReport.ps1 with README and Pester tests
+          kind: implement
+          capability: coding
+          goal: >-
+            Create Get-ServiceReport.ps1 in the repository root: it reads the services with `Get-Service` and prints a
+            JSON array with one object per service holding `Name`, `DisplayName`, `Status` and `StartType`, where
+            status and start type are text (`"Running"`, `"Automatic"`), not numbers. `-Status` (optional, `Running` or
+            `Stopped`) keeps only services with that status and rejects other values with an error; `-OutFile`
+            (optional) writes the JSON as UTF-8 to that file instead of standard output. One service still gives a
+            JSON array, no service gives `[]`. Describe the call and both parameters in `README.md` and add Pester
+            tests under tests/ that replace `Get-Service` with a mock, so they run without Windows.
+          repo_hints: [README.md]
+          allowed_new_paths: [Get-ServiceReport.ps1, "tests/**"]
+          acceptance:
+            - {type: presence, path_glob: Get-ServiceReport.ps1}
+            - {type: test, command: "pwsh -NoProfile -Command \"Invoke-Pester -Path tests -CI\"", framework: generic, min_passed: 3}
+            - {type: diff, must_change: [README.md]}

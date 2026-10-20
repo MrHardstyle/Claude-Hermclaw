@@ -32,7 +32,7 @@ from hermclaw.scope.engine import ScopeEngine
 from hermclaw.scope.expansion import ScopeExpansionHandler
 from hermclaw.tools.executors import SubprocessExecutor
 from tests.integration.test_gitops_support import World, git, make_world
-from tests.integration.test_runtime_driver import FakeIntel, ReviewHandler, _job, _plan, _replan, _run
+from tests.integration.test_runtime_driver import FakeIntel, ReviewHandler, _job, _plan, _replan, _run, _tournament_job
 from tests.integration.test_tools_support import dev_settings
 from tests.unit.test_planner_support import ScriptedChat
 
@@ -764,3 +764,29 @@ async def test_a_change_demand_the_review_upholds_goes_to_a_correction(world: Wo
         step = (await s.execute(select(Step).where(Step.job_id == jid, Step.step_key == "S001"))).scalar_one()
     assert step.correction_count >= 1 and reviewer.calls >= 1
     assert "adds a column to data/input.csv" in json.dumps([m.content for m in models.coder_prompts[2]])  # first turn of the correction
+
+
+class CandidateModels(Models):
+    """A tournament candidate: the coder answers under another alias than the production coder."""
+
+    def __init__(self, alias: str, coder: list[dict[str, Any]]) -> None:
+        super().__init__([], coder)
+        self.alias, self.aliases = alias, []
+
+    async def structured(  # type: ignore[override]
+        self, alias: str, messages: list[ChatMessage], schema: type[T], *, ctx: CallContext, **kw: Any
+    ) -> StructuredResult[T]:
+        self.aliases.append(alias)
+        return await super().structured("coder-main" if alias == self.alias else alias, messages, schema, ctx=ctx, **kw)
+
+
+async def test_a_tournament_job_codes_on_the_candidate_alias_without_review(world: World, tmp_path: Path) -> None:
+    """Coder tournament (2026-10-20): every coding step of the run talks to the candidate's alias, and the heavy review
+    stays off – it would measure a second model and load it next to the candidate."""
+    models = CandidateModels("heavy-review", [EDIT, DONE])
+    verifier, reviewer = ScriptedVerifier(world, [True]), ScriptedReviewer(["major_pass"])
+    jid = await _tournament_job(world, coder_alias="heavy-review")
+    jobs = await _run(world, _driver(world, models, tmp_path), [_handler(world, models, verifier, reviewer), ReviewHandler()], [jid])
+    assert jobs[jid].status == "succeeded", (jobs[jid].error_code, jobs[jid].error_message)
+    assert models.aliases == ["heavy-review", "heavy-review"] and models.calls == []
+    assert verifier.calls == 1 and reviewer.calls == 0

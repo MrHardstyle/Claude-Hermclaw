@@ -2,7 +2,7 @@
 # hermclaw-build-sandbox-images – build the sandbox toolchain images (and optional project images) on .222.
 #
 # Usage:
-#   hermclaw-build-sandbox-images [--engine podman|docker] [--version N] [--only python,node,php,generic] [--dry-run]
+#   hermclaw-build-sandbox-images [--engine podman|docker] [--version N] [--only python,node,php,generic,powershell] [--dry-run]
 #   hermclaw-build-sandbox-images --project NAME --base python --requirements FILE [--version N]
 #   hermclaw-build-sandbox-images --project NAME --base node --package-dir DIR      (package.json + lock → npm cache)
 #
@@ -21,7 +21,7 @@ elif [ -d "$HERE/infra/sandbox-images" ]; then
 else
   CTX=/opt/hermclaw/current/sandbox-images
 fi
-ENGINE=podman VERSION=1 ONLY="python,node,php,generic" DRY=0 PROJECT="" BASE="" REQ="" PKGDIR=""
+ENGINE=podman VERSION=1 ONLY="python,node,php,generic,powershell" DRY=0 PROJECT="" BASE="" REQ="" PKGDIR=""
 while [ $# -gt 0 ]; do
   case "$1" in
     --engine) ENGINE="$2"; shift ;;
