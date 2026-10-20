@@ -1188,6 +1188,19 @@ def test_nothing_live_changes_before_the_schema_decision() -> None:
     assert worker.index("Install the validated configuration of release {{ hermclaw_version }}") + 1 == worker.index(
         "Switch to release {{ hermclaw_version }}"
     )
+    # BUG-299: a restart decided at the switch survives a run that stops before the start (marker in /run)
+    assert (
+        worker.index("Switch to release {{ hermclaw_version }}") + 1
+        == worker.index("Remember the pending restart of {{ hermclaw_worker_unit }}")
+        < worker.index("Ollama models")
+        < worker.index("Check for a pending restart of {{ hermclaw_worker_unit }}")
+        < worker.index("Start the worker daemon (restart on a new release, configuration, unit or environment file)")
+        < worker.index("Clear the pending restart of {{ hermclaw_worker_unit }}")
+    ), worker
+    assert at("Remember the pending restart") < at("Check for a pending restart") < at("Start LiteLLM")
+    for role in ("hermclaw_worker", "hermclaw_orchestrator"):
+        text = (ROLES_DIR / role / "tasks" / "main.yml").read_text(encoding="utf-8")
+        assert "restart_pending.stat.exists" in text, role
     config_main = yaml.safe_load((ROLES_DIR / "hermclaw_config" / "tasks" / "main.yml").read_text(encoding="utf-8"))
     (install,) = [t for t in config_main if t.get("ansible.builtin.import_tasks") == "install.yml"]
     assert install["when"] == "not hermclaw_config_install_at_switch | bool"

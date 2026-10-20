@@ -41,3 +41,5 @@ hermclaw_worker_model_default_size_gb: 20
 hermclaw_worker_model_disk_headroom_gb: 10
 # Ollama's drop-in (role ollama) names the models directory (OLLAMA_MODELS)
 hermclaw_worker_ollama_dropin: /etc/systemd/system/ollama.service.d/hermclaw.conf
+# a restart the run decided but did not reach yet (BUG-299); /run: a reboot restarts the daemon anyway
+hermclaw_worker_restart_marker: "/run/hermclaw-restart-pending-{{ hermclaw_worker_unit }}"

@@ -46,6 +46,16 @@ Noch keine.
 
 ## Behobene Bugs
 
+### BUG-299 – Abgebrochenes Deployment holt den Neustart nicht nach, alter Release läuft weiter
+- Phase: Deployment 0.1.0rc62, 2026-10-20 · Komponente: deploy (Rollen `hermclaw_worker`, `hermclaw_orchestrator`) · Severity: P1 · blockierend: ja (Wiederholung scheitert an „Wait for the worker /health (version 0.1.0rc62)“) · Status: **behoben** (`tests/integration/test_deploy_infra.py::test_nothing_live_changes_before_the_schema_decision`)
+- Reproduktion:
+  - Lauf 1 schaltet auf .224 den Release-Symlink auf rc62 und bricht dann beim Modell-Download ab (BUG-298).
+  - Lauf 2 sieht keine Änderung mehr (`hermclaw_release_switched` false), startet den Worker nur mit `started` und wartet 30-mal vergeblich auf `worker_version 0.1.0rc62`. Der Worker läuft weiter mit rc61.
+- Ursache: Die Neustart-Entscheidung beruhte nur auf Änderungen im laufenden Ansible-Lauf. Brach ein Lauf zwischen Umschalten und Start ab, war die Entscheidung verloren.
+- Fix:
+  - Ein ausstehender Neustart wird als Markierung unter `/run` festgehalten (`/run/hermclaw-restart-pending-<unit>` bzw. `-orchestrator`) und erst nach dem Neustart gelöscht.
+  - Der nächste Lauf startet den Dienst dann neu; ein Reboot startet ihn ohnehin auf dem neuen Release.
+
 ### BUG-298 – Deployment will Modelle aus GGUF-Dateien über Ollama laden und bricht ab
 - Phase: Deployment 0.1.0rc62, 2026-10-20 · Komponente: deploy (Rolle `hermclaw_worker`, models.yml) · Severity: P1 · blockierend: ja (Deployment auf .224 bricht ab) · Status: **behoben** (`tests/integration/test_deploy_infra.py::test_model_pull_follows_models_yaml_and_survives_a_dry_run`)
 - Reproduktion:

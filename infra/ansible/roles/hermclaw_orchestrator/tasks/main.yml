@@ -172,6 +172,25 @@
          or systemd_skeleton_units_changed | default(false) | bool
          or systemd_skeleton_env_changed | default(false) | bool }}
 
+# kept in /run until the services were restarted: a run that stops before the start (LiteLLM health, SearXNG) must
+# not leave the old release running for the next run to overlook (BUG-299)
+- name: Remember the pending restart of the API and the scheduler
+  ansible.builtin.copy:
+    dest: "{{ hermclaw_orchestrator_restart_marker }}"
+    content: "{{ hermclaw_version }}\n"
+    owner: root
+    group: root
+    mode: "0600"
+  when:
+    - hermclaw_manage_services | bool
+    - hermclaw_orchestrator_restart | bool
+
+- name: Check for a pending restart of the API and the scheduler
+  ansible.builtin.stat:
+    path: "{{ hermclaw_orchestrator_restart_marker }}"
+  register: hermclaw_orchestrator_restart_pending
+  when: hermclaw_manage_services | bool
+
 - name: Start LiteLLM (restart after a new venv, config or unit)
   ansible.builtin.systemd_service:
     name: hermclaw-litellm.service
@@ -194,8 +213,15 @@
     - name: Start the API and the scheduler (restart on a new release, configuration or unit)
       ansible.builtin.systemd_service:
         name: "{{ item }}"
-        state: "{{ 'restarted' if hermclaw_orchestrator_restart | bool else 'started' }}"
+        state: >-
+          {{ 'restarted' if hermclaw_orchestrator_restart | bool
+             or hermclaw_orchestrator_restart_pending.stat.exists | default(false) else 'started' }}
       loop: [hermclaw-api.service, hermclaw-scheduler.service]
+
+    - name: Clear the pending restart of the API and the scheduler
+      ansible.builtin.file:
+        path: "{{ hermclaw_orchestrator_restart_marker }}"
+        state: absent
 
     - name: Start the backup and restore-test timers
       ansible.builtin.systemd_service:

@@ -42,3 +42,5 @@ hermclaw_orchestrator_searxng_delay: 5
 hermclaw_orchestrator_venv: "{{ hermclaw_install_dir }}/venv-{{ hermclaw_version }}"
 hermclaw_orchestrator_python: "{{ common_python_bin | default('/usr/bin/python3') }}"
 hermclaw_orchestrator_config_staging: "{{ hermclaw_config_staging_dir | default(hermclaw_config_dir ~ '/deploy-staging') }}"
+# a restart of the API and the scheduler the run decided but did not reach yet (BUG-299)
+hermclaw_orchestrator_restart_marker: /run/hermclaw-restart-pending-orchestrator

@@ -52,6 +52,21 @@
     name: hermclaw_release
     tasks_from: switch.yml
 
+# A run that stops between the switch and the start left the old release running, and the next run saw nothing
+# changed and never restarted it (rc62 deploy: the model download on .224 failed after the switch, BUG-299). The
+# pending restart is kept in /run until the daemon was restarted; a reboot starts it on the new release anyway.
+- name: Remember the pending restart of {{ hermclaw_worker_unit }}
+  ansible.builtin.copy:
+    dest: "{{ hermclaw_worker_restart_marker }}"
+    content: "{{ hermclaw_version }}\n"
+    owner: root
+    group: root
+    mode: "0600"
+  when:
+    - hermclaw_manage_services | bool
+    - hermclaw_release_switched | bool or hermclaw_config_changed | default(false) | bool
+      or systemd_skeleton_units_changed | default(false) | bool or systemd_skeleton_env_changed | default(false) | bool
+
 # before the daemon starts: models.yml stops a running daemon while it downloads (no heartbeat, no idle suspend)
 - name: Ollama models
   ansible.builtin.import_tasks: models.yml
@@ -60,6 +75,12 @@
     - hermclaw_worker_pull_models | bool
     - hermclaw_manage_services | bool
 
+- name: Check for a pending restart of {{ hermclaw_worker_unit }}
+  ansible.builtin.stat:
+    path: "{{ hermclaw_worker_restart_marker }}"
+  register: hermclaw_worker_restart_pending
+  when: hermclaw_manage_services | bool
+
 # systemd_skeleton_*_changed accumulate over every play of the run (bootstrap part of playbooks/site.yml included)
 - name: Start the worker daemon (restart on a new release, configuration, unit or environment file)
   ansible.builtin.systemd_service:
@@ -67,7 +88,14 @@
     state: >-
       {{ 'restarted' if (hermclaw_release_switched | bool or hermclaw_config_changed | default(false) | bool
          or systemd_skeleton_units_changed | default(false) | bool
-         or systemd_skeleton_env_changed | default(false) | bool) else 'started' }}
+         or systemd_skeleton_env_changed | default(false) | bool
+         or hermclaw_worker_restart_pending.stat.exists | default(false)) else 'started' }}
+  when: hermclaw_manage_services | bool
+
+- name: Clear the pending restart of {{ hermclaw_worker_unit }}
+  ansible.builtin.file:
+    path: "{{ hermclaw_worker_restart_marker }}"
+    state: absent
   when: hermclaw_manage_services | bool
 
 - name: Wait for the worker /health (status ok, version {{ hermclaw_version }})
