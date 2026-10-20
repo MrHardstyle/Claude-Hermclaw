@@ -4,6 +4,8 @@ Format: [Keep a Changelog](https://keepachangelog.com/de/1.1.0/), Versionen nach
 
 ## [Unreleased]
 
+## [0.1.0rc62] – Release Candidate (2026-10-20)
+
 ### Hinzugefügt
 - **Coder-Turnier (D-018):** `hermclaw coder-tournament SPEC` vergleicht Coder-Modelle unter gleichen Bedingungen:
   vorgegebener Plan (geprüft wie ein Modellplan, `source = prescribed`), kein Triage, kein Review, kein Replan, kein
