@@ -78,6 +78,11 @@ rewritten, a retired entry keeps counting but stays retired.
 
 The vector never leaves the server (`embedded: true/false` instead).
 
+`hermclaw memory-import FILE` adds operator entries from a YAML list (`kind`, `title`, `content`, optional `scope`,
+`tags`, `status`; active by default) without an API token; a title that exists is skipped. The repository keeps such
+lists under `config/knowledge/` (first: `rc62-tournament.yaml`, four lessons of the coder tournament, each naming the
+run it comes from; the Pester stub was checked in the PowerShell sandbox image).
+
 ## Policy
 
 `policies.memory` (`config/policies.example.yaml`): `enabled`, `recall_k`, `planner_entries`, `coder_entries`,

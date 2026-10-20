@@ -176,6 +176,34 @@ def cmd_repo_list(_: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_memory_import(ns: argparse.Namespace) -> int:
+    """``hermclaw memory-import FILE`` – operator knowledge from a YAML list (D-019): ``kind``, ``title``, ``content``,
+    optional ``scope``, ``tags``, ``status``. An entry whose title already exists is left as it is."""
+    import yaml
+
+    from hermclaw.core.config import get_config
+    from hermclaw.memory.store import import_entries
+
+    items = yaml.safe_load(Path(ns.file).read_text(encoding="utf-8")) or []
+    if not isinstance(items, list):
+        print("the file must hold a YAML list of entries", file=sys.stderr)
+        return 2
+    config = get_config()
+
+    async def run(sm: Any) -> Any:
+        embedder = None
+        try:
+            from hermclaw.models.gateway import LiteLLMGateway
+
+            embedder = LiteLLMGateway.from_config(config, session_factory=sm)
+        except Exception as exc:  # stored without vectors: found by their words
+            print(f"no embeddings ({type(exc).__name__}): entries are found by their words", file=sys.stderr)
+        return await import_entries(sm, embedder, config.policies.memory, items)
+
+    _print(asyncio.run(_with_db(run)))
+    return 0
+
+
 async def _create_job(
     sm: Any,
     prompt: str,
@@ -410,6 +438,9 @@ def build_parser() -> argparse.ArgumentParser:
     tr = sub.add_parser("token-revoke", help="revoke an API token")
     tr.add_argument("name")
     tr.set_defaults(fn=cmd_token_revoke)
+    mi = sub.add_parser("memory-import", help="add operator knowledge entries from a YAML list (page Wissen)")
+    mi.add_argument("file", type=Path)
+    mi.set_defaults(fn=cmd_memory_import)
     r = sub.add_parser("repo-add", help="register a repository")
     r.add_argument("name")
     r.add_argument("url")

@@ -1,0 +1,44 @@
+# Operator knowledge from the coder tournament on 0.1.0rc62 (2026-10-20/21, D-018/D-019).
+# Import: hermclaw memory-import config/knowledge/rc62-tournament.yaml (existing titles are skipped).
+# Every entry names the run it comes from; edit or retire it on the page "Wissen".
+
+- kind: convention
+  title: "Pester on Linux: Windows cmdlets such as Get-Service do not exist – stub them before Mock"
+  tags: [powershell, pester, tests]
+  content: |
+    pwsh on Linux has no Get-Service, Get-WmiObject, Get-EventLog and other Windows-only cmdlets. Pester can only
+    Mock a command that exists, so `Mock Get-Service` fails with "CommandNotFoundException: Could not find Command
+    Get-Service" and every test of the Describe block fails in BeforeAll.
+    Fix: define a stub with the parameters the code uses before mocking it, e.g. in BeforeAll:
+    `function Get-Service { param([string[]]$Name) }` then `Mock Get-Service { ... }`.
+    Seen: tournament A9 (coder-main), all nine tests failed on this for the whole run.
+
+- kind: lesson
+  title: "Python: an import inside a branch makes the name local to the whole function"
+  tags: [python, UnboundLocalError]
+  content: |
+    `import sys` inside an `if` block of a function makes `sys` a local name of the entire function. When the branch
+    is not taken, a later `sys.stderr` raises UnboundLocalError although the module is imported elsewhere. ruff and
+    pyflakes do not report this. Import modules at the top of the file.
+    Seen: tournament A7 (Ornith 35B) – `python -m notes_api` crashed on start, 28 of 31 hidden checks could not run.
+
+- kind: lesson
+  title: "Read configuration from the environment when it is used, not at import time"
+  tags: [python, tests, environment]
+  content: |
+    A module-level `TOKEN = os.environ.get("NOTES_API_TOKEN", "")` is evaluated when the test module imports the
+    package – before setUpClass or a fixture sets the variable. Every request then fails (401) although the test sets
+    the token. Read the variable inside the function that needs it (or pass it in), so tests and `python -m` both see
+    the current value.
+    Seen: tournament A7 (Agents-A1, 3 runs): the server passed 30 of 31 hidden checks, its own tests failed and the
+    step stalled on them.
+
+- kind: lesson
+  title: "Start a delivered entry point once: tests with an in-process server do not prove `python -m` works"
+  tags: [python, server, acceptance]
+  content: |
+    When the task says the program is started with `python -m <package>` (or a script), add one test that starts it
+    as a subprocess with the documented environment, waits until it answers (or exits with the documented error) and
+    stops it. Tests that build the server object in-process skip `__main__.py` and the start-up code, where import
+    errors, missing environment handling and UnboundLocalError hide.
+    Seen: tournament A7/A8 (Ornith 35B): jobs reported success, the program did not start.

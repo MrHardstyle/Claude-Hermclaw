@@ -10,7 +10,7 @@ import pytest
 from sqlalchemy import delete
 
 from hermclaw.core.config import MemoryPolicy
-from hermclaw.memory.store import MemoryStore, word_score
+from hermclaw.memory.store import MemoryStore, import_entries, word_score
 from hermclaw.persistence.models import Job, MemoryEntry
 from tests.integration.test_repo_intelligence_support import HashingEmbedder
 
@@ -101,3 +101,19 @@ async def test_an_edit_is_embedded_again_and_checked(store: MemoryStore) -> None
         await store.update(entry, embedding=[0.0])
     assert await store.update(uuid.uuid4(), title="x") is None
     assert [e.id for e in await store.entries(q="powershell")] == [entry]
+
+
+async def test_operator_knowledge_is_imported_once(sessionmaker: SM, store: MemoryStore) -> None:
+    items = [
+        {"kind": "convention", "title": "Pester on Linux", "content": "define a stub before Mock", "tags": ["pester"]},
+        {"title": "Start the entry point", "content": "run python -m pkg once", "scope": "repo:x"},
+    ]
+    first = await import_entries(sessionmaker, HashingEmbedder(), store.policy, items)
+    again = await import_entries(sessionmaker, HashingEmbedder(), store.policy, items)
+    assert first == {"added": ["Pester on Linux", "Start the entry point"], "skipped": []}
+    assert again == {"added": [], "skipped": ["Pester on Linux", "Start the entry point"]}
+    rows = {e.title: e for e in await store.entries()}
+    assert rows["Pester on Linux"].source == "operator" and rows["Pester on Linux"].status == "active"
+    assert rows["Start the entry point"].kind == "lesson" and rows["Start the entry point"].scope == "repo:x"
+    with pytest.raises(ValueError, match="title and content"):
+        await import_entries(sessionmaker, None, store.policy, [{"title": "no text"}])

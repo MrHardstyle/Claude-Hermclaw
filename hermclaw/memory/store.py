@@ -314,3 +314,31 @@ def _check(*, kind: str | None, status: str | None, source: str | None) -> None:
         raise ValueError(f"status must be one of {STATUSES}")
     if source is not None and source not in SOURCES:
         raise ValueError(f"source must be one of {SOURCES}")
+
+
+async def import_entries(
+    sessionmaker: async_sessionmaker[AsyncSession], embedder: EmbeddingModel | None, policy: MemoryPolicy, items: Sequence[Any]
+) -> dict[str, list[str]]:
+    """Operator entries (active unless they say otherwise); a title that exists already is skipped, not overwritten."""
+    store = MemoryStore(sessionmaker, embedder, policy)
+    existing = {row.title for row in await store.entries(limit=1000)}
+    added, skipped = [], []
+    for raw in items:
+        if not isinstance(raw, dict) or not str(raw.get("title", "")).strip() or not str(raw.get("content", "")).strip():
+            raise ValueError(f"an entry needs title and content: {raw!r}"[:300])
+        title = str(raw["title"]).strip()
+        if title in existing:
+            skipped.append(title)
+            continue
+        await store.add(
+            kind=str(raw.get("kind", "lesson")),
+            title=title,
+            content=str(raw["content"]),
+            status=str(raw.get("status", "active")),
+            source="operator",
+            scope=raw.get("scope"),
+            tags=[str(t) for t in raw.get("tags", [])],
+        )
+        existing.add(title)
+        added.append(title)
+    return {"added": added, "skipped": skipped}
