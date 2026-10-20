@@ -41,6 +41,7 @@ KIND_LABELS = {
 }
 _WORD_RE = re.compile(r"[\w.-]{3,}", re.UNICODE)
 _TEXT_SCAN_MAX_ROWS = 2000
+FAILURE_SCORE_MARGIN = 0.1  # how far below min_score a failure match may be when it shares an identifier
 
 
 @dataclass(frozen=True)
@@ -234,6 +235,14 @@ class MemoryStore:
                 await s.commit()
             return [_hit(r, 1.0) for r in rows]
 
+    async def count_recalls(self, ids: Sequence[uuid.UUID]) -> None:
+        """Count entries a model was given (for hits found with ``count=False`` and chosen afterwards)."""
+        if not ids:
+            return
+        async with self.sessionmaker() as s:
+            await s.execute(update(MemoryEntry).where(MemoryEntry.id.in_(list(ids))).values(recalls=MemoryEntry.recalls + 1))
+            await s.commit()
+
     async def get(self, entry_id: uuid.UUID) -> MemoryEntry | None:
         async with self.sessionmaker() as s:
             return await s.get(MemoryEntry, entry_id)
@@ -301,6 +310,33 @@ class MemoryStore:
                 )
             await s.commit()
         return ranked
+
+
+# exception and test words every failure log shares: no evidence that a lesson is about this failure
+_COMMON_NAMES = frozenset(
+    {
+        "AssertionError", "AttributeError", "Exception", "ImportError", "IndexError", "KeyError", "ModuleNotFoundError",
+        "NameError", "RuntimeError", "SyntaxError", "Traceback", "TypeError", "ValueError", "FileNotFoundError",
+        "OSError", "TimeoutError", "ConnectionError", "PermissionError", "NotImplementedError", "SystemExit",
+    }
+)  # fmt: skip
+_NAME_RE = re.compile(r"[A-Za-z][A-Za-z0-9]*(?:[-_][A-Za-z0-9]+)+|[A-Za-z]*[a-z][A-Z][A-Za-z0-9]+")
+
+
+def distinctive_names(text: str) -> set[str]:
+    """Identifiers that name something specific – ``Get-Service``, ``CommandNotFoundException``, ``NOTES_API_TOKEN`` –
+    without the exception and test words every failure log carries."""
+    return {m for m in _NAME_RE.findall(text) if len(m) >= 6 and m not in _COMMON_NAMES and not m.startswith("test_")}
+
+
+def failure_matches(hits: Sequence[MemoryHit], query: str, min_score: float) -> list[MemoryHit]:
+    """The hits for a failed run's error lines: at ``min_score`` as for any recall; up to ``FAILURE_SCORE_MARGIN`` below
+    only when the entry names one of the failure's distinctive identifiers. Measured with embeddinggemma on the rc62
+    tournament lessons: the Pester failure scored 0.50 against its lesson, unrelated failures up to 0.54 (an
+    ImportError against the import lesson) – similarity alone cannot tell them apart, the shared ``Get-Service`` can."""
+    names = distinctive_names(query)
+    floor = min_score - FAILURE_SCORE_MARGIN
+    return [h for h in hits if h.score >= min_score or (h.score >= floor and names & distinctive_names(f"{h.title}\n{h.content}"))]
 
 
 def _hit(row: MemoryEntry, score: float) -> MemoryHit:

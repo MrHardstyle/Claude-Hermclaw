@@ -55,6 +55,7 @@ from hermclaw.core.config import PoliciesConfig
 from hermclaw.core.interfaces import CommandExecutor, ExecutionRequest, GitReader, RepoContextProvider, RepoHit, WorkspaceHandle
 from hermclaw.core.logging import get_logger
 from hermclaw.core.redaction import DEFAULT_REDACTOR, REDACTED, Redactor
+from hermclaw.memory.store import FAILURE_SCORE_MARGIN, failure_matches
 from hermclaw.models.protocols import CallContext as ModelCallContext
 from hermclaw.research.questions import unanswerable_reason
 from hermclaw.scope.guard import ScopeGuard
@@ -906,14 +907,22 @@ class ToolEngine:
             return result
         self._looked_up.add(query)
         call = ModelCallContext(purpose="memory", job_id=ctx.job_id, step_id=ctx.step_id, attempt_id=ctx.attempt_id)
+        min_score = self.policies.memory.min_score
         try:
             hits = await self.memory.search(
-                query, k=want + len(self._shown), scopes=self.memory_scopes, kinds=("lesson", "convention", "research"), ctx=call
+                query,
+                k=want + len(self._shown),
+                scopes=self.memory_scopes,
+                kinds=("lesson", "convention", "research"),
+                min_score=max(0.0, min_score - FAILURE_SCORE_MARGIN),
+                count=False,
+                ctx=call,
             )
+            fresh = [h for h in failure_matches(hits, query, min_score) if h.id not in self._shown][:want]
+            await self.memory.count_recalls([h.id for h in fresh])
         except Exception as exc:  # the failed run itself still reaches the model
             log.warning("knowledge for a failed run unavailable", extra={"error_type": type(exc).__name__})
             return result
-        fresh = [h for h in hits if h.id not in self._shown][:want]
         if not fresh:
             return result
         self._shown.update(h.id for h in fresh)
