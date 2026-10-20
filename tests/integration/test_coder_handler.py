@@ -208,6 +208,8 @@ async def test_implement_step_happy_path_commits_and_pushes(world: World, tmp_pa
     async with world.sessionmaker() as s:
         s1 = (await s.execute(select(Step).where(Step.job_id == jid, Step.step_key == "S001"))).scalar_one()
     assert s1.result["commit"] and s1.result["files"] == ["src/module.py"]
+    # BUG-307: the attempt names its coder model (the learner's incidents and tool-bug suspicions count models)
+    assert [a.model_alias for a in await _attempts(world, jid) if a.kind != "review"][:1] == ["coder-main"]
     # the scope engine created an explicit scope from the planner hint before the coder ran
     assert any("src/module.py" in m.content for m in models.coder_prompts[0])
     # BUG-235: the coder requests exactly the output the context budget reserves (profile vs. policy, the larger)

@@ -18,6 +18,8 @@ from hermclaw.persistence.models import (
     Event,
     Job,
     MemoryEntry,
+    ModelInvocation,
+    Repository,
     ResearchClaim,
     ResearchRun,
     ResearchSource,
@@ -43,19 +45,40 @@ async def learner(sessionmaker: SM) -> MemoryLearner:
 
 
 async def _job(
-    sessionmaker: SM, *, model: str, calls: list[tuple[str, str | None, str]], status: str = "succeeded", error: str | None = None
+    sessionmaker: SM,
+    *,
+    model: str,
+    calls: list[tuple[str, str | None, str]],
+    status: str = "succeeded",
+    error: str | None = None,
+    model_in_turns: bool = False,
+    repository_id: uuid.UUID | None = None,
 ) -> uuid.UUID:
-    """A finished job with one step and one attempt; ``calls`` = (tool, error code, path) in turn order."""
+    """A finished job with one step and one attempt; ``calls`` = (tool, error code, path) in turn order.
+    ``model_in_turns``: the model is only known from the coder turns (attempts before BUG-307)."""
     async with sessionmaker() as s:
-        job = Job(title="learn", prompt="p", status=status, error_code=error, error_message="checks failed" if error else None)
+        job = Job(
+            title="learn",
+            prompt="p",
+            status=status,
+            error_code=error,
+            error_message="checks failed" if error else None,
+            repository_id=repository_id,
+        )
         s.add(job)
         await s.flush()
         step = Step(job_id=job.id, step_key="S001", title="Write the parser", kind="implement", capability="code", goal="g", status=status)
         s.add(step)
         await s.flush()
-        attempt = StepAttempt(step_id=step.id, job_id=job.id, attempt_no=1, model_alias=model, status=status)
+        attempt = StepAttempt(step_id=step.id, job_id=job.id, attempt_no=1, model_alias=None if model_in_turns else model, status=status)
         s.add(attempt)
         await s.flush()
+        if model_in_turns:
+            s.add(
+                ModelInvocation(
+                    job_id=job.id, step_id=step.id, attempt_id=attempt.id, alias=model, model=model, role="coder", purpose="coder_turn"
+                )
+            )
         for turn, (tool, code, path) in enumerate(calls, start=1):
             s.add(
                 ToolCallRow(
@@ -199,3 +222,50 @@ async def test_red_test_runs_are_work_in_progress_not_refusals(sessionmaker: SM,
     report = await learner.run_once()
     assert report.suspicions == 0 and await _entries(sessionmaker, "tool_bug") == []
     assert [e.signature for e in await _entries(sessionmaker, "incident")] == ["job:STEP_FAILED"]
+
+
+async def test_models_are_known_from_the_coder_turns_and_one_way_past_in_three_is_no_lesson(
+    sessionmaker: SM, learner: MemoryLearner
+) -> None:
+    """BUG-307 (dry run against the production jobs): attempts never carried their model, so no tool-bug suspicion could
+    name two models; an incident got active when one of five cases got past it."""
+    await _job(sessionmaker, model="coder-main", calls=REFUSED_ONLY, model_in_turns=True)
+    await _job(sessionmaker, model="coder-glm47-flash", calls=REFUSED_ONLY, model_in_turns=True)
+    await _job(sessionmaker, model="coder-main", calls=REFUSED_THEN_READ, model_in_turns=True)
+    report = await learner.run_once()
+    assert report.suspicions == 1 and report.promoted == 0
+    [incident] = await _entries(sessionmaker, "incident")
+    assert incident.status == "candidate" and "(1 of 3 recent cases)" in incident.content
+    await _job(sessionmaker, model="coder-main", calls=REFUSED_THEN_READ)
+    await learner.run_once()
+    [incident] = await _entries(sessionmaker, "incident")
+    assert incident.status == "active"  # two of four
+
+
+async def test_research_on_a_repository_stays_with_that_repository(sessionmaker: SM, learner: MemoryLearner) -> None:
+    """BUG-307: "which framework does this repository use" was kept as knowledge for every job."""
+    async with sessionmaker() as s:
+        repo = Repository(name=f"tasks-{uuid.uuid4().hex[:6]}", url="https://example.invalid/tasks.git")
+        s.add(repo)
+        await s.flush()
+        repo_id, name = repo.id, repo.name
+        await s.commit()
+    job_id = await _job(sessionmaker, model="coder-main", calls=[], repository_id=repo_id)
+    async with sessionmaker() as s:
+        run = ResearchRun(job_id=job_id, question="Which web framework does this repository use?", status="completed")
+        run.synthesis = "The repository uses the standard library http.server."
+        s.add(run)
+        await s.commit()
+    await learner.run_once()
+    [research] = await _entries(sessionmaker, "research")
+    assert research.scope == f"repo:{name}"
+    assert await learner.store.search("web framework repository http.server", scopes=[]) == []
+
+
+async def test_a_guard_refusal_is_no_tool_bug_suspicion(sessionmaker: SM, learner: MemoryLearner) -> None:
+    """BUG-307: models stuck on COMMAND_REPEATED raised a suspicion against run_command although the guard did its job."""
+    repeated = [("run_command", "COMMAND_REPEATED", ".")] * 3
+    await _job(sessionmaker, model="coder-main", calls=repeated, model_in_turns=True)
+    await _job(sessionmaker, model="coder-glm47-flash", calls=repeated, model_in_turns=True)
+    report = await learner.run_once()
+    assert report.incidents == 2 and report.suspicions == 0

@@ -55,13 +55,20 @@ The scheduler process runs `MemoryLearner` next to the workspace janitor: every 
 | a tool refused with one error code at least `min_repeats` times in the job (a command or test that ran and failed – `errors.RUN_FAILED` – and sandbox errors are not refusals, BUG-306) | `incident`: how often, models, typical message, **what helped** (the calls up to the next success of the same tool on the same file in that attempt, e.g. `read_file → replace_text`) or that nothing did | `tool:<tool>:<code>` |
 | `stagnation.detected` with directive `diagnose` or `stop` (one per stall kind and job) | `incident`: cause (`edit_mechanics`, `loop`, `knowledge`, …), step, model, turn, reasons, repeated signal, how the step ended | `stall:<cause>:<tool or signal>:<code>` |
 | failed job | `incident` with the job's error | `job:<error code>` |
-| completed research run | `research` (source `research`, active, expires after `research_days`): question, synthesis, claims with confidence ≥ 0.6, sources; the same question updates the entry | `research:<hash of the question>` |
+| completed research run | `research` (source `research`, active, expires after `research_days`, scope `repo:<name>` when the job has a repository – a question about one repository is no knowledge for another, BUG-307): question, synthesis, claims with confidence ≥ 0.6, sources; the same question updates the entry | `research:<hash of the question>` |
 
 An incident is counted once per job (`occurrences`, `evidence.jobs`, the last five examples). Its text is rewritten from
-the latest examples while it is a system entry; at `promote_after` jobs **and** with something that helped it becomes
-active. A refusal that at least two models could not get past in `promote_after` jobs is a **tool-bug suspicion**: a
-`tool_bug` candidate and one open bug record `AUTO-<hash>` (component `tools`, P3) for the operator. Nothing in a tool is
-changed by itself.
+the latest examples while it is a system entry; at `promote_after` jobs **and** with something that helped in at least
+half of the recent cases it becomes active. A refusal that at least two models could not get past in `promote_after`
+jobs, with at least half of the recent cases unresolved, is a **tool-bug suspicion**: a `tool_bug` candidate and one
+open bug record `AUTO-<hash>` (component `tools`, P3) for the operator. A guard's refusal (`COMMAND_REPEATED`,
+`READ_REPEATED`, `NO_CHANGE`, `CHECK_STILL_FAILING`, policy refusals) is never a suspicion; a scope verdict on a command
+is. The model of an attempt comes from `step_attempts.model_alias` (set by the coder handler), for older attempts from
+their coder turns in `model_invocations`. Nothing in a tool is changed by itself.
+
+Dry run (2026-10-21, copy of the production database, 200 finished jobs): 192 incidents, 205 stall examples, 13 research
+entries, 8 active incidents and exactly two suspicions – `replace_text:TEXT_NOT_FOUND` (BUG-301) and
+`run_test:COMMAND_SCOPE_VIOLATION` (Pester report, BUG-305), both real tool bugs found by hand before.
 
 The operator's word wins: an entry whose title or text was edited on the page becomes `source = operator` and is not
 rewritten, a retired entry keeps counting but stays retired.

@@ -522,6 +522,9 @@ class ImplementStepHandler:
                 **({"alias": coder_alias} if coder_alias else {}),
             }
         )
+        async with self.sm() as s:  # the model of the attempt: the learner names it in incidents and suspicions (BUG-307)
+            await s.execute(update(StepAttempt).where(StepAttempt.id == ctx.attempt_id).values(model_alias=settings.alias))
+            await s.commit()
         stagnation = await self.deps.stagnation_factory(ctx) if self.deps.stagnation_factory else None
         loop = CoderLoop(self.deps.chat, builder, engine, settings=settings, stagnation=stagnation, sessionmaker=self.sm)
         start, history, last_failure = (

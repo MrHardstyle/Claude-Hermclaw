@@ -35,7 +35,19 @@ from hermclaw.contracts.events import EventType
 from hermclaw.core.config import MemoryPolicy
 from hermclaw.core.logging import get_logger
 from hermclaw.memory.store import MemoryStore
-from hermclaw.persistence.models import BugRecord, Event, Job, ResearchClaim, ResearchRun, ResearchSource, Step, StepAttempt, ToolCallRow
+from hermclaw.persistence.models import (
+    BugRecord,
+    Event,
+    Job,
+    ModelInvocation,
+    Repository,
+    ResearchClaim,
+    ResearchRun,
+    ResearchSource,
+    Step,
+    StepAttempt,
+    ToolCallRow,
+)
 from hermclaw.tools import errors as E
 
 log = get_logger(__name__)
@@ -45,6 +57,18 @@ FINISHED = ("succeeded", "failed")
 # refusals that say nothing about a tool or the task: the step was over, the budget spent, the call cancelled; and
 # runs that executed and failed – a red test run is work in progress, not a refusal (BUG-306)
 _NOT_LEARNED = frozenset({"CANCELLED", "STEP_FINISHED", "TURN_BUDGET_EXHAUSTED", E.SANDBOX_ERROR, *E.RUN_FAILED})
+# refusals that are a guard doing its job (a repeated command or read, an unchanged edit, a forbidden command, a check
+# that still fails, a policy): models stuck on them say something about the model, not the tool. The dry run against
+# the production jobs raised suspicions for COMMAND_REPEATED and READ_REPEATED (BUG-307). Scope verdicts on commands
+# stay suspicious: the Pester report counted as a violation was a tool bug (BUG-305).
+_GUARDS = frozenset(
+    {
+        E.COMMAND_REPEATED, E.READ_REPEATED, E.NO_CHANGE, E.CHECK_STILL_FAILING, E.REDACTED_PLACEHOLDER, E.SCOPE_VIOLATION,
+        E.SCOPE_EXPANSION_DENIED, E.COMMAND_FORBIDDEN, E.COMMAND_DESTRUCTIVE, E.DEPENDENCY_NOT_REQUESTED,
+        E.PACKAGE_INSTALL_REFUSED, E.TOOL_NOT_ALLOWED, E.PATH_FORBIDDEN, E.PATH_OUTSIDE_WORKSPACE, E.RESEARCH_REFUSED,
+        E.INSTALL_UNCHANGED,
+    }
+)  # fmt: skip
 _STALL_DIRECTIVES = ("diagnose", "stop")
 _MAX_EXAMPLES = 5
 
@@ -181,7 +205,15 @@ class MemoryLearner:
             job = await s.get(Job, job_id)
             if job is None:
                 return report
-            attempts = {a.id: a for a in (await s.execute(select(StepAttempt).where(StepAttempt.job_id == job_id))).scalars()}
+            attempts = list((await s.execute(select(StepAttempt).where(StepAttempt.job_id == job_id))).scalars())
+            models = {a.id: a.model_alias for a in attempts if a.model_alias}
+            # attempts before BUG-307 carry no model; their coder turns recorded the alias that answered
+            turns = select(ModelInvocation.attempt_id, ModelInvocation.alias).where(
+                ModelInvocation.job_id == job_id, ModelInvocation.purpose == "coder_turn", ModelInvocation.attempt_id.is_not(None)
+            )
+            for attempt_id, alias in (await s.execute(turns.order_by(ModelInvocation.started_at))).all():
+                if attempt_id is not None and alias:
+                    models.setdefault(attempt_id, alias)
             steps = {st.id: st for st in (await s.execute(select(Step).where(Step.job_id == job_id))).scalars()}
             calls = list(
                 (
@@ -203,8 +235,12 @@ class MemoryLearner:
                 (await s.execute(select(ResearchRun).where(ResearchRun.job_id == job_id, ResearchRun.status == "completed"))).scalars()
             )
             job_error, job_message, job_status = job.error_code, job.error_message, job.status
-        await self._refusals(job_id, calls, attempts, steps, report)
-        await self._stalls(job_id, stalls, attempts, steps, report)
+            repo = await s.get(Repository, job.repository_id) if job.repository_id else None
+            # research is kept for the repository it was asked for: "which framework does this repository use" answered
+            # for one job is no knowledge for another (dry run against the production jobs, BUG-307)
+            research_scope = f"repo:{repo.name}" if repo is not None else None
+        await self._refusals(job_id, calls, models, steps, report)
+        await self._stalls(job_id, stalls, models, steps, report)
         if job_status == "failed" and job_error:
             await self.store.record_incident(
                 signature=f"job:{job_error}",
@@ -215,14 +251,14 @@ class MemoryLearner:
                 tags=["job-failed"],
             )
         for run in runs:
-            await self._research(job_id, run, report)
+            await self._research(job_id, run, report, scope=research_scope)
         return report
 
     async def _refusals(
         self,
         job_id: uuid.UUID,
         calls: list[ToolCallRow],
-        attempts: dict[uuid.UUID, StepAttempt],
+        models: dict[uuid.UUID, str],
         steps: dict[uuid.UUID, Step],
         report: LearnReport,
     ) -> None:
@@ -231,15 +267,15 @@ class MemoryLearner:
         for c in calls:
             by_attempt.setdefault(c.attempt_id, []).append(c)
         for attempt_id, seq in by_attempt.items():
-            attempt = attempts.get(attempt_id) if attempt_id else None
+            model = models.get(attempt_id) if attempt_id else None
             for c in seq:
                 if not c.error_code or c.error_code in _NOT_LEARNED:
                     continue
                 r = found.setdefault((c.tool, c.error_code), _Refusal(c.tool, c.error_code))
                 r.count += 1
                 r.message = r.message or _clip(c.result_summary, 300)
-                if attempt is not None and attempt.model_alias:
-                    r.models.add(attempt.model_alias)
+                if model:
+                    r.models.add(model)
                 if c.step_id in steps:
                     r.steps.add(steps[c.step_id].step_key)
             for (tool, code), r in found.items():
@@ -273,7 +309,7 @@ class MemoryLearner:
         self,
         job_id: uuid.UUID,
         events: list[Event],
-        attempts: dict[uuid.UUID, StepAttempt],
+        models: dict[uuid.UUID, str],
         steps: dict[uuid.UUID, Step],
         report: LearnReport,
     ) -> None:
@@ -291,12 +327,11 @@ class MemoryLearner:
                 continue
             seen_here.add(signature)
             step = steps.get(ev.step_id) if ev.step_id else None
-            attempt = attempts.get(ev.attempt_id) if ev.attempt_id else None
             example = {
                 "job": str(job_id),
                 "step": step.title if step else None,
                 "outcome": step.status if step else None,
-                "model": attempt.model_alias if attempt else None,
+                "model": models.get(ev.attempt_id) if ev.attempt_id else None,
                 "turn": p.get("turn"),
                 "cause": cause,
                 "directive": p.get("directive"),
@@ -317,7 +352,8 @@ class MemoryLearner:
 
     async def _settle(self, entry_id: uuid.UUID, seen: int, render: Any, report: LearnReport) -> list[dict[str, Any]]:
         """Rewrite a system entry's text from its latest examples; activate it once it is seen in ``promote_after`` jobs
-        and something helped. Operator text and retired or active status stay as they are."""
+        and something helped in at least half of the recent cases. Operator text and retired or active status stay as
+        they are."""
         row = await self.store.get(entry_id)
         if row is None:
             return []
@@ -325,7 +361,10 @@ class MemoryLearner:
         changes: dict[str, Any] = {}
         if row.source == "system" and seen > 1:
             changes["content"] = render(examples, seen)
-        if row.status == "candidate" and seen >= self.policy.promote_after and any(e.get("helped") for e in examples):
+        # a way past it in 1 of 5 cases is no lesson: the dry run against the production jobs activated
+        # "COMMAND_REPEATED – what helped: read_file → run_command (1 of 5)" for every repeated command (BUG-307)
+        helped = sum(1 for e in examples if e.get("helped"))
+        if row.status == "candidate" and seen >= self.policy.promote_after and helped and helped * 2 >= len(examples):
             changes["status"] = "active"
             report.promoted += 1
         if changes:
@@ -344,10 +383,11 @@ class MemoryLearner:
         report: LearnReport,
     ) -> None:
         """Models of different kinds that could not get past the same refusal in ``promote_after`` jobs: the tool may be
-        wrong (BUG-301 was such a case). A tool_bug candidate and an open bug record for the operator."""
+        wrong (BUG-301 and BUG-305 were such cases). Not for a guard's refusal, and only when most recent cases did not
+        get past it. A tool_bug candidate and an open bug record for the operator."""
         models = {m for e in examples for m in e.get("models", [])}
         unresolved = [e for e in examples if not e.get("helped")]
-        if seen < self.policy.promote_after or len(models) < 2 or not unresolved:
+        if code in _GUARDS or seen < self.policy.promote_after or len(models) < 2 or len(unresolved) * 2 < len(examples):
             return
         if await self.store.by_signature(signature, kinds=("tool_bug",)):
             return
@@ -387,7 +427,7 @@ class MemoryLearner:
                 )
         report.suspicions += 1
 
-    async def _research(self, job_id: uuid.UUID, run: ResearchRun, report: LearnReport) -> None:
+    async def _research(self, job_id: uuid.UUID, run: ResearchRun, report: LearnReport, scope: str | None = None) -> None:
         if not (run.synthesis or "").strip():
             return
         async with self.sm() as s:
@@ -432,6 +472,7 @@ class MemoryLearner:
                 status="active",
                 source="research",
                 signature=signature,
+                scope=scope,
                 job_id=job_id,
                 evidence={"research_run": str(run.id), "sources": [src.url for src in sources]},
                 expires_at=expires,
