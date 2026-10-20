@@ -442,6 +442,17 @@ async def test_runtime_data_files_a_command_creates_are_cleaned_not_violations(s
     assert not (repo / "inventory.db").exists() and git(repo, "status", "--porcelain") == ""
 
 
+async def test_test_reports_a_command_writes_are_cleaned_not_violations(sessionmaker: SM, repo: Path) -> None:
+    """rc62 tournament A9: `Invoke-Pester -CI` wrote testResults.xml outside the scope on every run; the run was a
+    COMMAND_SCOPE_VIOLATION and its nine failing tests went unnoticed by the coder (BUG-305)."""
+    h = await make_harness(sessionmaker, repo, contract=scope(**SCOPE))
+    script = "open('testResults.xml','w').write('<test-results/>'); raise SystemExit(9)"
+    res = await h.call("run_command", command=f'{PY} -c "{script}"')
+    assert res.error_code == E.COMMAND_FAILED and "exit code 9" in res.output, res.output
+    assert res.data["cleaned"] == ["testResults.xml"]
+    assert not (repo / "testResults.xml").exists() and git(repo, "status", "--porcelain") == ""
+
+
 async def test_run_test_invalid_cwd_is_refused_before_start(sessionmaker: SM, repo: Path) -> None:
     h = await make_harness(sessionmaker, repo)
     assert (await h.call("run_test", command="pytest", cwd="nope")).error_code == E.NOT_A_DIRECTORY

@@ -56,6 +56,14 @@ DEFAULT_GENERATED_GLOBS: tuple[str, ...] = (
     "**/*.sqlite-journal",
     "**/*.log",
     "**/.nyc_output/**",
+    # reports test runners write next to the tests (rc62 tournament A9: `Invoke-Pester -CI` wrote testResults.xml on
+    # every run; each run was a COMMAND_SCOPE_VIOLATION and the nine failing tests behind it went unnoticed, BUG-305)
+    "**/testResults.xml",
+    "**/junit.xml",
+    "**/coverage.xml",
+    "**/.coverage.*",
+    "**/htmlcov/**",
+    "**/TestResults/**",
 )
 GIT_META_FILES = ("HEAD", "config", "packed-refs", "shallow", "commondir")
 GIT_META_DIRS = ("refs", "info", "hooks")

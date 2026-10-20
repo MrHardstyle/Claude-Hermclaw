@@ -120,7 +120,9 @@ executor.run(workspace, ExecutionRequest(timeout<=permission/policy limit, netwo
 tracker.audit(decide = ScopeGuard.decide on base-relative operations; deny-all without scope)
   new out-of-scope files deleted, modified/deleted tracked files restored with git checkout-index,
   dirty/untracked files restored from backups, git metadata/index restored, up to 3 rounds (.gitignore tricks),
-  new untracked generated caches (verifier.generated_file_globs, __pycache__, …) that are not git-ignored removed
+  new untracked generated caches (verifier.generated_file_globs, __pycache__, …) that are not git-ignored removed –
+  also runtime data (`*.db`, `*.log`, BUG-214) and test reports (`testResults.xml`, `junit.xml`, `coverage.xml`,
+  `htmlcov/`, `TestResults/`, BUG-305): the command keeps its own result, the cleanup is a note (`data.cleaned`)
 command_runs row (redacted stdout/stderr excerpts) + command.run; scope.violation / file.changed when applicable
 run_test: test.started before, summarise(output, exit code) -> test_runs + test.passed / test.failed
 ```

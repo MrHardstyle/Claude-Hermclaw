@@ -46,6 +46,13 @@ Noch keine.
 
 ## Behobene Bugs
 
+### BUG-305 – Ein Testbericht neben den Tests macht jeden Testlauf zum Scope-Verstoß und verdeckt die Fehlschläge
+- Phase: Coder-Turnier 0.1.0rc62, 2026-10-21 (Auswertung: coder-main A9, PowerShell) · Komponente: tools (Befehls-Seiteneffekte, `snapshot.py`) · Severity: P2 · blockierend: nein · Status: **behoben im Repository** (`tests/integration/test_tools_engine_exec.py::test_test_reports_a_command_writes_are_cleaned_not_violations`)
+- Reproduktion: `pwsh -NoProfile -Command "Invoke-Pester -Path tests -CI"` schreibt `testResults.xml` ins Arbeitsverzeichnis. Jeder Lauf endet mit `COMMAND_SCOPE_VIOLATION` („creating 'testResults.xml' is outside allowed_new_paths … (reverted)“). Die eigentliche Meldung darüber („9 failed – Could not find Command Get-Service“) geht unter; coder-main ändert achtmal die Tests und ruft den Lauf viermal identisch erneut auf (`COMMAND_REPEATED`).
+- Ursache: Testberichte zählten nicht zu den erzeugten Dateien, die nach einem Befehl entfernt werden (wie Caches und Laufzeitdaten seit BUG-214). Das Anlegen wurde als Scope-Verstoß gewertet, und der Fehlercode des Verstoßes ersetzt den des Befehls.
+- Fix: `testResults.xml`, `junit.xml`, `coverage.xml`, `.coverage.*`, `htmlcov/` und `TestResults/` gehören zu `DEFAULT_GENERATED_GLOBS`. Ungetrackt und außerhalb des Scopes werden sie nach dem Befehl entfernt (`data.cleaned`), der Befehl behält sein Ergebnis (`COMMAND_FAILED`, `TESTS_FAILED`).
+- Auswertung dazu: In den 27 coder-main-Läufen des Turniers waren die verschwendeten Werkzeugaufrufe vor allem `COMMAND_REPEATED` (54), `COMMAND_SCOPE_VIOLATION` (17), `READ_REPEATED` (13) und `NO_CHANGE` (7).
+
 ### BUG-304 – Turnierwertung: ein Programm, das nicht startet, ist kein K.o.
 - Phase: Coder-Turnier 0.1.0rc62, 2026-10-21 (Auswertung des vollen Turniers) · Komponente: tournament (scoring, runner) · Severity: P2 · blockierend: nein (Sieger unverändert) · Status: **behoben im Repository** (`tests/unit/test_tournament.py::test_a_program_the_hidden_checks_cannot_run_is_knocked_out`)
 - Reproduktion: Ornith 35B, A7 #3 meldet „succeeded“, der gelieferte Server startet nicht: „3 passed, 28 errors“ in den versteckten Prüfungen (Setup-Fehler `python -m … ` bei jedem Test). Ebenso A8 #1–#3 („1 passed, 22 errors“). Die Läufe bekamen Punkte für „abgeschlossen“ und „keine unnötigen Änderungen“ wie ein laufendes Programm.
