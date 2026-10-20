@@ -204,6 +204,8 @@ MAX_READ_BYTES = 2_000_000
 MAX_DIFF_BYTES = 400_000
 SNIPPET_CHARS = 600
 _SLACK = 400  # markers appended after clipping
+# refusals that tell nothing about how to act: the step is over, the budget spent, the knowledge itself unavailable
+_NO_KNOWLEDGE = frozenset({E.STEP_FINISHED, E.TURN_BUDGET_EXHAUSTED, E.MEMORY_UNAVAILABLE})
 _SOURCE_FILE_BYTES = 2_000_000  # larger files are not read for [source] lines
 
 
@@ -308,6 +310,7 @@ class ToolEngine:
         # re-ran identical commands on unchanged files again and again (analysis 2026-10-16, live job 50784df5)
         # keyed without the timeout: a command that finished is not changed by another timeout (BUG-211)
         self._ran: dict[tuple[str, str], tuple[int, int, str]] = {}
+        self._hinted: set[tuple[str, str]] = set()  # (tool, error code) whose knowledge this attempt was given (D-019)
         self._ran_output: dict[tuple[str, str], str] = {}  # rendered output of a failed run, repeated in its refusal
         # identical reads: (file-change count, turn). The context of every turn already shows the files read in this
         # attempt; the coder still re-read the same unchanged file turn after turn instead of acting (BUG-179)
@@ -451,7 +454,8 @@ class ToolEngine:
                 result = await self._lint_after_write(result, ctx, events)
             return result
         except ToolError as exc:
-            return ToolResult(tool=spec.name, ok=False, output=exc.message, error_code=exc.code, data=exc.data)
+            refused = ToolResult(tool=spec.name, ok=False, output=exc.message, error_code=exc.code, data=exc.data)
+            return await self._with_knowledge(refused, ctx)
         except Exception as exc:  # never leak a traceback to the model; keep the runtime alive
             log.exception("tool handler failed", extra={"tool": spec.name.value, "error_type": type(exc).__name__})
             return ToolResult(
@@ -849,6 +853,37 @@ class ToolEngine:
         out, clipped = clip_head(text, self.output_limit)
         return self._ok(
             ToolName.search_symbol, out, truncated=clipped, data={"hits": n, "paths": [h.path for h in hits if not self._hidden(h.path)]}
+        )
+
+    async def _with_knowledge(self, result: ToolResult, ctx: CallContext) -> ToolResult:
+        """What earlier jobs learned about this refusal, added to it once per tool and error code (D-019): the entry
+        recorded for exactly this refusal first, then the closest lessons. Models rarely call recall on their own when
+        a tool refuses – GLM-4.7-Flash spent a whole A3 run against replace_text (BUG-301)."""
+        code, want = result.error_code, self.policies.memory.coder_entries
+        key = (result.tool.value, code or "")
+        if self.memory is None or not code or want <= 0 or code in _NO_KNOWLEDGE or key in self._hinted:
+            return result
+        self._hinted.add(key)
+        call = ModelCallContext(purpose="memory", job_id=ctx.job_id, step_id=ctx.step_id, attempt_id=ctx.attempt_id)
+        try:
+            hits = await self.memory.for_signature(f"tool:{key[0]}:{code}", scopes=self.memory_scopes)
+            if len(hits) < want:
+                query = f"{key[0]} {code} {result.output[:300]}"
+                near = await self.memory.search(
+                    query, k=want, scopes=self.memory_scopes, kinds=("lesson", "tool_bug", "incident", "convention"), ctx=call
+                )
+                hits += [h for h in near if h.id not in {x.id for x in hits}]
+        except Exception as exc:  # the refusal itself still reaches the model
+            log.warning("knowledge for a refusal unavailable", extra={"error_type": type(exc).__name__})
+            return result
+        if not hits:
+            return result
+        limit = self.policies.memory.max_entry_chars
+        note = "\n\nHermclaw's knowledge about this refusal (from earlier jobs; the files and outputs here decide):\n" + "\n\n".join(
+            h.render(limit) for h in hits[:want]
+        )
+        return result.model_copy(
+            update={"output": result.output + note, "data": result.data | {"knowledge": [str(h.id) for h in hits[:want]]}}
         )
 
     async def _recall(self, args: RecallArgs, ctx: CallContext, events: list[PendingEvent]) -> ToolResult:

@@ -136,3 +136,8 @@ memory:
   min_score: 0.55        # cosine similarity below which an entry is not relevant
   learn: true            # record incidents of failed or stalled work after each job
   promote_after: 2       # jobs with the same incident before its lesson becomes active
+  learn_interval_seconds: 120  # pause between two learning passes over finished jobs
+  learn_batch: 20        # finished jobs one learning pass reads at most
+  learn_since_days: 30   # finished jobs older than this are not read (0 = all)
+  min_repeats: 2         # refusals of one tool with one error code in a job that make an incident
+  research_days: 180     # validity of a research finding in the knowledge

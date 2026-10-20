@@ -64,6 +64,12 @@ async def test_the_operator_writes_searches_edits_and_retires_knowledge(app) -> 
         assert [e["id"] for e in (await c.get("/api/memory", params={"status": "retired"})).json()] == [entry["id"]]
         assert (await c.get(f"/api/memory/{uuid.uuid4()}")).status_code == 404
         assert (await c.patch(f"/api/memory/{entry['id']}", json={})).status_code == 422
+        store = app.state.hermclaw.memory  # a system entry whose text the operator corrects is the operator's
+        learned = await store.add(kind="incident", title="seen twice", content="system text", signature="tool:x:Y")
+        r = await c.patch(f"/api/memory/{learned}", json={"content": "operator text"})
+        assert r.json()["source"] == "operator"
+        r = await c.patch(f"/api/memory/{learned}", json={"status": "active"})
+        assert r.json()["source"] == "operator" and r.json()["status"] == "active"
         assert (await c.post("/api/memory", json={"kind": "gossip", "title": "x", "content": "y"})).status_code == 422
 
 

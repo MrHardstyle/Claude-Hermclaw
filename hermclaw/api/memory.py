@@ -129,6 +129,8 @@ async def update_memory(
     changes = body.model_dump(exclude_unset=True)
     if not changes:
         raise HTTPException(422, "nothing to change")
+    if {"title", "content"} & set(changes):
+        changes["source"] = "operator"  # the text is the operator's now: learning after jobs does not rewrite it
     row = await _store(request).update(entry_id, **changes)
     if row is None:
         raise HTTPException(404, "memory entry not found")

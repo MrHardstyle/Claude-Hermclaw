@@ -423,6 +423,39 @@ async def test_recall_finds_active_knowledge_of_this_repository(sessionmaker: SM
     assert ToolName.recall not in plain.engine.available_tools()
 
 
+async def test_a_refusal_brings_what_earlier_jobs_learned_about_it_once(sessionmaker: SM, repo: Path) -> None:
+    """D-019: the active entry recorded for exactly this refusal reaches the model with the refusal, once per tool and
+    error code in an attempt; a candidate does not."""
+    from sqlalchemy import delete
+
+    from hermclaw.core.config import MemoryPolicy
+    from hermclaw.memory.store import MemoryStore
+    from hermclaw.persistence.models import MemoryEntry
+    from tests.integration.test_repo_intelligence_support import HashingEmbedder
+
+    async with sessionmaker() as s:
+        await s.execute(delete(MemoryEntry))
+        await s.commit()
+    store = MemoryStore(sessionmaker, HashingEmbedder(), MemoryPolicy(min_score=0.9))
+    learned = await store.add(
+        kind="incident",
+        title="replace_text refuses with TEXT_NOT_FOUND",
+        content="What helped: read_file → replace_text.",
+        status="active",
+        signature="tool:replace_text:TEXT_NOT_FOUND",
+    )
+    await store.add(kind="incident", title="unproven", content="x", signature="tool:replace_text:TEXT_NOT_FOUND")
+    h = await make_harness(sessionmaker, repo, memory=store, contract=scope(target_paths=["src/calc.py"]))
+    first = await h.call("replace_text", path="src/calc.py", old="no such text", new="x")
+    assert not first.ok and first.error_code == "TEXT_NOT_FOUND"
+    assert "Hermclaw's knowledge about this refusal" in first.output and "What helped: read_file → replace_text." in first.output
+    assert first.data["knowledge"] == [str(learned)] and "unproven" not in first.output
+    again = await h.call("replace_text", path="src/calc.py", old="still no such text", new="x")
+    assert again.error_code == "TEXT_NOT_FOUND" and "Hermclaw's knowledge" not in again.output
+    row = await store.get(learned)
+    assert row is not None and row.recalls == 1
+
+
 async def test_replace_text_handles_crlf_files(sessionmaker: SM, repo: Path) -> None:
     (repo / "src" / "calc.py").write_bytes(b"def mul(a, b):\r\n    return a * b\r\n")
     h = await make_harness(sessionmaker, repo, contract=scope(target_paths=["src/calc.py"]))

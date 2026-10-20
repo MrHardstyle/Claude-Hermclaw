@@ -40,9 +40,31 @@ Nothing is deleted through the API: a wrong entry is retired and stays visible.
 
 | Reader | How |
 |---|---|
-| Coder | tool `recall(query, k)` (read-only, offered only when the knowledge store exists); scope `repo:<key>` of the job |
+| Coder | tool `recall(query, k)` (read-only, offered only when the knowledge store exists); scope `repo:<key>` of the job. A refused tool call brings the knowledge about it along, once per tool and error code in an attempt: the active entry with the signature `tool:<tool>:<code>`, then the closest lessons, `coder_entries` at most |
 | Planner, replanner | `PlannerInput.knowledge`: the `planner_entries` active entries closest to the job text, as input key `knowledge` (3 % of the prompt budget); the system prompt says they are hints and the job and repository decide |
 | Operator | page "Wissen" (`ui/src/pages/Wissen.tsx`, `/api/memory`): filters, edit form, activate/retire, recall probe |
+
+## Learning after jobs (`hermclaw/memory/learner.py`)
+
+The scheduler process runs `MemoryLearner` next to the workspace janitor: every `learn_interval_seconds` it reads up to
+`learn_batch` finished jobs (`succeeded`/`failed`, not older than `learn_since_days`) that carry no
+`metadata.memory_learned_at` yet, and stamps them afterwards (a JSON merge, no row version).
+
+| Source | Entry | Signature |
+|---|---|---|
+| a tool refused with one error code at least `min_repeats` times in the job | `incident`: how often, models, typical message, **what helped** (the calls up to the next success of the same tool on the same file in that attempt, e.g. `read_file → replace_text`) or that nothing did | `tool:<tool>:<code>` |
+| `stagnation.detected` with directive `diagnose` or `stop` (one per stall kind and job) | `incident`: cause (`edit_mechanics`, `loop`, `knowledge`, …), step, model, turn, reasons, repeated signal, how the step ended | `stall:<cause>:<tool or signal>:<code>` |
+| failed job | `incident` with the job's error | `job:<error code>` |
+| completed research run | `research` (source `research`, active, expires after `research_days`): question, synthesis, claims with confidence ≥ 0.6, sources; the same question updates the entry | `research:<hash of the question>` |
+
+An incident is counted once per job (`occurrences`, `evidence.jobs`, the last five examples). Its text is rewritten from
+the latest examples while it is a system entry; at `promote_after` jobs **and** with something that helped it becomes
+active. A refusal that at least two models could not get past in `promote_after` jobs is a **tool-bug suspicion**: a
+`tool_bug` candidate and one open bug record `AUTO-<hash>` (component `tools`, P3) for the operator. Nothing in a tool is
+changed by itself.
+
+The operator's word wins: an entry whose title or text was edited on the page becomes `source = operator` and is not
+rewritten, a retired entry keeps counting but stays retired.
 
 ## API
 
@@ -59,7 +81,8 @@ The vector never leaves the server (`embedded: true/false` instead).
 ## Policy
 
 `policies.memory` (`config/policies.example.yaml`): `enabled`, `recall_k`, `planner_entries`, `coder_entries`,
-`min_score`, `max_entry_chars`, `learn`, `promote_after`.
+`min_score`, `max_entry_chars`, `learn`, `promote_after`, `learn_interval_seconds`, `learn_batch`, `learn_since_days`,
+`min_repeats`, `research_days`.
 
 ## Guard rails
 

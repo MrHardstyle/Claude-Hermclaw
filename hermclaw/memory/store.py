@@ -181,12 +181,15 @@ class MemoryStore:
         tags: Iterable[str] = (),
         ctx: CallContext | None = None,
     ) -> tuple[uuid.UUID, int]:
-        """One entry per failure signature: a known one counts the new job (once per job); returns (id, jobs seen)."""
+        """One entry per failure signature: a known one counts the new job (once per job) – also a retired one, which
+        stays retired, so an entry the operator rejected does not come back; returns (id, jobs seen)."""
         async with self.sessionmaker() as s:
             row = (
                 await s.execute(
                     select(MemoryEntry)
-                    .where(MemoryEntry.signature == signature[:300], MemoryEntry.kind == kind, MemoryEntry.status != "retired")
+                    .where(MemoryEntry.signature == signature[:300], MemoryEntry.kind == kind)
+                    .order_by(MemoryEntry.created_at)
+                    .limit(1)
                     .with_for_update()
                 )
             ).scalar_one_or_none()
@@ -214,6 +217,23 @@ class MemoryStore:
         return entry_id, 1
 
     # ------------------------------------------------------------------------------------------ reading
+    async def by_signature(self, signature: str, *, kinds: Sequence[str] | None = None) -> list[MemoryEntry]:
+        stmt = select(MemoryEntry).where(MemoryEntry.signature == signature[:300]).order_by(MemoryEntry.created_at)
+        if kinds:
+            stmt = stmt.where(MemoryEntry.kind.in_(list(kinds)))
+        async with self.sessionmaker() as s:
+            return list((await s.execute(stmt)).scalars().all())
+
+    async def for_signature(self, signature: str, *, scopes: Sequence[str] | None = None, count: bool = True) -> list[MemoryHit]:
+        """Active entries recorded for exactly this failure signature (score 1), each counted as a recall."""
+        async with self.sessionmaker() as s:
+            stmt = _live(select(MemoryEntry), ("active",), scopes).where(MemoryEntry.signature == signature[:300])
+            rows = list((await s.execute(stmt.order_by(MemoryEntry.updated_at.desc()).limit(5))).scalars())
+            if count and rows:
+                await s.execute(update(MemoryEntry).where(MemoryEntry.id.in_([r.id for r in rows])).values(recalls=MemoryEntry.recalls + 1))
+                await s.commit()
+            return [_hit(r, 1.0) for r in rows]
+
     async def get(self, entry_id: uuid.UUID) -> MemoryEntry | None:
         async with self.sessionmaker() as s:
             return await s.get(MemoryEntry, entry_id)

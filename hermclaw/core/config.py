@@ -388,6 +388,11 @@ class MemoryPolicy(_Strict):
     max_entry_chars: int = Field(default=1200, ge=200, le=8000)  # one entry as a model sees it
     learn: bool = True  # record incidents of failed/stalled work after a job
     promote_after: int = Field(default=2, ge=1, le=20)  # jobs with the same incident before its lesson becomes active
+    learn_interval_seconds: float = Field(default=120.0, ge=10.0, le=86400.0)  # pause between two learning passes
+    learn_batch: int = Field(default=20, ge=1, le=500)  # finished jobs one learning pass reads at most
+    learn_since_days: int = Field(default=30, ge=0, le=3650)  # finished jobs older than this are not read (0 = all)
+    min_repeats: int = Field(default=2, ge=1, le=20)  # refusals of one tool with one error code in a job that count
+    research_days: int = Field(default=180, ge=1, le=3650)  # validity of a research finding in the knowledge
 
 
 class PoliciesConfig(_Strict):
