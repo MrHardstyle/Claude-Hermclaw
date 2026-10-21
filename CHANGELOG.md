@@ -4,6 +4,8 @@ Format: [Keep a Changelog](https://keepachangelog.com/de/1.1.0/), Versionen nach
 
 ## [Unreleased]
 
+## [0.1.0rc66] – Release Candidate (2026-10-21)
+
 ### Behoben
 - **Keine Planer-Reparaturrunde für fehlende Auftragsdetails (BUG-312):** Nennt der erste Plan einen Ausdruck aus dem Auftrag nicht (Dateipfad, Name in Backticks, Statuscode), trägt der Planer-Kern ihn selbst in das Ziel des Schritts ein, der ihn liefert, statt den Plan neu erzeugen zu lassen. Auf der Leiter (rc65) kostete jede solche Runde mit qwen3.8:27b rund 10 min; A7 verbrauchte 29 von 40 min im Planer.
 
