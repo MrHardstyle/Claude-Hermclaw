@@ -9,15 +9,17 @@ from typing import Any
 import pytest
 import yaml
 
-from hermclaw.core.config import load_config
+from hermclaw.core.config import ModelProfileConfig, load_config
 from hermclaw.core.errors import ConfigError, ValidationFailed
 from hermclaw.models.litellm_config import build_litellm_config, main, render_litellm_config
 from hermclaw.models.profiles import (
     ProfileRegistry,
+    _row_values,
     assert_architecture,
     check_architecture,
     normalize_model_tag,
     ollama_base_url,
+    profile_from_row,
     resolve_api_key,
     same_model,
     validate_http_url,
@@ -264,6 +266,36 @@ def test_llamacpp_profiles_route_to_the_resident_llama_server() -> None:
     assert planner["model"] == "openai/qwen3.8:27b" and planner["api_base"] == "http://10.0.0.5:18080/v1"
     emb = replace_profile(models_config(), "embedding", backend="llamacpp")
     assert any("chat profiles only" in i.message for i in check_architecture(emb))
+
+
+def test_a_profile_sends_further_chat_template_variables_with_their_type() -> None:
+    """Research R-035: gpt-oss-20b passes the screening only with ``reasoning_effort: low``, which no profile could set.
+    The template variables go next to ``enable_thinking``; profiles without them keep their config and DB metadata."""
+    cfg = models_config()
+    for alias in [p.alias for p in cfg.profiles if p.kind == "chat"]:
+        cfg = replace_profile(cfg, alias, model="qwen3.6:35b", backend="llamacpp", deviation="D-015", gpu_layers=None)
+    before = {p.alias: _row_values(p) for p in cfg.profiles}
+    oss = replace_profile(cfg, "coder-main", chat_template_kwargs={"reasoning_effort": "low", "clear_thinking": False, "budget": 512})
+    assert [i for i in check_architecture(oss) if i.severity == "error"] == []
+    urls = {"ollama_urls_by_host": {"model-224": "http://10.0.0.5:11434"}, "llamacpp_urls_by_host": {"model-224": "http://10.0.0.5:18080"}}
+    by_name = {m["model_name"]: m["litellm_params"] for m in build_litellm_config(oss, **urls)["model_list"]}
+    kwargs = by_name["coder-main"]["extra_body"]["chat_template_kwargs"]
+    assert kwargs == {"enable_thinking": False, "reasoning_effort": "low", "clear_thinking": False, "budget": 512}
+    assert kwargs["clear_thinking"] is False and type(kwargs["budget"]) is int  # JSON scalars keep their type
+    assert by_name["planner-gemma"]["extra_body"] == {"chat_template_kwargs": {"enable_thinking": False}}
+    assert {p.alias: _row_values(p) for p in cfg.profiles} == before and "chat_template_kwargs" not in before["coder-main"]["metadata_"]
+
+    row = _row_values(oss.by_alias("coder-main"))
+    assert row["metadata_"]["chat_template_kwargs"] == {"reasoning_effort": "low", "clear_thinking": False, "budget": 512}
+    back = profile_from_row(type("Row", (), row)())
+    assert back.chat_template_kwargs == {"reasoning_effort": "low", "clear_thinking": False, "budget": 512}
+
+    base = {"alias": "x", "role": "coder", "model": "m", "backend": "llamacpp"}
+    for bad in ({"enable_thinking": True}, {"Reasoning-Effort": "low"}, {"nested": {"a": 1}}, {"long": "x" * 201}):
+        with pytest.raises(ValueError):
+            ModelProfileConfig.model_validate({**base, "chat_template_kwargs": bad})
+    ollama = replace_profile(models_config(), "coder-main", chat_template_kwargs={"reasoning_effort": "low"})
+    assert any("chat_template_kwargs need backend llamacpp" in i.message for i in check_architecture(ollama))
 
 
 # ----------------------------------------------------------------------------------------------- litellm config (8.1)

@@ -8,12 +8,13 @@ fresh checkout and the test-suite run without manual setup. Production installs 
 from __future__ import annotations
 
 import ipaddress
+import re
 from functools import lru_cache
 from pathlib import Path
 from typing import Any, Literal
 
 import yaml
-from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
+from pydantic import BaseModel, ConfigDict, Field, StrictBool, StrictFloat, StrictInt, StrictStr, field_validator, model_validator
 
 from hermclaw.core.errors import ConfigError
 from hermclaw.core.settings import get_settings
@@ -98,6 +99,7 @@ class HostsConfig(_Strict):
 
 # ----------------------------------------------------------------------------------------------- models
 ModelRole = Literal["fast", "planner", "planner_fallback", "coder", "heavy", "embedding", "research"]
+_TEMPLATE_KEY = re.compile(r"^[a-z][a-z0-9_]{0,63}$")
 
 
 class ModelProfileConfig(_Strict):
@@ -128,6 +130,19 @@ class ModelProfileConfig(_Strict):
     # A documented decision (DECISIONS.md) to run this role on another model than the architecture names: the check
     # reports the deviation as a warning instead of an error. Empty = the architecture's model is required.
     deviation: str = Field(default="", max_length=500)
+    # llamacpp only: further variables for the model's chat template, sent with every request next to
+    # ``enable_thinking`` (Research R-035: gpt-oss-20b reasons at ``reasoning_effort: low``). JSON scalars keep their
+    # type; ``enable_thinking`` itself stays the job of ``think``.
+    chat_template_kwargs: dict[str, StrictBool | StrictInt | StrictFloat | StrictStr] = Field(default_factory=dict, max_length=16)
+
+    @model_validator(mode="after")
+    def _template_kwargs(self) -> ModelProfileConfig:
+        for key, value in self.chat_template_kwargs.items():
+            if not _TEMPLATE_KEY.match(key) or key == "enable_thinking":
+                raise ValueError(f"{self.alias}: chat_template_kwargs key {key!r} not allowed (enable_thinking is set by think)")
+            if isinstance(value, str) and len(value) > 200:
+                raise ValueError(f"{self.alias}: chat_template_kwargs value of {key!r} longer than 200 characters")
+        return self
 
 
 class LiteLLMConfig(_Strict):

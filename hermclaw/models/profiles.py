@@ -147,6 +147,8 @@ def check_architecture(models: ModelsConfig) -> list[ProfileIssue]:
                 issues.append(ProfileIssue("error", req.role, p.alias, "embedding profile needs embedding_dimensions"))
             if p.backend == "llamacpp" and p.kind != "chat":
                 issues.append(ProfileIssue("error", req.role, p.alias, "backend llamacpp serves chat profiles only"))
+            if p.backend != "llamacpp" and p.chat_template_kwargs:
+                issues.append(ProfileIssue("error", req.role, p.alias, "chat_template_kwargs need backend llamacpp"))
             if p.backend == "llamacpp" and p.gpu_layers is not None:
                 issues.append(ProfileIssue("warning", req.role, p.alias, "gpu_layers is ignored for llamacpp (set on llama-server)"))
     planners = [p.alias for p in models.profiles if p.role == "planner" and p.enabled]
@@ -302,6 +304,8 @@ def _row_values(p: ModelProfileConfig) -> dict[str, Any]:
             "think": p.think,
             "timeout_seconds": p.timeout_seconds,
             "embedding_dimensions": p.embedding_dimensions,
+            # only when set: profiles without it keep the metadata they had before (no needless update)
+            **({"chat_template_kwargs": dict(p.chat_template_kwargs)} if p.chat_template_kwargs else {}),
         },
     }
 
@@ -395,7 +399,7 @@ def profile_from_row(row: ModelProfile) -> ModelProfileConfig:
     }
     if row.host_worker_id:
         data["host"] = row.host_worker_id
-    for key in ("temperature", "think", "timeout_seconds", "embedding_dimensions"):
+    for key in ("temperature", "think", "timeout_seconds", "embedding_dimensions", "chat_template_kwargs"):
         if meta.get(key) is not None:
             data[key] = meta[key]
     return ModelProfileConfig.model_validate(data)

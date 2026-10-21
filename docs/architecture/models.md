@@ -236,7 +236,13 @@ tokens, reasoning chars, avg/p50/p95/p99/max latency (PostgreSQL `percentile_con
 - `models.litellm.request_timeout_seconds` – upper bound for any single call.
 - `models.model_host_capacity_gb` – capacity warning threshold for resident models.
 - `models.profiles[]`: `alias, role, model, kind, host, context_tokens, max_output_tokens, temperature, think,
-  timeout_seconds, priority, resource_group, exclusive, memory_gb, fallback_for, embedding_dimensions, gpu_layers, enabled`.
+  timeout_seconds, priority, resource_group, exclusive, memory_gb, fallback_for, embedding_dimensions, gpu_layers, enabled,
+  backend, host, deviation, chat_template_kwargs`.
+  `chat_template_kwargs` (backend `llamacpp` only, else an architecture error) adds variables for the model's chat
+  template to the deployment's `extra_body.chat_template_kwargs`, next to `enable_thinking` from `think`, which it may not
+  set itself. Keys `[a-z][a-z0-9_]*`, at most 16, values JSON scalars that keep their type (strings ≤ 200 characters).
+  Research R-035: gpt-oss-20b needs `{reasoning_effort: low}`; thinking cannot be switched off there. The DB metadata
+  carries it only when set, so existing profiles sync unchanged.
   `gpu_layers` (optional, ≥ 0) becomes Ollama `options.num_gpu` – per request (top-level `num_gpu`, passed through by
   LiteLLM 1.104.2, `tests/integration/test_models_litellm_proxy.py::test_gpu_layers_reach_ollama_as_num_gpu`) and as
   the proxy deployment default. Unset = Ollama's own layer estimate. The example sets 30 for `planner-gemma-fallback`:

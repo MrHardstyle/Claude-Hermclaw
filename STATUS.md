@@ -275,11 +275,11 @@ bestanden; ansible-lint (production) sauber. `test_deploy_converge` ist angepass
    (`infra/sandbox-images/README.md`) bleibt für Systempakete nötig.
 
 ## Paket B – Modellfamilien (Research R-035)
-Nächster Teil: 2
+Nächster Teil: 3a (vorher Release mit Teil 2, nach der Leiter)
 Hintergrundlauf: Leiter rc68 ab A7 (nach Deploy 2026-10-22); Teil 3a erst nach der Leiter
 Offene Fragen: –
 - Root auf .224: Option (b) aus R-034 (`/etc/sudoers.d/90-hermclaw-tuning`), bleibt bis Paketende.
 - Teil 1 fertig (2026-10-22): Gemma 4 26B, gpt-oss-20b, GLM-4.7-Flash bestehen das Screening (Research R-035).
-- Teil 2: `chat_template_kwargs`/`reasoning_effort` je Profil, nötig für gpt-oss-20b (`low`).
-- Dateien: gpt-oss-20b unter `/var/lib/hcbench/models/gpt-oss-20b-mxfp4.gguf` (sha256 = LFS-oid), GLM-4.7-Flash dort aus R-033, gemma4:26b im Ollama-Store. 29 GB frei.
+- Teil 2 im Repository: `chat_template_kwargs` je Profil (llamacpp), gpt-oss-20b bekommt `{reasoning_effort: low}`; Release noch offen.
+- Dateien: gpt-oss-20b unter `/var/lib/hcbench/models/gpt-oss-20b-mxfp4.gguf` (sha256 = LFS-oid), GLM-4.7-Flash dort aus R-033, gemma4:26b im Ollama-Store. 30 GB frei.
 - Rohdaten: `/var/tmp/hc-screen/<kandidat>/` auf .224.
