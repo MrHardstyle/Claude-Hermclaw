@@ -128,6 +128,24 @@ async def test_fix_required_findings_rows_and_events_in_severity_order(sessionma
     assert events[-1].severity == "warning"
 
 
+async def test_a_finding_without_a_path_names_a_scope_file_in_the_correction(sessionmaker: SM) -> None:
+    """BUG-311: the reviewer left out the path; the file its text names in the scope reaches the correction."""
+    from hermclaw.review.correction import build_correction_request
+
+    answer = {
+        "verdict": "fix_required",
+        "summary": "sub() is untested",
+        "findings": [{"severity": "blocker", "summary": "test_app.py is missing a test for sub()", "suggested_fix": "add test_sub"}],
+    }
+    inp = await _input(sessionmaker)
+    outcome = await HeavyReviewer(ScriptedChatModel([answer]), sessionmaker, config()).review(inp)
+
+    assert outcome.review.findings[0].path == "tests/test_app.py"  # allowed new path of the scope, not yet changed
+    correction = build_correction_request(step_id=inp.step_id, attempt_id=None, review=outcome, step=inp.step)
+    assert correction.review_findings[0].path == "tests/test_app.py"
+    assert correction.required_changes[0] == "[blocker] tests/test_app.py: add test_sub"
+
+
 async def test_pass_with_major_is_overridden(sessionmaker: SM) -> None:
     answer = {
         "verdict": "pass",

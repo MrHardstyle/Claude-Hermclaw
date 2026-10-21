@@ -7,6 +7,9 @@ Format: [Keep a Changelog](https://keepachangelog.com/de/1.1.0/), Versionen nach
 ### Hinzugefügt
 - **Deploy-Wrapper `hermclaw-deploy`:** `scripts/deploy/hermclaw-deploy.sh`, vom Betreiber einmal als root installiert, deployt ein gebautes Release mit `sudo -n /usr/local/sbin/hermclaw-deploy <version>`. Das Become-Passwort entschlüsselt das Skript selbst in eine private Datei in `/dev/shm` und vernichtet sie danach, es geht durch keine Shell des Aufrufers. Vorab prüft es Version, gebautes Release, Inventory, laufende Jobs und parallele Deploys. `--check` macht nur die Vorabprüfung. Log unter `/var/log/hermclaw-deploy/`.
 
+### Behoben
+- **Review-Befunde ohne Pfad nennen ihre Datei (BUG-311):** Lässt das Review den Pfad eines Befunds weg, übernimmt die Normalisierung die eine bekannte Datei, die der Text des Befunds nennt: geändert, im Scope oder dem Reviewer gezeigt, auch als eindeutiges Pfadende wie `__main__.py`. Die Korrektur nennt die Datei, und `complete_step` wird abgelehnt, solange sie unberührt ist. Auf der Leiter (rc64, A4) hielt der Coder `ledger/__main__.py` für außerhalb des Scopes und schloss zweimal ab, ohne den Absturz-Blocker zu beheben.
+
 ## [0.1.0rc64] – Release Candidate (2026-10-21)
 
 ### Geändert

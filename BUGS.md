@@ -46,6 +46,12 @@ Noch keine.
 
 ## Behobene Bugs
 
+### BUG-311 – Ein Review-Befund ohne Pfad lässt den Coder die genannte Datei übergehen
+- Phase: Schwierigkeitsleiter auf rc64, 2026-10-21 (A4, Job 69813999) · Komponente: review (`severity.py`, `reviewer.py`) · Severity: P2 · blockierend: nein · Status: **behoben im Repository** (`tests/unit/test_review_severity.py::test_a_finding_without_a_path_takes_the_one_known_file_its_text_names`, `tests/integration/test_review_reviewer.py::test_a_finding_without_a_path_names_a_scope_file_in_the_correction`)
+- Reproduktion: Das Review meldet als Blocker „The program crashes with IndexError when run without arguments because `__main__.py` accesses `argv[1]`“. Das Feld `path` lässt es leer. Im ersten Korrekturversuch lässt der Coder nur zweimal pytest laufen und schließt ab: „__main__.py … is outside the current scope“. Dabei steht `ledger/__main__.py` in den `target_paths`. Im zweiten Versuch behebt er nur die Formatierung. Die Korrekturen sind aufgebraucht, der Replan kostet weitere 10 min, und der Job läuft ins Zeitlimit (versteckt 8/9).
+- Ursache: Ohne Pfad nennt die Korrekturanforderung keine Datei. Der Wächter aus BUG-258 lehnt `complete_step` nur ab, solange eine *genannte* Datei unberührt ist. Hier hatte er also keine Datei zu prüfen. Der Prompt verlangt zwar einen Pfad je Befund, das Modell hält sich aber nicht immer daran.
+- Fix: Hat ein Befund keinen Pfad, sucht `normalise_findings` in Zusammenfassung, Beleg und Lösungsvorschlag nach Dateinamen. Gezählt werden nur bekannte Dateien: geänderte Dateien, Scope-Ziele, erlaubte neue Pfade und die dem Reviewer gezeigten Dateien. Ein Name zählt als voller Pfad oder als eindeutiges Pfadende wie `__main__.py`. Nennt der Text genau eine solche Datei, wird sie zum Pfad des Befunds. Bei mehreren oder keiner bleibt der Pfad leer, geraten wird nicht. Damit erscheint die Datei in der Korrektur, und BUG-258 greift.
+
 ### BUG-310 – Jeder Gateway-Start meldet die dokumentierten Modellabweichungen als Warnung
 - Phase: GLM-Nachtest auf rc63, 2026-10-21 (Log des Turnier-CLI) · Komponente: models (`gateway.py`, `profiles.py`) · Severity: P4 · blockierend: nein · Status: **behoben im Repository** (`tests/unit/test_models_profiles.py::test_the_gateway_logs_a_documented_deviation_only_at_debug_level`)
 - Reproduktion: `hermclaw coder-tournament …` schreibt elfmal „model profile warning“ ins Log, je Gateway erneut. Das sind die elf Profile mit begründeter Abweichung: D-015 und die Turnierkandidaten.

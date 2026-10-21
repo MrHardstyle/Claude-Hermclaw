@@ -281,7 +281,9 @@ class HeavyReviewer:
         draft = result.value
         notes = draft.normalisation_notes if isinstance(draft, ReviewDraft) else []
         contract = draft.to_contract() if isinstance(draft, ReviewDraft) else ReviewContract.model_validate(draft.model_dump())
-        normalised, more_notes = normalise_findings(redact_review(contract), changed)
+        scope = inp.step.scope  # a finding without a path names one of these files in its text (BUG-311)
+        known = [*(s.path for s in inp.snippets), *((*scope.target_paths, *scope.allowed_new_paths) if scope else ())]
+        normalised, more_notes = normalise_findings(redact_review(contract), changed, known)
         normalised, contradicted = downgrade_contradicted_findings(normalised, inp.verification)
         normalised, unrelated = downgrade_new_correction_findings(normalised, inp.earlier_findings)
         more_notes = [*more_notes, *contradicted, *unrelated]

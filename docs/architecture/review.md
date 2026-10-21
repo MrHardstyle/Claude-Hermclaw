@@ -108,7 +108,10 @@ Before validation (wrap validator of `ReviewDraft`): verdict synonyms (`approved
 → major, `nit`/`low`/`info` → minor, **unknown → major**, fail-closed), textual "none"/"n/a" findings → empty list, other free text → one major finding, clipping to the contract limits, ≤ 50 findings
 (most severe kept), unknown fields dropped (noted by *name* only). After validation: canonical repository paths (`./`,
 `a/`/`b/` diff prefixes, `path:line` → evidence `line N: …`; absolute or traversing paths are removed from the
-`path` field and only quoted in the evidence, so no later stage can open a file by them), de-duplication (same path + summary keeps the highest
+`path` field and only quoted in the evidence, so no later stage can open a file by them), a missing path taken from
+the one known file – changed, a scope target or allowed new path, or a file shown to the reviewer; as a full path or a
+unique tail like `__main__.py` – that summary, evidence and suggested fix name (none or several: left empty), so the
+correction names the file and BUG-258 refuses `complete_step` while it is untouched (BUG-311), de-duplication (same path + summary keeps the highest
 severity), stable order blocker → major → minor. Normalisation notes go to the `review.finished` event.
 
 ## Correction request (22.6)

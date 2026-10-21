@@ -7,8 +7,9 @@ Two stages, both deterministic:
    ``ReviewContract`` vocabulary, clips over-long texts and drops unknown keys (e.g. a ``reasoning`` field – model
    reasoning is never stored). Unknown severities become ``major`` (fail-closed: an unclassifiable finding blocks a
    pass). Unknown verdicts are left alone so validation fails and the gateway repairs the answer.
-2. ``normalise_findings`` runs on the validated contract: canonical repository paths, ``path:line`` split, de-
-   duplication (same path + summary keeps the highest severity) and stable ordering blocker → major → minor.
+2. ``normalise_findings`` runs on the validated contract: canonical repository paths, ``path:line`` split, a missing
+   path taken from the one known file the finding's text names, de-duplication (same path + summary keeps the
+   highest severity) and stable ordering blocker → major → minor.
 """
 
 from __future__ import annotations
@@ -125,6 +126,8 @@ _FINDINGS_KEYS = ("findings", "issues", "problems")
 _SUMMARY_KEYS = ("summary", "overall", "comment")
 _NO_FINDINGS = frozenset({"", "none", "no", "n_a", "na", "null", "nil", "[]", "no_findings", "no_issues", "nothing"})
 _PATH_LINE = re.compile(r"^(?P<path>.+?):(?P<line>\d+)(?:[-:]\d+)?$")
+# a file named in prose: `ledger/__main__.py`, __main__.py, form.test.js – only names of known files count
+_FILE_REF = re.compile(r"(?<![\w/-])((?:[\w.-]+/)*[\w.-]*\w\.[A-Za-z]\w{0,9})(?![\w/-])")
 
 
 def _token(value: object) -> str:
@@ -302,14 +305,35 @@ def _canonical_path(raw: str, changed: set[str]) -> tuple[str | None, str]:
         return None, line
 
 
-def normalise_findings(review: ReviewContract, changed_files: Sequence[str] = ()) -> tuple[ReviewContract, list[str]]:
-    """Post-validation normalisation: canonical paths, de-duplication, ordering blocker → major → minor."""
+def _named_path(finding: ReviewFinding, known: set[str]) -> str:
+    """The one known file the finding's text names (a full path or a unique tail like ``__main__.py``), else ``""``."""
+    named: set[str] = set()
+    for text in (finding.summary, finding.evidence, finding.suggested_fix):
+        for m in _FILE_REF.finditer(text or ""):
+            ref = _strip_dot(m.group(1))
+            hits = {p for p in known if p == ref or p.endswith("/" + ref)}
+            if len(hits) == 1:
+                named |= hits
+    return named.pop() if len(named) == 1 else ""
+
+
+def normalise_findings(
+    review: ReviewContract, changed_files: Sequence[str] = (), known_paths: Iterable[str] = ()
+) -> tuple[ReviewContract, list[str]]:
+    """Post-validation normalisation: canonical paths, de-duplication, ordering blocker → major → minor.
+
+    ``known_paths`` (scope targets, files shown to the reviewer) and ``changed_files`` resolve a finding without a
+    path: the correction names its file and the coder may not complete while that file is untouched (BUG-311).
+    """
     notes: list[str] = []
     changed = {c.strip() for c in changed_files}
+    known = {p for p in (*changed, *(k.strip() for k in known_paths)) if p and not any(c in p for c in "*?[")}
     merged: dict[tuple[str, str], tuple[int, ReviewFinding]] = {}
     outside = 0
     for idx, f in enumerate(review.findings):
         canonical, line = _canonical_path(f.path, changed) if f.path else ("", "")
+        if not f.path and (canonical := _named_path(f, known)):
+            notes.append(f"finding[{idx}]: path {canonical!r} taken from its text")
         evidence = f.evidence
         if line and line not in evidence:
             evidence = clip(f"line {line}: {evidence}".rstrip(": "), _LIMITS["evidence"])

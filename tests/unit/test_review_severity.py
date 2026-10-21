@@ -164,6 +164,30 @@ def test_normalise_findings_paths_dedupe_and_order() -> None:
     assert any("outside the changed files" in n for n in notes)
 
 
+def test_a_finding_without_a_path_takes_the_one_known_file_its_text_names() -> None:
+    """Ladder A4 on rc64: the reviewer left out the path of "__main__.py accesses argv[1] …"; the correction named no file,
+    the coder called ledger/__main__.py "outside the current scope" and completed twice without touching it (BUG-311)."""
+    known = ["ledger/parse.py", "ledger/report.py", "ledger/__main__.py", "tests/test_report.py", "tests/test_*.py"]
+    review = ReviewContract(
+        verdict="fix_required",
+        findings=[
+            ReviewFinding(
+                severity=FindingSeverity.blocker,
+                summary="The program crashes with IndexError when run without arguments because `__main__.py` accesses `argv[1]`.",
+                suggested_fix="Add a check `if len(argv) < 2:` before accessing `argv[1]`.",
+            ),
+            ReviewFinding(severity=FindingSeverity.major, summary="report.py and parse.py both round", evidence="x"),  # two files
+            ReviewFinding(severity=FindingSeverity.major, summary="the test asserts str(result['Giro']) == '1159.8'"),  # none
+            ReviewFinding(severity=FindingSeverity.minor, summary="main.py is missing"),  # not a known file
+            ReviewFinding(severity=FindingSeverity.minor, path="ledger/report.py", summary="see __main__.py"),  # has a path
+        ],
+    )
+    out, notes = normalise_findings(review, ["ledger/parse.py", "ledger/report.py"], known)
+    assert [f.path for f in out.findings] == ["ledger/__main__.py", "", "", "", "ledger/report.py"]
+    assert "finding[0]: path 'ledger/__main__.py' taken from its text" in notes
+    assert normalise_findings(review, ["ledger/parse.py"])[0].findings[0].path == ""  # unknown file: nothing guessed
+
+
 def test_redact_review_masks_secrets() -> None:
     token = "ghp_" + "Z" * 36
     review = ReviewContract(
