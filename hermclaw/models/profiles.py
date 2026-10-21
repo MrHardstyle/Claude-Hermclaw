@@ -96,6 +96,7 @@ class ProfileIssue:
     role: str
     alias: str | None
     message: str
+    documented: bool = False  # a deviation the profile names a decision for: shown by config-check/doctor, not logged
 
     def as_dict(self) -> dict[str, str | None]:
         return {"severity": self.severity, "role": self.role, "alias": self.alias, "message": self.message}
@@ -126,7 +127,7 @@ def check_architecture(models: ModelsConfig) -> list[ProfileIssue]:
                 expected = " / ".join(req.model_prefixes)
                 if p.deviation.strip():
                     message = f"model '{p.model}' deviates from the architecture (expected {expected}*): {p.deviation.strip()}"
-                    issues.append(ProfileIssue("warning", req.role, p.alias, message))
+                    issues.append(ProfileIssue("warning", req.role, p.alias, message, documented=True))
                 else:
                     message = f"model '{p.model}' violates the fixed architecture (expected {expected}*)"
                     issues.append(ProfileIssue("error", req.role, p.alias, message))

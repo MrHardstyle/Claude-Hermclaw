@@ -140,9 +140,22 @@ def test_a_documented_deviation_turns_the_model_check_into_a_warning() -> None:
     cfg = replace_profile(models_config(), "coder-main", model="qwen3.6:35b", deviation="D-047: battery A/B")
     issues = [i for i in check_architecture(cfg) if i.alias == "coder-main"]
     assert [i.severity for i in issues] == ["warning"] and "D-047: battery A/B" in issues[0].message
+    assert issues[0].documented
     assert assert_architecture(cfg)
     blank = replace_profile(models_config(), "coder-main", model="qwen3.6:35b", deviation="  ")
     assert any(i.severity == "error" for i in check_architecture(blank) if i.alias == "coder-main")
+
+
+def test_the_gateway_logs_a_documented_deviation_only_at_debug_level(caplog: pytest.LogCaptureFixture) -> None:
+    """BUG-310: every gateway construction logged the eleven documented deviations of production (D-015, tournament
+    candidates) as warnings – noise at every CLI run that buried real warnings."""
+    from hermclaw.models.gateway import LiteLLMGateway
+
+    cfg = replace_profile(models_config(), "coder-main", model="qwen3.6:35b", deviation="D-047: battery A/B")
+    with caplog.at_level("DEBUG", logger="hermclaw.models.gateway"):
+        LiteLLMGateway(cfg, api_key="k")
+    records = [r for r in caplog.records if r.getMessage() == "model profile warning"]
+    assert records and all(r.levelname == "DEBUG" for r in records)
 
 
 def test_registry_lookups() -> None:

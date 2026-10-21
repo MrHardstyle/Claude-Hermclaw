@@ -46,6 +46,12 @@ Noch keine.
 
 ## Behobene Bugs
 
+### BUG-310 – Jeder Gateway-Start meldet die dokumentierten Modellabweichungen als Warnung
+- Phase: GLM-Nachtest auf rc63, 2026-10-21 (Log des Turnier-CLI) · Komponente: models (`gateway.py`, `profiles.py`) · Severity: P4 · blockierend: nein · Status: **behoben im Repository** (`tests/unit/test_models_profiles.py::test_the_gateway_logs_a_documented_deviation_only_at_debug_level`)
+- Reproduktion: `hermclaw coder-tournament …` schreibt elfmal „model profile warning“ ins Log, je Gateway erneut. Das sind die elf Profile mit begründeter Abweichung: D-015 und die Turnierkandidaten.
+- Ursache: Das Gateway loggt jede Warnung der Architekturprüfung. Eine dokumentierte Abweichung ist aber eine getroffene Entscheidung, keine Auffälligkeit. Das Rauschen verdeckt echte Warnungen.
+- Fix: `ProfileIssue.documented` markiert begründete Abweichungen. Das Gateway loggt sie nur noch auf Debug-Ebene. `config-check` und Doctor zeigen sie weiterhin.
+
 ### BUG-309 – Der Verifier nimmt ein Programm ab, das nicht startet
 - Phase: Coder-Turnier auf rc62, Nachbereitung 2026-10-21 (Ornith 35B A7#3 und A8#2, Agents-A1 A8#1) · Komponente: verifier (`checks.py`, neu `entrypoints.py`) · Severity: P2 · blockierend: nein · Status: **behoben im Repository** (`tests/integration/test_verifier_engine.py::test_a_delivered_package_that_does_not_start_fails`, `tests/unit/test_verifier_entrypoints.py`)
 - Reproduktion: Ornith A8#2 endet `succeeded`, die eigenen Tests sind grün. `python -m tasks_app` bricht beim Start ab: `ImportError: cannot import name 'make_server' from 'tasks_app.server'`. Von 23 versteckten Prüfungen besteht eine. Ornith A7#3 ebenso: `import sys` steht nur im Fehlerzweig von `main()`, damit ist `sys` in der ganzen Funktion lokal. Beim normalen Start folgt `UnboundLocalError`, 3 von 31 Prüfungen bestehen. ruff meldet beides nicht.

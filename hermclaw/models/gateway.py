@@ -26,6 +26,7 @@ from __future__ import annotations
 import asyncio
 import hashlib
 import json
+import logging
 import re
 import time
 import uuid
@@ -326,7 +327,13 @@ class LiteLLMGateway:
         self.options = options or GatewayOptions()
         if self.options.validate_architecture:
             for issue in assert_architecture(models):
-                log.warning("model profile warning", extra={"alias": issue.alias, "role": issue.role, "issue": issue.message})
+                # a documented deviation (D-015, tournament candidates) is a decision, not a warning: logged at every
+                # gateway construction it buried real warnings – eleven lines per CLI run (BUG-310)
+                log.log(
+                    logging.DEBUG if issue.documented else logging.WARNING,
+                    "model profile warning",
+                    extra={"alias": issue.alias, "role": issue.role, "issue": issue.message},
+                )
         self.base_url = validate_http_url(base_url or models.litellm.base_url, what="litellm base_url")
         self._api_key = api_key
         self._redactor = redactor or DEFAULT_REDACTOR

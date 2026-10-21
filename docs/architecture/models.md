@@ -36,7 +36,9 @@ kept as a metric.
 `ConfigError(MODEL_ARCHITECTURE_VIOLATION)` on errors (wrong model family for a role, missing role, duplicate or
 malformed alias, fallback pointing at an unknown/different-kind alias, `max_output_tokens >= context_tokens`).
 Context/output deviations from the targets are warnings. The gateway constructor and the config generator refuse to
-start on errors – there is no silent model replacement.
+start on errors – there is no silent model replacement. A model deviation the profile names a decision for
+(`deviation: "D-015: …"`) is a warning with `documented = True`: `config-check` and doctor list it, the gateway logs
+it only at debug level (BUG-310).
 
 ## Public interfaces
 
