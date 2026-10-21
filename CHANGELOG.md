@@ -4,6 +4,8 @@ Format: [Keep a Changelog](https://keepachangelog.com/de/1.1.0/), Versionen nach
 
 ## [Unreleased]
 
+## [0.1.0rc69] – Release Candidate (2026-10-22)
+
 ### Behoben
 - **Die Maskierung verdeckte Variablennamen (BUG-318):** `{"NOTES_API_TOKEN": token}` erschien dem Coder als `***REDACTED***`, genau in der Zeile mit dem Fehler, den er finden musste. Unquotierte Werte aus Rollenwörtern (`token`, `api_key`, `new_password`) bleiben jetzt sichtbar, echte Werte weiter maskiert.
 
