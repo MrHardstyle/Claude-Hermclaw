@@ -43,7 +43,9 @@ Ports: `VerifierPort.verify(step, workspace, …) -> VerificationOutcome(report,
   that work (`GitEngine.save_verified`: changed, new and deleted files in the workspace's git directory, per step). When
   the step later ends blocked (coder block, replan request, stagnation, exhausted corrections), `_keep_verified` restores
   it (`restore_verified`), verifies it again and commits it with the event `correction.fell_back`; a failing re-verification
-  keeps the block. A failed correction never costs verified work.
+  keeps the block. A failed correction never costs verified work. A job cancelled during such a correction (BUG-317)
+  gets the saved work back in its work tree too, without re-verification or commit (`correction.fell_back` with
+  `outcome: cancelled`).
 
 ## Tests
 

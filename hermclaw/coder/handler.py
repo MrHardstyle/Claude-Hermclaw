@@ -788,17 +788,26 @@ class ImplementStepHandler:
         """A blocked step whose work once passed verification, before the review asked for a correction, falls back to
         that work and commits it instead of a replan that throws it away (BUG-315: ladder A7, a review finding with the
         facts reversed, the correction broke the verified server, the replan left no time). The kept state is verified
-        again; if it no longer passes, the step stays blocked."""
-        if outcome.outcome != "blocked":
+        again; if it no longer passes, the step stays blocked. A job cancelled during that correction leaves the
+        verified work, not the half-edited files, in the work tree; it is not committed (BUG-317: ladder A7 #4, the time
+        limit cut a correction short after an import was removed, the kept state would have passed 31 of 31 checks)."""
+        if outcome.outcome not in ("blocked", "cancelled"):
             return outcome
         ctx = run.ctx
         restored = await self.deps.git.restore_verified(run.ws, step_id=ctx.step_id)
         if restored is None:
             return outcome
+        if outcome.outcome == "cancelled":
+            await self._fell_back(ctx, restored, outcome)
+            return outcome
         await self._status(ctx, f"{run.row.step_key}: Korrektur gescheitert – zurück zum verifizierten Stand")
         verified = await self._verify(run)
         if not verified.report.passed:
             return outcome
+        await self._fell_back(ctx, restored, outcome)
+        return await self._commit(run, verified, result)
+
+    async def _fell_back(self, ctx: StepRunContext, restored: list[str], outcome: StepOutcome) -> None:
         async with self.sm() as s:
             await append_event(
                 s,
@@ -809,12 +818,12 @@ class ImplementStepHandler:
                 attempt_id=ctx.attempt_id,
                 payload={
                     "paths": restored[:50],
+                    "outcome": outcome.outcome,
                     "blocked": outcome.error_code,
                     "reason": DEFAULT_REDACTOR.text(outcome.error_message or outcome.summary)[:500],
                 },
             )
             await s.commit()
-        return await self._commit(run, verified, result)
 
     async def _review_and_correct(self, run: _Run, report: VerificationReport, items: list[CorrectionItem]) -> StepOutcome:
         ctx, row, step, handle = run.ctx, run.row, run.step, run.handle

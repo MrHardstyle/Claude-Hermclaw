@@ -32,7 +32,7 @@ from hermclaw.scope.engine import ScopeEngine
 from hermclaw.scope.expansion import ScopeExpansionHandler
 from hermclaw.tools.executors import SubprocessExecutor
 from tests.integration.test_gitops_support import World, git, make_world
-from tests.integration.test_runtime_driver import FakeIntel, ReviewHandler, _job, _plan, _replan, _run, _tournament_job
+from tests.integration.test_runtime_driver import FakeIntel, ReviewHandler, _events, _job, _plan, _replan, _run, _tournament_job
 from tests.integration.test_tools_support import dev_settings
 from tests.unit.test_planner_support import ScriptedChat
 
@@ -362,6 +362,48 @@ async def test_a_failed_review_correction_falls_back_to_the_verified_work(world:
     async with world.sessionmaker() as s:
         kinds = (await s.execute(select(Event.event_type).where(Event.job_id == jid))).scalars().all()
     assert "correction.fell_back" in kinds
+
+
+async def test_a_job_cancelled_during_the_review_correction_keeps_the_verified_work(world: World, tmp_path: Path) -> None:
+    """BUG-317 (ladder A7 #4 on rc67): the review asked for a correction of verified work, the time limit cancelled the
+    job in the middle of it, and the work tree kept the half-edited files (an import removed, 2 of 31 checks). The
+    cancelled step leaves the verified work in the work tree, uncommitted, and says so."""
+    tokens: list[Any] = []
+    broken = act("replace_text", path="src/module.py", old="VALUE = 2", new="VALUE = 3  # broken")
+    more = act("replace_text", path="src/module.py", old="VALUE = 3  # broken", new="VALUE = 4  # still broken")
+
+    class CancellingModels(Models):
+        turns = 0
+
+        async def structured(
+            self, alias: str, messages: list[ChatMessage], schema: type[T], *, ctx: CallContext, **kw: Any
+        ) -> StructuredResult[T]:  # type: ignore[override]
+            if alias == "coder-main":
+                self.turns += 1
+                if self.turns == 4:  # the correction broke the work, then the job is cancelled
+                    async with world.sessionmaker() as s:
+                        await s.execute(update(Job).where(Job.id == ctx.job_id).values(cancel_requested=True))
+                        await s.commit()
+                    tokens[-1].cancel("job cancelled")
+            return await super().structured(alias, messages, schema, ctx=ctx, **kw)
+
+    models = CancellingModels([_plan()], [EDIT, DONE, broken, more])
+    verifier, reviewer = ScriptedVerifier(world, [True]), ScriptedReviewer(["major_pass"])
+    handler = _handler(world, models, verifier, reviewer)
+    run = handler.run
+
+    async def capture(ctx: Any) -> Any:
+        tokens.append(ctx.token)
+        return await run(ctx)
+
+    handler.run = capture  # type: ignore[method-assign]
+    jid = await _job(world)
+    jobs = await _run(world, _driver(world, models, tmp_path), [handler, ReviewHandler()], [jid])
+    assert jobs[jid].status == "cancelled", (jobs[jid].error_code, jobs[jid].error_message)
+    ws = (await world.engine.list_workspaces(jid))[0]
+    assert (Path(ws.path) / "src/module.py").read_text().splitlines()[0] == "VALUE = 2"
+    fell_back = [e.payload for e in await _events(world, jid) if e.event_type == "correction.fell_back"]
+    assert [f["outcome"] for f in fell_back] == ["cancelled"] and fell_back[0]["paths"] == ["src/module.py"]
 
 
 async def test_a_blocker_finding_keeps_no_state_to_fall_back_to(world: World, tmp_path: Path) -> None:

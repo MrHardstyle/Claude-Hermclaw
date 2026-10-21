@@ -31,6 +31,7 @@ from hermclaw.contracts.common import JobStatus
 from hermclaw.core.interfaces import CommandExecutor, ExecutionRequest, WorkspaceHandle
 from hermclaw.persistence.models import Event, Job, ModelInvocation
 from hermclaw.runtime.transitions import transition_job
+from hermclaw.tools.output import strip_ansi
 from hermclaw.tools.testparse import summarise
 from hermclaw.tournament.scoring import RunRecord, disqualification, render_ladder, render_markdown, score_runs
 from hermclaw.tournament.settings import TournamentSettings
@@ -43,6 +44,7 @@ Workspace = Callable[[uuid.UUID], Awaitable[tuple[Path, str] | None]]  # job -> 
 # ``FAILED path::name`` (pytest) and ``not ok 3 - name`` (node --test / TAP)
 _FAILED = re.compile(r"^(?:FAILED\s+(\S+)|not ok \d+ - (.+?))(?:\s+-\s.*)?$", re.MULTILINE)
 _ERRORS = re.compile(r"\b(\d+) errors?\b")  # pytest summary line: "3 passed, 28 errors in 10.43s"
+_PROGRESS = re.compile(r"^([.FEsxX]+)(?:\s+\[\s*\d+%\])?\s*$", re.MULTILINE)  # pytest -q: "FF.F  [ 40%]"
 _WAITING = (
     JobStatus.queued,
     JobStatus.blocked,
@@ -121,11 +123,21 @@ async def grade(  # noqa: PLR0917 - the grading inputs of one run
             with contextlib.suppress(Exception):
                 await drop(handle)
         shutil.rmtree(copy, ignore_errors=True)
-    output = f"{res.stdout}\n{res.stderr}"
-    summary = summarise(output, res.exit_code, timed_out=res.timed_out)
+    return grade_output(f"{res.stdout}\n{res.stderr}", res.exit_code, timed_out=res.timed_out)
+
+
+def grade_output(output: str, exit_code: int | None, *, timed_out: bool) -> Grade:
+    """The grade of one hidden-check run. A run the sandbox killed at its time limit ran the delivered program, which
+    hung: it is graded from the progress line the checks printed so far plus one failure for the hanging check, never
+    repeated as infrastructure (BUG-316: ladder A7 #4, the own tests of the delivered server never ended)."""
+    summary = summarise(output, exit_code, timed_out=timed_out)
     names = failed_names(output)
+    if summary.passed + summary.failed + summary.errors == 0 and timed_out:
+        progress = "".join(m.group(1) for m in _PROGRESS.finditer(strip_ansi(output)))
+        failed = progress.count("F") + progress.count("E") + 1
+        return Grade(progress.count("."), failed, [*names, "hidden checks timed out (the delivered program hangs)"], None, output[-4000:])
     if summary.passed + summary.failed + summary.errors == 0:
-        return Grade(error=f"hidden checks produced no result (exit {res.exit_code})", output=output[-4000:])
+        return Grade(error=f"hidden checks produced no result (exit {exit_code})", output=output[-4000:])
     return Grade(summary.passed, summary.failed + summary.errors, names, None, output[-4000:], errors=summary.errors)
 
 

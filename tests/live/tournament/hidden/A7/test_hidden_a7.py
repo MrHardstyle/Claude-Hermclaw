@@ -197,7 +197,7 @@ def test_documentation_names_the_endpoints():
 def test_own_tests_pass():
     res = subprocess.run(
         [sys.executable, "-m", "pytest", "-q", "-p", "no:cacheprovider", "tests"],
-        capture_output=True, text=True, timeout=600, cwd=ROOT,
+        capture_output=True, text=True, timeout=300, cwd=ROOT,
     )
     assert res.returncode == 0, res.stdout[-3000:]
     passed = int(res.stdout.rsplit(" passed", 1)[0].split()[-1]) if " passed" in res.stdout else 0

@@ -4,6 +4,10 @@ Format: [Keep a Changelog](https://keepachangelog.com/de/1.1.0/), Versionen nach
 
 ## [Unreleased]
 
+### Behoben
+- **Ein Abbruch mitten in einer Review-Korrektur lieferte halb bearbeiteten Code (BUG-317):** Wird ein Job abgebrochen, während er verifizierte Arbeit auf Wunsch des Reviews korrigiert, kehrt der Arbeitsbaum zum verifizierten Stand zurück (Ereignis `correction.fell_back` mit `outcome: cancelled`, kein Commit).
+- **Turnier: Ein hängendes Programm galt als Infrastrukturfehler (BUG-316):** Am Zeitlimit beendete versteckte Prüfungen werden aus der Fortschrittszeile bewertet, die hängende Prüfung zählt als Fehlschlag. Der Lauf wird nicht mehr wiederholt. Die eigenen Tests in A7/A8 warten höchstens 300 s.
+
 ## [0.1.0rc67] – Release Candidate (2026-10-21)
 
 ### Behoben

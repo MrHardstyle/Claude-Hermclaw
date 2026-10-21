@@ -53,7 +53,10 @@ could not even exercise it (the server did not start, the module did not import)
 is graded by the share of passed checks (BUG-304). `Grade.errors`/`RunRecord.hidden_errors` hold that count; records
 written before it existed get it from the stored grading output (`grading/<model>-<task>-<rep>-<job>.txt`).
 Runs that ended on an infrastructure error (engine, GitLab, model host unreachable, grading could not run) are retried
-up to twice and never scored; the report lists them separately.
+up to twice and never scored; the report lists them separately. Hidden checks the sandbox stopped at their time limit did
+run the delivered program, which hung: they are graded from the pytest progress line plus one failure for the hanging
+check, never repeated (BUG-316). Checks that run the candidate's own tests wait at most 300 s, below the 600 s limit
+of the whole grading run.
 
 ## Operation
 

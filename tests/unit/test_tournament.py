@@ -9,7 +9,7 @@ import pytest
 import yaml
 
 from hermclaw.core import job_metadata
-from hermclaw.tournament.runner import TournamentRunner, _matches, changed_files, export_base, failed_names
+from hermclaw.tournament.runner import TournamentRunner, _matches, changed_files, export_base, failed_names, grade_output
 from hermclaw.tournament.scoring import RunRecord, render_markdown, score_runs, summarise
 from hermclaw.tournament.settings import tournament_of
 from hermclaw.tournament.spec import SYSTEM, WEIGHTS, load_spec
@@ -104,6 +104,19 @@ def test_a_program_the_hidden_checks_cannot_run_is_knocked_out(tmp_path: Path) -
     runner.out, runner.runs_file = out, out / "runs.jsonl"
     [loaded] = runner.load_runs()
     assert loaded.hidden_errors == 28  # recorded before the count was kept: read from the stored grading output
+
+
+def test_hidden_checks_that_hang_on_the_delivered_program_are_graded_not_repeated() -> None:
+    """Ladder A7 #4: the own tests of the delivered server never ended, the sandbox killed the hidden checks at their
+    limit after the progress line and the run was repeated as infrastructure instead of graded (BUG-316)."""
+    hung = grade_output("FFFFFFFFFFFFF.FFFFFFFFFFFFFFFF\n", None, timed_out=True)
+    assert hung.error is None and (hung.passed, hung.failed, hung.errors) == (1, 30, 0)
+    assert hung.failed_names == ["hidden checks timed out (the delivered program hangs)"]
+    assert grade_output("..F.  [ 80%]\n", None, timed_out=True).passed == 3  # pytest progress with a percentage
+    assert grade_output("", None, timed_out=True).failed == 1  # hung before the first check
+    assert grade_output("Traceback: sandbox gone\n", 125, timed_out=False).error == "hidden checks produced no result (exit 125)"
+    done = grade_output("FAILED _hidden/t.py::test_a - x\n3 passed, 1 failed in 2.0s\n", 1, timed_out=False)
+    assert (done.passed, done.failed, done.error) == (3, 1, None)
 
 
 def test_failed_check_names_and_globs() -> None:
