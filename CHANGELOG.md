@@ -4,6 +4,8 @@ Format: [Keep a Changelog](https://keepachangelog.com/de/1.1.0/), Versionen nach
 
 ## [Unreleased]
 
+## [0.1.0rc64] – Release Candidate (2026-10-21)
+
 ### Geändert
 - **Schnellere Coder-Züge durch stabilen Prompt-Anfang (D-021):** Systemnachricht und Nutzernachricht bis `RELEVANT CODE` sind in jedem Zug eines Versuchs gleich, sodass llama.cpp den zwischengespeicherten Anfang wiederverwendet und nur das Geänderte neu verarbeitet. Die Zugnummer steht nur noch im Schlusssatz, der Fortschritt (geänderte Dateien, geschriebene und fehlende neue Dateien, Stand der Diff-Kriterien) am Anfang von `CURRENT DIFF`. Ziel bis Repo-Fakten sind eine eigene Nutzernachricht, weil llama.cpp bei Hybridmodellen nur am Beginn der letzten Nachricht einen Cache-Checkpoint setzt. Bisher stand die Zugnummer im System-Prompt, und jeder Zug verarbeitete den ganzen Prompt neu (im Mittel 8.800 Tokens, 32–74 s je Zug). Gemessen auf .224 bei ~6,5k Tokens: 24,5 s Prefill vorher, 10,5 s nachher.
 
