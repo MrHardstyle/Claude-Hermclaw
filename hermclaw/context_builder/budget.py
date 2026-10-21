@@ -16,6 +16,7 @@ from hermclaw.context_builder.sections import (
     CLOSING_RESERVATION,
     ELASTIC_SECTIONS,
     MESSAGE_OVERHEAD_TOKENS,
+    PROMPT_MESSAGES,
     RESPONSE_PROTOCOL,
     SECTION_ORDER,
     SECTION_SEPARATOR,
@@ -107,8 +108,8 @@ def plan_budget(
             f"context window too small: {context_tokens} context - {max_output_tokens} output - {margin} safety margin "
             f"= {total} tokens (< {MIN_TOTAL_BUDGET_TOKENS})"
         )
-    # +2: each of the two messages is estimated with ceil()
-    framing = estimate_tokens(framing_text()) + 2 * MESSAGE_OVERHEAD_TOKENS + 2
+    # +PROMPT_MESSAGES: each message is estimated with ceil()
+    framing = estimate_tokens(framing_text()) + PROMPT_MESSAGES * (MESSAGE_OVERHEAD_TOKENS + 1)
     available = cost_for_tokens(total - framing)
     if available <= 0:  # pragma: no cover - guarded by MIN_TOTAL_BUDGET_TOKENS
         raise ConfigError("no budget left after framing")

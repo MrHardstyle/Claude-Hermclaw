@@ -17,6 +17,7 @@ from hermclaw.context_builder import (
     TurnContextInput,
     TurnRecord,
 )
+from hermclaw.context_builder.sections import SECTION_SEPARATOR
 from hermclaw.contracts.acceptance import TestEvidence
 from hermclaw.contracts.scope import ScopeContract
 from hermclaw.core.errors import NotFoundError
@@ -196,6 +197,11 @@ def make_builder(
     r = repo or default_repo()
     g = git or FakeGit()
     return ContextBuilder(r, g, ContextBuilderConfig(**cfg)), r, g
+
+
+def user_text(built: Any) -> str:
+    """The user part of a built context: the stable message and the turn message (D-021) as one text."""
+    return SECTION_SEPARATOR.join(m.content for m in built.messages if m.role == "user")
 
 
 def correction_items() -> list[CorrectionItem]:

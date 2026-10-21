@@ -19,7 +19,7 @@ from hermclaw.context_builder.diff import render_diff, split_diff
 from hermclaw.context_builder.failure import clip_line
 from hermclaw.context_builder.report import PAYLOAD_MAX_DROPPED, ContextReport, DroppedItem, SectionReport
 from hermclaw.core.redaction import DEFAULT_REDACTOR
-from tests.unit.test_context_builder_support import FakeGit, make_builder, make_input
+from tests.unit.test_context_builder_support import FakeGit, make_builder, make_input, user_text
 
 PYTEST_OUT = (
     "============================= test session starts ==============================\n"
@@ -167,7 +167,7 @@ async def test_diff_is_requested_with_byte_limit_and_redacted() -> None:
     builder, _, _ = make_builder(git=Git(), diff_max_bytes=12345)
     built = await builder.build(make_input())
     assert calls == [12345]
-    user = built.messages[1].content
+    user = user_text(built)
     assert "sk-abcdefghijklmnopqrstuvwxyz123456" not in user and "***REDACTED***" in user
 
 
@@ -224,7 +224,7 @@ async def test_report_reflects_built_context() -> None:
     assert failure.truncated and failure.present and failure.estimated_tokens <= failure.budget_tokens
     assert report.truncated
     assert report.total_budget_tokens == builder.plan.total_tokens
-    assert report.estimated_prompt_tokens == sum(estimate_tokens(m.content) for m in built.messages) + 16
+    assert report.estimated_prompt_tokens == sum(estimate_tokens(m.content) for m in built.messages) + 8 * len(built.messages)
     assert len(report.fingerprint) == 64
     payload = report.to_event_payload()
     assert payload["sections"][0]["name"] == "SYSTEM CONTRACT"

@@ -47,8 +47,11 @@ from hermclaw.context_builder.report import BuiltContext, ContextReport, Dropped
 from hermclaw.context_builder.sections import (
     MANDATORY_SECTIONS,
     MESSAGE_OVERHEAD_TOKENS,
+    PROMPT_MESSAGES,
     RESPONSE_PROTOCOL,
     SECTION_ORDER,
+    USER_STABLE_SECTIONS,
+    USER_TURN_SECTIONS,
     RenderedSection,
     SectionName,
     render_message,
@@ -402,13 +405,10 @@ class ContextBuilder:
             [rendered[n] for n in (SectionName.SYSTEM_CONTRACT, SectionName.AVAILABLE_TOOLS, SectionName.COMPLETION_CONDITIONS)],
             suffix=RESPONSE_PROTOCOL,
         )
-        user_order = [
-            n
-            for n in SECTION_ORDER
-            if n not in (SectionName.SYSTEM_CONTRACT, SectionName.AVAILABLE_TOOLS, SectionName.COMPLETION_CONDITIONS)
-        ]
-        user_msg = render_message([rendered[n] for n in user_order], suffix=user_closing(inp.turn, inp.max_turns))
-        estimated = estimate_tokens(system_msg) + estimate_tokens(user_msg) + 2 * MESSAGE_OVERHEAD_TOKENS
+        stable_msg = render_message([rendered[n] for n in USER_STABLE_SECTIONS])
+        turn_msg = render_message([rendered[n] for n in USER_TURN_SECTIONS], suffix=user_closing(inp.turn, inp.max_turns))
+        contents = [system_msg, stable_msg, turn_msg]
+        estimated = sum(estimate_tokens(c) for c in contents) + PROMPT_MESSAGES * MESSAGE_OVERHEAD_TOKENS
         if estimated > plan.total_tokens:  # pragma: no cover - budgets are disjoint; kept as a hard guarantee
             raise HermclawError(f"context budget exceeded: {estimated} > {plan.total_tokens} tokens", code="CONTEXT_BUDGET_EXCEEDED")
 
@@ -428,7 +428,7 @@ class ContextBuilder:
             )
             for n in SECTION_ORDER
         ]
-        fingerprint = hashlib.sha256((system_msg + "\x00" + user_msg).encode("utf-8", errors="surrogateescape")).hexdigest()
+        fingerprint = hashlib.sha256("\x00".join(contents).encode("utf-8", errors="surrogateescape")).hexdigest()
         report = ContextReport(
             turn=inp.turn,
             max_turns=inp.max_turns,
@@ -447,7 +447,8 @@ class ContextBuilder:
         )
         if warnings:
             log.info("context built with provider warnings", extra={"warnings": warnings[:5], "turn": inp.turn})
-        return BuiltContext(messages=[ChatMessage("system", system_msg), ChatMessage("user", user_msg)], report=report)
+        messages = [ChatMessage("system", system_msg), ChatMessage("user", stable_msg), ChatMessage("user", turn_msg)]
+        return BuiltContext(messages=messages, report=report)
 
     # ------------------------------------------------------------------ relevance helpers
     def _excluded_raw(self, path: str) -> bool:

@@ -36,13 +36,18 @@ SYSTEM_SECTIONS: tuple[SectionName, ...] = (
     SectionName.AVAILABLE_TOOLS,
     SectionName.COMPLETION_CONDITIONS,
 )
-# user message: the step-specific state; LATEST FAILURE and history last (closest to the answer)
-USER_SECTIONS: tuple[SectionName, ...] = (
+# user messages: the step-specific state; LATEST FAILURE and history last (closest to the answer). The first user
+# message holds what stays the same for the whole attempt, the second what a turn changes (D-021): llama.cpp keeps a
+# cache checkpoint only where the last message of a prompt starts, so a hybrid model (Qwen3.6) reuses the cached
+# prompt up to the turn part instead of only up to the system message
+USER_STABLE_SECTIONS: tuple[SectionName, ...] = (
     SectionName.STEP_GOAL,
     SectionName.SCOPE,
     SectionName.CONSTRAINTS,
     SectionName.ACCEPTANCE,
     SectionName.CURRENT_REPO_FACTS,
+)
+USER_TURN_SECTIONS: tuple[SectionName, ...] = (
     SectionName.RELEVANT_CODE,
     SectionName.RELEVANT_TESTS,
     SectionName.CURRENT_DIFF,
@@ -65,6 +70,7 @@ ELASTIC_SECTIONS: tuple[SectionName, ...] = (SectionName.RELEVANT_CODE, SectionN
 
 SECTION_SEPARATOR = "\n\n"
 MESSAGE_OVERHEAD_TOKENS = 8  # chat-template tokens per message (role markers etc.), reserved conservatively
+PROMPT_MESSAGES = 3  # system, stable user part, turn user part
 
 
 def heading(name: SectionName) -> str:

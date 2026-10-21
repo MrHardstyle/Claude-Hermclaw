@@ -11,7 +11,7 @@ from hermclaw.context_builder import ContextBuilder, ContextBuilderConfig, StepB
 from hermclaw.core.errors import ValidationFailed
 from hermclaw.core.interfaces import RepoHit, WorkspaceHandle
 from hermclaw.core.redaction import Redactor
-from tests.unit.test_context_builder_support import WS, FakeGit, FakeRepo, default_repo, make_builder, make_input
+from tests.unit.test_context_builder_support import WS, FakeGit, FakeRepo, default_repo, make_builder, make_input, user_text
 
 
 @pytest.mark.parametrize("method", ["context_for", "read", "inventory_summary", "search"])
@@ -20,7 +20,7 @@ async def test_repo_provider_errors_degrade_gracefully(method: str) -> None:
     repo.fail = {method}
     builder, _, _ = make_builder(repo=repo)
     built = await builder.build(make_input())
-    user = built.messages[1].content
+    user = user_text(built)
     assert "## STEP GOAL" in user and "## SCOPE" in user
     assert built.report.warnings, method
     assert any(w.startswith(f"repo.{method}") for w in built.report.warnings)
@@ -34,7 +34,7 @@ async def test_git_reader_errors_degrade_gracefully(method: str) -> None:
     builder, _, _ = make_builder(git=FakeGit(diff_text="diff --git a/x b/x\n", fail={method}))
     built = await builder.build(make_input())
     assert any(w.startswith(f"git.{method}") for w in built.report.warnings)
-    assert "## CURRENT REPO FACTS" in built.messages[1].content
+    assert "## CURRENT REPO FACTS" in user_text(built)
 
 
 async def test_provider_timeouts_are_bounded() -> None:
@@ -46,7 +46,7 @@ async def test_provider_timeouts_are_bounded() -> None:
     built = await builder.build(make_input())
     assert loop.time() - start < 2.0
     assert any("repo.context_for: timeout" in w for w in built.report.warnings)
-    assert "### app.py lines 1-" in built.messages[1].content  # target reads still arrived
+    assert "### app.py lines 1-" in user_text(built)  # target reads still arrived
 
 
 async def test_garbage_provider_results_are_ignored() -> None:
@@ -71,7 +71,7 @@ async def test_garbage_provider_results_are_ignored() -> None:
 
     builder, _, _ = make_builder(repo=Garbage(), git=GarbageGit())
     built = await builder.build(make_input())
-    user = built.messages[1].content
+    user = user_text(built)
     assert "### ok.py lines 1-1 [context]" in user and "fine" in user
     assert not built.report.section("CURRENT DIFF").present
     assert built.report.estimated_prompt_tokens <= builder.plan.total_tokens
@@ -104,7 +104,7 @@ async def test_redaction_cannot_be_disabled() -> None:
         ContextBuilderConfig(redact=False)  # type: ignore[call-arg]
     builder, _, _ = make_builder()
     built = await builder.build(make_input(latest_failure="password=abcd1234 failed\n"))
-    assert "abcd1234" not in built.messages[1].content
+    assert "abcd1234" not in user_text(built)
 
 
 def test_invalid_turn_input_rejected() -> None:
@@ -120,10 +120,10 @@ def test_invalid_turn_input_rejected() -> None:
 async def test_turn_budget_exhaustion_is_announced() -> None:
     builder, _, _ = make_builder()
     built = await builder.build(make_input(turn=19, max_turns=20))
-    user = built.messages[1].content
+    user = user_text(built)
     assert "Turn 19/20, 1 left. Almost out of turns" in user and "Almost out" not in built.messages[0].content
     built2 = await builder.build(make_input(turn=25, max_turns=20))
-    assert "0 left. Almost out of turns" in built2.messages[1].content
+    assert "0 left. Almost out of turns" in user_text(built2)
 
 
 async def test_concurrency_limit_is_honoured() -> None:

@@ -59,12 +59,19 @@ Dependencies: only the shared protocols `RepoContextProvider` (`inventory_summar
 * **system**: `SYSTEM CONTRACT` (runtime-owned rules, never truncated; includes the rule to parse JSON/TOML/CSV/INI/XML with the language's own parser and to read written output back with it, BUG-245), `AVAILABLE TOOLS`, `COMPLETION CONDITIONS`
   and the fixed `RESPONSE PROTOCOL`: exactly one JSON object
   `{"tool": ..., "args": {...}, "status": "...", "decision": "..."}`.
-* **user**: `STEP GOAL`, `SCOPE`, `CONSTRAINTS`, `ACCEPTANCE`, `CURRENT REPO FACTS`, `RELEVANT CODE`,
-  `RELEVANT TESTS`, `CURRENT DIFF`, `LATEST FAILURE`, `SHORT STEP HISTORY`, then the closing line
+* **user (stable)**: `STEP GOAL`, `SCOPE`, `CONSTRAINTS`, `ACCEPTANCE`, `CURRENT REPO FACTS` – the same for the
+  whole attempt.
+* **user (turn)**: `RELEVANT CODE`, `RELEVANT TESTS`, `CURRENT DIFF`, `LATEST FAILURE`, `SHORT STEP HISTORY`, then the
+  closing line
   "Turn N/M, R left. Reply with one JSON action." (with two turns or fewer left: "Almost out of turns: complete_step,
   block_step or request_replan.").
-* **Stable prefix (D-021):** the system message and the user message up to `RELEVANT CODE` are the same in every turn
-  of an attempt, so llama.cpp reuses its cached prompt prefix and only processes what changed. The turn count is
+* **Stable prefix (D-021):** the system message and the stable user message are the same in every turn of an attempt,
+  so llama.cpp reuses its cached prompt prefix and only processes what changed. They are separate messages because
+  llama.cpp keeps a cache checkpoint for a hybrid model (Qwen3.6: recurrent layers, the cache cannot be cut at any
+  position; `--checkpoint-min-step` 8192) only where the last message of a prompt starts. Measured on .224
+  (qwen3.6-35b, 2026-10-21, ~6.5k-token prompts): turn number at the top 0 tokens from the cache, 24.5 s prefill;
+  one user message with a changed middle 2,201 (the system message), 15.6 s; stable part as its own message 3,682,
+  10.5 s; only the tail changed 6,093, 2.2 s. The turn count is
   only in the closing line; what the attempt changed so far is at the head of `CURRENT DIFF`
   (`render.render_progress`): "Changed vs base (N): …" with git status codes, "New files written" / "Not written
   yet" for the scope's new files (BUG-228) and "Acceptance i — NOT YET CHANGED: … / met (already changed)" per diff

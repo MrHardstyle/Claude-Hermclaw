@@ -25,7 +25,7 @@ from hermclaw.gitops.reader import WorkspaceGitReader
 from hermclaw.gitops.runner import GitRunner
 from hermclaw.gitops.scope_guard import gitattributes_lines
 from hermclaw.persistence.models import Event
-from tests.unit.test_context_builder_support import TOOLS, make_input, make_step
+from tests.unit.test_context_builder_support import TOOLS, make_input, make_step, user_text
 
 pytestmark = pytest.mark.integration
 
@@ -129,7 +129,7 @@ async def test_real_git_diff_status_and_files(workspace: WorkspaceHandle) -> Non
     failure = f'Traceback (most recent call last):\n  File "{root}/tests/test_app.py", line 5, in test_add\nAssertionError\n'
     inp = make_input(step=step, workspace=workspace, latest_failure=failure, tools=TOOLS)
     built = await builder.build(inp)
-    user = built.messages[1].content
+    user = user_text(built)
     assert not built.report.warnings, built.report.warnings
     # current diff from real git, incl. untracked file; .env never shown
     assert "diff --git a/app.py b/app.py" in user and "+def sub(a, b):" in user

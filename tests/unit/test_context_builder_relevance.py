@@ -7,7 +7,17 @@ from hermclaw.context_builder.snippets import Snippet, dedupe_snippets, make_sni
 from hermclaw.contracts.acceptance import CommandEvidence, TestEvidence
 from hermclaw.contracts.scope import ScopeContract
 from hermclaw.core.interfaces import RepoHit
-from tests.unit.test_context_builder_support import WS, FakeGit, FakeRepo, default_repo, make_builder, make_input, make_step, numbered
+from tests.unit.test_context_builder_support import (
+    WS,
+    FakeGit,
+    FakeRepo,
+    default_repo,
+    make_builder,
+    make_input,
+    make_step,
+    numbered,
+    user_text,
+)
 
 
 def section(text: str, name: str) -> str:
@@ -28,7 +38,7 @@ async def test_target_files_rank_first_then_context_hits() -> None:
     repo.files["other.py"] = "x = 1\ny = 2\nz = 3\n"
     builder, _, _ = make_builder(repo=repo, target_head_lines=60)
     built = await builder.build(make_input(history=[]))  # a full read of app.py would show all of it (BUG-229)
-    code = section(built.messages[1].content, "RELEVANT CODE")
+    code = section(user_text(built), "RELEVANT CODE")
     order = [line.split(" lines ")[0][4:] for line in code.splitlines() if line.startswith("### ")]
     assert order[0] == "app.py"  # target head first
     assert set(order) == {"app.py", "other.py", "util.py"}
@@ -56,7 +66,7 @@ async def test_tests_found_via_target_stems_symbols_and_acceptance() -> None:
     )
     builder, _, _ = make_builder(repo=repo)
     built = await builder.build(make_input(step=step))
-    user = built.messages[1].content
+    user = user_text(built)
     tests = section(user, "RELEVANT TESTS")
     code = section(user, "RELEVANT CODE")
     assert "### tests/test_app.py lines 1-32 [acceptance, search]" in tests
@@ -81,7 +91,7 @@ async def test_failure_references_become_regions() -> None:
     )
     builder, _, _ = make_builder(repo=repo, failure_region_lines=5)
     built = await builder.build(make_input(latest_failure=failure))
-    user = built.messages[1].content
+    user = user_text(built)
     code = section(user, "RELEVANT CODE")
     tests = section(user, "RELEVANT TESTS")
     assert "### lib/core.py lines 115-125 [failure]" in code
@@ -128,7 +138,7 @@ async def test_duplicate_and_overlapping_hits_are_merged() -> None:
     ]
     builder, _, _ = make_builder(repo=repo)
     built = await builder.build(make_input(step=make_step(scope=None)))
-    code = section(built.messages[1].content, "RELEVANT CODE")
+    code = section(user_text(built), "RELEVANT CODE")
     headers = [line for line in code.splitlines() if line.startswith("### ")]
     assert "### util.py lines 10-35 [context]" in headers
     assert "### util.py lines 80-85 [context]" in headers
@@ -266,10 +276,10 @@ async def test_huge_inputs_respect_every_budget() -> None:
         for sec in built.report.sections:
             if sec.name != "SYSTEM CONTRACT":
                 assert sec.estimated_tokens <= max(sec.budget_tokens, 0), (ctx, sec)
-        elastic = sum(char_cost(section(built.messages[1].content, n)) for n in ("RELEVANT CODE", "RELEVANT TESTS"))
+        elastic = sum(char_cost(section(user_text(built), n)) for n in ("RELEVANT CODE", "RELEVANT TESTS"))
         assert elastic <= plan.available_cost
         assert built.report.truncated
-        user = built.messages[1].content
+        user = user_text(built)
         assert "first error line" in user and "=== 3 failed, 1 passed in 9.0s ===" in user  # 16.5 even under pressure
         assert "chars omitted" in user
 
@@ -283,7 +293,7 @@ async def test_git_status_codes_and_excluded_changes_in_repo_facts() -> None:
     )
     builder, _, _ = make_builder(git=git)
     built = await builder.build(make_input())
-    user = built.messages[1].content
+    user = user_text(built)
     progress = section(user, "CURRENT DIFF")
     assert "Changed vs base (3): M app.py, old.py, ?? new.py" in progress
     assert ".env" not in progress and "Changed vs base" not in section(user, "CURRENT REPO FACTS")
@@ -295,7 +305,7 @@ async def test_stale_index_snippets_are_replaced_by_fresh_workspace_reads() -> N
     repo.context_hits = [RepoHit("svc.py", 1, 2, 1.0, "def handler():\n    return 'old'\n")]  # indexed before the edit
     builder, _, _ = make_builder(repo=repo)
     built = await builder.build(make_input(step=make_step(scope=None)))
-    code = section(built.messages[1].content, "RELEVANT CODE")
+    code = section(user_text(built), "RELEVANT CODE")
     assert "return 'new'" in code and "return 'old'" not in code
 
 
@@ -304,7 +314,7 @@ async def test_provider_snippet_is_fallback_when_read_fails() -> None:
     repo.context_hits = [RepoHit("gone.py", 3, 4, 1.0, "a = 1\nb = 2\n"), RepoHit("nothing.py", 1, 1, 0.5, "")]
     builder, _, _ = make_builder(repo=repo)
     built = await builder.build(make_input(step=make_step(scope=None)))
-    code = section(built.messages[1].content, "RELEVANT CODE")
+    code = section(user_text(built), "RELEVANT CODE")
     assert "### gone.py lines 3-4 [context]" in code and "a = 1\nb = 2" in code
     assert ("nothing.py:1-1", "read_failed") in [(d.item, d.reason) for d in built.report.dropped]
     assert any("repo.read gone.py: NotFoundError" in w for w in built.report.warnings)
@@ -316,7 +326,7 @@ async def test_hits_per_query_are_capped_by_score() -> None:
     repo.context_hits = [RepoHit(f"h{i:02d}.py", 1, 1, i / 30, "") for i in range(30)]
     builder, _, _ = make_builder(repo=repo, max_hits_per_query=5)
     built = await builder.build(make_input(step=make_step(scope=None), history=[]))
-    code = section(built.messages[1].content, "RELEVANT CODE")
+    code = section(user_text(built), "RELEVANT CODE")
     shown = sorted(line.split()[1] for line in code.splitlines() if line.startswith("### "))
     assert shown == [f"h{i}.py" for i in range(25, 30)]
     assert sum(1 for d in built.report.dropped if d.reason == "limit") == 25
@@ -336,7 +346,7 @@ async def test_files_read_in_this_attempt_stay_in_the_context() -> None:
         TurnRecord(2, "read_file", '{"path": "missing.py"}', False, "not found", "NOT_FOUND"),
     ]
     built = await builder.build(make_input(history=history))
-    code = section(built.messages[1].content, "RELEVANT CODE")
+    code = section(user_text(built), "RELEVANT CODE")
     assert "### helpers/format.py lines 1-2 [read]" in code and "return str(x)" in code
     assert "missing.py" not in code  # failed reads are not part of the working set
 
@@ -356,7 +366,7 @@ async def test_reads_are_shown_as_read_not_as_a_short_head() -> None:
         TurnRecord(2, "read_range", '{"end": 560, "path": "pkg/huge.py", "start": 520}', True, "41 lines"),
     ]
     built = await builder.build(make_input(history=history))
-    code = section(built.messages[1].content, "RELEVANT CODE")
+    code = section(user_text(built), "RELEVANT CODE")
     assert "### pkg/big.py lines 1-300 [read]" in code and "x300 = 300" in code
     assert "### pkg/huge.py lines 520-560 [read]" in code and "y540 = 540" in code and "y1 = 1\n" not in code
 
@@ -376,7 +386,7 @@ async def test_pages_of_a_clipped_file_are_shown_from_where_they_started() -> No
         ),
     ]
     built = await builder.build(make_input(history=history))
-    code = section(built.messages[1].content, "RELEVANT CODE")
+    code = section(user_text(built), "RELEVANT CODE")
     assert "### pkg/huge.py lines 521-640 [read]" in code and "y600 = 600" in code
 
 
@@ -389,7 +399,7 @@ async def test_files_delivered_by_dependency_steps_are_shown() -> None:
     builder, _, _ = make_builder(repo=repo)
     step = make_step(dependency_files=["pkg/collector.py"])
     built = await builder.build(make_input(step=step, history=[]))
-    user = built.messages[1].content
+    user = user_text(built)
     assert "Files earlier steps delivered" in section(user, "STEP GOAL") and "pkg/collector.py" in section(user, "STEP GOAL")
     code = section(user, "RELEVANT CODE")
     assert "### pkg/collector.py" in code and "[dependency]" in code and '"usage": 0.5' in code
