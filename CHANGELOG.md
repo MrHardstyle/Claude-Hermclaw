@@ -4,6 +4,8 @@ Format: [Keep a Changelog](https://keepachangelog.com/de/1.1.0/), Versionen nach
 
 ## [Unreleased]
 
+## [0.1.0rc63] – Release Candidate (2026-10-21)
+
 ### Hinzugefügt
 - **Gedächtnis (D-019), Teil 1:** Wissensspeicher in `memory_entries` (Migration 0003) für Lehren, Recherche, Vorfälle, Werkzeug-Bug-Verdacht und Konventionen, mit semantischer Suche und Wortsuche als Rückfall. Der Coder schlägt mit dem neuen Werkzeug `recall` nach, Planner und Replanner bekommen die passendsten aktiven Einträge als `knowledge`. API `/api/memory` für die Kontrollraum-Seite „Wissen“; Richtlinie `policies.memory`.
 - **Schwierigkeitsleiter (D-020):** `hermclaw coder-tournament --model system --ladder --task …` lässt Aufgaben als normale Jobs laufen (Planner, Review, Replans) und bewertet sie mit den versteckten Prüfungen. Der Lauf steigt Stufe für Stufe auf, hält an der ersten nicht voll korrekten an und wiederholt beim nächsten Aufruf genau diese Stufe. `--task` gibt die Reihenfolge vor.
