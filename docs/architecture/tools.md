@@ -170,6 +170,8 @@ behind `on_scope_expansion`, research events by the research service.
 - Quoted values made only of role words (`test-token-123`, `wrong-token`, `valid_token`) are not masked. The rule
   (`is_role_value` in `hermclaw/core/redaction.py`) is the one the verifier's secret scan uses for placeholders, so a
   model sees the values a test compares, and the scan does not flag them (BUG-279, BUG-293).
+  Unquoted, such a value is a variable (`{"NOTES_API_TOKEN": token}`, `password=new_password`) and stays visible
+  too (BUG-318); real unquoted values (`PASSWORD=hunter2realpw`) stay masked.
 - Sandbox/executor exceptions -> the side-effect audit still runs, then `SANDBOX_ERROR` (or the scope violation).
 - Broken `GitReader` / `RepoContextProvider` / callbacks -> `GIT_UNAVAILABLE`, `REPO_UNAVAILABLE`, `RESEARCH_FAILED`,
   `SCOPE_EXPANSION_FAILED`, `REPLAN_FAILED` (never terminal).

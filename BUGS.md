@@ -46,6 +46,12 @@ Noch keine.
 
 ## Behobene Bugs
 
+### BUG-318 – Die Maskierung verdeckt einen Variablennamen genau in der fehlerhaften Zeile
+- Phase: Schwierigkeitsleiter auf rc68, 2026-10-22 (A7#5, Job 9ee37ef1) · Komponente: core (`redaction.py`) · Severity: P2 · blockierend: nein · Status: **behoben im Repository** (`tests/unit/test_config_and_redaction.py::test_a_variable_named_like_a_secret_stays_visible`)
+- Reproduktion: Die Test-Fixture des Coders baut `env = {**os.environ, "NOTES_API_TOKEN": token, "PORT": str(port)}`, benutzt das Dict aber nie. Der Server im selben Prozess sieht keinen Token, und jeder autorisierte Test bekommt 401. Der Coder sieht die Zeile als `"NOTES_API_TOKEN": ***REDACTED***`. `replace_text` auf der Zeile wird abgelehnt („nothing would change … ***REDACTED***“). Zwei Stagnationsstopps, ein Heavy Review, ein Replan von 13 min, dann Zeitabbruch nach 40,8 min. Versteckt 30/31: Der Server ist richtig, nur die eigenen Tests scheitern.
+- Ursache: Ein unquotierter Wert hinter einem geheimnisartigen Schlüssel galt nur dann als Code, wenn er Punkt oder Klammer enthält (`self.token`, `config["x"]`, BUG-225). Ein nackter Variablenname wie `token` wurde maskiert. Die Regel für Rollenwörter (`test-token-123`, `wrong-token`, BUG-293) galt nur für quotierte Werte.
+- Fix: Ein Wert, der nur aus Rollenwörtern besteht, ist auch unquotiert kein Geheimnis (`token`, `auth_token`, `new_password`, `api_key`). Echte Werte wie `hunter2realpw` oder `hX9q2LmP4tR8` bleiben maskiert.
+
 ### BUG-317 – Ein Abbruch mitten in der Review-Korrektur hinterlässt halb bearbeiteten Code
 - Phase: Schwierigkeitsleiter auf rc67, 2026-10-21 (A7#4, Job 080a8174) · Komponente: coder (`handler.py`) · Severity: P2 · blockierend: nein · Status: **behoben im Repository** (`tests/integration/test_coder_handler.py::test_a_job_cancelled_during_the_review_correction_keeps_the_verified_work`)
 - Reproduktion: S001 besteht um 23:00 und 23:15 die Verifikation (20 von 21 Prüfungen). Das Review verlangt zweimal eine Korrektur, unter anderem wegen eines angeblich doppelten `main()`, das den Start verhindere, und englischer Doku. `save_verified` sichert den Stand. In der dritten Korrektur entfernt der Coder einen Import aus `notes_api/server.py`, dann bricht das Zeitlimit den Job ab (23:23). Bewertet wird der halb bearbeitete Stand: ImportError, versteckt 2/31, K.o. als unvollständiges Programm. Der gesicherte Stand besteht nachträglich alle 31 versteckten Prüfungen.

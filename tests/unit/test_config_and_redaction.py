@@ -159,3 +159,18 @@ def test_role_values_a_test_compares_stay_visible() -> None:
     assert Redactor().text('token="hX9q2LmP4tR8"') == f'token="{REDACTED}"'
     assert Redactor().text('password = "S3cr3t!Pa55"') == f'password = "{REDACTED}"'
     assert Redactor().text('token="wrong-hX9q2LmP4tR8"') == f'token="{REDACTED}"'
+
+
+def test_a_variable_named_like_a_secret_stays_visible() -> None:
+    """Ladder A7 #5 on rc68: the test fixture built ``env = {**os.environ, "NOTES_API_TOKEN": token, ...}`` and never
+    used it, so every authorised test got 401. The coder saw ``"NOTES_API_TOKEN": ***REDACTED***`` on exactly that
+    line, could not even rewrite it, and stagnated twice (BUG-318). A bare role word is a variable, not a secret."""
+    for text in (
+        'env = {**os.environ, "NOTES_API_TOKEN": token, "PORT": str(port)}',
+        "headers = {'Authorization': auth_token}",
+        "password=new_password",
+        "API_KEY = api_key",
+    ):
+        assert Redactor().text(text) == text, text
+    for text in ("PASSWORD=hunter2realpw", "password: hunter2", "TOKEN=hX9q2LmP4tR8", "secret = s3cr3t_value"):
+        assert REDACTED in Redactor().text(text), text

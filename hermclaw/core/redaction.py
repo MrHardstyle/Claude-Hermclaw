@@ -68,8 +68,9 @@ def is_benign_value(value: str, *, quoted: bool) -> bool:
     if low.startswith(_PLACEHOLDER_START) or any(part in low for part in _PLACEHOLDER_PARTS) or not set(low) - set("x*-."):
         return True
     # cycle 2 M3 on rc60: ``token="test-token-123"`` and ``token="wrong-token"`` both showed as the marker, and the review
-    # could not tell the valid-token test from the wrong-token test (BUG-293)
-    if quoted and is_role_value(value):
+    # could not tell the valid-token test from the wrong-token test (BUG-293). Unquoted, such a value is a variable:
+    # ``{"NOTES_API_TOKEN": token}`` showed as the marker exactly on the line whose bug the coder had to find (BUG-318)
+    if is_role_value(value):
         return True
     return not quoted and len(value) <= 60 and bool(_CODE_SIGNS & set(value)) and bool(_CODE_REFERENCE.match(value))
 

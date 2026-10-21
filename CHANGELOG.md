@@ -4,6 +4,9 @@ Format: [Keep a Changelog](https://keepachangelog.com/de/1.1.0/), Versionen nach
 
 ## [Unreleased]
 
+### Behoben
+- **Die Maskierung verdeckte Variablennamen (BUG-318):** `{"NOTES_API_TOKEN": token}` erschien dem Coder als `***REDACTED***`, genau in der Zeile mit dem Fehler, den er finden musste. Unquotierte Werte aus Rollenwörtern (`token`, `api_key`, `new_password`) bleiben jetzt sichtbar, echte Werte weiter maskiert.
+
 ### Hinzugefügt
 - **Template-Variablen je Modellprofil (Research R-035, Paket B Teil 2):** `chat_template_kwargs` in `models.profiles[]` (nur Backend `llamacpp`) geht mit jeder Anfrage neben `enable_thinking` an das Chat-Template, etwa `reasoning_effort: low` für gpt-oss-20b. Werte behalten ihren JSON-Typ, `enable_thinking` bleibt Sache von `think`. Profile ohne das Feld erzeugen dieselbe LiteLLM-Konfiguration und dieselben DB-Metadaten wie bisher.
 
