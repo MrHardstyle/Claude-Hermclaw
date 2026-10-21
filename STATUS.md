@@ -273,3 +273,12 @@ bestanden; ansible-lint (production) sauber. `test_deploy_converge` ist angepass
 5. Backup nach Terra einrichten (Kapitel 11), Backup-Suite; danach Soak-Test und Cutover (`docs/runbooks/cutover.md`).
 6. Drittabhängigkeiten eines Projekts installiert der Coder über `install_dependencies` (D-014); ein Projekt-Sandbox-Image
    (`infra/sandbox-images/README.md`) bleibt für Systempakete nötig.
+
+## Paket B – Modellfamilien (Research R-035)
+Nächster Teil: 1a
+Hintergrundlauf: Download gpt-oss-20b (Unit `hc-dl-gptoss` auf .224, `/var/lib/hcbench/models/`, 2026-10-21 22:05) – Leiter rc67 ab A7 läuft (Screening erst danach)
+Offene Fragen: –
+- Root auf .224: Option (b) aus R-034 (`/etc/sudoers.d/90-hermclaw-tuning`), bleibt bis Paketende.
+- Platz: 41 GB frei; Bedarf gpt-oss-20b MXFP4 12,1 GB + 10 GB Reserve. gemma4:26b liegt im Ollama-Store, GLM-4.7-Flash unter `/var/lib/hcbench/models/` (GLM-5.3-Flash mit 110–181 GB zu groß).
+- Quellen: `ggml-org/gpt-oss-20b-GGUF` (MXFP4, 2026-07-16, Apache-2.0, sha256 = LFS-oid).
+
