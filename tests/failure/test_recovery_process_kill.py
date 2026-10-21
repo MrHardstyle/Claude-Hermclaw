@@ -28,6 +28,19 @@ from tests.integration.test_gitops_support import World, git, make_world
 pytestmark = [pytest.mark.asyncio(loop_scope="session"), pytest.mark.slow]
 ROOT = Path(__file__).resolve().parents[2]
 TERMINAL = ("succeeded", "failed", "cancelled")
+_STARTED: list[Child] = []
+
+
+@pytest.fixture(autouse=True)
+async def _no_child_survives() -> Any:
+    """A child left running by a failed assertion keeps scheduling: it took the jobs of every later test in the
+    session database and turned a full run into hundreds of failures (2026-10-21)."""
+    yield
+    while _STARTED:
+        child = _STARTED.pop()
+        if child.proc is not None and child.proc.returncode is None:
+            child.proc.kill()
+            await child.proc.wait()
 
 
 @pytest.fixture
@@ -60,6 +73,7 @@ class Child:
             stdout=self._fh,
             stderr=asyncio.subprocess.STDOUT,
         )
+        _STARTED.append(self)
         return self
 
     def output(self) -> str:
