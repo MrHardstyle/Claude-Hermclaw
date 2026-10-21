@@ -4,6 +4,9 @@ Format: [Keep a Changelog](https://keepachangelog.com/de/1.1.0/), Versionen nach
 
 ## [Unreleased]
 
+### Geändert
+- **Schnellere Coder-Züge durch stabilen Prompt-Anfang (D-021):** Systemnachricht und Nutzernachricht bis `RELEVANT CODE` sind in jedem Zug eines Versuchs gleich, sodass llama.cpp den zwischengespeicherten Anfang wiederverwendet und nur das Geänderte neu verarbeitet. Die Zugnummer steht nur noch im Schlusssatz, der Fortschritt (geänderte Dateien, geschriebene und fehlende neue Dateien, Stand der Diff-Kriterien) am Anfang von `CURRENT DIFF`. Bisher stand die Zugnummer im System-Prompt, und jeder Zug verarbeitete den ganzen Prompt neu (im Mittel 8.800 Tokens, 32–74 s je Zug).
+
 ### Behoben
 - **Verifier startet den gelieferten Startpunkt (BUG-309):** Für jedes geänderte Python-Paket mit `__main__.py` läuft `python -m <Paket>` einmal in der Sandbox, mit Port, Host, Pfaden und Token aus den Variablennamen. Ein `ImportError`, `NameError`, `UnboundLocalError`, `SyntaxError` oder `AttributeError` beim Start lässt den Schritt scheitern. Bisher meldeten Jobs Erfolg, deren Server nicht startete (Turnier rc62: Ornith A7#3 und A8#2). Neue Richtlinie `policies.verifier.start_seconds` (5, 0 schaltet ab).
 

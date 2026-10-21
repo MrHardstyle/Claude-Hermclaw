@@ -112,11 +112,19 @@ Reply with exactly ONE JSON object and nothing else (no prose, no markdown fence
 if the step cannot be completed, use block_step (or request_replan) with a concrete reason."""
 
 
+ALMOST_EXHAUSTED = "Almost out of turns: complete_step, block_step or request_replan."
+
+
 def user_closing(turn: int, max_turns: int) -> str:
-    return f"Respond now with exactly one JSON action for turn {turn} of {max_turns}."
+    """The last line of the user message – the only place of the turn count (D-021): a turn number near the top of
+    the prompt changed every turn and made the model server process the whole prompt again instead of reusing its
+    cache for the unchanged beginning."""
+    remaining = max(0, max_turns - turn)
+    warning = f" {ALMOST_EXHAUSTED}" if remaining <= 2 else ""
+    return f"Turn {turn}/{max_turns}, {remaining} left.{warning} Reply with one JSON action."
 
 
-# worst-case closing line (large turn numbers) for the framing reservation
+# worst-case closing line (large turn numbers, budget warning) for the framing reservation
 CLOSING_RESERVATION = user_closing(99_999, 99_999)
 
 

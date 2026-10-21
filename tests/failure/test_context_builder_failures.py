@@ -120,10 +120,10 @@ def test_invalid_turn_input_rejected() -> None:
 async def test_turn_budget_exhaustion_is_announced() -> None:
     builder, _, _ = make_builder()
     built = await builder.build(make_input(turn=19, max_turns=20))
-    system = built.messages[0].content
-    assert "1 turn(s) remain" in system and "almost exhausted" in system
+    user = built.messages[1].content
+    assert "Turn 19/20, 1 left. Almost out of turns" in user and "Almost out" not in built.messages[0].content
     built2 = await builder.build(make_input(turn=25, max_turns=20))
-    assert "0 turn(s) remain" in built2.messages[0].content
+    assert "0 left. Almost out of turns" in built2.messages[1].content
 
 
 async def test_concurrency_limit_is_honoured() -> None:

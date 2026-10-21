@@ -61,7 +61,16 @@ Dependencies: only the shared protocols `RepoContextProvider` (`inventory_summar
   `{"tool": ..., "args": {...}, "status": "...", "decision": "..."}`.
 * **user**: `STEP GOAL`, `SCOPE`, `CONSTRAINTS`, `ACCEPTANCE`, `CURRENT REPO FACTS`, `RELEVANT CODE`,
   `RELEVANT TESTS`, `CURRENT DIFF`, `LATEST FAILURE`, `SHORT STEP HISTORY`, then the closing line
-  "Respond now with exactly one JSON action for turn N of M."
+  "Turn N/M, R left. Reply with one JSON action." (with two turns or fewer left: "Almost out of turns: complete_step,
+  block_step or request_replan.").
+* **Stable prefix (D-021):** the system message and the user message up to `RELEVANT CODE` are the same in every turn
+  of an attempt, so llama.cpp reuses its cached prompt prefix and only processes what changed. The turn count is
+  only in the closing line; what the attempt changed so far is at the head of `CURRENT DIFF`
+  (`render.render_progress`): "Changed vs base (N): …" with git status codes, "New files written" / "Not written
+  yet" for the scope's new files (BUG-228) and "Acceptance i — NOT YET CHANGED: … / met (already changed)" per diff
+  criterion (BUG-182). Without a diff the section carries these lines alone when something changed or a criterion
+  waits for a change. Not yet stable: the tool list when tools are withheld after repeats, and `RELEVANT CODE` /
+  `RELEVANT TESTS` (scored and re-packed each turn).
   `STEP GOAL` also carries the job request (job title and prompt, at most half of the section, cut in the middle)
   below the step goal: the planner's goal summarises the job and may lose details the review checks (BUG-212).
 

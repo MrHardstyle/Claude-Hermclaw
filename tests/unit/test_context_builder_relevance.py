@@ -254,7 +254,9 @@ async def test_huge_inputs_respect_every_budget() -> None:
     )
     history = [TurnRecord(i, "run_test", "x" * 5000, i % 2 == 0, "y" * 5000, None if i % 2 == 0 else "test_failed") for i in range(1, 400)]
     failure = "E   first error line\n" + "noise\n" * 200_000 + "=== 3 failed, 1 passed in 9.0s ===\n"
-    for ctx, out in ((32768, 6144), (8192, 2048), (4096, 1024)):
+    # 4096/1000: the smallest window the system contract still fits since the turn count moved into the closing line
+    # of the user message (framing, D-021)
+    for ctx, out in ((32768, 6144), (8192, 2048), (4096, 1000)):
         builder, _, _ = make_builder(repo=repo, git=git, context_tokens=ctx, max_output_tokens=out, safety_margin_tokens=128)
         built = await builder.build(make_input(step=step, history=history, latest_failure=failure))
         plan = builder.plan
@@ -281,9 +283,10 @@ async def test_git_status_codes_and_excluded_changes_in_repo_facts() -> None:
     )
     builder, _, _ = make_builder(git=git)
     built = await builder.build(make_input())
-    facts = section(built.messages[1].content, "CURRENT REPO FACTS")
-    assert "Changed vs base (3): M app.py, old.py, ?? new.py" in facts
-    assert ".env" not in facts
+    user = built.messages[1].content
+    progress = section(user, "CURRENT DIFF")
+    assert "Changed vs base (3): M app.py, old.py, ?? new.py" in progress
+    assert ".env" not in progress and "Changed vs base" not in section(user, "CURRENT REPO FACTS")
 
 
 async def test_stale_index_snippets_are_replaced_by_fresh_workspace_reads() -> None:

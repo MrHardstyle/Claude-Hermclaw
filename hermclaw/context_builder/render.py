@@ -136,8 +136,6 @@ def render_goal(
     title: str,
     step_key: str,
     repo_hints: Sequence[str],
-    turn: int,
-    max_turns: int,
     budget: int,
     job_request: str = "",
     dependency_files: Sequence[str] = (),
@@ -145,7 +143,7 @@ def render_goal(
     sec = RenderedSection(SectionName.STEP_GOAL)
     head_parts = [p for p in (f"Step {step_key}" if step_key else "", f"kind: {kind}" if kind else "", title) if p]
     header = " · ".join(head_parts)
-    meta = f"{header}\nTurn {turn} of {max_turns}.\n" if header else f"Turn {turn} of {max_turns}.\n"
+    meta = f"{header}\n" if header else ""
     hints = f"\nPlanner hints: {_bullets(list(repo_hints), 12, 160)}" if repo_hints else ""
     if dependency_files:
         hints += (
@@ -188,16 +186,9 @@ def _display(pattern: str) -> str:
     return lit if lit is not None else pattern
 
 
-def _new_path_display(path: str, done: set[str]) -> str:
-    return f"{_display(path)} (written)" if path in done else _display(path)
-
-
-def render_scope(
-    scope: ScopeContract | None, exclude_globs: Sequence[str], budget: int, *, max_items: int, written: Sequence[str] = ()
-) -> RenderedSection:
-    """``written``: files changed in this attempt. New files already written are marked and the ones still missing
-    are listed: without that checklist the coder wrote freshly created files a second time, identically, and lost
-    track of what was left (grand job G1 on 0.1.0rc26, BUG-228)."""
+def render_scope(scope: ScopeContract | None, exclude_globs: Sequence[str], budget: int, *, max_items: int) -> RenderedSection:
+    """The grant only; what was written so far is progress (:func:`render_progress`), so this section stays the same
+    turn after turn and the model server can reuse its cache for the prompt up to here (D-021)."""
     sec = RenderedSection(SectionName.SCOPE)
     if scope is None:
         body = (
@@ -208,20 +199,16 @@ def render_scope(
         sec.truncated = char_cost(body) > budget
         return sec
     limit = max(1, max_items)
-    done = set(written)
     while True:
         forbidden = list(dict.fromkeys([*exclude_globs, *scope.forbidden_paths]))
         lines = [
             f"Scope version {scope.version} ({'strict target paths' if scope.strict_target_paths else 'target globs'}).",
             f"Allowed operations: {', '.join(scope.allowed_operations) or '(none)'}",
             f"May modify: {_bullets([_display(p) for p in scope.target_paths], limit, 200)}",
-            f"May create: {_bullets([_new_path_display(p, done) for p in scope.allowed_new_paths], limit, 200)}",
+            f"May create: {_bullets([_display(p) for p in scope.allowed_new_paths], limit, 200)}",
             f"Forbidden (never write; secret files are never shown): {_bullets(forbidden, limit, 120)}",
             "Everything else is outside the scope; request_scope_expansion asks the runtime for more (with justification).",
         ]
-        missing = [p for p in scope.allowed_new_paths if literal_path(p) and p not in done]
-        if done & set(scope.allowed_new_paths) and missing:
-            lines.insert(5, f"Not written yet: {', '.join(_display(p) for p in missing[:limit])}")
         if scope.reason:
             lines.insert(1, f"Reason: {clip_line(scope.reason, 300)}")
         body = "\n".join(lines)
@@ -319,14 +306,47 @@ def change_progress(c: Any, changed: Sequence[str]) -> str:
     return " — met (already changed)"
 
 
-def render_acceptance(acceptance: Sequence[Any], budget: int, changed: Sequence[str] | None = None) -> RenderedSection:
+NO_CHANGES = "Changed vs base: none (no changes yet)"
+
+
+def render_progress(
+    *,
+    scope: ScopeContract | None,
+    acceptance: Sequence[Any],
+    status: Sequence[GitStatusEntry],
+    changed: Sequence[str],
+    max_items: int,
+) -> list[str]:
+    """What the attempt changed so far, at the head of CURRENT DIFF (D-021): the changed files with their git status,
+    the new files of the scope already written and still missing (BUG-228) and per diff criterion whether its required
+    change is there (BUG-182). Kept out of the sections before RELEVANT CODE, which stay the same from turn to turn."""
+    codes = {e.path: e.status.strip() or e.status for e in status}
+    paths = list(dict.fromkeys([*changed, *(e.path for e in status)]))
+    if paths:
+        shown = [f"{codes.get(p, 'M')} {p}" if p in codes else p for p in paths[:max_items]]
+        more = f" (+{len(paths) - max_items} more)" if len(paths) > max_items else ""
+        lines = [f"Changed vs base ({len(paths)}): {', '.join(shown)}{more}"]
+    else:
+        lines = [NO_CHANGES]
+    if scope is not None:
+        done = set(paths)
+        written = [p for p in scope.allowed_new_paths if p in done]
+        missing = [p for p in scope.allowed_new_paths if literal_path(p) and p not in done]
+        if written:
+            lines.append(f"New files written: {_bullets([_display(p) for p in written], max_items, 200)}")
+            if missing:
+                lines.append(f"Not written yet: {', '.join(_display(p) for p in missing[:max_items])}")
+    marks = [(i, change_progress(c, paths)) for i, c in enumerate(acceptance, 1)]
+    lines.extend(f"Acceptance {i}{mark}" for i, mark in marks if mark)
+    return lines
+
+
+def render_acceptance(acceptance: Sequence[Any], budget: int) -> RenderedSection:
     sec = RenderedSection(SectionName.ACCEPTANCE)
     if not acceptance:
         sec.omitted_reason = "empty"
         return sec
-    lines = [
-        f"{i}. {describe_criterion(c)}{change_progress(c, changed) if changed is not None else ''}" for i, c in enumerate(acceptance, 1)
-    ]
+    lines = [f"{i}. {describe_criterion(c)}" for i, c in enumerate(acceptance, 1)]
     fit_lines(sec, ["The runtime verifies these criteria deterministically after complete_step:", *lines], budget, what="criteria")
     sec.items_included = max(0, sec.items_included - 1)
     return sec
@@ -350,23 +370,14 @@ def render_repo_facts(
     *,
     workspace: WorkspaceHandle,
     inventory: Mapping[str, Any] | None,
-    status: Sequence[GitStatusEntry],
-    changed: Sequence[str],
     budget: int,
     max_items: int,
 ) -> RenderedSection:
+    """Repository, branch, base and inventory; the changed files are progress (:func:`render_progress`, D-021)."""
     sec = RenderedSection(SectionName.CURRENT_REPO_FACTS)
     lines = [
         f"Repository: {workspace.repository_key} · branch {workspace.branch} · base {workspace.base_branch}@{workspace.base_sha[:12]}",
     ]
-    codes = {e.path: e.status.strip() or e.status for e in status}
-    paths = list(dict.fromkeys([*changed, *(e.path for e in status)]))
-    if paths:
-        shown = [f"{codes.get(p, 'M')} {p}" if p in codes else p for p in paths[:max_items]]
-        more = f" (+{len(paths) - max_items} more)" if len(paths) > max_items else ""
-        lines.append(f"Changed vs base ({len(paths)}): {', '.join(shown)}{more}")
-    else:
-        lines.append("Changed vs base: none (no changes yet)")
     for key in sorted(inventory or {}, key=str):
         value = (inventory or {})[key]
         if value in (None, "", [], {}):
@@ -494,17 +505,12 @@ def render_tools(tools: Sequence[ToolPromptSpec], budget: int) -> RenderedSectio
 
 
 # ---------------------------------------------------------------------------------------------- COMPLETION CONDITIONS
-def render_completion(text: str, *, turn: int, max_turns: int, budget: int) -> RenderedSection:
+def render_completion(text: str, *, budget: int) -> RenderedSection:
+    """The completion contract; the turn count is in the closing line of the user message (D-021)."""
     sec = RenderedSection(SectionName.COMPLETION_CONDITIONS)
-    remaining = max(0, max_turns - turn)
-    turn_line = f"This is turn {turn} of {max_turns}; {remaining} turn(s) remain after this one."
-    if remaining <= 2:
-        turn_line += " The turn budget is almost exhausted: finish with complete_step, or block_step/request_replan."
     contract = text.strip() or "Call complete_step when the step goal is reached and the acceptance criteria hold."
-    room = max(0, budget - char_cost(turn_line) - 1)
-    clipped = truncate_middle(contract, room)
-    sec.truncated = clipped != contract
-    body = f"{clipped}\n{turn_line}" if clipped else turn_line
+    body = truncate_middle(contract, budget)
+    sec.truncated = body != contract
     if char_cost(body) > budget:
         body = clip_to_cost(body, budget)
         sec.truncated = True

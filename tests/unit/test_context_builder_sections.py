@@ -62,7 +62,7 @@ async def test_full_context_has_all_sections_in_order() -> None:
     assert [s.name for s in report.sections] == [n.value for n in SECTION_ORDER]
     assert all(s.present for s in report.sections)
     # content of the sections
-    assert "Fix the off-by-one error in f3" in user and "Turn 3 of 20." in user
+    assert "Fix the off-by-one error in f3" in user
     assert "May modify: app.py" in user and "May create: tests/test_extra.py" in user and "vendor/**" in user
     assert "**/.env" in user  # always-forbidden policy globs are shown as forbidden
     assert "- Do not change the public API." in user
@@ -75,10 +75,10 @@ async def test_full_context_has_all_sections_in_order() -> None:
     assert FAILURE.strip() in user  # verbatim
     assert "[verifier:test:pytest] tests/test_app.py: tests/test_app.py::test_f3 failed" in user
     assert "- turn 2: run_test" in user and "FAILED [test_failed]" in user
-    assert user.rstrip().endswith("Respond now with exactly one JSON action for turn 3 of 20.")
+    assert user.rstrip().endswith("Turn 3/20, 17 left. Reply with one JSON action.")
     assert "- read_range(path: string, start: integer, end: integer): Read lines" in system
     assert "count?: integer" in system and 'reason_code?: "other"|"test_conflict"' in system
-    assert "17 turn(s) remain" in system
+    assert "Turn" not in system and "turn 3" not in system
 
 
 async def test_step_goal_carries_the_job_request() -> None:
@@ -119,7 +119,7 @@ async def test_optional_sections_are_omitted_when_empty() -> None:
     user = built.messages[1].content
     assert headings(user) == ["STEP GOAL", "SCOPE", "CURRENT REPO FACTS"]
     assert "No write scope is granted" in user
-    assert "Changed vs base: none (no changes yet)" in user
+    assert "Changed vs base" not in user, "nothing changed and no criterion waits for a change"
     rep = {s.name: s for s in built.report.sections}
     for name in ("CONSTRAINTS", "ACCEPTANCE", "RELEVANT CODE", "RELEVANT TESTS", "CURRENT DIFF", "LATEST FAILURE", "SHORT STEP HISTORY"):
         assert not rep[name].present and rep[name].omitted_reason == "empty", name
@@ -242,12 +242,12 @@ async def test_acceptance_shows_which_required_changes_are_still_missing() -> No
     builder, _, _ = make_builder(git=git)
     built = await builder.build(make_input(step=make_step(acceptance=acceptance)))
     text = built.messages[1].content
-    assert "1. diff: must change app.py; diff must not be empty — met (already changed)" in text
-    assert (
-        "2. diff: must change tests/test_server.py, tests/test_*.py; diff must not be empty — NOT YET CHANGED: tests/test_server.py" in text
-    )
-    assert "— NOT YET CHANGED: docs/*.md" in text
-    assert "passes (>= 1 passed) —" not in text, "only diff criteria carry a change status"
+    criteria, progress = text.split("## ACCEPTANCE")[1].split("## ")[0], text.split("## CURRENT DIFF")[1]
+    assert "1. diff: must change app.py; diff must not be empty\n" in criteria and "—" not in criteria  # D-021
+    assert "Acceptance 1 — met (already changed)" in progress
+    assert "Acceptance 2 — NOT YET CHANGED: tests/test_server.py" in progress
+    assert "Acceptance 3 — NOT YET CHANGED: docs/*.md" in progress
+    assert "Acceptance 4" not in progress, "only diff criteria carry a change status"
 
 
 def test_tool_catalogue_degrades_but_keeps_every_tool() -> None:
@@ -387,9 +387,10 @@ async def test_tools_and_history_from_stored_mappings() -> None:
     assert "- turn 4: run_test -> FAILED [test_failed] (changed: a.py)" in built.messages[1].content
 
 
-def test_scope_marks_written_new_files_and_lists_the_missing_ones() -> None:
-    """BUG-228 (grand job G1): without a checklist the coder rewrote freshly created files identically."""
-    from hermclaw.context_builder.render import render_scope
+def test_progress_lists_written_new_files_and_the_missing_ones() -> None:
+    """BUG-228 (grand job G1): without a checklist the coder rewrote freshly created files identically. The checklist
+    is progress at the head of CURRENT DIFF; the scope itself stays the same every turn (D-021)."""
+    from hermclaw.context_builder.render import render_progress, render_scope
     from hermclaw.contracts.scope import ScopeContract
 
     scope = ScopeContract(
@@ -397,11 +398,36 @@ def test_scope_marks_written_new_files_and_lists_the_missing_ones() -> None:
         allowed_new_paths=["collector.py", "static/app.js", "tests/test_collector.py", "tests/fixtures/**"],
         allowed_operations=["create", "modify"],
     )
-    first = render_scope(scope, [], 4000, max_items=20).body
-    assert "(written)" not in first and "Not written yet" not in first
-    body = render_scope(scope, [], 4000, max_items=20, written=["collector.py", "README.md"]).body
-    assert "collector.py (written)" in body
-    assert "Not written yet: static/app.js, tests/test_collector.py" in body  # globs are no files to tick off
+    first = render_progress(scope=scope, acceptance=[], status=[], changed=[], max_items=20)
+    assert first == ["Changed vs base: none (no changes yet)"]
+    lines = render_progress(scope=scope, acceptance=[], status=[], changed=["collector.py", "README.md"], max_items=20)
+    assert "New files written: collector.py" in lines
+    assert "Not written yet: static/app.js, tests/test_collector.py" in lines  # globs are no files to tick off
+    assert "written" not in render_scope(scope, [], 4000, max_items=20).body
+
+
+async def test_the_prompt_up_to_relevant_code_is_the_same_every_turn() -> None:
+    """D-021: the coder spent 94 % of the tournament in model calls, 32 s each for ~200 answer tokens, growing with the
+    whole prompt: the turn count in the system message and STEP GOAL and the progress marks in SCOPE, ACCEPTANCE and
+    REPO FACTS changed the beginning of the prompt every turn, so llama.cpp could not reuse its cached prefix."""
+    acceptance = [DiffEvidence(must_change=["app.py"]), TestEvidence(command="pytest -q", framework="pytest")]
+    step = make_step(acceptance=acceptance)
+    first_builder, _, _ = make_builder()
+    first = await first_builder.build(make_input(step=step, turn=1, history=[], latest_failure=None, correction=[]))
+    git = FakeGit(diff_text=DIFF, status_entries=[GitStatusEntry("tests/test_extra.py", "??")], changed=["app.py"])
+    later_builder, _, _ = make_builder(git=git)
+    later = await later_builder.build(make_input(step=step, turn=18, latest_failure=FAILURE, correction=correction_items()))
+    assert first.messages[0].content == later.messages[0].content
+    head = first.messages[1].content.split("## RELEVANT CODE")[0]
+    assert later.messages[1].content.startswith(head) and "## SCOPE" in head and "## CURRENT REPO FACTS" in head
+    progress = later.messages[1].content.split("## CURRENT DIFF")[1]
+    assert "Changed vs base (2): app.py, ?? tests/test_extra.py" in progress
+    assert "Acceptance 1 — met (already changed)" in progress and "New files written: tests/test_extra.py" in progress
+    assert (
+        later.messages[1]
+        .content.rstrip()
+        .endswith("Turn 18/20, 2 left. Almost out of turns: complete_step, block_step or request_replan. Reply with one JSON action.")
+    )
 
 
 def test_research_findings_reach_the_coder_with_their_facts() -> None:

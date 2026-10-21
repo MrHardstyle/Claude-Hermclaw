@@ -29,13 +29,16 @@ from hermclaw.context_builder.diff import render_diff
 from hermclaw.context_builder.failure import first_error_line
 from hermclaw.context_builder.history import TurnRecord, render_history
 from hermclaw.context_builder.render import (
+    NO_CHANGES,
     CorrectionItem,
     ToolPromptSpec,
+    fit_lines,
     render_acceptance,
     render_completion,
     render_constraints,
     render_failure,
     render_goal,
+    render_progress,
     render_repo_facts,
     render_scope,
     render_tools,
@@ -319,27 +322,31 @@ class ContextBuilder:
             repo_hints=[self._red(h) for h in step.repo_hints],
             dependency_files=[self._red(f) for f in step.dependency_files],
             job_request=self._red(step.job_request),
-            turn=inp.turn,
-            max_turns=inp.max_turns,
             budget=cost[SectionName.STEP_GOAL],
         )
-        changed_now = list(dict.fromkeys([*_as_paths(changed), *(e.path for e in _as_status(status))]))
-        rendered[SectionName.SCOPE] = render_scope(
-            step.scope, cfg.exclude_globs, cost[SectionName.SCOPE], max_items=cfg.max_list_items, written=changed_now
-        )
+        # D-021: everything up to RELEVANT CODE stays the same from turn to turn (no turn count, no progress marks), so
+        # the model server reuses its cached prompt prefix; what changed is at the head of CURRENT DIFF
+        rendered[SectionName.SCOPE] = render_scope(step.scope, cfg.exclude_globs, cost[SectionName.SCOPE], max_items=cfg.max_list_items)
         rendered[SectionName.CONSTRAINTS] = render_constraints([self._red(c) for c in step.constraints], cost[SectionName.CONSTRAINTS])
-        rendered[SectionName.ACCEPTANCE] = render_acceptance(list(step.acceptance), cost[SectionName.ACCEPTANCE], changed_now)
+        rendered[SectionName.ACCEPTANCE] = render_acceptance(list(step.acceptance), cost[SectionName.ACCEPTANCE])
         for name in (SectionName.SCOPE, SectionName.ACCEPTANCE):
             self._post_redact(rendered[name], cost[name])
         rendered[SectionName.CURRENT_REPO_FACTS] = render_repo_facts(
             workspace=ws,
             inventory=self._red_obj(inventory) if isinstance(inventory, Mapping) else None,
-            status=[e for e in _as_status(status) if not self._excluded_raw(e.path)],
-            changed=[p for p in _as_paths(changed) if not self._excluded_raw(p)],
             budget=cost[SectionName.CURRENT_REPO_FACTS],
             max_items=cfg.max_list_items,
         )
-        rendered[SectionName.CURRENT_DIFF] = self._render_diff(diff if isinstance(diff, str) else "", cost[SectionName.CURRENT_DIFF])
+        progress = render_progress(
+            scope=step.scope,
+            acceptance=list(step.acceptance),
+            status=[e for e in _as_status(status) if not self._excluded_raw(e.path)],
+            changed=[p for p in _as_paths(changed) if not self._excluded_raw(p)],
+            max_items=cfg.max_list_items,
+        )
+        rendered[SectionName.CURRENT_DIFF] = self._render_diff(
+            diff if isinstance(diff, str) else "", cost[SectionName.CURRENT_DIFF], progress=[self._red(x) for x in progress]
+        )
         rendered[SectionName.LATEST_FAILURE] = render_failure(
             failure, correction, cost[SectionName.LATEST_FAILURE], item_chars=cfg.correction_item_chars
         )
@@ -356,7 +363,7 @@ class ContextBuilder:
         tools = [t if isinstance(t, ToolPromptSpec) else ToolPromptSpec.from_mapping(t) for t in inp.tools]
         rendered[SectionName.AVAILABLE_TOOLS] = render_tools(tools, cost[SectionName.AVAILABLE_TOOLS])
         rendered[SectionName.COMPLETION_CONDITIONS] = render_completion(
-            self._red(inp.completion_contract), turn=inp.turn, max_turns=inp.max_turns, budget=cost[SectionName.COMPLETION_CONDITIONS]
+            self._red(inp.completion_contract), budget=cost[SectionName.COMPLETION_CONDITIONS]
         )
 
         # ---- elastic sections with redistributed budget (16.2)
@@ -659,18 +666,29 @@ class ContextBuilder:
                 drops.append(DroppedItem(_section_for(p).value, f"{p}:{start}-{end}", "read_failed"))
         return out, drops
 
-    def _render_diff(self, diff: str, budget: int) -> RenderedSection:
+    def _render_diff(self, diff: str, budget: int, *, progress: Sequence[str] = ()) -> RenderedSection:
+        """The progress lines (:func:`render_progress`) first – they are short and always kept – then the diff in what
+        is left. Without a diff the section carries the progress only when something changed or a criterion waits for a
+        change."""
         sec = RenderedSection(SectionName.CURRENT_DIFF)
         text = self._red(diff)
+        head = RenderedSection(SectionName.CURRENT_DIFF)
+        fit_lines(head, list(progress), budget // 3, what="progress lines")
         if not text.strip():
-            sec.omitted_reason = "empty"
+            if not head.body or list(progress) == [NO_CHANGES]:
+                sec.omitted_reason = "empty"
+                return sec
+            sec.body, sec.truncated, sec.items_included = head.body, head.truncated, 0
             return sec
+        used = char_cost(head.body) + 1 if head.body else 0
         fence = fence_for(text)  # fenced: diff content can never pose as a section heading
         wrap = 2 * len(fence) + len("diff") + 2
-        inner = budget - wrap if budget > wrap + 40 else budget
+        room = budget - used
+        inner = room - wrap if room > wrap + 40 else room
         dr = render_diff(text, inner, min_file_cost=self.config.min_diff_file_cost, exclude=self._excluded_raw)
-        sec.body = f"{fence}diff\n{dr.body}\n{fence}" if dr.body and inner != budget else dr.body
-        sec.truncated = dr.truncated
+        body = f"{fence}diff\n{dr.body}\n{fence}" if dr.body and inner != room else dr.body
+        sec.body = "\n".join(x for x in (head.body, body) if x)
+        sec.truncated = dr.truncated or head.truncated
         sec.items_included = dr.files_shown
         for item, reason in dr.dropped:
             sec.drop(item, reason)
