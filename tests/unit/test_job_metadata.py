@@ -47,6 +47,7 @@ def test_registry_lists_every_runtime_key_once() -> None:
         "allow_network_research",
         "auto_commit",
         "create_merge_request",
+        "memory_learned_at",
     }
     assert all(jm.RESERVED_KEYS.values()), "every reserved key names its owner"
     with pytest.raises(TypeError):
@@ -98,6 +99,13 @@ def test_check_client_metadata_names_the_offending_keys() -> None:
     assert exc.details["reserved_keys"] == sorted([" SSH_Approvals", "triage", "_x"])
     assert exc.details["field"] == "metadata" and exc.details["reserved_prefixes"] == list(jm.RESERVED_PREFIXES)
     assert "' SSH_Approvals'" in exc.message and "'triage'" in exc.message and "ticket" not in exc.message
+
+
+def test_a_client_cannot_keep_its_job_out_of_learning() -> None:
+    """BUG-308: the learner skips finished jobs carrying memory_learned_at; a client must not plant it."""
+    with pytest.raises(ValidationFailed) as info:
+        jm.check_client_metadata({"Memory_Learned_At": "2026-10-21"})
+    assert info.value.details["reserved_keys"] == ["Memory_Learned_At"]
 
 
 def test_job_create_schema_documents_the_reserved_keys() -> None:
@@ -296,6 +304,8 @@ def _scan_tree(tree: ast.Module, path: Path) -> tuple[list[Site], list[str]]:
                     for kw in node.keywords:
                         if kw.arg is not None:
                             sites.append(Site(rel, node.lineno, "write", kw.arg, True))
+                elif name == "jsonb_build_object" and path.name == "learner.py" and node.args:
+                    add("write", node.args[0])  # learner._mark: metadata || jsonb_build_object(key, value) (BUG-308)
                 elif name == "_patch" and path.name == "approvals.py" and len(node.args) >= 3:
                     add_dict(node.args[2], "approvals._patch (metadata || patch)")
                 elif name == "Job":

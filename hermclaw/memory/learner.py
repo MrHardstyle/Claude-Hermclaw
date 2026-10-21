@@ -32,6 +32,7 @@ from sqlalchemy import func, or_, select, update
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from hermclaw.contracts.events import EventType
+from hermclaw.core import job_metadata
 from hermclaw.core.config import MemoryPolicy
 from hermclaw.core.logging import get_logger
 from hermclaw.memory.store import MemoryStore
@@ -52,7 +53,7 @@ from hermclaw.tools import errors as E
 
 log = get_logger(__name__)
 
-LEARNED_KEY = "memory_learned_at"
+LEARNED_KEY = job_metadata.MEMORY_LEARNED_AT  # reserved: a client cannot keep its job out of learning (BUG-308)
 FINISHED = ("succeeded", "failed")
 # refusals that say nothing about a tool or the task: the step was over, the budget spent, the call cancelled; and
 # runs that executed and failed – a red test run is work in progress, not a refusal (BUG-306)

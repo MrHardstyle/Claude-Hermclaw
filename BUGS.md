@@ -46,6 +46,12 @@ Noch keine.
 
 ## Behobene Bugs
 
+### BUG-308 – Ein Client kann seinen Job vom Selbstlernen ausnehmen
+- Phase: volle Testsuite vor dem Release rc63, 2026-10-21 (`tests/unit/test_job_metadata.py::test_every_job_metadata_read_is_a_reserved_key`) · Komponente: memory (`learner.py`), core (`job_metadata.py`) · Severity: P3 · blockierend: nein · Status: **behoben im Repository** (`tests/unit/test_job_metadata.py::test_a_client_cannot_keep_its_job_out_of_learning`)
+- Reproduktion: `POST /api/jobs` mit `metadata: {"memory_learned_at": "x"}` wird angenommen. Der Lerner hält den beendeten Job für schon gelesen und lernt nichts aus ihm.
+- Ursache: Der Lerner liest und schreibt den Metadaten-Schlüssel `memory_learned_at`. Er war nicht in `hermclaw/core/job_metadata.py` reserviert (BUG-140: Laufzeitschlüssel darf ein Client nicht setzen).
+- Fix: `MEMORY_LEARNED_AT` ist reserviert, `POST /api/jobs` lehnt ihn mit 422 ab (`JobCreate`-Schema und OpenAPI neu erzeugt). Der Scanner der Metadaten-Tests erkennt das JSON-Merge des Lerners als Schreibzugriff.
+
 ### BUG-307 – Selbstlernen: kein Modell bekannt, globale Repo-Recherche, Lehren aus Einzelfällen, Verdacht gegen Schutzregeln
 - Phase: Probelauf des Lerners (D-019 Teil 3) gegen eine Kopie der Produktions-DB (200 beendete Jobs), 2026-10-21, vor jedem Release des Lerners · Komponente: memory (`learner.py`), coder (`handler.py`) · Severity: P2 · blockierend: nein · Status: **behoben im Repository** (`tests/integration/test_memory_learner.py::test_models_are_known_from_the_coder_turns_and_one_way_past_in_three_is_no_lesson`, `::test_research_on_a_repository_stays_with_that_repository`, `::test_a_guard_refusal_is_no_tool_bug_suspicion`, `tests/integration/test_coder_handler.py::test_implement_step_happy_path_commits_and_pushes`)
 - Reproduktion: Lerner mit `learn_since_days=0` über die kopierte DB. (1) `step_attempts.model_alias` ist in allen 692 Versuchen leer: Stalls nennen „model ?“, und kein Werkzeug-Bug-Verdacht kann je zwei Modelle zählen; die automatische Bug-Erkennung war damit tot. (2) Zwölf Recherchen wie „What is the programming language and web framework used in this repository?“ wurden aktives Wissen für alle Jobs. (3) `COMMAND_REPEATED` wurde aktiv mit „What helped: read_file → run_command (1 of 5 recent cases)“. (4) Nach Fix (1) gab es neun Verdachtsfälle, sieben davon gegen Schutzregeln (`COMMAND_REPEATED`, `READ_REPEATED`, `NO_CHANGE`, `CHECK_STILL_FAILING`, `REDACTED_PLACEHOLDER`).

@@ -51,6 +51,8 @@ AUTO_COMMIT = "auto_commit"
 CREATE_MERGE_REQUEST = "create_merge_request"
 # --- coder tournament (hermclaw/tournament/; set only by the operator CLI) ---------------------------------------
 TOURNAMENT = "tournament"
+# --- knowledge (hermclaw/memory/learner.py) -----------------------------------------------------------------------
+MEMORY_LEARNED_AT = "memory_learned_at"
 
 RESERVED_KEYS: Mapping[str, str] = MappingProxyType(
     {
@@ -71,6 +73,7 @@ RESERVED_KEYS: Mapping[str, str] = MappingProxyType(
         AUTO_COMMIT: "typed field auto_commit of POST /api/jobs",
         CREATE_MERGE_REQUEST: "typed field create_merge_request of POST /api/jobs",
         TOURNAMENT: "coder tournament run: prescribed plan, coder alias, review and replan switches (CLI coder-tournament)",
+        MEMORY_LEARNED_AT: "when the learner read the finished job (D-019); a planted key would keep the job out of it",
     }
 )
 RESERVED_PREFIXES: tuple[str, ...] = ("_", "hermclaw.")
@@ -131,6 +134,7 @@ __all__ = [
     "AUTO_COMMIT",
     "CREATE_MERGE_REQUEST",
     "LAST_REPLAN",
+    "MEMORY_LEARNED_AT",
     "PLANNER_FALLBACK_ALIAS",
     "PLANNER_MODEL_ALIAS",
     "PLANNER_MODEL_FALLBACK",
