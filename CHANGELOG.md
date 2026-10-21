@@ -4,6 +4,9 @@ Format: [Keep a Changelog](https://keepachangelog.com/de/1.1.0/), Versionen nach
 
 ## [Unreleased]
 
+### Behoben
+- **Verifier startet den gelieferten Startpunkt (BUG-309):** Für jedes geänderte Python-Paket mit `__main__.py` läuft `python -m <Paket>` einmal in der Sandbox, mit Port, Host, Pfaden und Token aus den Variablennamen. Ein `ImportError`, `NameError`, `UnboundLocalError`, `SyntaxError` oder `AttributeError` beim Start lässt den Schritt scheitern. Bisher meldeten Jobs Erfolg, deren Server nicht startete (Turnier rc62: Ornith A7#3 und A8#2). Neue Richtlinie `policies.verifier.start_seconds` (5, 0 schaltet ab).
+
 ## [0.1.0rc63] – Release Candidate (2026-10-21)
 
 ### Hinzugefügt

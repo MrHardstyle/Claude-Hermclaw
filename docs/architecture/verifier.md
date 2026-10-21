@@ -34,6 +34,7 @@ Invariants:
 | `syntax.py` | in-process parsers, local `bash -n`, sandbox batches for `php -l` / `node --check` with nonce markers | 21.2 |
 | `secrets.py` | `SecretScanner` (redaction patterns + prefixed assignments + well-known token shapes + entropy heuristic); findings in test files ask for an obvious placeholder (`dummy`, `fake`, `example`) instead of an environment variable (BUG-243, `checks.py`); values made only of role words count as placeholders (`is_role_value`, shared with the redactor, BUG-279/293) | 21.7 |
 | `conflicts.py` | conflict marker scan | 21.8 |
+| `entrypoints.py` | start check (BUG-309): changed packages with `__main__.py`, environment from the variable names, driver script, traceback classification | start |
 | `schema.py` | JSON/YAML/TOML parsing, `jsonschema` (if importable) or built-in validator | schema evidence |
 | `commands.py` | `CommandRunner` (executor wrapper: timeout + grace, error capture, redacted excerpts, `command_runs`/`test_runs` records) | 21.3–21.6, 21.11 |
 | `report.py` | `build_report` (passed iff no blocking fail/error, summary), `run_status` | 21.14 |
@@ -74,7 +75,8 @@ report = await verifier.verify(...)  # same, report only
    `secrets:*` / `conflicts:*` over **added lines only**, presence/absence/diff/schema/artifact criteria.
 5. Commands (serialised; snapshot before the first one): syntax batches (PHP, JS; shell when bash is missing
    locally), compile (`npx tsc --noEmit` if `tsconfig.json` + `node_modules/typescript`, `go build ./...` if `go.mod`,
-   `cargo check [--offline]` if `Cargo.toml` – only when changed files are relevant to the toolchain), lint
+   `cargo check [--offline]` if `Cargo.toml` – only when changed files are relevant to the toolchain), new imports,
+   start (`python -m <package>` once for every changed package with a `__main__.py`, BUG-309), lint
    (`policies.verifier.lint_commands[language]`, `{files}` = shell-quoted changed files of that language), command
    and test criteria in declaration order. Afterwards `workspace_integrity`: side effects reverted (non-blocking info)
    or not restorable / snapshot impossible (blocking error).
@@ -96,6 +98,7 @@ report = await verifier.verify(...)  # same, report only
 | `conflicts` / `conflict_markers[:path]` | no `<<<<<<<`/`|||||||`/`>>>>>>>` (and bare `=======` outside markup) at line start | added lines |
 | `syntax` / `syntax:<path>` | file parses | skip with reason: TS/JSX (compile), templated YAML, binary, symlink, > 2 MB, missing tool (exit 126/127) |
 | `compile` / `compile:<lang>` | toolchain command exits 0 | skip: no marker, no relevant change, no `node_modules`, missing tool |
+| `start` / `start:<module>` | `python -m <module>` still runs after `start_seconds` or exits without a traceback | run from a temporary directory with the repository (and `src/`) on `PYTHONPATH`, stdin closed; variables the package reads are set when the name tells their meaning (`*PORT*` free port, `*HOST*` 127.0.0.1, `*_DIR`/`*_DB`/`*_FILE`/`*_PATH` temporary paths, `*TOKEN*`/`*SECRET*`/`*_KEY`/`*PASSWORD*` a placeholder), all others keep the program's default. A traceback ending in `ImportError`, `ModuleNotFoundError`, `NameError`, `UnboundLocalError`, `SyntaxError`, `AttributeError` fails the step (non-blocking when no criterion names the interpreter, BUG-194); any other traceback is reported without blocking. Skip: no changed package with `__main__.py`, `start_seconds = 0` |
 | `lint` / `lint:<lang>` | lint command exits 0 | missing configured linter = error |
 | `unit`/`integration`/`contract` / `acceptance[i]:test…` | exit 0, no failures/errors, `passed ≥ min_passed` (when counts are parseable) | category from the evidence wording |
 | `test_evidence` / `test_evidence` | implement step in a repo with tests: ≥ 1 test criterion executed and passed | skip for other kinds / repos without tests |
@@ -128,7 +131,7 @@ findings. Findings carry path, line, rule and a masked preview only.
 
 ## Configuration
 
-`policies.verifier`: `max_changed_files` (40), `allow_deletions` (true), `generated_file_globs`, `lint_commands` (default: python → ruff with defect rules F/E9 only, skipped where the image has no ruff; BUG-215)
+`policies.verifier`: `max_changed_files` (40), `allow_deletions` (true), `generated_file_globs`, `lint_commands` (default: python → ruff with defect rules F/E9 only, skipped where the image has no ruff; BUG-215), `start_seconds` (5; 0 disables the start check)
 (`{language: command}`; languages: `python`, `javascript`, `typescript`, `json`, `yaml`, `toml`, `shell`, `php`,
 `go`, `rust`, … see `languages.LANGUAGE_BY_EXTENSION`). `policies.scope` (forbidden globs), `policies.sandbox.
 default_timeout_seconds` (compile/lint timeout). Evidence timeouts come from the criteria.

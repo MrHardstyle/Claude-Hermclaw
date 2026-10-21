@@ -18,6 +18,7 @@ from hermclaw.repo_intelligence.paths import is_test_path
 from hermclaw.verifier.changes import matching, read_bytes, read_text
 from hermclaw.verifier.conflicts import scan_conflicts
 from hermclaw.verifier.context import VerifyContext
+from hermclaw.verifier.entrypoints import entry_points, parse_start_output, start_command, start_environment
 from hermclaw.verifier.imports import MISSING_EXIT_CODE, interpreter_for, new_unresolved_candidates, resolve_command
 from hermclaw.verifier.languages import CODE_LANGUAGES, detect_language, repo_has_tests
 from hermclaw.verifier.report import EXECUTOR_ERROR
@@ -378,6 +379,60 @@ async def import_checks(ctx: VerifyContext, added: AddedContent | None) -> list[
             evidence,
         )
     ]
+
+
+# ------------------------------------------------------------------------------------------- start (BUG-309)
+async def start_checks(ctx: VerifyContext) -> list[VerificationCheck]:
+    """Every changed package with a ``__main__.py`` must start: ``python -m <package>`` once in the sandbox."""
+    seconds = ctx.policies.verifier.start_seconds
+    if not seconds:
+        return [ctx.check("start", "start:python", "skip", "disabled (policies.verifier.start_seconds = 0)")]
+    entries = await asyncio.to_thread(entry_points, ctx.root, [c.path for c in ctx.changes.existing])
+    if not entries:
+        return [ctx.check("start", "start:python", "skip", "the change touches no package with a __main__.py")]
+    own = [c.command for c in ctx.step.acceptance if isinstance(c, (TestEvidence, CommandEvidence))]
+    interpreter, named = interpreter_for([*own, *ctx.step.command_hints])
+    out: list[VerificationCheck] = []
+    for entry in entries:
+        name = f"start:{entry.module}"
+        env = await asyncio.to_thread(start_environment, ctx.root, entry)
+        command = start_command(interpreter, entry.module, seconds, env)
+        res = await ctx.runner.run(command, purpose="verifier", timeout_seconds=int(seconds) + 30, network=False)
+        result = parse_start_output(res.output) if not res.failed_to_run else None
+        evidence: dict[str, Any] = {
+            "command": f"python -m {entry.module}",
+            "interpreter": " ".join(interpreter),
+            "path": f"{entry.directory}/__main__.py",
+            "environment": sorted(env),
+        }
+        if result is None:
+            evidence[EXECUTOR_ERROR] = res.failed_to_run
+            evidence["output"] = ctx.runner.clip(res.output, 2000)
+            problem = res.problem or (f"exit code {res.exit_code}" if not res.timed_out else "timed out")
+            out.append(ctx.check("start", name, "error", f"start check could not run: {problem}", evidence))
+            continue
+        evidence["exit_code"] = result.exit_code
+        if result.stderr:
+            evidence["stderr"] = ctx.runner.clip(result.stderr, 3000)
+        if result.running:
+            out.append(ctx.check("start", name, "pass", f"python -m {entry.module} still runs after {seconds:g}s", evidence))
+        elif result.exception is None:
+            how = "exited with code 0" if result.exit_code == 0 else f"exited with code {result.exit_code} without a traceback"
+            out.append(ctx.check("start", name, "pass", f"python -m {entry.module} {how}", evidence))
+        else:
+            evidence["exception"] = result.exception
+            blocking = result.broken and named
+            why = (
+                "the program cannot start as written; run it once yourself (python -m "
+                f"{entry.module} with the documented environment) and fix the error"
+                if result.broken
+                else "this may be an argument or setting the program does not handle; check that the documented start works"
+            )
+            if result.broken and not named:
+                why += "; no criterion names the project's interpreter, so this does not block the step"
+            message = f"python -m {entry.module} crashed on start with {result.exception}: {why}"
+            out.append(ctx.check("start", name, "fail", message, evidence, blocking=blocking))
+    return out
 
 
 # ------------------------------------------------------------------------------------------- 21.4 lint

@@ -46,6 +46,12 @@ Noch keine.
 
 ## Behobene Bugs
 
+### BUG-309 – Der Verifier nimmt ein Programm ab, das nicht startet
+- Phase: Coder-Turnier auf rc62, Nachbereitung 2026-10-21 (Ornith 35B A7#3 und A8#2, Agents-A1 A8#1) · Komponente: verifier (`checks.py`, neu `entrypoints.py`) · Severity: P2 · blockierend: nein · Status: **behoben im Repository** (`tests/integration/test_verifier_engine.py::test_a_delivered_package_that_does_not_start_fails`, `tests/unit/test_verifier_entrypoints.py`)
+- Reproduktion: Ornith A8#2 endet `succeeded`, die eigenen Tests sind grün. `python -m tasks_app` bricht beim Start ab: `ImportError: cannot import name 'make_server' from 'tasks_app.server'`. Von 23 versteckten Prüfungen besteht eine. Ornith A7#3 ebenso: `import sys` steht nur im Fehlerzweig von `main()`, damit ist `sys` in der ganzen Funktion lokal. Beim normalen Start folgt `UnboundLocalError`, 3 von 31 Prüfungen bestehen. ruff meldet beides nicht.
+- Ursache: Die Tests der Modelle bauen den Server im Prozess und führen `__main__.py` nie aus. Der Verifier prüfte Syntax, Importe, Lint und die Kriterien des Schritts, startete den gelieferten Startpunkt aber nie. Für den Verifier war das Programm damit fertig.
+- Fix: Neue Prüfung `start:<Paket>`. Für jedes geänderte Paket mit `__main__.py` startet der Verifier einmal `python -m <Paket>` in der Sandbox. Er startet aus einem temporären Verzeichnis, mit geschlossenem stdin. Umgebungsvariablen setzt er nur, wenn der Name ihre Bedeutung verrät: Port, Host, Pfade, Token. Bestanden ist der Start, wenn das Programm nach `policies.verifier.start_seconds` (5 s) noch läuft oder ohne Traceback endet; eine dokumentierte Ablehnung zählt also nicht als Fehler. Ein Traceback mit `ImportError`, `NameError`, `UnboundLocalError`, `SyntaxError` oder `AttributeError` lässt den Schritt scheitern, andere Tracebacks werden ohne Blockade gemeldet. Der Coder bekommt die Fehlermeldung und die Anweisung, das Programm selbst einmal zu starten.
+
 ### BUG-308 – Ein Client kann seinen Job vom Selbstlernen ausnehmen
 - Phase: volle Testsuite vor dem Release rc63, 2026-10-21 (`tests/unit/test_job_metadata.py::test_every_job_metadata_read_is_a_reserved_key`) · Komponente: memory (`learner.py`), core (`job_metadata.py`) · Severity: P3 · blockierend: nein · Status: **behoben im Repository** (`tests/unit/test_job_metadata.py::test_a_client_cannot_keep_its_job_out_of_learning`)
 - Reproduktion: `POST /api/jobs` mit `metadata: {"memory_learned_at": "x"}` wird angenommen. Der Lerner hält den beendeten Job für schon gelesen und lernt nichts aus ihm.

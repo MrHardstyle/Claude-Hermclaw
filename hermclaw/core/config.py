@@ -314,6 +314,9 @@ class VerifierPolicy(_Strict):
     allow_deletions: bool = True
     generated_file_globs: list[str] = Field(default_factory=lambda: ["**/node_modules/**", "**/__pycache__/**", "**/*.pyc", "**/dist/**"])
     lint_commands: dict[str, str] = Field(default_factory=lambda: dict(DEFAULT_LINT_COMMANDS))
+    # a changed package with a __main__.py is started once in the sandbox (BUG-309): passed when it still runs after
+    # this many seconds or exits without a traceback; 0 disables the check
+    start_seconds: float = Field(default=5, ge=0, le=60)
 
 
 class ReviewPolicy(_Strict):

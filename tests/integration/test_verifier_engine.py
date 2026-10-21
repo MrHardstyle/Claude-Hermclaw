@@ -890,3 +890,51 @@ async def test_new_import_that_does_not_resolve_fails(sessionmaker: Any, tmp_pat
     guessed, *_ = await run(sessionmaker, repo, step(scope_contract=st.scope))
     check = by_name(guessed.report)["imports:python"]
     assert check.status == "skip" and "no criterion names" in check.message
+
+
+SERVER = (
+    "import os\nimport time\n\n\ndef main():\n    token = os.environ.get('APP_TOKEN', '')\n    if not token:\n"
+    "        raise SystemExit('APP_TOKEN is not set')\n    port = int(os.environ.get('PORT', '8080'))\n"
+    "    open(os.environ.get('APP_DB', 'app.db'), 'w').write(str(port))\n"
+    "    print('listening', port, file=sys.stderr)\n    time.sleep(60)\n"
+)
+
+
+async def test_a_delivered_package_that_does_not_start_fails(sessionmaker: Any, tmp_path: Path) -> None:
+    """Coder tournament rc62 (Ornith A7#3, A8#2): the step's own tests built the server in-process and passed, but
+    `python -m <package>` crashed on start – an ImportError and an UnboundLocalError that ruff does not see (BUG-309)."""
+    repo = py_repo(tmp_path)
+    tests = [{"type": "test", "command": "python3 -m pytest -q -p no:cacheprovider tests", "framework": "pytest"}]
+    st = step(acceptance=tests, scope_contract=scope(allowed_new_paths=["app/**"], target_paths=["calc.py"]))
+    write(repo, "app/__init__.py", "import sys\n" + SERVER)
+    write(repo, "app/__main__.py", "from app import main\nfrom app import make_server\n\nmain()\n")
+    outcome, *_ = await run(sessionmaker, repo, st)
+    check = by_name(outcome.report)["start:app"]
+    assert check.status == "fail" and check.blocking and not outcome.report.passed, check.message
+    assert check.evidence["exception"] == "ImportError" and "make_server" in check.evidence["stderr"]
+    # the import fixed, sys imported only in a branch: local to main() – crashes once the token is set
+    write(repo, "app/__init__.py", SERVER.replace("    if not token:\n", "    if not token:\n        import sys\n"))
+    write(repo, "app/__main__.py", "from app import main\n\nmain()\n")
+    outcome2, *_ = await run(sessionmaker, repo, st)
+    check2 = by_name(outcome2.report)["start:app"]
+    assert check2.status == "fail" and check2.evidence["exception"] == "UnboundLocalError", check2.message
+    assert check2.evidence["environment"] == ["APP_DB", "APP_TOKEN", "PORT"]
+    # a server that starts: still running after the start time; its database file is not written into the workspace
+    write(repo, "app/__init__.py", "import sys\n" + SERVER)
+    outcome3, *_ = await run(sessionmaker, repo, st)
+    check3 = by_name(outcome3.report)["start:app"]
+    assert check3.status == "pass" and "still runs" in check3.message, check3.message
+    assert not (repo / "app.db").exists() and not (repo / "app" / "__pycache__").exists()
+    # a documented refusal is no crash; an unexpected exception is reported without blocking
+    write(repo, "app/__main__.py", "raise SystemExit('usage: python -m app --config FILE')\n")
+    refused, *_ = await run(sessionmaker, repo, st)
+    assert by_name(refused.report)["start:app"].status == "pass"
+    write(repo, "app/__main__.py", "import sys\n\nprint(sys.argv[1])\n")
+    crashed, *_ = await run(sessionmaker, repo, st)
+    check4 = by_name(crashed.report)["start:app"]
+    assert check4.status == "fail" and not check4.blocking and check4.evidence["exception"] == "IndexError"
+    # nothing of a package changed: nothing is started
+    commit_all(repo, "app")
+    write(repo, "calc.py", CALC + "# touched\n")
+    untouched, *_ = await run(sessionmaker, repo, st)
+    assert by_name(untouched.report)["start:python"].status == "skip"
