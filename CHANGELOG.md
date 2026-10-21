@@ -4,6 +4,8 @@ Format: [Keep a Changelog](https://keepachangelog.com/de/1.1.0/), Versionen nach
 
 ## [Unreleased]
 
+## [0.1.0rc67] – Release Candidate (2026-10-21)
+
 ### Behoben
 - **Eine gescheiterte Review-Korrektur vernichtete verifizierte Arbeit (BUG-315):** Blockiert ein Schritt in der Korrektur, die das Review nach bestandener Verifikation verlangt hat, kehrt er zum verifizierten Stand zurück, prüft ihn erneut und committet ihn (Ereignis `correction.fell_back`), statt neu zu planen. Bei einem Blocker-Befund bleibt es beim Replan.
 - **Ollama startete nach einer Unit-Änderung mit der alten Konfiguration neu (BUG-314):** Der Neustart lief vor dem `daemon-reload`, weil `notify: Reload systemd` beim gleichnamigen Handler einer anderen Rolle landete. Die Restart-Handler von Ollama und llama-server laden systemd jetzt selbst neu.
