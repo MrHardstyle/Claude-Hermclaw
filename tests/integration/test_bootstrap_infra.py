@@ -786,6 +786,15 @@ def test_llamacpp_main_model_takes_preset_settings_and_without_them_stays_as_bef
         assert dict(ini["qwen3.8-27b"]) == {"alias": "qwen3.8:27b", "model": blob + "1" * 64}
 
 
+def test_the_ollama_restarts_reload_systemd_themselves() -> None:
+    """BUG-314: `notify: Reload systemd` resolves to systemd_skeleton's handler, which runs after the ollama role's
+    restarts – the BUG-313 drop-in was written, Ollama restarted with the old environment, systemd reloaded after."""
+    handlers = yaml.safe_load((ROLES_DIR / "ollama" / "handlers" / "main.yml").read_text(encoding="utf-8"))
+    restarts = [h for h in handlers if h.get("ansible.builtin.systemd_service", {}).get("state") == "restarted"]
+    assert {h["name"] for h in restarts} == {"Restart ollama", "Restart llama-server"}
+    assert all(h["ansible.builtin.systemd_service"].get("daemon_reload") is True for h in restarts)
+
+
 def test_rendered_podman_and_searxng(rendered: dict[str, Path]) -> None:
     delegate = rendered["podman/delegate.conf"].read_text(encoding="utf-8")
     assert "[Service]\nDelegate=cpu cpuset io memory pids" in delegate

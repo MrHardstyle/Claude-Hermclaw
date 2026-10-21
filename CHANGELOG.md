@@ -5,6 +5,7 @@ Format: [Keep a Changelog](https://keepachangelog.com/de/1.1.0/), Versionen nach
 ## [Unreleased]
 
 ### Behoben
+- **Ollama startete nach einer Unit-Änderung mit der alten Konfiguration neu (BUG-314):** Der Neustart lief vor dem `daemon-reload`, weil `notify: Reload systemd` beim gleichnamigen Handler einer anderen Rolle landete. Die Restart-Handler von Ollama und llama-server laden systemd jetzt selbst neu.
 - **qwen3.6 lädt nach einem Modellwechsel nicht mehr (BUG-313):** Fiel ein Embedding-Aufruf in die Lücke, wenn der Router den Planer gegen den Coder tauschte, lud Ollama das Embedding-Modell auf die freie GPU. qwen3.6 scheiterte danach an jedem Versuch mit CUDA-OOM. Ist llama.cpp aktiv, läuft Ollama jetzt mit `CUDA_VISIBLE_DEVICES=-1` nur auf der CPU. Nur Ansible: `bootstrap.yml --limit model_workers --tags ollama`.
 
 ### Geändert

@@ -12,16 +12,20 @@
     - ollama_firewall_enabled | bool
     - hermclaw_manage_services | bool
 
+# both restarts reload systemd themselves: `notify: Reload systemd` resolves to the handler of another role
+# (systemd_skeleton), which runs after these, so a changed unit or drop-in was restarted stale (BUG-314)
 - name: Restart ollama
   ansible.builtin.systemd_service:
     name: ollama
     state: restarted
+    daemon_reload: true
   when: hermclaw_manage_services | bool
 
 - name: Restart llama-server
   ansible.builtin.systemd_service:
     name: hermclaw-llamacpp.service
     state: restarted
+    daemon_reload: true
   when:
     - ollama_llamacpp_enabled | bool
     - hermclaw_manage_services | bool

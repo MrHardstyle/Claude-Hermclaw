@@ -14,7 +14,8 @@
    review): with the planner on another model of the exclusive group, a plan call waits for a running step's lease
    instead of swapping the model under it (R-033, router-mode llama-server). The GPU of the model host belongs to that
    llama-server alone: Ollama, which there serves only the embedding model, runs with `CUDA_VISIBLE_DEVICES=-1`, so an
-   embedding call in the gap of a model swap cannot take the VRAM the next model needs (BUG-313).
+   embedding call in the gap of a model swap cannot take the VRAM the next model needs (BUG-313). The role's restart handlers reload systemd themselves, so a
+   changed drop-in or unit takes effect on the restart that applies it (BUG-314).
 4. Result `next_status=running`. Errors become job failures with stable codes (`PLANNER_INVALID_OUTPUT`, git/model codes).
 
 ## finalize(job_id) – committing → succeeded/failed
