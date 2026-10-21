@@ -22,7 +22,7 @@ from hermclaw.runtime.main import SchedulerProcess, check_database
 from hermclaw.runtime.services import ServiceOverrides, build_services, resource_holder_id
 from hermclaw.scheduler.scheduler import SchedulerSettings
 from hermclaw.workers.errors import WorkerUnreachable
-from tests.integration.runtime_stack import StackModels, checked_plan
+from tests.integration.runtime_stack import StackModels, checked_plan, stack_config
 from tests.integration.test_gitops_support import World, git, make_world
 
 pytestmark = pytest.mark.asyncio(loop_scope="session")
@@ -111,7 +111,7 @@ async def test_scheduler_process_runs_a_job_end_to_end(world: World) -> None:
     models = StackModels([checked_plan()])
     settings = stack_settings(world)
     proc = SchedulerProcess(
-        get_config(),
+        stack_config(),
         settings,
         overrides=overrides(models),
         scheduler_settings=SchedulerSettings(poll_seconds=0.05, retry_backoff_seconds=(0,)),

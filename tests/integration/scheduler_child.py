@@ -13,13 +13,12 @@ import asyncio
 import signal
 from pathlib import Path
 
-from hermclaw.core.config import get_config
 from hermclaw.core.logging import configure_logging
 from hermclaw.core.settings import Settings
 from hermclaw.runtime.main import SchedulerProcess
 from hermclaw.runtime.services import ServiceOverrides
 from hermclaw.scheduler.scheduler import SchedulerSettings
-from tests.integration.runtime_stack import StackModels, checked_plan
+from tests.integration.runtime_stack import StackModels, checked_plan, stack_config
 
 
 async def _main() -> int:
@@ -34,7 +33,7 @@ async def _main() -> int:
     settings = Settings(env="test", data_dir=ns.data_dir, instance_id=ns.instance, execution_mode="local", wake_on_lan=False)
     models = StackModels([checked_plan()] if ns.plan else [], hang_marker=ns.hang_marker, hang_on=ns.hang_on)
     proc = SchedulerProcess(
-        get_config(),
+        stack_config(),
         settings,
         overrides=ServiceOverrides(chat=models, research_enabled=False, gitlab=None, lease_keeper_interval=0.2),
         scheduler_settings=SchedulerSettings(

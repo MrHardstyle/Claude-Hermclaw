@@ -17,10 +17,21 @@ from typing import Any, TypeVar
 
 from pydantic import BaseModel
 
+from hermclaw.core.config import HermclawConfig, get_config
 from hermclaw.models.protocols import CallContext, ChatMessage, ChatResult, StructuredResult
 from tests.unit.test_planner_support import ScriptedChat, plan, step
 
 T = TypeVar("T", bound=BaseModel)
+
+
+def stack_config() -> HermclawConfig:
+    """The configuration without lint commands: the stack tests are about scheduling, recovery and load; the default
+    lint (BUG-215) is the only command of their jobs that needs the container sandbox, and where the test user's
+    rootless podman cannot unpack an image (no subuid range, e.g. the suite run as ``postgres``) the verifier waited
+    for the executor until the test timed out (since BUG-303). The sandbox has its own suites."""
+    config = get_config().model_copy(deep=True)
+    config.policies.verifier.lint_commands = {}
+    return config
 
 
 def act(tool: str, **args: Any) -> dict[str, Any]:

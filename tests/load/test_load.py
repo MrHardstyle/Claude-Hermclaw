@@ -37,7 +37,7 @@ from hermclaw.runtime.main import SchedulerProcess
 from hermclaw.runtime.services import ServiceOverrides
 from hermclaw.scheduler.scheduler import Scheduler, SchedulerSettings
 from tests.failure.test_recovery_process_kill import Child
-from tests.integration.runtime_stack import StackModels, checked_plan
+from tests.integration.runtime_stack import StackModels, checked_plan, stack_config
 from tests.integration.test_gitops_support import make_world
 from tests.integration.test_media_worker import _app as media_app
 from tests.integration.test_media_worker import _client as media_client
@@ -80,7 +80,7 @@ async def test_38_1_concurrent_jobs(sessionmaker: Any, tmp_path: Path) -> None:
         env="test", data_dir=tmp_path / "data", instance_id=f"load-{uuid.uuid4().hex[:6]}", execution_mode="local", wake_on_lan=False
     )
     proc = SchedulerProcess(
-        get_config(),
+        stack_config(),
         settings,
         overrides=ServiceOverrides(chat=models, research_enabled=False, gitlab=None, lease_keeper_interval=0.2),
         scheduler_settings=SchedulerSettings(concurrency=4, poll_seconds=0.05, retry_backoff_seconds=(0,)),

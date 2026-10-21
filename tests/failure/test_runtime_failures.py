@@ -20,7 +20,7 @@ from hermclaw.runtime.health import DiskMonitor
 from hermclaw.runtime.main import SchedulerProcess
 from hermclaw.scheduler.scheduler import Scheduler, SchedulerSettings
 from tests.conftest import ADMIN_URL
-from tests.integration.runtime_stack import StackModels, checked_plan
+from tests.integration.runtime_stack import StackModels, checked_plan, stack_config
 from tests.integration.test_gitops_support import World, make_world
 from tests.integration.test_runtime_driver import Chat, _driver, _job, _run
 from tests.integration.test_runtime_services import overrides, stack_settings
@@ -150,7 +150,7 @@ async def test_db_connections_killed_mid_job_are_reestablished_and_the_job_finis
     # a kill while the plan is persisted rolls it back; the re-entrant preparation asks Gemma again (BUG-072)
     models = StackModels([checked_plan() for _ in range(4)])
     proc = SchedulerProcess(
-        get_config(),
+        stack_config(),
         stack_settings(world),
         overrides=overrides(models),
         scheduler_settings=SchedulerSettings(poll_seconds=0.05, retry_backoff_seconds=(0,)),
