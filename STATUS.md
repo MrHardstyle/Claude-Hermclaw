@@ -133,6 +133,13 @@ Lint, mypy, ShellCheck, ansible-lint (production) sauber.
   BUG-143–293 sind produktiv (0.1.0rc61, deployt 2026-10-19 19:50: Fixpaket BUG-281–293 nach Testzyklus 2; der abschließende Doctor-Lauf scheiterte nur an der neuen Prüfung `gitlab`: Sidekiq auf .226 läuft nicht, 139 Jobs seit 22 h im Rückstand – Neustart durch den Betreiber offen; rc60 2026-10-19 12:19: Fixpaket BUG-275–280, Planer/Neuplaner auf qwen3.8:27b im llama.cpp-Router b11696, D-017; rc59 2026-10-18 16:46 mit laufendem G1; rc58 16:32; rc57 15:14; rc56 14:25; rc55 14:18; rc54 13:49; rc53 13:25; rc52 13:02; rc51 12:39; rc50 12:26; rc49 11:46; rc48 11:38; rc47 11:24; rc46 11:11; rc45 10:53; rc44 10:35; rc43 10:00; rc42 09:48; rc41 09:17; rc40 08:41; rc39 07:26; rc38 07:03; rc37 06:44; rc36 06:00; SearXNG mit Bing/Yahoo; rc33 05:06; rc29 04:23; rc28 03:48 mit laufendem G1, Worker-Ausfall beim Fortsetzen ohne Versuchsverlust (BUG-227 live bestätigt); rc26 02:55, `coder-main.max_output_tokens` 8192 im Inventory-Override; rc25 deployt 01:50 mit laufendem G1, Schritt per Checkpoint unterbrochen und fortgesetzt; rc24 deployt 2026-10-18 01:10; rc20 deployt 2026-10-17 20:40, Scheduler-Neustart mit laufendem Job live geprüft: Job lief nach dem Deployment weiter).
 - Externe Blocker: BLOCKER-002 (Tag-Push)
 
+## Paket C – llama.cpp-Tuning (Research R-034)
+- 2026-10-21 abgeschlossen, 5 Stoppfenster auf .224 (b11696, `NRestarts` durchgehend 0); Messdaten unter `/var/tmp/hc-tune/` auf .224.
+- Übernommen (D-022): `ubatch-size: 1024` für qwen3.6 → kalter 10k-Prompt 40,6 → 27,3 s, Decode unverändert; Praxistest A1/A3/A5 3/3 statt 2/3, Laufzeit −22 bis −33 %.
+- Nicht übernommen: `--n-cpu-moe 32 -ub 2048` (Decode −3 bis −9 %), MTP/n-gram beim Coder, `--moe-cache-mib` (Decode −30 %).
+- Offen beim Betreiber: MTP für den Planer qwen3.8 (Decode +28–52 %, Prefill −11 %).
+- Unterwegs behoben: BUG-313 (Ollama-Embedding auf der GPU → qwen3.6-OOM), BUG-314 (Restart vor `daemon-reload`).
+
 ## Letzte Testresultate (2026-10-15, Build-Host)
 - Finale Testmatrix `docs/testing/test-matrix-results.md`: **208 Dateien, 3232 bestanden, 0 fehlgeschlagen**, 24 Live-Tests
   deselektiert (unit 1956, integration 1042, failure 204, security 4, e2e 18, load 8); UI: vitest 48, Playwright 35

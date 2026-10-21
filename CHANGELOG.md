@@ -9,6 +9,7 @@ Format: [Keep a Changelog](https://keepachangelog.com/de/1.1.0/), Versionen nach
 - **qwen3.6 lädt nach einem Modellwechsel nicht mehr (BUG-313):** Fiel ein Embedding-Aufruf in die Lücke, wenn der Router den Planer gegen den Coder tauschte, lud Ollama das Embedding-Modell auf die freie GPU. qwen3.6 scheiterte danach an jedem Versuch mit CUDA-OOM. Ist llama.cpp aktiv, läuft Ollama jetzt mit `CUDA_VISIBLE_DEVICES=-1` nur auf der CPU. Nur Ansible: `bootstrap.yml --limit model_workers --tags ollama`.
 
 ### Geändert
+- **llama.cpp-Tuning übernommen (D-022, Research R-034):** qwen3.6 auf .224 läuft mit `ubatch-size: 1024` (Inventar). Ein kalter 10k-Prompt braucht 27,3 statt 40,6 s, Decode und Folgezug bleiben gleich. Nur Ansible, kein Release.
 - **Preset-Werte für das residente llama.cpp-Modell (Paket C, R-034):** Die Rolle `ollama` kennt `ollama_llamacpp_model_settings: {}`. Die Werte landen im Abschnitt des Hauptmodells in `models.ini` (Router-Betrieb) bzw. als `--<option> <wert>` im ExecStart (Einzelmodell), mit derselben Validierung wie `ollama_llamacpp_models[].settings`. Schlüssel mit eigener Variable (`n-cpu-moe`, `n-gpu-layers`, `model`, `alias`, `load-on-startup`) sind ausgeschlossen. Ohne Werte bleiben `models.ini` und Unit unverändert (Test `test_llamacpp_main_model_takes_preset_settings_and_without_them_stays_as_before`).
 
 ## [0.1.0rc66] – Release Candidate (2026-10-21)
