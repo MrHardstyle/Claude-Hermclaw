@@ -630,6 +630,8 @@ def test_rendered_ollama_and_nvidia_policy(rendered: dict[str, Path]) -> None:
     assert "Environment=OLLAMA_LOAD_TIMEOUT=10m" in dropin
     keys = [line.split("=")[1] for line in dropin.splitlines() if line.startswith("Environment=")]
     assert len(keys) == len(set(keys)), f"duplicate variables: {keys}"
+    assert "CUDA_VISIBLE_DEVICES" not in dropin
+
     assert "ExecStart=\nExecStart=/opt/ollama/current/bin/ollama serve" in dropin
     # runfile driver (default): every apt-provided NVIDIA driver package is blocked
     pin = rendered["nvidia/nvidia-pin.pref"].read_text(encoding="utf-8")
@@ -660,6 +662,15 @@ def test_rendered_ollama_and_nvidia_policy(rendered: dict[str, Path]) -> None:
         check = _run([nft, "-c", "-f", str(rendered["ollama/hermclaw-ollama.nft"])], cwd=REPO)
         if "Operation not permitted" not in check.stderr:
             assert check.returncode == 0, check.stderr
+
+
+def test_ollama_stays_off_the_gpu_while_llamacpp_holds_it(tmp_path: Path) -> None:
+    """BUG-313: with llama.cpp the GPU belongs to its resident llama-server and Ollama serves only the embedding model.
+    Ollama on the GPU took the free VRAM while the router swapped the planner for the coder (embeddinggemma 25/25
+    layers, 587 MiB), and qwen3.6 then failed to load with CUDA OOM on every retry."""
+    out = _render(tmp_path, tmp_path / "out", _render_vars({"ollama_llamacpp_enabled": True}))
+    dropin = out["systemd/ollama-hermclaw.conf"].read_text(encoding="utf-8")
+    assert "Environment=CUDA_VISIBLE_DEVICES=-1" in dropin.splitlines()
 
 
 def test_llamacpp_unit_and_firewall_cover_the_llama_server_port(tmp_path: Path) -> None:

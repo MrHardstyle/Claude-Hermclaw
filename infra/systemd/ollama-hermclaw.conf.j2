@@ -21,6 +21,11 @@ Environment=OLLAMA_LOAD_TIMEOUT={{ ollama_load_timeout }}
 Environment=OLLAMA_NO_CLOUD=1
 {% endif %}
 Environment=OLLAMA_VULKAN={{ '1' if ollama_vulkan | bool else '0' }}
+{% if ollama_llamacpp_enabled | default(false) | bool %}
+# the GPU belongs to the resident llama-server (D-015): Ollama serves only the embedding model, on the CPU. On the GPU
+# it would take the free VRAM in the gap of a model swap and the next llama.cpp model failed with OOM (BUG-313)
+Environment=CUDA_VISIBLE_DEVICES=-1
+{% endif %}
 {% for key, value in ollama_extra_env | dictsort %}
 Environment={{ key }}={{ value }}
 {% endfor %}
