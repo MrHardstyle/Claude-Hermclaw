@@ -135,9 +135,9 @@ async def test_real_git_diff_status_and_files(workspace: WorkspaceHandle) -> Non
     assert "diff --git a/app.py b/app.py" in user and "+def sub(a, b):" in user
     assert "notes.md" in user
     assert "abcdef0123456789" not in user
-    # repo facts from real status / changed files
-    facts = user.split("## CURRENT REPO FACTS\n", 1)[1].split("\n## ", 1)[0]
-    assert "app.py" in facts and "notes.md" in facts and ".env" not in facts
+    # changed files from real status / changed files: progress at the head of CURRENT DIFF (D-021)
+    progress = user.split("## CURRENT DIFF\n", 1)[1].split("\n## ", 1)[0].split("```", 1)[0]
+    assert "app.py" in progress and "notes.md" in progress and ".env" not in progress
     # code: the real target file content; tests: acceptance + failure reference to the real test file
     assert "### app.py lines 1-6 [target, context]" in user and "return a + b + 0" in user
     diff_section = user.split("## CURRENT DIFF\n", 1)[1].split("\n## ", 1)[0]

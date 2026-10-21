@@ -194,7 +194,10 @@ async def test_killed_daemon_is_detected_by_offline_sweep(
     async with sessionmaker() as s:
         assert (await s.get(Worker, wid)).state == "ready"  # type: ignore[union-attr]
     async with sessionmaker() as s, s.begin():
-        assert await registry.sweep_offline(s, now=datetime.now(UTC) + timedelta(seconds=4)) == [wid]
+        # the sweep covers every worker of the session database: in a full run the stale "ready" workers other tests
+        # registered (wol-*) are swept with it
+        swept = await registry.sweep_offline(s, now=datetime.now(UTC) + timedelta(seconds=4))
+        assert wid in swept
     async with sessionmaker() as s:
         evs = (await s.execute(select(Event).where(Event.source_id == wid, Event.event_type == EventType.WORKER_OFFLINE))).scalars().all()
         assert len(evs) == 1 and evs[0].payload["reason"] == "heartbeat_timeout"

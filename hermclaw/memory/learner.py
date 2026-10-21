@@ -185,7 +185,7 @@ class MemoryLearner:
         stmt = (
             select(Job.id)
             .where(Job.status.in_(FINISHED), ~Job.metadata_.has_key(LEARNED_KEY))
-            .order_by(Job.finished_at.asc().nulls_last())
+            .order_by(Job.finished_at.asc().nulls_last(), Job.created_at.asc(), Job.id)  # evidence in the order it arrived
             .limit(self.policy.learn_batch)
         )
         if self.policy.learn_since_days:
