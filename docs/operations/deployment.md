@@ -255,6 +255,27 @@ services restart: LiteLLM first, and the API and the scheduler only once it answ
 requests without its master key. A failed migration starts the old services again with their own configuration
 (PostgreSQL rolls the revision back). A failure on `.225` stops the whole run.
 
+### Deploy wrapper (`hermclaw-deploy`)
+
+On the orchestrator the become password is a systemd credential (`ansible-become`, host key, only root decrypts it).
+`scripts/deploy/hermclaw-deploy.sh`, installed once by the operator as root, deploys a built release without the
+password passing through anyone's shell – also for an agent session the operator allowed to deploy:
+
+```bash
+sudo install -o root -g root -m 0755 scripts/deploy/hermclaw-deploy.sh /usr/local/sbin/hermclaw-deploy  # once
+sudo -n /usr/local/sbin/hermclaw-deploy 0.1.0rc65 --check   # preflight only
+sudo -n /usr/local/sbin/hermclaw-deploy 0.1.0rc65
+```
+
+Preflight: release version format, `dist/release-<version>/release.json`, `hermclaw_version` in the inventory equal to
+the version, no queued or running job (`--allow-active-jobs` overrides; the deploy restarts the scheduler), no other
+deploy (`flock`). Then the password is decrypted into a private file in `/dev/shm`, `playbooks/deploy.yml` runs as the
+deploy user with `--become-password-file`, and the file is shredded on every exit. Output goes to
+`/var/log/hermclaw-deploy/<timestamp>-<version>.log` (group-readable by the deploy user); the last 15 lines are printed.
+Paths are constants of the script or come from the root-owned `/etc/hermclaw/deploy.env`, never from the caller's
+environment. Exit codes: 0 ok, 1 environment, 2 usage, 3 refused by the preflight, 4 deploy already running, else the
+exit code of `ansible-playbook`.
+
 ## 7. Rollback
 
 ```bash

@@ -4,6 +4,9 @@ Format: [Keep a Changelog](https://keepachangelog.com/de/1.1.0/), Versionen nach
 
 ## [Unreleased]
 
+### Hinzugefügt
+- **Deploy-Wrapper `hermclaw-deploy`:** `scripts/deploy/hermclaw-deploy.sh`, vom Betreiber einmal als root installiert, deployt ein gebautes Release mit `sudo -n /usr/local/sbin/hermclaw-deploy <version>`. Das Become-Passwort entschlüsselt das Skript selbst in eine private Datei in `/dev/shm` und vernichtet sie danach, es geht durch keine Shell des Aufrufers. Vorab prüft es Version, gebautes Release, Inventory, laufende Jobs und parallele Deploys. `--check` macht nur die Vorabprüfung. Log unter `/var/log/hermclaw-deploy/`.
+
 ## [0.1.0rc64] – Release Candidate (2026-10-21)
 
 ### Geändert
