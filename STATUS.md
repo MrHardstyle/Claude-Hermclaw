@@ -275,10 +275,11 @@ bestanden; ansible-lint (production) sauber. `test_deploy_converge` ist angepass
    (`infra/sandbox-images/README.md`) bleibt für Systempakete nötig.
 
 ## Paket B – Modellfamilien (Research R-035)
-Nächster Teil: 1a
-Hintergrundlauf: Download gpt-oss-20b (Unit `hc-dl-gptoss` auf .224, `/var/lib/hcbench/models/`, 2026-10-21 22:05) – Leiter rc67 ab A7 läuft (Screening erst danach)
+Nächster Teil: 2
+Hintergrundlauf: Leiter rc68 ab A7 (nach Deploy 2026-10-22); Teil 3a erst nach der Leiter
 Offene Fragen: –
 - Root auf .224: Option (b) aus R-034 (`/etc/sudoers.d/90-hermclaw-tuning`), bleibt bis Paketende.
-- Platz: 41 GB frei; Bedarf gpt-oss-20b MXFP4 12,1 GB + 10 GB Reserve. gemma4:26b liegt im Ollama-Store, GLM-4.7-Flash unter `/var/lib/hcbench/models/` (GLM-5.3-Flash mit 110–181 GB zu groß).
-- Quellen: `ggml-org/gpt-oss-20b-GGUF` (MXFP4, 2026-07-16, Apache-2.0, sha256 = LFS-oid).
-
+- Teil 1 fertig (2026-10-22): Gemma 4 26B, gpt-oss-20b, GLM-4.7-Flash bestehen das Screening (Research R-035).
+- Teil 2: `chat_template_kwargs`/`reasoning_effort` je Profil, nötig für gpt-oss-20b (`low`).
+- Dateien: gpt-oss-20b unter `/var/lib/hcbench/models/gpt-oss-20b-mxfp4.gguf` (sha256 = LFS-oid), GLM-4.7-Flash dort aus R-033, gemma4:26b im Ollama-Store. 29 GB frei.
+- Rohdaten: `/var/tmp/hc-screen/<kandidat>/` auf .224.
