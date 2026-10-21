@@ -4,7 +4,9 @@
 # for another model unloads the loaded one and loads the requested one.
 - name: Validate the llama.cpp settings
   vars:
-    ollama_llamacpp_preset_settings: "{{ (ollama_llamacpp_models | map(attribute='settings', default={}) | map('dict2items') | flatten) + (ollama_llamacpp_model_settings | dict2items) }}"
+    ollama_llamacpp_preset_settings: >-
+      {{ (ollama_llamacpp_models | map(attribute='settings', default={}) | map('dict2items') | flatten)
+         + (ollama_llamacpp_model_settings | dict2items) }}
   ansible.builtin.assert:
     that:
       - ollama_llamacpp_build is match('^b[0-9]+$')

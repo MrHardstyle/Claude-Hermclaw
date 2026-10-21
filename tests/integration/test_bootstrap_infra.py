@@ -671,6 +671,10 @@ def test_ollama_stays_off_the_gpu_while_llamacpp_holds_it(tmp_path: Path) -> Non
     out = _render(tmp_path, tmp_path / "out", _render_vars({"ollama_llamacpp_enabled": True}))
     dropin = out["systemd/ollama-hermclaw.conf"].read_text(encoding="utf-8")
     assert "Environment=CUDA_VISIBLE_DEVICES=-1" in dropin.splitlines()
+    # the role's check that Ollama found the GPU would fail the rollout: it runs only without llama.cpp
+    tasks = yaml.safe_load((ROLES_DIR / "ollama" / "tasks" / "main.yml").read_text(encoding="utf-8"))
+    check = next(t for t in tasks if t["name"] == "Verify that Ollama uses the GPU")
+    assert "not ollama_llamacpp_enabled | bool" in check["when"]
 
 
 def test_llamacpp_unit_and_firewall_cover_the_llama_server_port(tmp_path: Path) -> None:

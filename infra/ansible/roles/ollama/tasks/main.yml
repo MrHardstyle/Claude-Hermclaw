@@ -342,6 +342,7 @@
     - ollama_verify | bool
     - ollama_expected_gpu_library | length > 0
     - hermclaw_manage_services | bool
+    - not ollama_llamacpp_enabled | bool   # then Ollama runs on the CPU on purpose (BUG-313)
     - not ansible_check_mode
   tags: [ollama]
 
