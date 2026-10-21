@@ -733,11 +733,7 @@ def _job_literal_errors(plan: PlanContract, ctx: ValidationContext) -> list[str]
     First plans of J2 and X3 left out the demanded status 400 and the named database file; all four such plans needed
     replans, while eight of nine plans naming every literal ran without one. A literal no step names is a
     requirement no coder is asked to deliver (traceability, plan release criteria)."""
-    literals = job_literals(ctx.job_text)
-    if not literals:
-        return []
-    text = "\n".join(_strings([s.model_dump(mode="json", exclude={"id", "depends_on"}) for s in plan.steps])).lower()
-    missing = [lit for lit in literals if lit.lower() not in text and lit.rsplit("/", 1)[-1].lower() not in text]
+    missing = _missing_job_literals(plan, ctx)
     if not missing:
         return []
     names = ", ".join(repr(m) for m in missing)
@@ -745,6 +741,62 @@ def _job_literal_errors(plan: PlanContract, ctx: ValidationContext) -> list[str]
         f"the job names {names}, but no step mentions it: write each into the goal and an acceptance criterion of the "
         "step that delivers it (a file to read or create, a status code to answer)"
     ]
+
+
+def _missing_job_literals(plan: PlanContract, ctx: ValidationContext) -> list[str]:
+    literals = job_literals(ctx.job_text)
+    if not literals:
+        return []
+    text = "\n".join(_strings([s.model_dump(mode="json", exclude={"id", "depends_on"}) for s in plan.steps])).lower()
+    return [lit for lit in literals if lit.lower() not in text and lit.rsplit("/", 1)[-1].lower() not in text]
+
+
+_SENTENCE_END = re.compile(r"(?<=[.!?:])\s+|\n+")
+_WORD = re.compile(r"[A-Za-zÄÖÜäöüß][\wÄÖÜäöüß-]{3,}")
+
+
+def _literal_context(literal: str, job_text: str) -> str:
+    """The job sentence(s) naming ``literal`` – they say which part of the work it belongs to."""
+    return " ".join(s for s in _SENTENCE_END.split(job_text) if literal in s) or literal
+
+
+def _delivering_step(literal: str, steps: Sequence[PlanStep], ctx: ValidationContext) -> PlanStep:
+    """The step that delivers ``literal``: one whose files the literal or its job sentence names, else the one whose
+    goal shares the most words with that sentence, else the first."""
+    context = _literal_context(literal, ctx.job_text)
+    named = {p.rsplit("/", 1)[-1].lower() for p in job_literals(context) if _is_job_path(p)}
+    words = {w.lower() for w in _WORD.findall(context)}
+
+    def score(step: PlanStep) -> tuple[int, int]:
+        files = {p.rsplit("/", 1)[-1].lower() for p in (*_step_paths(step, ctx), *step.repo_hints)}
+        own = {w.lower() for w in _WORD.findall(f"{step.title} {step.goal}")}
+        return len(files & named), len(words & own)
+
+    return max(steps, key=score)  # max keeps the first of equal scores
+
+
+def carry_job_literals(plan: PlanContract, ctx: ValidationContext) -> tuple[PlanContract, list[str]]:
+    """Write every job literal no step names into the goal of the step that delivers it.
+
+    Ladder rc65: the first plans of A4 and A7 left out `Giro: 1234.50` and `Authorization: Bearer <token>`; each repair
+    turn of the 27B planner took about 10 min, so A7 spent 29 of its 40 min planning and the coder ran out of time
+    (BUG-312). Which step delivers a literal follows from the job sentence naming it, so no model turn is needed.
+    ``_job_literal_errors`` stays as the check for plans without a step that changes the workspace."""
+    missing = _missing_job_literals(plan, ctx)
+    steps = [s for s in plan.steps if s.kind.value in WORKSPACE_MUTATING_KINDS]
+    if not missing or not steps:
+        return plan, []
+    carried: dict[str, list[str]] = {}
+    for literal in missing:
+        carried.setdefault(_delivering_step(literal, steps, ctx).id, []).append(literal)
+
+    def with_literals(step: PlanStep, lits: list[str]) -> PlanStep:
+        goal = f"{step.goal.rstrip()} Exactly as the job states: {', '.join(f'`{lit}`' for lit in lits)}."
+        return step.model_copy(update={"goal": goal[:4000]})
+
+    updated = [with_literals(s, carried[s.id]) if s.id in carried else s for s in plan.steps]
+    notes = [f"step {sid}: job literal(s) {', '.join(repr(lit) for lit in lits)} added to the goal" for sid, lits in carried.items()]
+    return plan.model_copy(update={"steps": updated}), notes
 
 
 def _reachable(plan: PlanContract, start: str) -> set[str]:

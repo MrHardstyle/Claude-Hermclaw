@@ -62,6 +62,7 @@ from hermclaw.planner.prompt import (
 from hermclaw.planner.validation import (
     AdviceOnce,
     ValidationContext,
+    carry_job_literals,
     new_manifest_notes,
     prune_unreachable_must_change,
     semantic_errors,
@@ -291,6 +292,8 @@ class Planner(PlannerBase):
         def validate(data: dict[str, Any]) -> EnrichmentResult:
             plan = validate_schema(PlanContract, data, limit=self.settings.max_errors_reported)
             plan, pruned = prune_unreachable_must_change(plan, vctx)
+            plan, carried = carry_job_literals(plan, vctx)  # no repair turn for a missing job literal (BUG-312)
+            pruned += carried
             errors = semantic_errors(plan, vctx, limit=self.settings.max_errors_reported)
             errors += advice(new_manifest_notes(plan, vctx))
             if errors:

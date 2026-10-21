@@ -952,6 +952,33 @@ def test_a_job_literal_with_quotes_is_found_in_the_step() -> None:
     assert not [e for e in _errors(plan("goal", [api]), ctx) if "the job names" in e]
 
 
+def test_a_job_literal_no_step_names_goes_into_the_step_that_delivers_it() -> None:
+    """BUG-312 (ladder rc65, A7): the plan left out `Authorization: Bearer <token>` and the error body; two repair turns
+    of the 27B planner took 20 of the job's 40 min. The job sentence naming a literal says which step delivers it."""
+    from hermclaw.planner.validation import carry_job_literals
+
+    text = "Schreibe eine REST-API für Notizen in notes_api/server.py. Jede Anfrage braucht den Header "
+    text += "`Authorization: Bearer <token>`. Fehler antworten mit `{\"error\": \"...\"}`.\n"
+    text += "Beschreibe die Endpunkte in docs/api.md, mit Beispiel `curl -H X`."
+    ctx = ValidationContext.build(get_config(), FASTAPI.inputs, PlannerSettings(), job_text=text)
+    api = _impl("S001", goal="Implement the notes REST API with token authentication.", allowed_new_paths=["notes_api/server.py"])
+    docs = step("S002", "documentation", "documentation", "Document every endpoint.", depends_on=["S001"], allowed_new_paths=["docs/api.md"])
+    check = step("S003", "test", "testing", "Run the API tests.", depends_on=["S001"])
+    data = plan("goal", [api, docs, check])
+    assert [e for e in _errors(data, ctx) if "the job names" in e], "without the fix: a repair turn"
+
+    fixed, notes = carry_job_literals(PlanContract.model_validate(data), ctx)
+    goals = {s.id: s.goal for s in fixed.steps}
+    assert goals["S001"].endswith('Exactly as the job states: `Authorization: Bearer <token>`, `{"error": "..."}`.')
+    assert goals["S002"] == "Document every endpoint. Exactly as the job states: `curl -H X`."  # its sentence names docs/api.md
+    assert goals["S003"] == "Run the API tests."  # a test step writes nothing
+    assert len(notes) == 2 and not [e for e in semantic_errors(fixed, ctx) if "the job names" in e]
+    assert carry_job_literals(fixed, ctx) == (fixed, [])  # nothing missing: unchanged
+
+    only_checks = PlanContract.model_validate(plan("goal", [check | {"depends_on": []}]))
+    assert carry_job_literals(only_checks, ctx) == (only_checks, []), "no step to deliver it: the check reports it"
+
+
 def test_a_replacement_step_keeps_the_requirements_of_the_failed_step() -> None:
     """BUG-285 (K1 on rc60): the replanned goal listed only lint fixes; columns, warnings and README were gone."""
     from hermclaw.planner.replan_contract import ReplanStep
