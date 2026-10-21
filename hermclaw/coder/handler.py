@@ -26,7 +26,7 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 from hermclaw.coder.loop import CoderLoop, CoderResult, CoderSettings, StagnationHook, history_from_checkpoint
 from hermclaw.context_builder import ContextBuilder, ContextBuilderConfig, CorrectionItem, StepBrief
 from hermclaw.contracts.acceptance import AcceptanceCriterion
-from hermclaw.contracts.common import StepKind
+from hermclaw.contracts.common import FindingSeverity, StepKind
 from hermclaw.contracts.events import EventType
 from hermclaw.contracts.review import ReviewContract, enforce_review_invariant
 from hermclaw.contracts.scope import ScopeContract, ScopeExpansionRequest
@@ -563,7 +563,8 @@ class ImplementStepHandler:
         try:
             earlier = tuple(c.message for c in corrections if c.source == "review")
             review = tournament is None or tournament.review
-            return await self._after_loop(_Run(ctx, row, step, ws, handle, earlier, review=review), result)
+            run = _Run(ctx, row, step, ws, handle, earlier, review=review)
+            return await self._keep_verified(run, await self._after_loop(run, result), result)
         except ResourceUnavailable as exc:  # heavy-review lease not granted in time
             return StepOutcome("failed", error_code=exc.code, error_message=exc.message, retryable=True)
 
@@ -757,6 +758,10 @@ class ImplementStepHandler:
                 )
             review, _ = enforce_review_invariant(raw_review)
             if review.verdict != "pass":
+                if not any(f.severity == FindingSeverity.blocker for f in review.findings):
+                    # the work passed verification: a correction that fails falls back to it (BUG-315); with a blocker
+                    # finding the state must not ship, so it is not kept
+                    await self.deps.git.save_verified(run.ws, step_id=ctx.step_id)
                 return await self._correction(
                     ctx,
                     row,
@@ -778,6 +783,38 @@ class ImplementStepHandler:
                 )
                 await s.commit()
         return await self._commit(run, outcome, result)
+
+    async def _keep_verified(self, run: _Run, outcome: StepOutcome, result: CoderResult) -> StepOutcome:
+        """A blocked step whose work once passed verification, before the review asked for a correction, falls back to
+        that work and commits it instead of a replan that throws it away (BUG-315: ladder A7, a review finding with the
+        facts reversed, the correction broke the verified server, the replan left no time). The kept state is verified
+        again; if it no longer passes, the step stays blocked."""
+        if outcome.outcome != "blocked":
+            return outcome
+        ctx = run.ctx
+        restored = await self.deps.git.restore_verified(run.ws, step_id=ctx.step_id)
+        if restored is None:
+            return outcome
+        await self._status(ctx, f"{run.row.step_key}: Korrektur gescheitert – zurück zum verifizierten Stand")
+        verified = await self._verify(run)
+        if not verified.report.passed:
+            return outcome
+        async with self.sm() as s:
+            await append_event(
+                s,
+                EventType.CORRECTION_FELL_BACK,
+                source_type="coder",
+                job_id=ctx.job_id,
+                step_id=ctx.step_id,
+                attempt_id=ctx.attempt_id,
+                payload={
+                    "paths": restored[:50],
+                    "blocked": outcome.error_code,
+                    "reason": DEFAULT_REDACTOR.text(outcome.error_message or outcome.summary)[:500],
+                },
+            )
+            await s.commit()
+        return await self._commit(run, verified, result)
 
     async def _review_and_correct(self, run: _Run, report: VerificationReport, items: list[CorrectionItem]) -> StepOutcome:
         ctx, row, step, handle = run.ctx, run.row, run.step, run.handle

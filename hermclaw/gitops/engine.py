@@ -20,6 +20,7 @@ import asyncio
 import contextlib
 import fnmatch
 import hashlib
+import json
 import os
 import stat
 import uuid
@@ -164,6 +165,8 @@ def _verified_paths(changed: Any) -> set[str]:
 
 #: directory in the workspace's git dir holding files set aside for another step of the job (BUG-257)
 PARKED_DIR = "hermclaw-parked"
+#: per step, the uncommitted changes that last passed verification before the review asked for a correction (BUG-315)
+VERIFIED_DIR = "hermclaw-verified"
 
 
 def path_matches(path: str, patterns: Iterable[str]) -> bool:
@@ -883,6 +886,70 @@ class GitEngine:
                     restored.append(rel)
                 rec.details.update({"paths": _cap(restored), "count": len(restored)})
                 return restored
+
+    # ================================================================================== the last verified state
+    async def save_verified(self, ws: WorkspaceRef, *, step_id: uuid.UUID) -> list[str]:
+        """Keep a copy of the uncommitted changes that just passed verification: the review asked for a correction,
+        and a correction that fails must not cost the verified work (BUG-315).
+
+        Changed and new files are copied into the workspace's git directory (one store per step, replaced on every
+        call); deleted paths are recorded. ``restore_verified`` brings the work tree back to exactly this state.
+        Returns the saved paths."""
+        async with self._locked(ws) as (info, _repo, path):
+            rec = OpRecord(operation="workspace.save_verified", job_id=info.job_id, step_id=step_id, workspace_id=info.id, ref=info.branch)
+            async with self._audited(rec):
+                store = await ops.git_dir(self.runner, path) / VERIFIED_DIR / str(step_id)
+                await asyncio.to_thread(_fs.remove_tree, store)
+                saved: list[str] = []
+                deleted: list[str] = []
+                for entry in await ops.read_status(self.runner, path):
+                    src = path / entry.path
+                    if await asyncio.to_thread(_parkable, src, path):
+                        await asyncio.to_thread(_fs.ensure_dir, (store / "files" / entry.path).parent)
+                        await asyncio.to_thread(_fs.copy_if_exists, src, store / "files" / entry.path)
+                        saved.append(entry.path)
+                    elif not await asyncio.to_thread(_fs.exists, src):
+                        deleted.append(entry.path)
+                await asyncio.to_thread(_fs.ensure_dir, store)
+                manifest = json.dumps({"saved": saved, "deleted": deleted})
+                await asyncio.to_thread(_fs.write_text, store / "manifest.json", manifest)
+                rec.details.update({"paths": _cap(saved), "count": len(saved), "deleted": len(deleted)})
+                return saved
+
+    async def restore_verified(self, ws: WorkspaceRef, *, step_id: uuid.UUID) -> list[str] | None:
+        """Return the work tree to the state ``save_verified`` kept for ``step_id``: every other uncommitted change
+        goes back to HEAD. ``None`` when nothing was saved for the step. Returns the paths that differ from HEAD."""
+        async with self._locked(ws) as (info, _repo, path):
+            store = await ops.git_dir(self.runner, path) / VERIFIED_DIR / str(step_id)
+            raw = await asyncio.to_thread(_fs.read_text, store / "manifest.json")
+            if raw is None:
+                return None
+            manifest = json.loads(raw)
+            saved, deleted = list(manifest.get("saved", [])), list(manifest.get("deleted", []))
+            rec = OpRecord(
+                operation="workspace.restore_verified", job_id=info.job_id, step_id=step_id, workspace_id=info.id, ref=info.branch
+            )
+            async with self._audited(rec):
+                for entry in await ops.read_status(self.runner, path):
+                    if entry.path in saved or entry.path in deleted:
+                        continue
+                    await self.runner.run(["reset", "--quiet", "--", entry.path], cwd=path, check=False)
+                    tracked = await self.runner.run(["cat-file", "-e", f"HEAD:{entry.path}"], cwd=path, check=False)
+                    if tracked.returncode == 0:
+                        await self.runner.run(["checkout", "--quiet", "HEAD", "--", entry.path], cwd=path)
+                    elif await asyncio.to_thread(_parkable, path / entry.path, path):
+                        await asyncio.to_thread(_fs.remove_file, path / entry.path)
+                for rel in saved:
+                    dst = path / rel
+                    if not await asyncio.to_thread(_fs.is_within, dst, path) or await asyncio.to_thread(_fs.is_symlink, dst):
+                        continue
+                    await asyncio.to_thread(_fs.ensure_dir, dst.parent)
+                    await asyncio.to_thread(_fs.copy_fresh, store / "files" / rel, dst)
+                for rel in deleted:
+                    if await asyncio.to_thread(_parkable, path / rel, path):
+                        await asyncio.to_thread(_fs.remove_file, path / rel)
+                rec.details.update({"paths": _cap(saved), "count": len(saved), "deleted": len(deleted)})
+                return sorted({*saved, *deleted})
 
     @staticmethod
     def _validate_paths(paths: Sequence[str] | None) -> list[str] | None:

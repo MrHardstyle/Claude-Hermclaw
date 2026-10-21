@@ -89,6 +89,12 @@ def copy_if_exists(src: Path, dst: Path) -> bool:
     return True
 
 
+def copy_fresh(src: Path, dst: Path) -> None:
+    """Copy content and mode with a new mtime: a restored file is a change git must not take for the indexed one."""
+    shutil.copyfile(src, dst)
+    shutil.copymode(src, dst)
+
+
 def remove_file(path: Path) -> None:
     path.unlink(missing_ok=True)
 

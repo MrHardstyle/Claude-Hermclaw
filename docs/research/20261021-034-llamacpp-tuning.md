@@ -139,7 +139,7 @@ schema answers parsed.
   - n-gram speculation: no gain; the follow-up decode is 16 % slower.
   - `--moe-cache-mib 768`: decode −30 %.
   - A larger `-ub` for the planner: decode −5 to −12 %.
-- **Open for the operator: MTP for the planner** (`spec-type: draft-mtp`, `spec-draft-n-max: 3` in its
+- **MTP for the planner, adopted by the operator's decision (D-023)** (`spec-type: draft-mtp`, `spec-draft-n-max: 3` in its
   `ollama_llamacpp_models[].settings`).
   - Decode is +28–52 %, prefill −11 %, so it misses the 3 % rule.
   - For a typical plan (~4k prompt tokens, ~1,300 output tokens) the extra prefill costs ~3.5 s and the faster
@@ -164,4 +164,20 @@ schema answers parsed.
   | after (`llamacpp-ub1024-20261021`) | 4/4, 0.7 min | 10/10, 4.0 min | 6/6, 2.4 min | 3/3 |
 
 - **Way back:** `cp infra/ansible/inventory/hosts.yml.bak-20261021-pre-llamacpp-tuning infra/ansible/inventory/hosts.yml`,
+  then the same rollout.
+
+## Adoption of planner MTP (D-023)
+- The operator decided after the recommendation. Prefill is under 5 % of a planner call.
+- Inventory change: `settings: {fit: "on", spec-type: draft-mtp, spec-draft-n-max: 3}` for qwen3.8. The `models.ini`
+  diff is two lines.
+- **Probe through LiteLLM** (alias `planner-gemma`, PlanContract schema, same job, each run including the model swap):
+
+  | Run | Plan | Tokens | Time | Speed |
+  |---|---|---|---|---|
+  | before | valid, 5 steps | 511 | 255.6 s | 2.0 tok/s |
+  | after | valid, 5 steps | 736 | 222.4 s | 3.3 tok/s |
+
+  Draft acceptance 82 % (523/639), mean accepted length 3.46.
+- Doctor 21 OK, no OOM, `NRestarts` 0.
+- **Way back:** `cp infra/ansible/inventory/hosts.yml.bak-20261021-pre-planner-mtp infra/ansible/inventory/hosts.yml`,
   then the same rollout.

@@ -613,3 +613,26 @@ async def test_parked_leftovers_return_to_head_and_never_overwrite_a_changed_pat
         "workspace.park",
         "workspace.unpark",
     ]
+
+
+async def test_the_verified_state_comes_back_exactly_after_a_failed_correction(world):
+    """BUG-315: the review asked for a correction of verified work; the correction rewrote a file, deleted another,
+    created a third and broke the work. restore_verified returns the work tree to the saved state – changed, new and
+    deleted files alike – and every later change goes back to HEAD. Without a saved state it answers None."""
+    job_id = await world.job("verified")
+    ws = await world.engine.create_workspace(job_id, world.repo)
+    path = Path(ws.path)
+    step = uuid.uuid4()
+    assert await world.engine.restore_verified(ws.id, step_id=step) is None
+    write(path, "app.py", "verified\n")
+    write(path, "pkg/new.py", "x = 1\n")
+    assert await world.engine.save_verified(ws.id, step_id=step) == ["app.py", "pkg/new.py"]
+    write(path, "app.py", "broken by the correction\n")
+    (path / "pkg" / "new.py").unlink()
+    write(path, "later.py", "only the correction wrote this\n")
+    assert await world.engine.restore_verified(ws.id, step_id=step) == ["app.py", "pkg/new.py"]
+    assert (path / "app.py").read_text() == "verified\n" and (path / "pkg" / "new.py").read_text() == "x = 1\n"
+    assert not (path / "later.py").exists()
+    assert sorted(await world.engine.changed_files(ws.id)) == ["app.py", "pkg/new.py"]
+    ops_seen = [o.operation for o in await world.git_ops(job_id) if o.operation.endswith("_verified")]
+    assert ops_seen == ["workspace.save_verified", "workspace.restore_verified"]

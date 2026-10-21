@@ -346,6 +346,48 @@ async def test_review_invariant_major_finding_forces_correction(world: World, tm
     assert reviewer.earlier[0] == () and any("configurable via env" in f for f in reviewer.earlier[1])
 
 
+async def test_a_failed_review_correction_falls_back_to_the_verified_work(world: World, tmp_path: Path) -> None:
+    """BUG-315 (ladder A7 on rc66): the work passed verification, the review asked for a correction with a major
+    finding, and the correction broke the work and blocked the step. The step falls back to the verified state, verifies
+    it again and commits it – no replan, the broken edit never reaches the branch."""
+    broken = act("replace_text", path="src/module.py", old="VALUE = 2", new="VALUE = 3  # broken")
+    block = act("block_step", reason_code="test_conflict", message="the tests hang after my rewrite")
+    models = Models([_plan()], [EDIT, DONE, broken, block])
+    verifier, reviewer = ScriptedVerifier(world, [True, True]), ScriptedReviewer(["major_pass"])
+    jid = await _job(world)
+    jobs = await _run(world, _driver(world, models, tmp_path), [_handler(world, models, verifier, reviewer), ReviewHandler()], [jid])
+    assert jobs[jid].status == "succeeded", (jobs[jid].error_code, jobs[jid].error_message)
+    assert jobs[jid].replan_count == 0 and verifier.calls == 2 and reviewer.calls == 1
+    assert _remote_value(world) == "VALUE = 2"
+    async with world.sessionmaker() as s:
+        kinds = (await s.execute(select(Event.event_type).where(Event.job_id == jid))).scalars().all()
+    assert "correction.fell_back" in kinds
+
+
+async def test_a_blocker_finding_keeps_no_state_to_fall_back_to(world: World, tmp_path: Path) -> None:
+    """BUG-315: a blocker finding means the verified state must not ship – a failed correction goes to the replanner."""
+
+    class Blocker(ScriptedReviewer):
+        async def review(
+            self, step: StepContract, workspace: WorkspaceHandle, verification: VerificationReport, **_: Any
+        ) -> ReviewContract:
+            self.calls += 1
+            return ReviewContract(
+                verdict="fix_required",
+                findings=[ReviewFinding(severity="blocker", path="src/module.py", summary="VALUE leaks the API key")],
+            )
+
+    block = act("block_step", reason_code="test_conflict", message="cannot fix this")
+    models = Models([_plan(), _replan()], [EDIT, DONE, block, EDIT, DONE])
+    verifier, reviewer = ScriptedVerifier(world, [True, True]), Blocker([])
+    jid = await _job(world)
+    await _run(world, _driver(world, models, tmp_path), [_handler(world, models, verifier, reviewer), ReviewHandler()], [jid])
+    async with world.sessionmaker() as s:
+        old = (await s.execute(select(Step).where(Step.job_id == jid, Step.step_key == "S001"))).scalar_one()
+        kinds = (await s.execute(select(Event.event_type).where(Event.job_id == jid))).scalars().all()
+    assert old.superseded and "correction.fell_back" not in kinds
+
+
 async def test_exhausted_corrections_escalate_to_replan(world: World, tmp_path: Path) -> None:
     # S001 fails verification 3x (initial + 2 corrections) -> blocked repeated_verifier_failure -> Gemma replan -> S003 passes
     models = Models([_plan(), _replan()], [EDIT, DONE, DONE, DONE, DONE, DONE, EDIT, DONE])  # BUG-258: each correction completes twice

@@ -39,6 +39,11 @@ Ports: `VerifierPort.verify(step, workspace, …) -> VerificationOutcome(report,
 - bounded by `policies.correction.max_corrections_per_step` (2) and `steps.max_attempts` (3); counters live in PostgreSQL
 - every attempt is fully re-verified (regression rerun); after a base update the runtime driver reruns verification (`RegressionCheck`)
 - budget exhausted → blocked `repeated_verifier_failure` → scheduler → Gemma replan (completed steps preserved)
+- verified state kept (BUG-315): a review `fix_required` without a blocker finding on work that passed verification saves
+  that work (`GitEngine.save_verified`: changed, new and deleted files in the workspace's git directory, per step). When
+  the step later ends blocked (coder block, replan request, stagnation, exhausted corrections), `_keep_verified` restores
+  it (`restore_verified`), verifies it again and commits it with the event `correction.fell_back`; a failing re-verification
+  keeps the block. A failed correction never costs verified work.
 
 ## Tests
 

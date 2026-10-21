@@ -88,6 +88,7 @@ class EventType:
     REVIEW_FINISHED = "review.finished"
     CORRECTION_STARTED = "correction.started"
     ACCEPTANCE_WAIVED = "acceptance.waived"
+    CORRECTION_FELL_BACK = "correction.fell_back"  # a failed review correction kept the verified state (BUG-315)
     STAGNATION_DETECTED = "stagnation.detected"
     STRATEGY_CHANGED = "strategy.changed"
     CHECKPOINT_CREATED = "checkpoint.created"

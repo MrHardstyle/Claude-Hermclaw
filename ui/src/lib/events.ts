@@ -82,6 +82,7 @@ export const KNOWN_EVENT_TYPES: readonly string[] = [
   "review.finished",
   "correction.started",
   "acceptance.waived",
+  "correction.fell_back",
   "stagnation.detected",
   "strategy.changed",
   "checkpoint.created",
