@@ -4,7 +4,7 @@
 # for another model unloads the loaded one and loads the requested one.
 - name: Validate the llama.cpp settings
   vars:
-    ollama_llamacpp_preset_settings: "{{ ollama_llamacpp_models | map(attribute='settings', default={}) | map('dict2items') | flatten }}"
+    ollama_llamacpp_preset_settings: "{{ (ollama_llamacpp_models | map(attribute='settings', default={}) | map('dict2items') | flatten) + (ollama_llamacpp_model_settings | dict2items) }}"
   ansible.builtin.assert:
     that:
       - ollama_llamacpp_build is match('^b[0-9]+$')
@@ -28,6 +28,8 @@
       - ollama_llamacpp_models | selectattr('path', 'defined') | map(attribute='path') | reject('match', '^/[A-Za-z0-9._/-]+\\.gguf$') | list | length == 0
       - ollama_llamacpp_preset_settings | map(attribute='key') | map('string') | reject('match', '^[a-z][a-z0-9-]*$') | list | length == 0
       - ollama_llamacpp_preset_settings | map(attribute='value') | map('string') | reject('match', '^[A-Za-z0-9._:,/-]+$') | list | length == 0
+      # the main model's own keys stay with their variables (a second n-cpu-moe line would make the preset ambiguous)
+      - ollama_llamacpp_model_settings.keys() | intersect(['model', 'alias', 'n-gpu-layers', 'n-cpu-moe', 'load-on-startup']) | list | length == 0
     fail_msg: >-
       invalid llama.cpp settings: ollama_llamacpp_archive_src/ollama_llamacpp_archive_sha256 come from scripts/ops/build-llamacpp.sh
       and the archive name carries ollama_llamacpp_build (llamacpp-<build>-sm<arch>.tgz),

@@ -17,7 +17,7 @@ SupplementaryGroups={{ ollama_supplementary_groups | default(['video', 'render']
 ExecStart={{ ollama_llamacpp_install_root }}/current/bin/llama-server --models-preset {{ ollama_llamacpp_install_root }}/models.ini --models-max 1 --host 0.0.0.0 --port {{ ollama_llamacpp_port }} --no-webui{% for a in ollama_llamacpp_extra_args %} {{ a }}{% endfor %}
 
 {% else %}
-ExecStart={{ ollama_llamacpp_install_root }}/current/bin/llama-server -m {{ ollama_llamacpp_model_path }} --alias {{ ollama_llamacpp_model }} --host 0.0.0.0 --port {{ ollama_llamacpp_port }} -c {{ ollama_llamacpp_context }} -ngl 99 --n-cpu-moe {{ ollama_llamacpp_n_cpu_moe }} -fa {{ ollama_llamacpp_flash_attention }} -t {{ ollama_llamacpp_threads }} -np 1 --jinja --no-webui{% for a in ollama_llamacpp_extra_args %} {{ a }}{% endfor %}
+ExecStart={{ ollama_llamacpp_install_root }}/current/bin/llama-server -m {{ ollama_llamacpp_model_path }} --alias {{ ollama_llamacpp_model }} --host 0.0.0.0 --port {{ ollama_llamacpp_port }} -c {{ ollama_llamacpp_context }} -ngl 99 --n-cpu-moe {{ ollama_llamacpp_n_cpu_moe }} -fa {{ ollama_llamacpp_flash_attention }} -t {{ ollama_llamacpp_threads }} -np 1 --jinja --no-webui{% for key, value in (ollama_llamacpp_model_settings | default({})).items() %} --{{ key }}{% if value | string != 'true' %} {{ value }}{% endif %}{% endfor %}{% for a in ollama_llamacpp_extra_args %} {{ a }}{% endfor %}
 
 {% endif %}
 

@@ -744,6 +744,33 @@ def test_llamacpp_router_mode_serves_further_models_under_their_ollama_tags(tmp_
     assert ini["*"]["ctx-size"] == "32768" and ini["*"]["parallel"] == "1"
 
 
+def test_llamacpp_main_model_takes_preset_settings_and_without_them_stays_as_before(tmp_path: Path) -> None:
+    """R-034: ollama_llamacpp_model_settings carries tuned preset values of the resident model – a line each in its
+    models.ini section (router mode), `--<option> <value>` in single-model mode (`true`: the bare flag). Without
+    values both stay exactly as before."""
+    blob = "/var/lib/ollama/models/blobs/sha256-"
+    router = {"ollama_llamacpp_enabled": True, "ollama_llamacpp_models": [{"model": "qwen3.8:27b"}]}
+    router["ollama_llamacpp_model_paths"] = {"qwen3.6:35b": blob + "0" * 64, "qwen3.8:27b": blob + "1" * 64}
+    settings = {"ollama_llamacpp_model_settings": {"ubatch-size": 1024, "no-mmap": "true"}}
+    single_exec = (
+        f"ExecStart=/opt/llamacpp/current/bin/llama-server -m {blob}{'0' * 64} --alias qwen3.6:35b --host 0.0.0.0 "
+        "--port 18080 -c 32768 -ngl 99 --n-cpu-moe 30 -fa on -t 6 -np 1 --jinja --no-webui"
+    )
+    for name, overrides, extra in [("plain", {}, ""), ("tuned", settings, " --ubatch-size 1024 --no-mmap")]:
+        single = _render(tmp_path, tmp_path / f"single-{name}", _render_vars({"ollama_llamacpp_enabled": True, **overrides}))
+        unit = single["systemd/hermclaw-llamacpp.service"].read_text(encoding="utf-8")
+        assert [ln for ln in unit.splitlines() if ln.startswith("ExecStart=")] == [single_exec + extra]
+        out = _render(tmp_path, tmp_path / f"router-{name}", _render_vars({**router, **overrides}))
+        ini = configparser.ConfigParser()
+        ini.read_string("[top]\n" + out["ollama/llamacpp-models.ini"].read_text(encoding="utf-8"))
+        expected = {"alias": "qwen3.6:35b", "model": blob + "0" * 64, "n-gpu-layers": "99", "n-cpu-moe": "30"}
+        expected["load-on-startup"] = "true"
+        if overrides:
+            expected |= {"ubatch-size": "1024", "no-mmap": "true"}
+        assert dict(ini["qwen3.6-35b"]) == expected
+        assert dict(ini["qwen3.8-27b"]) == {"alias": "qwen3.8:27b", "model": blob + "1" * 64}
+
+
 def test_rendered_podman_and_searxng(rendered: dict[str, Path]) -> None:
     delegate = rendered["podman/delegate.conf"].read_text(encoding="utf-8")
     assert "[Service]\nDelegate=cpu cpuset io memory pids" in delegate

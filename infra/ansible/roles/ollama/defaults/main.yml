@@ -81,6 +81,9 @@ ollama_llamacpp_n_cpu_moe: 30              # MoE layers whose experts stay in RA
 ollama_llamacpp_threads: 6
 ollama_llamacpp_flash_attention: "on"
 ollama_llamacpp_extra_args: []             # further llama-server arguments (validated allowlist)
+# preset values of the main model ({<llama-server option without dashes>: <value>}, as ollama_llamacpp_models[].settings;
+# R-034, e.g. {ubatch-size: 1024}); in single-model mode they become `--<option> <value>` (`true`: the bare flag)
+ollama_llamacpp_model_settings: {}
 ollama_llamacpp_health_retries: 60         # x 5 s: a cold page cache loads ~20 GB from disk
 # Further models the same llama-server serves on demand (router mode, `--models-max 1`): a request names the model,
 # the server unloads the loaded one and loads the requested one (the RAM of the model host holds one large model).

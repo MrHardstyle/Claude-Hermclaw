@@ -15,6 +15,9 @@ model = {{ ollama_llamacpp_model_path }}
 n-gpu-layers = 99
 n-cpu-moe = {{ ollama_llamacpp_n_cpu_moe }}
 load-on-startup = true
+{% for key, value in ollama_llamacpp_model_settings.items() %}
+{{ key }} = {{ value }}
+{% endfor %}
 {% for m in ollama_llamacpp_models %}
 
 [{{ m.model | replace(':', '-') }}]
