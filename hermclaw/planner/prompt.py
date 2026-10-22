@@ -43,6 +43,9 @@ KNOWLEDGE_NOTE = (
     "it fits this job; the job text and the repository decide over it."
 )
 MUTATING_KINDS_TEXT = ", ".join(sorted(k.value for k in MUTATING_STEP_KINDS))
+#: evidence the runtime adds to every changing step itself; the model-facing schema leaves it out (BUG-320)
+RUNTIME_EVIDENCE_TYPES = ("scope", "security")
+MODEL_EVIDENCE_TYPES = tuple(t for t in EVIDENCE_TYPES if t not in RUNTIME_EVIDENCE_TYPES)
 
 
 # --------------------------------------------------------------------------------------------- truncation
@@ -400,9 +403,7 @@ def _evidence_examples() -> str:
             "(runs the delivered program end to end like a user)",
             '  {"type":"test","command":"<repository test command>","framework":"pytest|unittest|npm|phpunit|go|cargo|generic"}',
             '  {"type":"diff","must_change":["path/or/glob"],"must_not_change":[],"allow_empty":false}',
-            '  {"type":"scope"}  (all changes stay inside the runtime scope)',
             '  {"type":"schema","path":"config/app.yaml","format":"json|yaml|toml"}',
-            '  {"type":"security","secret_scan":true,"conflict_markers":true}',
             '  {"type":"artifact","kind":"image|video|report|...","name_glob":"*.png"}',
             '  {"type":"artifact","kind":"ops_output","name_glob":"ssh_service_status*"}  (output of an operations tool call)',
         ]
@@ -452,7 +453,9 @@ def _base_rules(kind_capability: dict[str, str], capability_names: Sequence[str]
         "use there (README in its repo_hints, or in allowed_new_paths when the repository has none and the job "
         "creates a new program).",
         f"Every mutating step (kinds: {MUTATING_KINDS_TEXT}) MUST have machine-checkable acceptance criteria. "
-        f"Use only these evidence types: {', '.join(EVIDENCE_TYPES)}. Examples:\n{_evidence_examples()}",
+        f"Use only these evidence types: {', '.join(MODEL_EVIDENCE_TYPES)}. Examples:\n{_evidence_examples()}\n"
+        "The runtime itself adds the scope check (all changes inside the step's paths) and the security check (no "
+        "secrets, no conflict markers) to every changing step.",
         "Test evidence uses the repository's own test command as given in repository_inventory/existing_tests. "
         "Never invent test commands or test files that do not exist.",
         "repo_hints are the existing repository-relative files, directories, globs or symbol names a step works on. "
@@ -485,6 +488,9 @@ def _base_rules(kind_capability: dict[str, str], capability_names: Sequence[str]
         "risk is low|medium|high. Deployments, SSH/server administration and database changes are at least medium.",
         "Respect every entry of constraints. Never plan git commits, pushes, merges or branch operations; "
         "the runtime performs all git mutations.",
+        "Keep the plan short: every worker receives the job text itself, so goal is one sentence naming the outcome "
+        "(never a restatement of the job), and assumptions and risks hold at most three short items each, only what "
+        "the job text does not already say. The details belong into the goals and acceptance of the steps.",
         "Answer with exactly ONE JSON object that conforms to the provided JSON schema. No markdown, no prose, "
         "no comments, no explanation of your reasoning.",
     ]
@@ -497,7 +503,7 @@ def planner_system_prompt(kind_capability: dict[str, str], capability_names: Seq
         "You are Gemma, the PLANNER of Hermclaw Next, a local multi-agent system for software and operations work.\n"
         "You receive one JSON document (job, repository_inventory, retrieved_context, research_summary, knowledge, "
         "capabilities, constraints, existing_tests, risk_policy) and produce a structured execution plan (PlanContract: "
-        "goal, summary, assumptions, risks, research_needed, steps).\n"
+        "goal, assumptions, risks, research_needed, steps).\n"
         f"{KNOWLEDGE_NOTE}\n"
         f"Rules:\n{numbered}\n"
     )

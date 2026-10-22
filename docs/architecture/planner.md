@@ -75,7 +75,10 @@ the gateway, never by the planner.
    with the profile's `max_output_tokens`, `temperature` and `timeout_seconds`. The schema sent to the model bounds
    the step lists more tightly than the contract (`MODEL_STEP_LIST_BOUNDS`: 12 acceptance criteria, 20 paths, hints
    and constraints): the grammar closes the array there, so a repetition loop ends after a few items instead of at
-   the contract's 30 (BUG-288).
+   the contract's 30 (BUG-288). It also leaves out what the runtime adds or no worker reads: no `scope` and
+   `security` evidence (enrichment adds both to every changing step), no `summary`, a plan `goal` of at most 300
+   characters and at most three short `assumptions` and `risks` (BUG-320: qwen3.8 repeated scope/security up to eight
+   times per step and restated the job as the goal, a third of the plan's output). The contracts accept all of them.
 3. **Validation**, in this order. Any failure raises an internal `PlanInvalid(phase, errors)`:
    - `parse`: the JSON object of the final content. Fences and surrounding prose are tolerated. An empty answer is an error even when the model produced hidden reasoning, which is never accepted as a plan;
    - `schema` (14.3): `PlanContract` (unknown fields rejected, `S###` ids, duplicate ids, unknown or self dependencies, cycles), with located messages such as `steps[0](S001).kind: …`;

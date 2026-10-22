@@ -291,6 +291,46 @@ def test_model_facing_schemas_require_the_scope_fields() -> None:
     )
 
 
+def test_model_facing_schemas_leave_out_what_the_runtime_adds() -> None:
+    """BUG-320 (ladder A7 #8 on rc71): qwen3.8 wrote scope and security up to eight times per step and restated the job
+    as the plan goal – a third of the plan's output at 3–4 tok/s. The model-facing schema has no scope/security
+    evidence and no summary and keeps goal, assumptions and risks short; the contracts still accept all of them."""
+    import json
+
+    from hermclaw.contracts.plan import PlanContract
+    from hermclaw.planner.prompt import planner_system_prompt
+    from hermclaw.planner.replanner import replan_json_schema
+
+    for schema, name in ((plan_json_schema(), "PlanStep"), (replan_json_schema(), "ReplanStep")):
+        text = json.dumps(schema)
+        assert "ScopeEvidence" not in text and "SecurityEvidence" not in text
+        items = schema["$defs"][name]["properties"]["acceptance"]["items"]
+        assert {"scope", "security"}.isdisjoint(items["discriminator"]["mapping"])
+        assert {"test", "diff", "command"} <= set(items["discriminator"]["mapping"])
+        props = schema["properties"]
+        assert "summary" not in props and props["goal"]["maxLength"] == 300
+        assert props["assumptions"]["maxItems"] == 3 and props["risks"]["items"]["maxLength"] == 200
+    system = planner_system_prompt({"implement": "coding"}, ["coding"], 8)
+    assert '"type":"scope"' not in system and "adds the scope check" in system and "goal is one sentence" in system
+    plan = PlanContract.model_validate(
+        {
+            "goal": "x" * 1000,
+            "summary": "kept",
+            "steps": [
+                {
+                    "id": "S001",
+                    "title": "abc",
+                    "kind": "implement",
+                    "capability": "coding",
+                    "goal": "do it",
+                    "acceptance": [{"type": "scope"}],
+                }
+            ],
+        }
+    )
+    assert plan.summary == "kept" and plan.steps[0].acceptance[0].type == "scope"
+
+
 async def test_a_repair_that_changes_nothing_raises_the_temperature() -> None:
     """BUG-188 (rc16 battery J5): two repair turns at 0.2 reproduced the same runaway answer verbatim."""
     bad = FASTAPI.answer()

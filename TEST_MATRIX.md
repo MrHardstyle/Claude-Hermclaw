@@ -46,7 +46,7 @@ Playwright 35. Live-Suiten: `scripts/ops/live-acceptance.sh` (INSTALLATION.md Ka
 | P25 | Scheduler | `pytest tests/integration/test_scheduler.py` | 17 passed | – |
 | P06 | Git Engine | `pytest tests/*/test_gitops_*.py` | 185 passed, 1 skipped (live) | `pytest -m live tests/integration/test_gitops_live.py` (GitLab .226) |
 | P07 | Worker-Protokoll/Daemons | `pytest tests/*/test_workers_*.py` | 134 passed, 1 skipped (Podman-Sandbox) | `pytest -m live tests/integration/test_workers_live.py` (HERMCLAW_LIVE_EXEC_TOKEN_FILE, HERMCLAW_LIVE_MODEL_TOKEN_FILE, HERMCLAW_LIVE_DATABASE_URL) |
-| P14/P24 | Planner/Replanner | `pytest tests/*/test_planner_*.py` | 113 passed | Live-Gemma (14.2/24.2) über LiteLLM `planner-gemma` |
+| P14/P24 | Planner/Replanner | `pytest tests/*/test_planner_*.py` | 113 passed | Live-Gemma (14.2/24.2) über LiteLLM `planner-gemma` ; BUG-320: Schema an das Modell ohne Scope/Security und Zusammenfassung, kurzes Plan-Ziel (`test_model_facing_schemas_leave_out_what_the_runtime_adds`) |
 | P15 | Scope Engine | `pytest tests/*/test_scope_*.py` | 198 passed | – |
 | P08 | Model Gateway | `HERMCLAW_TEST_LITELLM_BIN=<litellm-venv>/bin/litellm pytest tests/*/test_models_*.py` | 129 passed (inkl. 12 empirische LiteLLM-Proxy-Tests), 6 live deselektiert | `pytest -m live tests/integration/test_models_live.py` gegen LiteLLM `.225:4000` + Ollama `.224` |
 | P16 | Context Builder | `pytest tests/*/test_context_builder_*.py` | 79 passed | – |

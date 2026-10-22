@@ -91,11 +91,33 @@ MODEL_STEP_LIST_BOUNDS: dict[str, int] = {
     "command_hints": 10,
     "depends_on": 20,
 }
+# Evidence the runtime adds to every workspace-changing step itself (enrich.generate_acceptance), and the plan-level
+# texts no worker reads (each worker gets the job text itself). qwen3.8 wrote scope and security up to eight times per
+# step, dropped later as duplicates, and restated the whole job as the plan goal: at 3–4 tok/s about a third of a
+# plan's output and two of its six minutes (ladder A7 #8 on rc71, BUG-320). The schema sent to the model leaves the two
+# evidence types and the summary out and keeps the other plan-level texts short; the contracts are unchanged.
+RUNTIME_EVIDENCE_DEFINITIONS: tuple[str, ...] = ("ScopeEvidence", "SecurityEvidence")
+MODEL_PLAN_TEXT_BOUNDS: dict[str, int] = {"goal": 300}
+MODEL_PLAN_LIST_BOUNDS: dict[str, tuple[int, int]] = {"assumptions": (3, 200), "risks": (3, 200)}
+MODEL_PLAN_DROPPED_FIELDS: tuple[str, ...] = ("summary",)
+
+
+def _without_runtime_evidence(schema: dict[str, Any], acceptance: dict[str, Any]) -> None:
+    refs = {f"#/$defs/{name}" for name in RUNTIME_EVIDENCE_DEFINITIONS}
+    items = acceptance.get("items", {})
+    if "oneOf" in items:
+        items["oneOf"] = [i for i in items["oneOf"] if i.get("$ref") not in refs]
+    mapping = items.get("discriminator", {}).get("mapping", {})
+    for key in [k for k, ref in mapping.items() if ref in refs]:
+        del mapping[key]
+    for name in RUNTIME_EVIDENCE_DEFINITIONS:
+        schema["$defs"].pop(name, None)
 
 
 def model_facing_schema(schema: dict[str, Any], step_definition: str) -> dict[str, Any]:
-    """``schema`` with :data:`MODEL_REQUIRED_STEP_FIELDS` required on its step definition (``$defs``) and the step's
-    lists bounded by :data:`MODEL_STEP_LIST_BOUNDS`."""
+    """``schema`` with :data:`MODEL_REQUIRED_STEP_FIELDS` required on its step definition (``$defs``), the step's
+    lists bounded by :data:`MODEL_STEP_LIST_BOUNDS`, without the evidence the runtime adds itself and with short
+    plan-level texts (BUG-320)."""
     step = schema["$defs"][step_definition]
     required = list(step.get("required", []))
     required += [f for f in MODEL_REQUIRED_STEP_FIELDS if f in step["properties"] and f not in required]
@@ -104,6 +126,17 @@ def model_facing_schema(schema: dict[str, Any], step_definition: str) -> dict[st
         prop = step["properties"].get(name)
         if prop is not None and prop.get("type") == "array":
             prop["maxItems"] = min(bound, prop.get("maxItems", bound))
+    _without_runtime_evidence(schema, step["properties"]["acceptance"])
+    props = schema["properties"]
+    for name in MODEL_PLAN_DROPPED_FIELDS:
+        props.pop(name, None)
+    for name, chars in MODEL_PLAN_TEXT_BOUNDS.items():
+        if name in props:
+            props[name]["maxLength"] = min(chars, props[name].get("maxLength", chars))
+    for name, (count, chars) in MODEL_PLAN_LIST_BOUNDS.items():
+        if name in props:
+            props[name]["maxItems"] = min(count, props[name].get("maxItems", count))
+            props[name]["items"]["maxLength"] = chars
     return schema
 
 

@@ -46,6 +46,12 @@ Noch keine.
 
 ## Behobene Bugs
 
+### BUG-320 – Der Planer schreibt, was die Laufzeit selbst ergänzt, und wiederholt es bis zu achtmal
+- Phase: Schwierigkeitsleiter auf rc71, 2026-10-22 (A7#8, Job 588a32c9) · Komponente: planner (`planner.py`, `prompt.py`) · Severity: P2 · blockierend: nein · Status: **behoben im Repository** (`tests/unit/test_planner_loop.py::test_model_facing_schemas_leave_out_what_the_runtime_adds`)
+- Reproduktion: Der Planer (qwen3.8, 3–4 tok/s) braucht für den Ein-Schritt-Plan von A7 1.071 Ausgabe-Tokens und 5,9 min; der Job scheitert später am 40-min-Limit. In der Antwort stehen `scope` und `security` je fünfmal im selben Schritt, in 27 Planer-Antworten seit dem 21.10. bis zu achtmal. Das Plan-Ziel wiederholt den ganzen Auftrag (650 Zeichen), dazu vier Annahmen und zwei Risiken.
+- Ursache: Die Laufzeit ergänzt Scope- und Security-Kriterien in jedem ändernden Schritt selbst und verwirft Duplikate (`enrich.generate_acceptance`). Prompt und Schema boten sie dem Modell trotzdem an. Plan-Ziel, Zusammenfassung, Annahmen und Risiken liest kein Worker, denn jeder bekommt den Auftragstext selbst. Das Schema erlaubte dafür trotzdem 4.000 Zeichen und je 40 Einträge.
+- Fix: Das Schema an das Modell enthält keine Scope- und Security-Kriterien und keine Zusammenfassung mehr. Es begrenzt das Plan-Ziel auf 300 Zeichen und Annahmen und Risiken auf je drei Einträge mit 200 Zeichen. Der Prompt sagt, dass die Laufzeit beide Prüfungen selbst ergänzt und das Ziel ein Satz ist. Die Verträge bleiben unverändert, gilt für Planer und Replaner.
+
 ### BUG-319 – Die Abdeckungskorrektur schreibt Tests mit einer Bibliothek, die die Sandbox nicht hat
 - Phase: Messung D-024 auf rc70, 2026-10-22 (A8, Job 7f379fe0) · Komponente: coder (`coverage.py`) · Severity: P3 · blockierend: nein · Status: **behoben im Repository** (`tests/unit/test_coverage.py::test_the_correction_names_the_tools_of_the_existing_tests`)
 - Reproduktion: S001 von A8 besteht den Verifier mit Tests nur für die Speicherschicht. Die Abdeckungsprüfung meldet zu Recht über 20 ungetestete Anforderungen der HTTP-API (8 gehen in die Korrektur). Der Coder schreibt `tests/test_http.py` mit `import requests`. Die Sandbox installiert kein Paket ohne Manifest, der Coder blockiert den Step nach 3,5 min. Der Rückfall auf den verifizierten Stand greift (`correction.fell_back`), die neuen HTTP-Tests sind verloren.
