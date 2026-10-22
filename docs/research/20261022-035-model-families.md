@@ -108,6 +108,31 @@ failure, no unexpected or protected changes. The delivered files were checked in
   model's at this effort and output budget.
 - One repetition on three small tasks says little about variance; the large tasks (A6–A9) were not part of it.
 
+## Stage 1: large tasks (2026-10-22, operator-approved)
+Same setup as the preliminary tournament (rc69, prescribed plan, no review, no replan), tasks A7, A8, A9, one
+repetition each, `coder-main` against `coder-gemma4-26b`, 11:57–13:34, `/var/lib/hermclaw/tournament/stage1-large/`.
+
+| Profile | Correct runs | Hidden checks | Model calls | Minutes | K.o. | Points (same report) |
+|---|---|---|---|---|---|---|
+| `coder-main` | 0/3 | 52/64 (A7 30/31, A8 16/23, A9 6/10) | 136 (14/73/49) | 49.5 (6.5/26.6/16.4) | 0 | 51.1 |
+| `coder-gemma4-26b` | 0/3 | 41/64 (A7 29/31, A8 5/23, A9 7/10) | 87 (30/50/7) | 45.5 (20.1/22.6/2.8) | 1 | 35.6 |
+
+- Neither model delivers a fully correct run, so the guide's order (correct runs, then calls) only ties; the hidden
+  checks and the points of the same report put `coder-main` ahead.
+- **A7:** `coder-main` repeats the ladder's model error (`test_ids_are_distinct`, counter on the handler instance);
+  Gemma misses the 404 for `PUT` on an unknown note, its own tests fail, and the run ends in edit stagnation
+  (`replace_text` with identical `old`/`new`).
+- **A8:** `coder-main` succeeded with 16/23 (list shape, filters, 400 for invalid bodies). Gemma's server answers
+  `GET /api/tasks` with 400 and ends in stagnation; 5/23. Its knock-out comes from
+  `test_security_titles_are_stored_as_data_not_sql`, but the delivered `storage.py` binds every value as an SQL
+  parameter: the check fails because listing is broken, not because of an injection. The knock-out does not change
+  the order.
+- **A9:** both fail the PowerShell single-element trap (`ConvertTo-Json` unwraps one object, no `[]` for none).
+  `coder-main` additionally fails its own Pester tests: it mocked `Get-Service`, which does not exist in `pwsh` on
+  Linux, and stopped after three stagnations; Gemma's own tests pass.
+- No infrastructure failure, no unexpected or protected changes, no Hermclaw bug found.
+- Both stages together: `coder-main` 3/6 correct, 72/84 hidden checks; Gemma 3/6, 61/84 and one knock-out.
+
 ## Result
 - Part 1a: Gemma 4 26B-A4B passes.
 - Part 1b: gpt-oss-20b passes with `reasoning_effort: low`, which Hermclaw cannot set yet.
@@ -115,7 +140,6 @@ failure, no unexpected or protected changes. The delivered files were checked in
 - Part 2 (0.1.0rc69): per-profile `chat_template_kwargs`.
 - Part 3b: Gemma 4 26B is as correct as `coder-main` in the same run, with fewer model calls and about the same
   duration; GLM-4.7-Flash and gpt-oss-20b fall behind and are not pursued as coder.
-- Proposed next test (operator decision, not started): `--reps 3` over all tournament tasks A1–A9 for `coder-main`
-  and `coder-gemma4-26b`, or the ladder (D-020) with `coder-gemma4-26b` as coder. `coder-main` stays qwen3.6:35b until
-  the operator approves a switch (DECISIONS entry with rollback).
+- Stage 1 (large tasks A7–A9): Gemma 4 26B falls behind `coder-main` (41/64 against 52/64 hidden checks, one
+  knock-out). Stage 2 (`--reps 3` over A1–A9) is not proposed; `coder-main` stays qwen3.6:35b, no DECISIONS entry.
 - Next part: 4 or done, by the operator's answer.
