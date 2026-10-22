@@ -23,6 +23,7 @@ from typing import TYPE_CHECKING, Any, Protocol
 from sqlalchemy import select, update
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
+from hermclaw.coder.coverage import check_coverage, gap_items, read_tests
 from hermclaw.coder.loop import CoderLoop, CoderResult, CoderSettings, StagnationHook, history_from_checkpoint
 from hermclaw.context_builder import ContextBuilder, ContextBuilderConfig, CorrectionItem, StepBrief
 from hermclaw.contracts.acceptance import AcceptanceCriterion
@@ -258,6 +259,7 @@ class _Run:
     handle: WorkspaceHandle
     earlier_findings: tuple[str, ...] = ()  # review findings this correction attempt had to address (BUG-284)
     review: bool = True  # False in a coder tournament run: the review would measure a second model
+    coder_alias: str | None = None  # the tournament's coder profile; None: the profile of the role coder
 
 
 class _Callbacks:
@@ -563,7 +565,7 @@ class ImplementStepHandler:
         try:
             earlier = tuple(c.message for c in corrections if c.source == "review")
             review = tournament is None or tournament.review
-            run = _Run(ctx, row, step, ws, handle, earlier, review=review)
+            run = _Run(ctx, row, step, ws, handle, earlier, review=review, coder_alias=coder_alias)
             return await self._keep_verified(run, await self._after_loop(run, result), result)
         except ResourceUnavailable as exc:  # heavy-review lease not granted in time
             return StepOutcome("failed", error_code=exc.code, error_message=exc.message, retryable=True)
@@ -744,6 +746,7 @@ class ImplementStepHandler:
                 )
             items = [*budget_items, *CorrectionItem.from_verification(outcome.report)]
             return await self._correction(ctx, row, "verifier", items, "VERIFIER_FAILED", outcome.report.summary or "verification failed")
+        gaps = gap_items(await self._coverage_gaps(run))
         if self.deps.reviewer is not None and self._reviews(run):
             await self._status(ctx, f"Heavy Review für {row.step_key}")
             async with self._model(ctx, "heavy", preemptible=False):
@@ -766,10 +769,17 @@ class ImplementStepHandler:
                     ctx,
                     row,
                     "review",
-                    list(CorrectionItem.from_review(review)),
+                    [*CorrectionItem.from_review(review), *gaps],
                     "REVIEW_FIX_REQUIRED",
                     review.summary or "review requires fixes",
                 )
+        if gaps:
+            # the work passed verification (and the review): a correction that fails falls back to it, as after a
+            # review finding (BUG-315)
+            await self.deps.git.save_verified(run.ws, step_id=ctx.step_id)
+            return await self._correction(
+                ctx, row, "coverage", gaps, "COVERAGE_GAP", f"{len(gaps)} requirement(s) of the task without a test"
+            )
         if waived:
             async with self.sm() as s:
                 await append_event(
@@ -783,6 +793,76 @@ class ImplementStepHandler:
                 )
                 await s.commit()
         return await self._commit(run, outcome, result)
+
+    async def _coverage_gaps(self, run: _Run) -> list[str]:
+        """The requirements of the task no delivered test checks (``hermclaw.coder.coverage``), once per implement step
+        and only while a correction can still follow; a failed check is recorded and skipped, it never blocks a step
+        that passed verification."""
+        ctx, row = run.ctx, run.row
+        limit = self.config.policies.correction.max_corrections_per_step
+        if (
+            not self.config.policies.coder.coverage_check
+            or row.kind != StepKind.implement.value
+            or row.correction_count >= limit
+            or row.attempt_count >= row.max_attempts
+        ):
+            return []
+        async with self.sm() as s:
+            checked = (
+                await s.execute(
+                    select(Event.sequence).where(Event.step_id == ctx.step_id, Event.event_type == EventType.COVERAGE_CHECKED).limit(1)
+                )
+            ).first()
+        if checked is not None:
+            return []
+        try:
+            profile = self.config.models.by_alias(run.coder_alias) if run.coder_alias else self.config.models.by_role("coder")
+        except ConfigError:
+            return []
+        payload: dict[str, Any] = {"alias": profile.alias}
+        gaps: list[str] = []
+        try:
+            changed = await self.deps.git.reader().changed_files(run.handle)
+            if not read_tests(Path(run.handle.path), changed):
+                return []  # no test file delivered: nothing to judge, no event (a later attempt may add tests)
+            await self._status(ctx, f"{row.step_key}: Abdeckung der Anforderungen durch die eigenen Tests")
+            async with self._model(ctx, "coder", preemptible=False, alias=run.coder_alias):
+                found = await check_coverage(
+                    self.deps.chat,
+                    profile.alias,
+                    Path(run.handle.path),
+                    changed,
+                    request=await self._job_request(ctx.job_id),
+                    goal=run.step.goal,
+                    job_id=ctx.job_id,
+                    step_id=ctx.step_id,
+                    attempt_id=ctx.attempt_id,
+                    max_tokens=min(profile.max_output_tokens, 4096),
+                    temperature=profile.temperature,
+                )
+        except (HermclawError, OSError) as exc:  # ResourceUnavailable, model errors: the step keeps its verified work
+            payload["error"] = DEFAULT_REDACTOR.text(f"{type(exc).__name__}: {exc}")[:500]
+            found = None
+        if found is not None:
+            gaps = list(found.gaps)
+            payload |= {
+                "alias": found.alias,
+                "requirements": found.requirements,
+                "tests": found.tests,
+                "gaps": [DEFAULT_REDACTOR.text(g)[:300] for g in gaps[:20]],
+            }
+        async with self.sm() as s:
+            await append_event(
+                s,
+                EventType.COVERAGE_CHECKED,
+                source_type="coder",
+                job_id=ctx.job_id,
+                step_id=ctx.step_id,
+                attempt_id=ctx.attempt_id,
+                payload=payload,
+            )
+            await s.commit()
+        return gaps
 
     async def _keep_verified(self, run: _Run, outcome: StepOutcome, result: CoderResult) -> StepOutcome:
         """A blocked step whose work once passed verification, before the review asked for a correction, falls back to

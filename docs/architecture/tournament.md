@@ -24,7 +24,8 @@ The runner creates an ordinary job whose reserved metadata entry `tournament` ho
    the job like a planner failure, so every plan of a specification is checked once before the tournament.
 2. **Implement handler:** the coder and its context budget use `coder_alias` (a profile of role `coder`), the lease is
    taken for that alias, and with `review=False` no heavy review runs; stagnation that would ask the review for advice
-   becomes a correction instead.
+   becomes a correction instead. The requirement-coverage check (D-024) runs on `coder_alias` as well: it measures
+   the same model, and its call and correction count in `model_calls` and `corrections`.
 3. **Scheduler:** the replan limit is `min(policy.max_replans_per_job, tournament.replans)` – 0 by default, so a step
    that exhausts its attempts ends the job.
 4. **Driver, finalize:** no push and no merge request. The result stays in the job workspace for grading.

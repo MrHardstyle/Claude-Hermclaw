@@ -89,6 +89,7 @@ class EventType:
     CORRECTION_STARTED = "correction.started"
     ACCEPTANCE_WAIVED = "acceptance.waived"
     CORRECTION_FELL_BACK = "correction.fell_back"  # a failed review correction kept the verified state (BUG-315)
+    COVERAGE_CHECKED = "coverage.checked"  # the step's own tests matched to the task's requirements (Research R-035)
     STAGNATION_DETECTED = "stagnation.detected"
     STRATEGY_CHANGED = "strategy.changed"
     CHECKPOINT_CREATED = "checkpoint.created"

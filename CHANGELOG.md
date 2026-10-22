@@ -4,6 +4,9 @@ Format: [Keep a Changelog](https://keepachangelog.com/de/1.1.0/), Versionen nach
 
 ## [Unreleased]
 
+### Hinzugefügt
+- **Abdeckung der Anforderungen durch die eigenen Tests (D-024, Research R-035):** Hat ein Implement-Step Tests geliefert und der Verifier bestanden, ordnet ein Aufruf des Coder-Modells jeder prüfbaren Anforderung aus Auftrag und Step-Ziel die Tests zu, die sie prüfen. Eine Anforderung ohne existierenden Test wird einmal je Step zur Korrektur („schreibe den Test, korrigiere bei Rot den Code“); scheitert die Korrektur, bleibt der verifizierte Stand. Ereignis `coverage.checked`, Schalter `policies.coder.coverage_check`.
+
 ## [0.1.0rc69] – Release Candidate (2026-10-22)
 
 ### Behoben

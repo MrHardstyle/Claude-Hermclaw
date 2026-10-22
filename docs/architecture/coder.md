@@ -33,6 +33,15 @@ Ports: `VerifierPort.verify(step, workspace, …) -> VerificationOutcome(report,
 - verifier outage (BUG-303): when every blocking failure is a command the executor could not run (`executor_failure`), the handler verifies again after 5 s and 20 s (`VERIFIER_RETRY_SECONDS`); still unable, the attempt ends `failed` with `VERIFIER_UNAVAILABLE`, a step outage code: the scheduler retries after the outage backoff without counting the attempt, and no correction is spent
 - unmet change demands (BUG-278): when the only blocking failures are diff checks whose `must_change` files stayed unchanged (the step changed other files; no forbidden, empty or oversized change, nothing else failed) and the step kind is reviewed, the handler verifies again on the step without those globs (`without_change_demands`, which adds a constraint asking the review whether the goal needs them) and runs the heavy review; a pass emits `acceptance.waived {must_change, reason}` and commits, a `fix_required` (e.g. a blocker naming the file) becomes a normal correction. Before, a plan demanding changes to files the step only reads (input data, an entry point it runs) was uncorrectable and ended in replans
 - turn budget exhausted after file changes: the verifier (and review) still run – a pass completes and commits the step, a failure becomes a correction carrying both the turn-budget note and the verifier evidence (BUG-230); without changes it is a plain correction
+- requirement coverage (D-024, Research R-035): after the verifier passed, an implement step that delivered test files
+  (`TEST_GLOBS`: `tests/*`, `test_*.py`, `*.Tests.ps1`, `*.test.*` …) gets one structured call (`purpose: coverage`) to
+  the coder's own profile (the tournament's `coder_alias` too): it lists the checkable requirements of the job request and
+  the step goal and names the delivered tests that check each one (`hermclaw/coder/coverage.py`). A requirement whose
+  named tests do not exist in the files counts as a gap; the gaps go into the review's correction, or – review passed or
+  off – into a correction of their own (`COVERAGE_GAP`, source `coverage`) after `save_verified`, so a failing
+  correction falls back to the verified work. Once per step (`coverage.checked {alias, requirements, tests, gaps}`),
+  only while a correction can follow; a model or lease error is recorded and skipped. Switch:
+  `policies.coder.coverage_check`
 - `_correction`: writes `step_attempts.correction_input = {pending, source, items[], detail}` with the real evidence,
   increments `steps.correction_count`, emits `correction.started`, returns a retryable failure with `retry_delay_seconds=0`
   → the scheduler starts attempt kind `correction` whose prompt contains the evidence (`CorrectionItem`s)

@@ -275,9 +275,9 @@ bestanden; ansible-lint (production) sauber. `test_deploy_converge` ist angepass
    (`infra/sandbox-images/README.md`) bleibt für Systempakete nötig.
 
 ## Paket B – Modellfamilien (Research R-035)
-Nächster Teil: 4 oder fertig (Antwort des Betreibers)
+Nächster Teil: fertig (Betreiber 2026-10-22: Teil 4 entfällt); weiter mit D-024 (Abdeckungsprüfung), danach Leiter ab A7
 Hintergrundlauf: –
-Offene Fragen: Teil 4 (Gemma als Reviewer) ja/nein; Leiter A7 mit qwen ohne Änderung nicht wiederholen; sudoers-Datei auf .224 entfernen
+Offene Fragen: sudoers-Datei auf .224 entfernt? (Betreiber)
 - Root auf .224: Option (b) aus R-034 (`/etc/sudoers.d/90-hermclaw-tuning`), bleibt bis Paketende.
 - Teil 1 fertig (2026-10-22): Gemma 4 26B, gpt-oss-20b, GLM-4.7-Flash bestehen das Screening (Research R-035).
 - Teil 2 mit 0.1.0rc69: `chat_template_kwargs` je Profil (llamacpp), gpt-oss-20b bekommt `{reasoning_effort: low}`.

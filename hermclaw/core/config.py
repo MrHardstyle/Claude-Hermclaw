@@ -293,6 +293,10 @@ class CoderPolicy(_Strict):
     # a command the coder starts without timeout_seconds: a hanging test (a server it never stops) blocked a turn for
     # the full sandbox limit of 600 s (rc19 battery J1, BUG-205); longer suites ask for more, up to that limit
     default_command_timeout_seconds: int = Field(default=180, ge=10, le=7200)
+    # after the verifier passed, one model call matches the step's own tests to the requirements of the task; a
+    # requirement no test checks becomes one correction (Research R-035: A7–A9 failed on stated requirements the
+    # delivered tests never exercised); false switches it off
+    coverage_check: bool = True
 
 
 class StagnationPolicy(_Strict):

@@ -932,3 +932,70 @@ async def test_a_tournament_job_codes_on_the_candidate_alias_without_review(worl
     assert jobs[jid].status == "succeeded", (jobs[jid].error_code, jobs[jid].error_message)
     assert models.aliases == ["heavy-review", "heavy-review"] and models.calls == []
     assert verifier.calls == 1 and reviewer.calls == 0
+
+
+class CoverageModels(Models):
+    """The coder's own model also answers the requirement-coverage check (Research R-035)."""
+
+    def __init__(self, plans: list[Any], coder: list[dict[str, Any]], coverage: list[dict[str, Any]]) -> None:
+        super().__init__(plans, coder)
+        self.coverage, self.coverage_prompts = list(coverage), []
+
+    async def structured(  # type: ignore[override]
+        self, alias: str, messages: list[ChatMessage], schema: type[T], *, ctx: CallContext, **kw: Any
+    ) -> StructuredResult[T]:
+        if ctx.purpose != "coverage":
+            return await super().structured(alias, messages, schema, ctx=ctx, **kw)
+        assert alias == "coder-main", alias
+        self.coverage_prompts.append(list(messages))
+        return StructuredResult(
+            value=schema.model_validate(self.coverage.pop(0)), result=ChatResult(content="{}", alias=alias, model="qwen3.6:35b")
+        )
+
+
+async def test_a_requirement_no_delivered_test_checks_becomes_one_correction(world: World, tmp_path: Path) -> None:
+    """Research R-035 (A7–A9, both coder models): the delivered tests passed and never exercised a requirement the
+    task states – one service still a JSON array, distinct note ids. After the verifier passed, the coder's model
+    matches the tests to the requirements; a test name that does not exist counts as no test, the gap becomes a
+    correction, and the check runs once per step."""
+    from tests.unit.test_planner_support import plan, step
+
+    tests_v1 = "from src.module import VALUE\n\n\ndef test_value():\n    assert VALUE == 2\n"
+    tests_v2 = tests_v1 + "\n\ndef test_value_is_an_int():\n    assert isinstance(VALUE, int)\n"
+    plan_with_tests = plan(
+        "Set VALUE to 2",
+        [
+            step(
+                "S001",
+                "implement",
+                "coding",
+                "Change VALUE in src/module.py from 1 to 2 and test it.",
+                repo_hints=["src/module.py"],
+                allowed_new_paths=["tests/test_module.py"],
+            )
+        ],
+    )
+    write = act("write_file", path="tests/test_module.py", content=tests_v1)
+    done = act("complete_step", summary="VALUE 2, tested", changed_files=["src/module.py", "tests/test_module.py"], tests_run=[])
+    add_test = act("write_file", path="tests/test_module.py", content=tests_v2)
+    coverage = {
+        "requirements": [
+            {"requirement": "VALUE is 2", "tests": ["tests/test_module.py::test_value"]},
+            {"requirement": "VALUE is an integer", "tests": ["test_value_type"]},  # invented: no such test
+        ]
+    }
+    models = CoverageModels([plan_with_tests], [EDIT, write, done, add_test, done], [coverage])
+    verifier = ScriptedVerifier(world, [True, True])
+    jid = await _job(world)
+    jobs = await _run(world, _driver(world, models, tmp_path), [_handler(world, models, verifier, None), ReviewHandler()], [jid])
+    assert jobs[jid].status == "succeeded", (jobs[jid].error_code, jobs[jid].error_message)
+    assert len(models.coverage_prompts) == 1 and "test_value" in models.coverage_prompts[0][1].content
+    checked = [e.payload for e in await _events(world, jid) if e.event_type == "coverage.checked"]
+    assert checked == [{"alias": "coder-main", "requirements": 2, "tests": 1, "gaps": ["VALUE is an integer"]}]
+    correction_prompt = json.dumps([m.content for m in models.coder_prompts[3]])
+    assert "No test of this step checks: VALUE is an integer" in correction_prompt
+    kinds = [(a.kind, a.outcome) for a in await _attempts(world, jid) if a.kind in ("initial", "correction")]
+    assert kinds == [("initial", "failed"), ("correction", "completed")]
+    async with world.sessionmaker() as s:
+        st = (await s.execute(select(Step).where(Step.job_id == jid, Step.step_key == "S001"))).scalar_one()
+    assert st.correction_count == 1 and sorted(st.result["files"]) == ["src/module.py", "tests/test_module.py"]
