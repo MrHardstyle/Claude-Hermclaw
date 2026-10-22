@@ -275,11 +275,13 @@ bestanden; ansible-lint (production) sauber. `test_deploy_converge` ist angepass
    (`infra/sandbox-images/README.md`) bleibt für Systempakete nötig.
 
 ## Paket B – Modellfamilien (Research R-035)
-Nächster Teil: 3a (nach der Leiter)
-Hintergrundlauf: Leiter rc69 ab A7 (2026-10-22); Teil 3a erst danach
+Nächster Teil: 3b
+Hintergrundlauf: Vorturnier seit 2026-10-22 02:44, Unit `hermclaw-prelim-families` (PID 510638), `/var/lib/hermclaw/tournament/prelim-families`, 12 Läufe (coder-main, coder-gemma4-26b, coder-gpt-oss-20b, coder-glm47-flash × A1/A3/A5); danach Leiter ab A7
 Offene Fragen: –
 - Root auf .224: Option (b) aus R-034 (`/etc/sudoers.d/90-hermclaw-tuning`), bleibt bis Paketende.
 - Teil 1 fertig (2026-10-22): Gemma 4 26B, gpt-oss-20b, GLM-4.7-Flash bestehen das Screening (Research R-035).
 - Teil 2 mit 0.1.0rc69: `chat_template_kwargs` je Profil (llamacpp), gpt-oss-20b bekommt `{reasoning_effort: low}`.
+- Teil 3a (02:36): drei Modelle mit `fit`/`ubatch-size 1024` in `models.ini`, Profile hinter `coder-main`; je Alias eine gültige Schema-Antwort über LiteLLM (gpt-oss 93 Zeichen Denken), Doctor 21 OK. Inventar-Kopie `hosts.yml.bak-20261022-pre-paketb-3a`.
+- Start: Der Befehl der Anleitung (`setsid nohup hermclaw …`) findet die CLI nicht und hätte keine Credentials; gestartet als transiente Unit wie `hc.sh`, Log `/var/lib/hermclaw/tournament/prelim-families.log`.
 - Dateien: gpt-oss-20b unter `/var/lib/hcbench/models/gpt-oss-20b-mxfp4.gguf` (sha256 = LFS-oid), GLM-4.7-Flash dort aus R-033, gemma4:26b im Ollama-Store. 30 GB frei.
 - Rohdaten: `/var/tmp/hc-screen/<kandidat>/` auf .224.
