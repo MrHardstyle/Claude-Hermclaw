@@ -275,9 +275,9 @@ bestanden; ansible-lint (production) sauber. `test_deploy_converge` ist angepass
    (`infra/sandbox-images/README.md`) bleibt für Systempakete nötig.
 
 ## Paket B – Modellfamilien (Research R-035)
-Nächster Teil: 4 oder fertig (Antwort des Betreibers)
-Hintergrundlauf: –
-Offene Fragen: Leiter A7 (#7 wieder 30/31, derselbe Modellfehler) – weiter mit Gemma als Coder/Reviewer?; größerer Lauf mit Gemma 4 26B (`--reps 3` über A1–A9 oder Leiter); Teil 4 ja/nein; sudoers-Datei auf .224 entfernen
+Nächster Teil: 3b (Stufe 1 auswerten), danach Stufe 2 oder 4 nach Antwort des Betreibers
+Hintergrundlauf: Stufe 1 seit 2026-10-22 11:57, Unit `hermclaw-stage1-large` (PID 736448), `/var/lib/hermclaw/tournament/stage1-large`, 6 Läufe (coder-main, coder-gemma4-26b × A7/A8/A9)
+Offene Fragen: – (Betreiber hat Stufe 1 freigegeben; Stufe 2 `--reps 3` A1–A9 nur bei Gemma ≥ coder-main; Teil 4 danach; Leiter ruht bis dahin)
 - Root auf .224: Option (b) aus R-034 (`/etc/sudoers.d/90-hermclaw-tuning`), bleibt bis Paketende.
 - Teil 1 fertig (2026-10-22): Gemma 4 26B, gpt-oss-20b, GLM-4.7-Flash bestehen das Screening (Research R-035).
 - Teil 2 mit 0.1.0rc69: `chat_template_kwargs` je Profil (llamacpp), gpt-oss-20b bekommt `{reasoning_effort: low}`.
