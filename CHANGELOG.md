@@ -4,6 +4,8 @@ Format: [Keep a Changelog](https://keepachangelog.com/de/1.1.0/), Versionen nach
 
 ## [Unreleased]
 
+## [0.1.0rc71] – Release Candidate (2026-10-22)
+
 ### Behoben
 - **Abdeckungskorrektur mit fremder Bibliothek (BUG-319):** Der Korrekturauftrag der Abdeckungsprüfung nennt jetzt die Importe der bestehenden Tests und schließt neue Pakete aus. In A8 hatte der Coder die fehlenden HTTP-Tests mit `requests` geschrieben, das die Sandbox nicht hat, und den Step blockiert.
 
