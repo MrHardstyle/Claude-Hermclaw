@@ -276,7 +276,7 @@ bestanden; ansible-lint (production) sauber. `test_deploy_converge` ist angepass
 
 ## Paket B – Modellfamilien (Research R-035)
 Nächster Teil: fertig (Betreiber 2026-10-22: Teil 4 entfällt); weiter mit D-024 (Abdeckungsprüfung), danach Leiter ab A7
-Hintergrundlauf: –
+Hintergrundlauf: D-024-Messung seit 2026-10-22 21:06 auf rc70, Unit `hermclaw-coverage-a7a9` (PID 1075321), `/var/lib/hermclaw/tournament/coverage-a7a9`, 3 Läufe (coder-main × A7/A8/A9)
 Offene Fragen: sudoers-Datei auf .224 entfernt? (Betreiber)
 - Root auf .224: Option (b) aus R-034 (`/etc/sudoers.d/90-hermclaw-tuning`), bleibt bis Paketende.
 - Teil 1 fertig (2026-10-22): Gemma 4 26B, gpt-oss-20b, GLM-4.7-Flash bestehen das Screening (Research R-035).
