@@ -43,6 +43,7 @@ _NAME_PATTERNS = (
     re.compile(r"\b(?:it|test)\s*\(\s*[\"'`]([^\"'`\n]+)[\"'`]"),  # Jest / Mocha / Vitest
     re.compile(r"^func\s+(Test\w+)\s*\(", re.MULTILINE),  # Go
 )
+_IMPORT = re.compile(r"^\s*(?:from\s+([\w.]+)\s+import|import\s+([\w.]+))", re.MULTILINE)
 _MAX_TEST_CHARS = 40_000
 _MAX_REQUEST_CHARS = 6_000
 _MAX_GAPS = 8
@@ -76,6 +77,7 @@ class CoverageResult:
     tests: int
     gaps: tuple[str, ...]
     alias: str
+    imports: tuple[str, ...] = ()
 
 
 def is_test_file(path: str) -> bool:
@@ -139,14 +141,24 @@ def gaps_of(draft: CoverageDraft, tests: dict[str, str]) -> list[str]:
     return list(dict.fromkeys(out))
 
 
-def gap_items(gaps: Sequence[str]) -> list[CorrectionItem]:
+def imports_of(tests: dict[str, str]) -> list[str]:
+    """Top-level modules the Python test files import, in order of first use."""
+    found = (m.group(1) or m.group(2) for text in tests.values() for m in _IMPORT.finditer(text))
+    return list(dict.fromkeys(name.split(".")[0] for name in found))
+
+
+def gap_items(gaps: Sequence[str], imports: Sequence[str] = ()) -> list[CorrectionItem]:
+    """The correction of the gaps. It names the tools of the existing tests: the coder's first coverage correction
+    wrote HTTP tests with ``requests``, which the sandbox does not have, and blocked the step (A8, BUG-319)."""
+    tools = f" (they import {', '.join(imports[:15])})" if imports else ""
     return [
         CorrectionItem(
             source="coverage",
             label="untested requirement",
             message=(
-                f"No test of this step checks: {gap}. Add a test for it next to the existing tests and run the tests; "
-                "if the new test fails, fix the code, not the test."
+                f"No test of this step checks: {gap}. Add a test for it next to the existing tests, with the test "
+                f"framework and libraries those tests already use{tools} and no new package, and run the tests; if the "
+                "new test fails, fix the code, not the test."
             ),
         )
         for gap in gaps[:_MAX_GAPS]
@@ -182,4 +194,4 @@ async def check_coverage(
     )
     gaps = gaps_of(result.value, tests)
     count = sum(len(names_in(t)) for t in tests.values())
-    return CoverageResult(len(result.value.requirements), count, tuple(gaps), result.result.alias or alias)
+    return CoverageResult(len(result.value.requirements), count, tuple(gaps), result.result.alias or alias, tuple(imports_of(tests)))

@@ -40,7 +40,8 @@ Ports: `VerifierPort.verify(step, workspace, …) -> VerificationOutcome(report,
   named tests do not exist in the files counts as a gap; the gaps go into the review's correction, or – review passed or
   off – into a correction of their own (`COVERAGE_GAP`, source `coverage`) after `save_verified`, so a failing
   correction falls back to the verified work. Once per step (`coverage.checked {alias, requirements, tests, gaps}`),
-  only while a correction can follow; a model or lease error is recorded and skipped. Switch:
+  only while a correction can follow; a model or lease error is recorded and skipped. The correction names the modules
+  the existing Python tests import and asks for no new package (BUG-319). Switch:
   `policies.coder.coverage_check`
 - `_correction`: writes `step_attempts.correction_input = {pending, source, items[], detail}` with the real evidence,
   increments `steps.correction_count`, emits `correction.started`, returns a retryable failure with `retry_delay_seconds=0`

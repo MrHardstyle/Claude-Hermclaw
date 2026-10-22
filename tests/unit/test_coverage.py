@@ -5,7 +5,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from hermclaw.coder.coverage import CoverageDraft, build_messages, gap_items, gaps_of, is_test_file, names_in, read_tests
+from hermclaw.coder.coverage import CoverageDraft, build_messages, gap_items, gaps_of, imports_of, is_test_file, names_in, read_tests
 
 
 def test_test_files_and_names_of_pytest_pester_and_jest() -> None:
@@ -42,3 +42,16 @@ def test_a_requirement_is_a_gap_without_an_existing_test(tmp_path: Path) -> None
     assert items[0].message.startswith("No test of this step checks: two notes get distinct ids.")
     user = build_messages("Notes API", "Write the API", tests)[1].content
     assert "tests/test_api.py::test_create" in user and "def test_list" in user
+
+
+def test_the_correction_names_the_tools_of_the_existing_tests() -> None:
+    """BUG-319 (A8 on rc70): the coverage correction wrote the HTTP tests with ``requests``, which the sandbox does not
+    have; the coder blocked the step. The correction names what the existing tests import and asks for no new package."""
+    tests = {
+        "tests/test_http.py": "import json\nimport urllib.request\nfrom tasks_app.storage import Store\nimport pytest\n\ndef test_x():\n    pass\n",
+        "tests/Get.Tests.ps1": "It 'works' { }\n",
+    }
+    assert imports_of(tests) == ["json", "urllib", "tasks_app", "pytest"]
+    message = gap_items(["unknown id is 404"], imports_of(tests))[0].message
+    assert "(they import json, urllib, tasks_app, pytest)" in message and "no new package" in message
+    assert "they import" not in gap_items(["x"])[0].message

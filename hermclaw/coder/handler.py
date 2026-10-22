@@ -746,7 +746,7 @@ class ImplementStepHandler:
                 )
             items = [*budget_items, *CorrectionItem.from_verification(outcome.report)]
             return await self._correction(ctx, row, "verifier", items, "VERIFIER_FAILED", outcome.report.summary or "verification failed")
-        gaps = gap_items(await self._coverage_gaps(run))
+        gaps = await self._coverage_gaps(run)
         if self.deps.reviewer is not None and self._reviews(run):
             await self._status(ctx, f"Heavy Review für {row.step_key}")
             async with self._model(ctx, "heavy", preemptible=False):
@@ -794,7 +794,7 @@ class ImplementStepHandler:
                 await s.commit()
         return await self._commit(run, outcome, result)
 
-    async def _coverage_gaps(self, run: _Run) -> list[str]:
+    async def _coverage_gaps(self, run: _Run) -> list[CorrectionItem]:
         """The requirements of the task no delivered test checks (``hermclaw.coder.coverage``), once per implement step
         and only while a correction can still follow; a failed check is recorded and skipped, it never blocks a step
         that passed verification."""
@@ -820,7 +820,7 @@ class ImplementStepHandler:
         except ConfigError:
             return []
         payload: dict[str, Any] = {"alias": profile.alias}
-        gaps: list[str] = []
+        gaps: list[CorrectionItem] = []
         try:
             changed = await self.deps.git.reader().changed_files(run.handle)
             if not read_tests(Path(run.handle.path), changed):
@@ -844,12 +844,12 @@ class ImplementStepHandler:
             payload["error"] = DEFAULT_REDACTOR.text(f"{type(exc).__name__}: {exc}")[:500]
             found = None
         if found is not None:
-            gaps = list(found.gaps)
+            gaps = gap_items(found.gaps, found.imports)
             payload |= {
                 "alias": found.alias,
                 "requirements": found.requirements,
                 "tests": found.tests,
-                "gaps": [DEFAULT_REDACTOR.text(g)[:300] for g in gaps[:20]],
+                "gaps": [DEFAULT_REDACTOR.text(g)[:300] for g in found.gaps[:20]],
             }
         async with self.sm() as s:
             await append_event(

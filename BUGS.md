@@ -46,6 +46,12 @@ Noch keine.
 
 ## Behobene Bugs
 
+### BUG-319 – Die Abdeckungskorrektur schreibt Tests mit einer Bibliothek, die die Sandbox nicht hat
+- Phase: Messung D-024 auf rc70, 2026-10-22 (A8, Job 7f379fe0) · Komponente: coder (`coverage.py`) · Severity: P3 · blockierend: nein · Status: **behoben im Repository** (`tests/unit/test_coverage.py::test_the_correction_names_the_tools_of_the_existing_tests`)
+- Reproduktion: S001 von A8 besteht den Verifier mit Tests nur für die Speicherschicht. Die Abdeckungsprüfung meldet zu Recht über 20 ungetestete Anforderungen der HTTP-API (8 gehen in die Korrektur). Der Coder schreibt `tests/test_http.py` mit `import requests`. Die Sandbox installiert kein Paket ohne Manifest, der Coder blockiert den Step nach 3,5 min. Der Rückfall auf den verifizierten Stand greift (`correction.fell_back`), die neuen HTTP-Tests sind verloren.
+- Ursache: Der Korrekturauftrag sagte nur „schreibe einen Test neben den bestehenden“. Womit die bestehenden Tests arbeiten, stand nicht darin.
+- Fix: Der Auftrag verlangt das Test-Framework und die Bibliotheken der bestehenden Tests, nennt deren Python-Importe (`they import json, urllib, …`) und schließt neue Pakete aus.
+
 ### BUG-318 – Die Maskierung verdeckt einen Variablennamen genau in der fehlerhaften Zeile
 - Phase: Schwierigkeitsleiter auf rc68, 2026-10-22 (A7#5, Job 9ee37ef1) · Komponente: core (`redaction.py`) · Severity: P2 · blockierend: nein · Status: **behoben im Repository** (`tests/unit/test_config_and_redaction.py::test_a_variable_named_like_a_secret_stays_visible`)
 - Reproduktion: Die Test-Fixture des Coders baut `env = {**os.environ, "NOTES_API_TOKEN": token, "PORT": str(port)}`, benutzt das Dict aber nie. Der Server im selben Prozess sieht keinen Token, und jeder autorisierte Test bekommt 401. Der Coder sieht die Zeile als `"NOTES_API_TOKEN": ***REDACTED***`. `replace_text` auf der Zeile wird abgelehnt („nothing would change … ***REDACTED***“). Zwei Stagnationsstopps, ein Heavy Review, ein Replan von 13 min, dann Zeitabbruch nach 40,8 min. Versteckt 30/31: Der Server ist richtig, nur die eigenen Tests scheitern.
