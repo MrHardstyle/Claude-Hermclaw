@@ -275,8 +275,8 @@ bestanden; ansible-lint (production) sauber. `test_deploy_converge` ist angepass
    (`infra/sandbox-images/README.md`) bleibt für Systempakete nötig.
 
 ## Paket B – Modellfamilien (Research R-035)
-Nächster Teil: fertig (Betreiber 2026-10-22: Teil 4 entfällt); D-024 mit rc70/rc71 ausgerollt, Leiter läuft
-Hintergrundlauf: Leiter A7#8 auf rc71 seit 2026-10-22 22:02, Unit `hermclaw-ladder-rc71`, `/var/lib/hermclaw/tournament/ladder`
+Nächster Teil: fertig (Betreiber 2026-10-22: Teil 4 entfällt); D-024 mit rc70/rc71 ausgerollt, Leiter steht bei A7
+Hintergrundlauf: – (Leiter A7#8 auf rc71: Zeitlimit nach 40 min, 30/31, nur die eigenen Tests rot; Modellfehler)
 Offene Fragen: sudoers-Datei auf .224 entfernt? (Betreiber)
 - Root auf .224: Option (b) aus R-034 (`/etc/sudoers.d/90-hermclaw-tuning`), bleibt bis Paketende.
 - Teil 1 fertig (2026-10-22): Gemma 4 26B, gpt-oss-20b, GLM-4.7-Flash bestehen das Screening (Research R-035).
