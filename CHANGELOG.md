@@ -4,6 +4,8 @@ Format: [Keep a Changelog](https://keepachangelog.com/de/1.1.0/), Versionen nach
 
 ## [Unreleased]
 
+## [0.1.0rc72] – Release Candidate (2026-10-23)
+
 ### Behoben
 - **Kürzere Pläne (BUG-320):** Das Schema an den Planer enthält weder die Scope- und Security-Kriterien, die die Laufzeit selbst ergänzt, noch die Zusammenfassung. Plan-Ziel, Annahmen und Risiken sind kurz begrenzt. qwen3.8 hatte beide Kriterien bis zu achtmal je Schritt wiederholt und den ganzen Auftrag als Plan-Ziel abgeschrieben, rund ein Drittel der Planausgabe bei 3–4 tok/s.
 
