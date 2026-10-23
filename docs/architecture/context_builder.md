@@ -179,7 +179,9 @@ when a failure text exists).
 The last `history.full_turns` (6) turns are one line each: tool, args digest, `ok`/`FAILED [error_code]`, result
 digest, changed paths. Older turns become `turns a-b (summary): tool xN (k ok, m failed: code xN)`, the last
 failure per tool and all files changed so far. On budget pressure fewer turns are shown in full, then digests are
-shortened. `TurnRecord` has no reasoning field; `strip_reasoning` removes `<think>`/`<thinking>`/`<reasoning>`/
+shortened. The history is rendered after RELEVANT CODE/TESTS are packed: a successful read whose lines a packed
+snippet shows in full reads `ok: the lines read are shown in full in RELEVANT CODE/RELEVANT TESTS above` instead of
+its clipped head, which looked like a cut-off output and was read again (BUG-338). `TurnRecord` has no reasoning field; `strip_reasoning` removes `<think>`/`<thinking>`/`<reasoning>`/
 analysis-channel markup from every digest and review text.
 
 ## Current diff (16.7)

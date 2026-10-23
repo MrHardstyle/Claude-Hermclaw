@@ -314,6 +314,22 @@ async def test_work_finished_in_the_last_turn_is_verified_not_thrown_away(
     assert verifier.calls == 1 and reviewer.calls == 1 and _remote_value(world) == "VALUE = 2"
 
 
+async def test_a_block_for_lack_of_turns_with_work_in_progress_is_verified_not_replanned(
+    world: World, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Ladder A10 #5 (BUG-340): told "Almost out of turns: complete_step, block_step or request_replan", the coder
+    blocked in its last turn ("Out of turns. The remaining work is …") and the step went to a 23-minute replan. A block
+    of reason "other" in the turns the closing line warns about, after changes, is verified like a spent budget."""
+    monkeypatch.setattr(get_config().policies.coder, "max_turns", 2)
+    out_of_turns = act("block_step", reason_code="other", message="Out of turns. The remaining work is: run the tests")
+    models = Models([_plan()], [EDIT, out_of_turns])
+    verifier = ScriptedVerifier(world, [True])
+    jid = await _job(world)
+    jobs = await _run(world, _driver(world, models, tmp_path), [_handler(world, models, verifier, None), ReviewHandler()], [jid])
+    assert jobs[jid].status == "succeeded", (jobs[jid].error_code, jobs[jid].error_message)
+    assert verifier.calls == 1 and _remote_value(world) == "VALUE = 2"
+
+
 async def test_failed_verification_after_the_turn_budget_corrects_with_both_notes(
     world: World, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:

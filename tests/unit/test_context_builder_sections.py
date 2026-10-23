@@ -9,6 +9,7 @@ import re
 from hermclaw.context_builder import SECTION_ORDER, CorrectionItem, ToolPromptSpec, TurnRecord, strip_reasoning
 from hermclaw.context_builder.builder import StepBrief
 from hermclaw.context_builder.render import describe_criterion, render_tools
+from hermclaw.context_builder.sections import ALMOST_EXHAUSTED
 from hermclaw.contracts.acceptance import (
     AbsenceEvidence,
     ArtifactEvidence,
@@ -370,10 +371,10 @@ async def test_no_model_reasoning_reaches_the_prompt() -> None:
     rec = TurnRecord.from_mapping(
         {
             "turn": 1,
-            "tool": "read_file",
-            "args_digest": '{"path": "app.py"}',
+            "tool": "run_test",
+            "args_digest": '{"command": "pytest -q"}',
             "ok": True,
-            "result_digest": "<think>I secretly plan X</think>120 lines",
+            "result_digest": "<think>I secretly plan X</think>120 passed",
             "reasoning": "HIDDEN CHAIN OF THOUGHT",
             "thinking": "HIDDEN THINKING",
             "status": "reading the file",
@@ -387,7 +388,7 @@ async def test_no_model_reasoning_reaches_the_prompt() -> None:
     text = "\n".join(m.content for m in built.messages)
     for leaked in ("HIDDEN", "secretly", "internal monologue", "musing", "<think", "<reasoning", "reading the file"):
         assert leaked not in text, leaked
-    assert "- turn 1: read_file" in text and "120 lines" in text and "f3 is wrong" in text
+    assert "- turn 1: run_test" in text and "120 passed" in text and "f3 is wrong" in text
     assert strip_reasoning("a<think>b</think>c") == "ac"
     assert strip_reasoning("x</think>visible") == "visible"
     assert strip_reasoning("<|channel|>analysis secret<|end|>final") == "final"
@@ -495,11 +496,7 @@ async def test_the_prompt_up_to_relevant_code_is_the_same_every_turn() -> None:
     progress = user_text(later).split("## CURRENT DIFF")[1]
     assert "Changed vs base (2): app.py, ?? tests/test_extra.py" in progress
     assert "Acceptance 1 — met (already changed)" in progress and "New files written: tests/test_extra.py" in progress
-    assert (
-        later.messages[2]
-        .content.rstrip()
-        .endswith("Turn 18/20, 2 left. Almost out of turns: complete_step, block_step or request_replan. Reply with one JSON action.")
-    )
+    assert later.messages[2].content.rstrip().endswith(f"Turn 18/20, 2 left. {ALMOST_EXHAUSTED} Reply with one JSON action.")
     # another failure, another diff and a longer history: the files message stays the same while no file changes
     other = "FAILED tests/test_app.py::test_f9 - AssertionError: assert 9 == 10\napp.py:30: AssertionError\n"
     git2 = FakeGit(diff_text="", status_entries=[], changed=[])

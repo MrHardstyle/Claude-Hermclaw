@@ -201,13 +201,35 @@ async def test_an_overwrite_that_drops_existing_tests_says_which(sessionmaker: S
     """BUG-336 (ladder A10 #4): rewriting tests/test_api.py dropped three tests the job said to keep; the write answered
     plainly "overwrote" and the hidden check found them missing."""
     (repo / "tests" / "test_api.py").write_text("def test_create():\n    pass\n\n\ndef test_invalid_json():\n    pass\n")
+    commit_all(repo)
     h = await make_harness(sessionmaker, repo, contract=scope(target_paths=["tests/test_api.py", "src/app.py"]))
     res = await h.call("write_file", path="tests/test_api.py", content="def test_create():\n    pass\n\n\ndef test_due():\n    pass\n")
     assert res.ok and "removed 1 test(s) the file had: test_invalid_json" in res.output
-    kept = await h.call("write_file", path="tests/test_api.py", content="def test_create():\n    pass\n\n\ndef test_due():\n    assert 1\n")
+    still = await h.call(
+        "write_file", path="tests/test_api.py", content="def test_create():\n    pass\n\n\ndef test_due():\n    assert 1\n"
+    )
+    assert still.ok and "removed 1 test(s) the file had: test_invalid_json" in still.output
+    kept = await h.call(
+        "write_file",
+        path="tests/test_api.py",
+        content="def test_create():\n    pass\n\n\ndef test_invalid_json():\n    pass\n\n\ndef test_due():\n    pass\n",
+    )
     assert kept.ok and "removed" not in kept.output
     code = await h.call("write_file", path="src/app.py", content="x = 1\n")
     assert code.ok and "removed" not in code.output
+
+
+async def test_a_rewrite_of_the_steps_own_new_test_file_is_not_a_lost_test(sessionmaker: SM, repo: Path) -> None:
+    """BUG-337 (ladder A10 #5): measured against the previous write, the coder's own new tests/test_ui.py swung between
+    two versions for four turns – each rewrite dropped a test the one before had added and the note asked for it back.
+    Only tests the file had at the step's base are existing tests."""
+    h = await make_harness(sessionmaker, repo, contract=scope(target_paths=["tests/test_calc.py"], allowed_new_paths=["tests/test_ui.py"]))
+    await h.call("write_file", path="tests/test_ui.py", content="def test_form():\n    pass\n\n\ndef test_date_input():\n    pass\n")
+    again = await h.call("write_file", path="tests/test_ui.py", content="def test_form():\n    pass\n")
+    assert again.ok and "removed" not in again.output
+    (repo / "tests" / "test_calc.py").write_text("def test_mul():\n    pass\n\n\ndef test_div():\n    pass\n")
+    rewrite = await h.call("write_file", path="tests/test_calc.py", content="def test_div():\n    pass\n")
+    assert rewrite.ok and "removed 1 test(s) the file had: test_mul" in rewrite.output
 
 
 async def test_a_masked_line_left_unchanged_keeps_its_content(sessionmaker: SM, repo: Path) -> None:

@@ -75,12 +75,17 @@ def _digest(text: str, limit: int) -> str:
     return clip_line(strip_reasoning(text), limit)
 
 
-def _full_line(r: TurnRecord, limits: HistoryLimits) -> str:
+READ_SHOWN = "the lines read are shown in full in RELEVANT CODE/RELEVANT TESTS above (their current content)"
+
+
+def _full_line(r: TurnRecord, limits: HistoryLimits, shown_reads: frozenset[int] = frozenset()) -> str:
     outcome = "ok" if r.ok else "FAILED"
     if r.error_code:
         outcome += f" [{clip_line(r.error_code, 60)}]"
     args = _digest(r.args_digest, limits.args_chars)
-    result = _digest(r.result_digest, limits.result_chars)
+    # a read shown in the files message: its clipped head here looked like a cut-off output, and the coder read the
+    # same lines again in the next turn (ladder A10 #5: three refused re-reads in one step, BUG-338)
+    result = READ_SHOWN if r.ok and r.turn in shown_reads else _digest(r.result_digest, limits.result_chars)
     line = f"- turn {r.turn}: {clip_line(r.tool, 60)}"
     if args:
         line += f" {args}"
@@ -147,8 +152,11 @@ class HistoryRender:
     truncated: bool
 
 
-def render_history(records: Sequence[TurnRecord], budget: int, limits: HistoryLimits | None = None) -> HistoryRender:
-    """Render the compact history so that it fits ``budget`` (character equivalents)."""
+def render_history(
+    records: Sequence[TurnRecord], budget: int, limits: HistoryLimits | None = None, shown_reads: frozenset[int] = frozenset()
+) -> HistoryRender:
+    """Render the compact history so that it fits ``budget`` (character equivalents). ``shown_reads`` are the turns of
+    reads whose lines the files message shows in full."""
     lim = limits or HistoryLimits()
     recs = sorted(records, key=lambda r: r.turn)
     if not recs or budget <= 0:
@@ -163,7 +171,7 @@ def render_history(records: Sequence[TurnRecord], budget: int, limits: HistoryLi
             key_result_chars=max(40, lim.key_result_chars >> shrink),
         )
         older, recent = recs[: len(recs) - n_full], recs[len(recs) - n_full :]
-        lines = _summary_lines(older, cur) + [_full_line(r, cur) for r in recent]
+        lines = _summary_lines(older, cur) + [_full_line(r, cur, shown_reads) for r in recent]
         body = "\n".join(lines)
         truncated = shrink > 0 or n_full < min(lim.full_turns, len(recs))
         if char_cost(body) <= budget:

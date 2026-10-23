@@ -10,6 +10,7 @@ error texts are sent back to the planner model verbatim in a repair turn.
 from __future__ import annotations
 
 import json
+import math
 import re
 from collections.abc import Iterable, Sequence
 from dataclasses import dataclass, field
@@ -81,6 +82,15 @@ def content_tokens(text: str) -> set[str]:
 def new_files_per_step(max_turns: int) -> int:
     """Two of every five coder turns may create a file; the rest run tests and fix (20 turns -> 8 files)."""
     return max(3, max_turns * 2 // 5)
+
+
+def step_turn_budget(step: PlanStep, max_turns: int, max_turns_per_step: int) -> int:
+    """The coder turns of one attempt: ``max_turns``, and for a step that creates or names more files than
+    :func:`new_files_per_step` five turns for every two files beyond (11 files at 20 turns -> 28), up to
+    ``max_turns_per_step``."""
+    files = {p for p in (*step.allowed_new_paths, *step.repo_hints) if not any(c in GLOB_CHARS for c in p) and not p.endswith("/")}
+    extra = math.ceil(max(0, len(files) - new_files_per_step(max_turns)) * 5 / 2)
+    return max(max_turns, min(max_turns_per_step, max_turns + extra))
 
 
 @dataclass(frozen=True)

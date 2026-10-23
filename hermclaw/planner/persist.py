@@ -28,6 +28,7 @@ from hermclaw.core.errors import NotFoundError
 from hermclaw.events.store import append_event
 from hermclaw.persistence.models import Job, JobInput, Plan, PlanVersion, Repository, Step, StepDependency
 from hermclaw.planner.errors import PlannerError
+from hermclaw.planner.validation import step_turn_budget
 
 SOURCE_TYPE = "planner"
 CODER_MODEL_ROLE = "coder"
@@ -174,7 +175,9 @@ def _step_row(job: Job, version: PlanVersion, step: PlanStep, config: HermclawCo
         forbidden_paths=list(step.forbidden_paths),
         network=step.network,
         max_attempts=config.policies.correction.max_attempts_per_step,
-        turn_budget=config.policies.coder.max_turns if kind in coder_kinds else 0,
+        turn_budget=step_turn_budget(step, config.policies.coder.max_turns, config.policies.coder.max_turns_per_step)
+        if kind in coder_kinds
+        else 0,
         superseded=False,
         current_scope_version=None,
     )

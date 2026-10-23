@@ -328,6 +328,7 @@ class ToolEngine:
         self._scope_requests = 0
         self._base_files: set[str] | None = None
         self._base_loaded = False
+        self._base_tests: dict[str, set[str]] = {}
         self._created: set[str] = set()
         # commands that ran into their timeout, with the file-change count at that time: the same command on an
         # unchanged workspace would only block for the full timeout again (BUG-164)
@@ -630,6 +631,16 @@ class ToolEngine:
         except RuntimeError as exc:
             raise ToolError(E.GIT_UNAVAILABLE, f"cannot list workspace files: {exc}") from exc
         return await asyncio.to_thread(self.fs.visible, files)
+
+    async def _base_test_names(self, rel: str) -> set[str]:
+        """The tests ``rel`` defines at the workspace base: only those count as existing. Measured against the previous
+        write, the coder's own new test file swung between two versions for four turns – each rewrite fixed a lint
+        finding and dropped a test the one before had added, and the note asked for it back (ladder A10 #5, BUG-337)."""
+        if rel not in self._base_tests:
+            await self._load_base()
+            data = await self.lgit.file_at(self.workspace.base_sha, rel) if self._base_files and rel in self._base_files else None
+            self._base_tests[rel] = _test_names(data.decode("utf-8", errors="replace")) if data and not is_binary(data) else set()
+        return self._base_tests[rel]
 
     def _guard_for_write(self) -> ScopeGuard:
         if self._guard is None:
@@ -1071,7 +1082,7 @@ class ToolEngine:
         self._note_created([(rel, op)])
         self._file_changed(ToolName.write_file, [{"path": rel, "operation": op, "bytes": len(data)}], events)
         verb = "created" if op == "create" else ("appended to" if args.append else "overwrote")
-        lost = sorted(_test_names(old_text) - _test_names(content)) if old_text and not args.append and is_test_path(rel) else []
+        lost = sorted(await self._base_test_names(rel) - _test_names(content)) if exists and not args.append and is_test_path(rel) else []
         note = (
             f"\nnote: this overwrite removed {len(lost)} test(s) the file had: {', '.join(lost[:12])}"
             f"{' …' if len(lost) > 12 else ''}. Existing tests are kept unless the goal asks to remove them – add them "

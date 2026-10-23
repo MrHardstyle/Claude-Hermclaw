@@ -154,6 +154,15 @@ class _FileRef:
 
 
 # ---------------------------------------------------------------------------------------------- builder
+def _span_shown(span: tuple[str, int, int], text: str | None, selected: Sequence[Snippet]) -> bool:
+    """Whether a packed snippet shows every line a read returned (``text`` is what the read range holds now)."""
+    if not text or not text.strip():
+        return False
+    path, start, _ = span
+    end = start + len(text.splitlines()) - 1
+    return any(snip.path == path and snip.start <= start and snip.end >= end for snip in selected)
+
+
 def _positive_int(value: object, default: int) -> int:
     return value if isinstance(value, int) and not isinstance(value, bool) and value > 0 else default
 
@@ -242,6 +251,7 @@ class ContextBuilder:
             for p in dict.fromkeys([*head_targets, *(p for p in acc_tests if p not in targets)])
         ]
         spans = self._read_spans(inp.history, ws, cfg.max_snippet_lines)
+        read_turns = {r.turn: span for r in inp.history if (span := self._read_span(r, ws, cfg.max_snippet_lines)) in spans}
         read_paths = {p for p, _, _ in spans}
         file_heads += spans
         shown = {p for p, _, _ in file_heads}
@@ -275,6 +285,7 @@ class ContextBuilder:
         inventory, status, changed, diff, hits = values[:5]
         pos = 5
         head_texts = values[pos : pos + len(file_heads)]
+        read_texts = {fh: text for fh, text in zip(file_heads, head_texts, strict=True) if fh in spans and isinstance(text, str)}
         pos += len(file_heads)
         ref_texts = values[pos : pos + len(refs) + len(fail_refs)]
         pos += len(refs) + len(fail_refs)
@@ -369,16 +380,6 @@ class ContextBuilder:
         rendered[SectionName.LATEST_FAILURE] = render_failure(
             failure, correction, cost[SectionName.LATEST_FAILURE], item_chars=cfg.correction_item_chars
         )
-        records = [
-            replace(r, args_digest=self._red(r.args_digest), result_digest=self._red(r.result_digest), tool=self._red(r.tool))
-            for r in inp.history
-        ]
-        hist = render_history(records, cost[SectionName.SHORT_STEP_HISTORY], cfg.history)
-        hist_sec = RenderedSection(SectionName.SHORT_STEP_HISTORY, body=hist.body, truncated=hist.truncated)
-        hist_sec.items_included = hist.full_turns + hist.summarised_turns
-        if not inp.history:
-            hist_sec.omitted_reason = "empty"
-        rendered[SectionName.SHORT_STEP_HISTORY] = hist_sec
         tools = [t if isinstance(t, ToolPromptSpec) else ToolPromptSpec.from_mapping(t) for t in inp.tools]
         rendered[SectionName.AVAILABLE_TOOLS] = render_tools(tools, cost[SectionName.AVAILABLE_TOOLS])
         rendered[SectionName.COMPLETION_CONDITIONS] = render_completion(
@@ -390,7 +391,6 @@ class ContextBuilder:
         # D-026: what the turn sections leave unused changes every turn; it goes to the code at the latest failure (in
         # the turn message), so the budget – and with it the content – of RELEVANT CODE/TESTS stays the same from turn
         # to turn while no file changes, and llama.cpp reuses the cached files message
-        turn_spare = sum(max(0, cost[n] - used.get(n, 0)) for n in USER_TURN_ONLY_SECTIONS)
         split = split_elastic(plan, cfg.budgets, {**used, **{n: cost[n] for n in USER_TURN_ONLY_SECTIONS}})
         # always kept, failure or not: a reserve only while a run fails changed the files message whenever a run passed
         # (ladder A10 #3 on rc80)
@@ -423,6 +423,20 @@ class ContextBuilder:
                 sec.omitted_reason = "budget"
             rendered[name] = sec
         packs = {SectionName.RELEVANT_CODE: code_pack, SectionName.RELEVANT_TESTS: test_pack}
+        selected = [snip for snip, _ in (*code_pack.selected, *test_pack.selected)]
+        # the history comes after the packs: a read whose lines RELEVANT CODE/TESTS show is named as shown (BUG-338)
+        shown_reads = frozenset(t for t, span in read_turns.items() if _span_shown(span, read_texts.get(span), selected))
+        records = [
+            replace(r, args_digest=self._red(r.args_digest), result_digest=self._red(r.result_digest), tool=self._red(r.tool))
+            for r in inp.history
+        ]
+        hist = render_history(records, cost[SectionName.SHORT_STEP_HISTORY], cfg.history, shown_reads)
+        hist_sec = RenderedSection(SectionName.SHORT_STEP_HISTORY, body=hist.body, truncated=hist.truncated)
+        hist_sec.items_included = hist.full_turns + hist.summarised_turns
+        if not inp.history:
+            hist_sec.omitted_reason = "empty"
+        rendered[SectionName.SHORT_STEP_HISTORY] = hist_sec
+        turn_spare = sum(max(0, cost[n] - (char_cost(rendered[n].body) if rendered[n].present else 0)) for n in USER_TURN_ONLY_SECTIONS)
         fail_budget = turn_spare + reserve + tests_allowed - test_pack.cost
         final_budget[SectionName.LATEST_FAILURE] = cost[SectionName.LATEST_FAILURE] + fail_budget
         self._add_failure_code(rendered[SectionName.LATEST_FAILURE], fail_snips, [*code_pack.selected, *test_pack.selected], fail_budget)
@@ -568,35 +582,40 @@ class ContextBuilder:
         refuses an identical re-read because its content is shown here (BUG-229)."""
         out: list[tuple[str, int, int]] = []
         for r in sorted(history, key=lambda h: h.turn, reverse=True):
-            if r.tool not in ("read_file", "read_range") or not r.ok:
-                continue
-            try:
-                args = json.loads(r.args_digest)
-            except ValueError:
-                args = None
-            if isinstance(args, dict):
-                raw = args.get("path")
-            else:
-                m = _ARG_PATH_RE.search(r.args_digest)
-                raw, args = (m.group(1) if m else None), {}
-            p = self._clean_path(raw, ws) if isinstance(raw, str) else None
-            if not p:
-                continue
-            start, end = 1, max_lines
-            page = _PAGE_SPAN_RE.match(r.result_digest) if r.tool == "read_file" else None
-            if page is not None:
-                # a page of a clipped file is shown from where it started: as lines 1-max_lines the coder never saw
-                # lines 316-845 of a read it continued twice and re-read the file until it stagnated (live G1, BUG-266)
-                start = int(page.group(1))
-                end = min(int(page.group(2)), start + max_lines - 1)
-            elif r.tool == "read_range":
-                start = _positive_int(args.get("start"), 1)
-                end = min(_positive_int(args.get("end"), start + max_lines - 1), start + max_lines - 1)
-            if (p, start, end) not in out:
-                out.append((p, start, end))
+            span = self._read_span(r, ws, max_lines)
+            if span is not None and span not in out:
+                out.append(span)
             if len(out) >= limit:
                 break
         return out
+
+    def _read_span(self, r: TurnRecord, ws: WorkspaceHandle, max_lines: int) -> tuple[str, int, int] | None:
+        """The (path, start, end) a successful read_file/read_range turn showed, ``None`` for any other turn."""
+        if r.tool not in ("read_file", "read_range") or not r.ok:
+            return None
+        try:
+            args = json.loads(r.args_digest)
+        except ValueError:
+            args = None
+        if isinstance(args, dict):
+            raw = args.get("path")
+        else:
+            m = _ARG_PATH_RE.search(r.args_digest)
+            raw, args = (m.group(1) if m else None), {}
+        p = self._clean_path(raw, ws) if isinstance(raw, str) else None
+        if not p:
+            return None
+        start, end = 1, max_lines
+        page = _PAGE_SPAN_RE.match(r.result_digest) if r.tool == "read_file" else None
+        if page is not None:
+            # a page of a clipped file is shown from where it started: as lines 1-max_lines the coder never saw
+            # lines 316-845 of a read it continued twice and re-read the file until it stagnated (live G1, BUG-266)
+            start = int(page.group(1))
+            end = min(int(page.group(2)), start + max_lines - 1)
+        elif r.tool == "read_range":
+            start = _positive_int(args.get("start"), 1)
+            end = min(_positive_int(args.get("end"), start + max_lines - 1), start + max_lines - 1)
+        return (p, start, end)
 
     def _failure_refs(self, failure: str, correction: Sequence[CorrectionItem], ws: WorkspaceHandle) -> list[_FileRef]:
         texts = [failure, *(c.message for c in correction)]

@@ -135,6 +135,13 @@ class LocalGit:
             return None
         return {raw.decode("utf-8", errors="surrogateescape") for raw in res.stdout.split(b"\0") if raw}
 
+    async def file_at(self, rev: str, path: str) -> bytes | None:
+        """Content of ``path`` in commit ``rev`` (``None`` if the commit or the file is unknown)."""
+        if not rev or rev.startswith("-") or not path:
+            return None
+        res = await self.run("cat-file", "blob", f"{rev}:{path}")
+        return res.stdout if res.ok else None
+
     async def worktree_dirty(self) -> dict[str, str]:
         """Paths whose working-tree content differs from the index (``XY`` with ``Y != ' '``) or untracked."""
         res = await self.run("status", "--porcelain=v1", "-z", "--untracked-files=all", "--no-renames", "--ignore-submodules=all")

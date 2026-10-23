@@ -267,9 +267,10 @@ async def test_huge_inputs_respect_every_budget() -> None:
     )
     history = [TurnRecord(i, "run_test", "x" * 5000, i % 2 == 0, "y" * 5000, None if i % 2 == 0 else "test_failed") for i in range(1, 400)]
     failure = "E   first error line\n" + "noise\n" * 200_000 + "=== 3 failed, 1 passed in 9.0s ===\n"
-    # 4096/1000: the smallest window the system contract still fits since the turn count moved into the closing line
-    # of the user message (framing, D-021)
-    for ctx, out in ((32768, 6144), (8192, 2048), (4096, 1000)):
+    # 4096/995: the smallest window the system contract still fits since the turn count moved into the closing line
+    # of the user message (framing, D-021); 995 instead of 1000 since the closing line says that leftover work is
+    # continued (BUG-340)
+    for ctx, out in ((32768, 6144), (8192, 2048), (4096, 995)):
         builder, _, _ = make_builder(repo=repo, git=git, context_tokens=ctx, max_output_tokens=out, safety_margin_tokens=128)
         built = await builder.build(make_input(step=step, history=history, latest_failure=failure))
         plan = builder.plan
@@ -372,6 +373,25 @@ async def test_reads_are_shown_as_read_not_as_a_short_head() -> None:
     code = section(user_text(built), "RELEVANT CODE")
     assert "### pkg/big.py lines 1-300 [read]" in code and "x300 = 300" in code
     assert "### pkg/huge.py lines 520-560 [read]" in code and "y540 = 540" in code and "y1 = 1\n" not in code
+
+
+async def test_the_history_names_a_read_the_files_message_shows_instead_of_its_clipped_head() -> None:
+    """Ladder A10 #5 (BUG-338): the history line of a read showed the first 320 characters of the content, which looked
+    like a cut-off output; the coder read the same lines again in the next turn, three refused re-reads in one step.
+    A read whose lines RELEVANT CODE/TESTS show in full points there; one they do not show keeps its digest."""
+    from hermclaw.context_builder.history import READ_SHOWN, TurnRecord
+
+    repo = default_repo()
+    repo.files["pkg/huge.py"] = "".join(f"y{i} = {i}\n" for i in range(1, 701))
+    builder, _, _ = make_builder(repo=repo)
+    history = [
+        TurnRecord(1, "read_range", '{"end": 35, "path": "util.py", "start": 1}', True, " 1| util 1\n 2| util 2"),
+        TurnRecord(2, "read_range", '{"end": 900, "path": "pkg/huge.py", "start": 800}', True, "beyond the end"),
+    ]
+    built = await builder.build(make_input(history=history))
+    hist = section(user_text(built), "SHORT STEP HISTORY")
+    assert "- turn 1: read_range" in hist and READ_SHOWN in hist.split("- turn 2:")[0] and "1| util 1" not in hist
+    assert "beyond the end" in hist.split("- turn 2:")[1]
 
 
 async def test_pages_of_a_clipped_file_are_shown_from_where_they_started() -> None:

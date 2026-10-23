@@ -99,8 +99,10 @@ the gateway, never by the planner.
    - the events `planner.plan.created` and `step.created` (one per step).
 
 Step rows take `capability`, `acceptance` JSON, `constraints`, `repo_hints`, `allowed_new_paths`,
-`forbidden_paths`, `network` and `risk` from the plan. `turn_budget = policies.coder.max_turns` applies to kinds
-whose capability uses the `coder` model role, otherwise `0`. `max_attempts = policies.correction.max_attempts_per_step`.
+`forbidden_paths`, `network` and `risk` from the plan. `turn_budget = step_turn_budget(...)` applies to kinds
+whose capability uses the `coder` model role, otherwise `0`: `policies.coder.max_turns`, plus five turns for every
+two files (non-glob `allowed_new_paths` and `repo_hints`) beyond `new_files_per_step`, up to
+`policies.coder.max_turns_per_step` (40; 11 files at 20 turns -> 28, BUG-339). `max_attempts = policies.correction.max_attempts_per_step`.
 `current_scope_version` stays `NULL`, because the scope engine (P15) creates scopes.
 
 ### Semantic rules (14.5 DAG, 14.6 dependencies)

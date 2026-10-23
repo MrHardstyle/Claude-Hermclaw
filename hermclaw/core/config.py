@@ -288,6 +288,9 @@ class ScopePolicy(_Strict):
 
 class CoderPolicy(_Strict):
     max_turns: int = 20
+    # a step with many files gets more turns, two of every five for writing a file, up to this limit: 20 turns for 11
+    # files left 9 turns for tests and fixes and the step ran out (ladder A10 #5, BUG-339)
+    max_turns_per_step: int = Field(default=40, ge=1, le=200)
     max_output_tokens: int = 6144
     tool_output_chars: int = 12000
     # a command the coder starts without timeout_seconds: a hanging test (a server it never stops) blocked a turn for

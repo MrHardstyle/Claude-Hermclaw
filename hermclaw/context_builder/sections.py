@@ -119,7 +119,9 @@ Reply with exactly ONE JSON object and nothing else (no prose, no markdown fence
 if the step cannot be completed, use block_step (or request_replan) with a concrete reason."""
 
 
-ALMOST_EXHAUSTED = "Almost out of turns: complete_step, block_step or request_replan."
+# block_step here sent a step with work in progress to a replan; work left when the turns run out is verified and
+# continued in another attempt (ladder A10 #5, BUG-340)
+ALMOST_EXHAUSTED = "Almost out of turns: finish this change or complete_step; leftover work is continued."
 
 
 def user_closing(turn: int, max_turns: int) -> str:

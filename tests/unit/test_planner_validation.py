@@ -28,6 +28,7 @@ from hermclaw.planner.validation import (
     prune_unreachable_must_change,
     quoted_names,
     semantic_errors,
+    step_turn_budget,
 )
 from tests.unit.test_planner_support import FASTAPI, LINUX_ADMIN, PHP, REACT, plan, step
 
@@ -1024,6 +1025,19 @@ def test_a_step_creating_more_files_than_one_attempt_can_write_is_split() -> Non
     errors = _errors(plan("goal", [_impl(allowed_new_paths=files)]), ctx)
     assert any("creates 9 new files" in e and "split it by component" in e for e in errors)
     assert not any("new files" in e for e in _errors(plan("goal", [_impl(allowed_new_paths=files[:8])]), ctx))
+
+
+def test_a_step_with_many_files_gets_more_turns() -> None:
+    """BUG-339 (ladder A10 #5): one step changed 6 files and created 5 test files within 20 turns; 11 turns went to
+    writing, 9 were left for tests and fixes and the step ran out. Five turns for every two files beyond the eight
+    20 turns are sized for, up to the per-step limit."""
+    small = PlanStep.model_validate(_impl(allowed_new_paths=["tests/test_users.py"]))
+    assert step_turn_budget(small, 20, 40) == 20
+    new = [f"tests/test_part_{i}.py" for i in range(5)]
+    hints = ["app/a.py", "app/b.py", "app/c.py", "app/d.py", "app/e.py", "README.md"]
+    large = PlanStep.model_validate(_impl(allowed_new_paths=[*new, "docs/", "tests/fixtures/*.json"], repo_hints=hints))
+    assert step_turn_budget(large, 20, 40) == 28  # globs and directories are no files to write
+    assert step_turn_budget(large, 20, 24) == 24 and step_turn_budget(large, 30, 24) == 30
 
 
 def test_a_file_the_job_names_without_a_path_goes_into_the_step_that_delivers_it() -> None:

@@ -46,6 +46,30 @@ Noch keine.
 
 ## Behobene Bugs
 
+### BUG-340 – „Fast keine Züge mehr“ führt zu `block_step` und damit zu einem 23-Minuten-Neuplan statt zu einem weiteren Versuch
+- Phase: Schwierigkeitsleiter auf rc82, 2026-10-23 (A10#5, Job 64562f45) · Komponente: coder (`handler.py`), context_builder (`sections.py`) · Severity: P2 · blockierend: nein · Status: **behoben im Repository** (`tests/integration/test_coder_handler.py::test_a_block_for_lack_of_turns_with_work_in_progress_is_verified_not_replanned`)
+- Reproduktion: Im Korrekturversuch von S001 sagt die Schlusszeile ab Zug 18 „Almost out of turns: complete_step, block_step or request_replan.“ In Zug 20 ruft der Coder `block_step` mit `reason_code: other` und „Out of turns. The remaining work is: …“ auf. Der Schritt geht in den Neuplan; der Planer braucht 13,5 + 9,4 min (eine Reparatur), danach bricht die Leiter den Job nach 56,9 min ab (versteckt 31/40). Ein dritter Versuch war erlaubt (`max_attempts_per_step: 3`).
+- Ursache: Die Schlusszeile bot `block_step` als gleichwertigen Abschluss an. Ein Block wegen fehlender Züge wurde wie ein Planproblem behandelt, während ein aufgebrauchtes Budget nach Änderungen geprüft und als Korrektur fortgesetzt wird (BUG-230).
+- Fix: Ein `block_step` mit `reason_code: other` in den drei Zügen, vor denen die Schlusszeile warnt, nach Dateiänderungen, wird wie ein aufgebrauchtes Budget behandelt (Verifier, dann Korrektur). Die Schlusszeile lautet jetzt „Almost out of turns: finish this change or complete_step; leftover work is continued.“ (`block_step` wird dort nicht mehr angeboten; im kleinsten getesteten Fenster 4096 Token sinkt die Ausgabereserve dadurch von 1000 auf 995).
+
+### BUG-339 – Ein Schritt mit 11 Dateien bekommt dieselben 20 Züge wie einer mit zwei
+- Phase: Schwierigkeitsleiter auf rc82, 2026-10-23 (A10#5, Job 64562f45) · Komponente: planner (`validation.py`, `persist.py`), coder (`handler.py`), core (`config.py`) · Severity: P2 · blockierend: nein · Status: **behoben im Repository** (`tests/unit/test_planner_validation.py::test_a_step_with_many_files_gets_more_turns`)
+- Reproduktion: Der Plan hat einen Implement-Schritt mit 6 vorhandenen und 5 neuen Dateien (Datenbank, App, Seite, README, fünf Testdateien). Der Coder schreibt in den Zügen 1–11 alle Dateien, der erste Testlauf kommt in Zug 12; für Tests und Korrekturen bleiben 9 Züge, der Verifier findet den Stand rot.
+- Ursache: `turn_budget` war immer `policies.coder.max_turns`. Die Planprüfung begrenzt nur die neuen Dateien eines Schritts (8 bei 20 Zügen), nicht die zu ändernden.
+- Fix: `step_turn_budget` gibt einem Schritt, der mehr Dateien anlegt oder nennt (`allowed_new_paths` und `repo_hints` ohne Globs und Verzeichnisse), als `new_files_per_step` vorsieht, fünf Züge je zwei weitere Dateien, bis `policies.coder.max_turns_per_step` (40). 11 Dateien bei 20 Zügen ergeben 28 Züge.
+
+### BUG-338 – Der Verlauf zeigt gelesenen Inhalt abgeschnitten, der Coder liest dieselben Zeilen erneut
+- Phase: Schwierigkeitsleiter auf rc82, 2026-10-23 (A10#5, Job 64562f45) · Komponente: context_builder (`builder.py`, `history.py`) · Severity: P3 · blockierend: nein · Status: **behoben im Repository** (`tests/unit/test_context_builder_relevance.py::test_the_history_names_a_read_the_files_message_shows_instead_of_its_clipped_head`)
+- Reproduktion: Der Coder liest `tasks_app/db.py` Zeilen 1–35, obwohl RELEVANT CODE die Datei ganz zeigt (1–160). Im nächsten Zug liest er genau denselben Bereich noch einmal und bekommt READ_REPEATED. Das passiert dreimal in einem Schritt; das Wissen kennt den Fall aus 13 bzw. 17 früheren Jobs.
+- Ursache: Die Verlaufszeile eines Lesezugriffs zeigte die ersten 320 Zeichen des Inhalts. Das sah wie eine abgeschnittene Ausgabe aus; dass der ganze Bereich in RELEVANT CODE steht, sagte sie nicht.
+- Fix: Der Verlauf wird nach dem Packen von RELEVANT CODE/TESTS erzeugt. Ein Lesezugriff, dessen Zeilen dort vollständig stehen, heißt im Verlauf „the lines read are shown in full in RELEVANT CODE/RELEVANT TESTS above (their current content)“. Ein nicht gezeigter Lesezugriff behält seinen Auszug.
+
+### BUG-337 – Der Hinweis auf entfernte Tests lässt den Coder seine eigene neue Testdatei viermal hin- und herschreiben
+- Phase: Schwierigkeitsleiter auf rc82, 2026-10-23 (A10#5, Job 64562f45) · Komponente: tools (`engine.py`, `gitlocal.py`) · Severity: P2 · blockierend: nein · Status: **behoben im Repository** (`tests/integration/test_tools_engine_read_write.py::test_a_rewrite_of_the_steps_own_new_test_file_is_not_a_lost_test`)
+- Reproduktion: Der Coder legt `tests/test_ui.py` neu an, Lint meldet einen unbenutzten Import. Jede Neufassung behebt den Befund, enthält aber eine andere Auswahl an Tests; der BUG-336-Hinweis verlangt die Tests der vorigen Fassung zurück. Die Züge 6–10 pendeln zwischen zwei Fassungen.
+- Ursache: Der Hinweis verglich mit dem Inhalt vor dem Schreiben, also auch mit eigenen Tests des Schritts, die der Coder frei umbauen darf.
+- Fix: Als vorhandene Tests zählen nur die Tests, die die Datei am Basis-Commit des Schritts hatte (`LocalGit.file_at`). Eine im Schritt neu angelegte Testdatei löst keinen Hinweis mehr aus; fehlende Basistests werden weiter genannt, auch nach mehreren Überschreibungen.
+
 ### BUG-336 – Ein Überschreiben einer Testdatei entfernt vorhandene Tests ohne Hinweis
 - Phase: Schwierigkeitsleiter auf rc81, 2026-10-23 (A10#4, Job b9245e25) · Komponente: tools (`engine.py`) · Severity: P2 · blockierend: nein · Status: **behoben im Repository** (`tests/integration/test_tools_engine_read_write.py::test_an_overwrite_that_drops_existing_tests_says_which`)
 - Reproduktion: Der Coder schreibt `tests/test_api.py` mit `write_file` neu. Drei der vorhandenen Tests (`test_create_array_body`, `test_create_invalid_json`, `test_python_m_starts`) fehlen danach, obwohl der Auftrag sagt „Die vorhandenen Tests bleiben erhalten“. Die Antwort lautet nur „overwrote tests/test_api.py“; die versteckte Prüfung `test_the_existing_tests_are_kept` scheitert (versteckt 37/40).

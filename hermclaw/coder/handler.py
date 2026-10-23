@@ -538,7 +538,7 @@ class ImplementStepHandler:
         settings = CoderSettings(
             **{
                 **self.deps.coder_settings.__dict__,
-                "max_turns": min(row.turn_budget, self.config.policies.coder.max_turns),
+                "max_turns": self._turn_limit(row),
                 # request exactly the output the context budget reserves: the loop's default (6144) cut answers off at
                 # 6144 tokens although the profile allowed and the budget reserved 8192 (live G1, BUG-235)
                 "max_output_tokens": builder_cfg.max_output_tokens,
@@ -636,8 +636,24 @@ class ImplementStepHandler:
             keeper_interval=self.deps.lease_keeper_interval,
         )
 
+    def _turn_limit(self, row: Step) -> int:
+        """The turns of one attempt: the step's budget (more for a step with many files, BUG-339) within the policy."""
+        policy = self.config.policies.coder
+        return min(row.turn_budget, max(policy.max_turns, policy.max_turns_per_step))
+
     async def _after_loop(self, run: _Run, result: CoderResult) -> StepOutcome:
         ctx, row = run.ctx, run.row
+        block = result.block or {}
+        if (
+            result.outcome == "blocked"
+            and str(block.get("reason_code", "other")) == "other"
+            and result.turns >= self._turn_limit(row) - 2  # the turns the closing line warns about
+            and any(r.mutated_paths for r in result.history)
+        ):
+            # out of turns with work in progress is no plan problem: blocked in its last turn ("Out of turns. The
+            # remaining work is …"), the step went to a 23-minute replan instead of being verified and continued in a
+            # third attempt (ladder A10 #5, BUG-340)
+            result = dataclasses.replace(result, outcome="budget_exhausted", detail=str(block.get("message", ""))[:2000])
         if result.outcome == "cancelled":
             return StepOutcome("cancelled", summary=result.detail or "cancelled")
         if result.outcome == "checkpointed":
@@ -645,7 +661,6 @@ class ImplementStepHandler:
         if result.outcome == "model_failed":
             return StepOutcome("failed", error_code=result.error_code or "MODEL_FAILED", error_message=result.detail, retryable=True)
         if result.outcome == "blocked":
-            block = result.block or {}
             reason = _BLOCK_REASONS.get(str(block.get("reason_code", "other")), "step_failed")
             return StepOutcome(
                 "blocked",

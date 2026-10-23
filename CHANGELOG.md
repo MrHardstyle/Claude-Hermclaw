@@ -4,6 +4,14 @@ Format: [Keep a Changelog](https://keepachangelog.com/de/1.1.0/), Versionen nach
 
 ## [Unreleased]
 
+## [0.1.0rc83] – Release Candidate (2026-10-23)
+
+### Behoben
+- **Eigene neue Testdatei pendelt (BUG-337):** Der Hinweis auf entfernte Tests zählt nur Tests, die die Datei am Basis-Commit des Schritts hatte.
+- **Erneutes Lesen gezeigter Zeilen (BUG-338):** Der Verlauf verweist bei einem Lesezugriff, dessen Zeilen RELEVANT CODE/TESTS ganz zeigen, dorthin statt auf einen abgeschnittenen Auszug.
+- **Zugbudget nach Schrittgröße (BUG-339):** Ein Schritt mit mehr Dateien als `new_files_per_step` bekommt fünf Züge je zwei weitere Dateien, bis `policies.coder.max_turns_per_step` (40).
+- **Block wegen fehlender Züge (BUG-340):** `block_step` (`other`) in den letzten drei Zügen nach Änderungen wird geprüft und als Korrektur fortgesetzt statt neu geplant; die Schlusszeile bietet `block_step` nicht mehr an.
+
 ## [0.1.0rc82] – Release Candidate (2026-10-23)
 
 ### Geändert

@@ -20,7 +20,7 @@ An answer cut off at the output limit is invalid; a cut-off `write_file` is salv
 1. workspace of the job (GitEngine), scope via `ScopeEngine.current_contract/create_scope` (unavailable → blocked `scope_unavailable`)
 2. `ToolEngine` with `ScopeGuard`, executor from `executor_factory` (local sandbox / remote `.222`), `ToolPermissions.for_step`,
    callbacks: research port, `ScopeExpansionHandler`
-3. `CoderLoop` (turn budget = min(step.turn_budget, policies.coder.max_turns); requested output = the context builder's `max_output_tokens`, i.e. max(profile, policies.coder.max_output_tokens), BUG-235)
+3. `CoderLoop` (turn budget = min(step.turn_budget, max(policies.coder.max_turns, max_turns_per_step)), BUG-339; requested output = the context builder's `max_output_tokens`, i.e. max(profile, policies.coder.max_output_tokens), BUG-235)
 4. completed → `ScopeAuditor.audit_status` → `VerifierPort.verify` (P21) → `ReviewerPort.review` (P22, `enforce_review_invariant`)
    → `GitEngine.stage_allowed` + `commit_verified(verification_run_id)` – **commit only after a passed verification**
 
@@ -33,6 +33,7 @@ Ports: `VerifierPort.verify(step, workspace, …) -> VerificationOutcome(report,
 - verifier outage (BUG-303): when every blocking failure is a command the executor could not run (`executor_failure`), the handler verifies again after 5 s and 20 s (`VERIFIER_RETRY_SECONDS`); still unable, the attempt ends `failed` with `VERIFIER_UNAVAILABLE`, a step outage code: the scheduler retries after the outage backoff without counting the attempt, and no correction is spent
 - unmet change demands (BUG-278): when the only blocking failures are diff checks whose `must_change` files stayed unchanged (the step changed other files; no forbidden, empty or oversized change, nothing else failed) and the step kind is reviewed, the handler verifies again on the step without those globs (`without_change_demands`, which adds a constraint asking the review whether the goal needs them) and runs the heavy review; a pass emits `acceptance.waived {must_change, reason}` and commits, a `fix_required` (e.g. a blocker naming the file) becomes a normal correction. Before, a plan demanding changes to files the step only reads (input data, an entry point it runs) was uncorrectable and ended in replans
 - turn budget exhausted after file changes: the verifier (and review) still run – a pass completes and commits the step, a failure becomes a correction carrying both the turn-budget note and the verifier evidence (BUG-230); without changes it is a plain correction
+- a `block_step` with `reason_code: other` in the last three turns (those the closing line warns about) after file changes is handled like a spent budget, not as a replan; the closing line no longer offers `block_step` and says that leftover work is continued (BUG-340)
 - requirement coverage (D-024, Research R-035): after the verifier passed, an implement step that delivered test files
   (`TEST_GLOBS`: `tests/*`, `test_*.py`, `*.Tests.ps1`, `*.test.*` …) gets one structured call (`purpose: coverage`) to
   the coder's own profile (the tournament's `coder_alias` too): it lists the checkable requirements of the job request and
