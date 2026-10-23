@@ -4,6 +4,12 @@ Format: [Keep a Changelog](https://keepachangelog.com/de/1.1.0/), Versionen nach
 
 ## [Unreleased]
 
+## [0.1.0rc85] – Release Candidate (2026-10-23)
+
+### Neu
+- **D-027 Wissen zum geschriebenen Code:** Lehren und Konventionen mit Tags `code:<regex>` kommen mit dem Ergebnis eines Schreibbefehls, dessen neuer Text passt (einmal pro Versuch). `memory-import` ergänzt bei vorhandenen Einträgen neue Tags und lehnt ungültige Muster ab.
+- **Wissen:** Die Konvention zu `LIKE` mit Nutzertext trägt Code-Muster; neue Konvention zur strengen Datumsprüfung `YYYY-MM-DD` (`config/knowledge/rc84-ladder.yaml`).
+
 ## [0.1.0rc84] – Release Candidate (2026-10-23)
 
 ### Behoben

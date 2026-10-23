@@ -55,7 +55,7 @@ from hermclaw.core.config import PoliciesConfig
 from hermclaw.core.interfaces import CommandExecutor, ExecutionRequest, GitReader, RepoContextProvider, RepoHit, WorkspaceHandle
 from hermclaw.core.logging import get_logger
 from hermclaw.core.redaction import DEFAULT_REDACTOR, REDACTED, Redactor
-from hermclaw.memory.store import FAILURE_SCORE_MARGIN, failure_matches
+from hermclaw.memory.store import FAILURE_SCORE_MARGIN, MemoryHit, failure_matches
 from hermclaw.models.protocols import CallContext as ModelCallContext
 from hermclaw.research.questions import unanswerable_reason
 from hermclaw.scope.expansion import is_test_path
@@ -339,6 +339,7 @@ class ToolEngine:
         # keyed without the timeout: a command that finished is not changed by another timeout (BUG-211)
         self._ran: dict[tuple[str, str], tuple[int, int, str]] = {}
         self._hinted: set[tuple[str, str]] = set()  # (tool, error code) whose knowledge this attempt was given (D-019)
+        self._code_entries: list[tuple[MemoryHit, list[re.Pattern[str]]]] | None = None  # D-027, loaded at the first write
         self._shown: set[uuid.UUID] = set()  # knowledge entries this attempt was given with a refusal or failed run
         self._looked_up: set[str] = set()  # error lines of failed runs already looked up in the knowledge
         self._ran_output: dict[tuple[str, str], str] = {}  # rendered output of a failed run, repeated in its refusal
@@ -460,7 +461,7 @@ class ToolEngine:
                     )
                 )
                 raise
-            result = await self._with_failure_knowledge(self._finalise(result), ctx)
+            result = await self._with_code_knowledge(await self._with_failure_knowledge(self._finalise(result), ctx), action.args)
             if result.ok and result.terminal:
                 self._finished_by = spec.name
             duration = _duration_ms(started)
@@ -926,6 +927,39 @@ class ToolEngine:
         return result.model_copy(
             update={"output": result.output + note, "data": result.data | {"knowledge": [str(h.id) for h in hits[:want]]}}
         )
+
+    async def _with_code_knowledge(self, result: ToolResult, args: Mapping[str, Any]) -> ToolResult:
+        """Lessons and conventions whose code patterns (tags ``code:<regex>``) match what a write just put into a file,
+        each entry once per attempt (D-027): the convention on SQL LIKE with user text scored 0.25 against the step
+        goal, stayed below the recall threshold, and the delivered search treated "100%" as a wildcard (ladder A10 #4
+        and #7)."""
+        want = self.policies.memory.coder_entries
+        if self.memory is None or want <= 0 or not result.ok or not result.mutated_paths:
+            return result
+        written = _written_text(result.tool, args)
+        if not written.strip():
+            return result
+        if self._code_entries is None:
+            try:
+                self._code_entries = await self.memory.code_entries(scopes=self.memory_scopes)
+            except Exception as exc:  # the write itself stands
+                log.warning("knowledge for written code unavailable", extra={"error_type": type(exc).__name__})
+                self._code_entries = []
+        fresh = [h for h, patterns in self._code_entries if h.id not in self._shown and any(p.search(written) for p in patterns)]
+        fresh = fresh[:want]
+        if not fresh:
+            return result
+        self._shown.update(h.id for h in fresh)
+        try:
+            await self.memory.count_recalls([h.id for h in fresh])
+        except Exception as exc:
+            log.warning("recall count failed", extra={"error_type": type(exc).__name__})
+        limit = self.policies.memory.max_entry_chars
+        note = (
+            "\n\nHermclaw's knowledge about code like the code just written (from earlier jobs; the files and outputs here "
+            "decide):\n" + "\n\n".join(h.render(limit) for h in fresh)
+        )
+        return result.model_copy(update={"output": result.output + note, "data": result.data | {"knowledge": [str(h.id) for h in fresh]}})
 
     async def _with_failure_knowledge(self, result: ToolResult, ctx: CallContext) -> ToolResult:
         """Lessons matching the error lines of a command or test run that failed, each entry once per attempt (D-019).
@@ -2271,6 +2305,18 @@ def _test_names(text: str) -> set[str]:
     for rx in _TEST_NAME_RES:
         names.update(m.group(m.lastindex or 0) for m in rx.finditer(text))
     return names
+
+
+def _written_text(tool: ToolName, args: Mapping[str, Any]) -> str:
+    """What a write put into a file: the content, the replacement, or the added lines of a patch."""
+    if tool == ToolName.write_file:
+        return str(args.get("content") or "")
+    if tool == ToolName.replace_text:
+        return str(args.get("new") or "")
+    if tool == ToolName.apply_patch:
+        lines = str(args.get("patch") or "").splitlines()
+        return "\n".join(line[1:] for line in lines if line.startswith("+") and not line.startswith("+++"))
+    return ""
 
 
 def _read_path(tool: str, key: str) -> str:

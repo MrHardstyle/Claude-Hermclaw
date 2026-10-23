@@ -178,7 +178,8 @@ def cmd_repo_list(_: argparse.Namespace) -> int:
 
 def cmd_memory_import(ns: argparse.Namespace) -> int:
     """``hermclaw memory-import FILE`` – operator knowledge from a YAML list (D-019): ``kind``, ``title``, ``content``,
-    optional ``scope``, ``tags``, ``status``. An entry whose title already exists is left as it is."""
+    optional ``scope``, ``tags``, ``status``. An entry whose title already exists only gains the file's new tags
+    (``code:<regex>`` patterns, D-027)."""
     import yaml
 
     from hermclaw.core.config import get_config

@@ -63,6 +63,22 @@ class MemoryHit:
         return DEFAULT_REDACTOR.text(f"{head}\n{body}" if body else head)
 
 
+CODE_TAG = "code:"
+
+
+def code_patterns(tags: Iterable[str]) -> list[re.Pattern[str]]:
+    """The code patterns of an entry (D-027): tags ``code:<regex>``; an invalid one is ignored here (the import refuses
+    it)."""
+    out: list[re.Pattern[str]] = []
+    for tag in tags:
+        if tag.startswith(CODE_TAG) and tag[len(CODE_TAG) :]:
+            try:
+                out.append(re.compile(tag[len(CODE_TAG) :], re.MULTILINE))
+            except re.error:
+                continue
+    return out
+
+
 def entry_text(title: str, content: str) -> str:
     """The text an entry is embedded and word-matched by."""
     return f"{title.strip()}\n\n{content.strip()}".strip()
@@ -249,6 +265,17 @@ class MemoryStore:
             await s.execute(update(MemoryEntry).where(MemoryEntry.id.in_(list(ids))).values(recalls=MemoryEntry.recalls + 1))
             await s.commit()
 
+    async def code_entries(
+        self, *, scopes: Sequence[str] | None = None, kinds: Sequence[str] = ("lesson", "convention")
+    ) -> list[tuple[MemoryHit, list[re.Pattern[str]]]]:
+        """Active entries with code patterns (D-027) and their compiled patterns: the coder is given an entry when the
+        code it writes matches one – a convention about a search with SQL LIKE scored 0.25 against a whole step goal
+        and never reached the coder by similarity (ladder A10 #7)."""
+        async with self.sessionmaker() as s:
+            stmt = _live(select(MemoryEntry), ("active",), scopes).where(MemoryEntry.kind.in_(list(kinds)))
+            rows = (await s.execute(stmt.limit(_TEXT_SCAN_MAX_ROWS))).scalars().all()
+        return [(_hit(row, 1.0), pats) for row in rows if (pats := code_patterns(row.tags or []))]
+
     async def get(self, entry_id: uuid.UUID) -> MemoryEntry | None:
         async with self.sessionmaker() as s:
             return await s.get(MemoryEntry, entry_id)
@@ -370,16 +397,33 @@ def _check(*, kind: str | None, status: str | None, source: str | None) -> None:
 async def import_entries(
     sessionmaker: async_sessionmaker[AsyncSession], embedder: EmbeddingModel | None, policy: MemoryPolicy, items: Sequence[Any]
 ) -> dict[str, list[str]]:
-    """Operator entries (active unless they say otherwise); a title that exists already is skipped, not overwritten."""
+    """Operator entries (active unless they say otherwise); a title that exists already is not overwritten – it only
+    gains the tags the file adds (``code:`` patterns given to an entry later, D-027)."""
     store = MemoryStore(sessionmaker, embedder, policy)
-    existing = {row.title for row in await store.entries(limit=1000)}
-    added, skipped = [], []
+    existing = {row.title: row for row in await store.entries(limit=1000)}
+    added, skipped, tagged = [], [], []
     for raw in items:
         if not isinstance(raw, dict) or not str(raw.get("title", "")).strip() or not str(raw.get("content", "")).strip():
             raise ValueError(f"an entry needs title and content: {raw!r}"[:300])
         title = str(raw["title"]).strip()
-        if title in existing:
+        tags = [str(t).strip() for t in raw.get("tags", []) if str(t).strip()]
+        for tag in tags:
+            if tag.startswith(CODE_TAG):
+                try:
+                    re.compile(tag[len(CODE_TAG) :])
+                except re.error as exc:
+                    raise ValueError(f"{title}: invalid code pattern {tag!r}: {exc}") from exc
+        if title in added:
             skipped.append(title)
+            continue
+        if title in existing:
+            row = existing[title]
+            new_tags = set(tags) - set(row.tags or [])
+            if new_tags:
+                await store.update(row.id, tags=[*(row.tags or []), *new_tags])
+                tagged.append(title)
+            else:
+                skipped.append(title)
             continue
         await store.add(
             kind=str(raw.get("kind", "lesson")),
@@ -388,8 +432,7 @@ async def import_entries(
             status=str(raw.get("status", "active")),
             source="operator",
             scope=raw.get("scope"),
-            tags=[str(t) for t in raw.get("tags", [])],
+            tags=tags,
         )
-        existing.add(title)
         added.append(title)
-    return {"added": added, "skipped": skipped}
+    return {"added": added, "skipped": skipped, "tagged": tagged}

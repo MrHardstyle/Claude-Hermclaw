@@ -4,7 +4,7 @@
 
 - kind: convention
   title: "SQL LIKE with user text: % and _ are wildcards – escape them, or search with instr()"
-  tags: [python, sqlite3, sql, search, database, api]
+  tags: [python, sqlite3, sql, search, database, api, 'code:\bLIKE\b', 'code:\blike\s+(?:lower\s*\()?\?']
   content: |
     `WHERE title LIKE ?` with `f"%{q}%"` is safe from injection (the value is a parameter) but not literal: a search
     for "100%" also finds "1000", and "e_n" finds "one note". For a literal, case-insensitive substring search either

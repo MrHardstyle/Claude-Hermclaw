@@ -88,6 +88,42 @@ async def test_a_failed_run_brings_the_matching_lesson_once(sessionmaker: SM, re
     assert ok.ok and "Hermclaw's knowledge" not in ok.output
 
 
+async def test_code_that_matches_a_code_pattern_brings_the_convention_once(sessionmaker: SM, repo: Path) -> None:
+    """D-027 (ladder A10 #4 and #7): the convention on SQL LIKE with user text scored 0.25 against the step goal and
+    never reached the coder; the search it delivered treated "100%" as a wildcard. An entry tagged ``code:<regex>``
+    comes with the write whose new text matches, once per attempt; text that does not match brings nothing."""
+    from sqlalchemy import delete
+
+    from hermclaw.core.config import MemoryPolicy
+    from hermclaw.memory.store import MemoryStore
+    from hermclaw.persistence.models import MemoryEntry
+    from tests.integration.test_repo_intelligence_support import HashingEmbedder
+
+    async with sessionmaker() as s:
+        await s.execute(delete(MemoryEntry))
+        await s.commit()
+    store = MemoryStore(sessionmaker, HashingEmbedder(), MemoryPolicy(min_score=0.3))
+    like = await store.add(
+        kind="convention",
+        title="SQL LIKE with user text: % and _ are wildcards",
+        content="Escape them with ESCAPE, or search with instr().",
+        status="active",
+        tags=["sql", r"code:\bLIKE\b"],
+    )
+    await store.add(kind="convention", title="Retired LIKE idea", content="x", status="retired", tags=[r"code:\bLIKE\b"])
+    h = await make_harness(sessionmaker, repo, contract=scope(target_paths=["src/calc.py"]), memory=store)
+    plain = await h.call("replace_text", path="src/calc.py", old="return a * b", new="return b * a")
+    assert plain.ok and "Hermclaw's knowledge" not in plain.output
+    sql = 'def find(c, q):\n    return c.execute("SELECT id FROM t WHERE title LIKE ?", (f"%{q}%",))\n'
+    first = await h.call("write_file", path="src/calc.py", content=sql)
+    assert first.ok and "Hermclaw's knowledge about code like the code just written" in first.output
+    assert "search with instr()" in first.output and "Retired" not in first.output and first.data["knowledge"] == [str(like)]
+    again = await h.call("write_file", path="src/calc.py", content=sql + "\n# LIKE again\n")
+    assert again.ok and "Hermclaw's knowledge" not in again.output
+    row = await store.get(like)
+    assert row is not None and row.recalls == 1
+
+
 async def test_run_command_executes_persists_and_redacts(sessionmaker: SM, repo: Path) -> None:
     h = await make_harness(sessionmaker, repo, contract=scope(**SCOPE))
     res = await h.call("run_command", command="echo hello; echo 'token=abcdef123456' >&2; ls src")

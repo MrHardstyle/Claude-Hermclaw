@@ -1,0 +1,16 @@
+# Operator knowledge from the difficulty ladder on 0.1.0rc84 (2026-10-23, D-020), stage A10 (extending a Python web app).
+# Import: hermclaw memory-import config/knowledge/rc84-ladder.yaml (existing titles only gain new tags).
+# Every entry names the runs it comes from; edit or retire it on the page "Wissen". Tags `code:<regex>` (D-027) bring
+# the entry with a write whose new text matches.
+
+- kind: convention
+  title: "A strict YYYY-MM-DD date: strptime('%Y-%m-%d') also accepts 2026-2-3 – check the shape first"
+  tags: [python, datetime, validation, api, 'code:strptime\(', 'code:fromisoformat\(']
+  content: |
+    `datetime.strptime(s, "%Y-%m-%d")` accepts one-digit months and days ("2026-2-3"), and `date.fromisoformat` (Python
+    3.11+) also accepts other ISO forms such as "20260203". When a format is stated exactly, check the shape and then
+    the calendar: `re.fullmatch(r"\d{4}-\d{2}-\d{2}", s)` and `date.fromisoformat(s)` (raises ValueError for
+    "2026-02-30"); a value of another type (number, list) is invalid as well. Test with "2026-2-3", "20260203",
+    "2026-02-30" and a valid date.
+    Seen: ladder A10 #7 on rc84 (coder-main) – `datetime.strptime(due, "%Y-%m-%d")` let "2026-2-3" through; the hidden
+    check expected 400.

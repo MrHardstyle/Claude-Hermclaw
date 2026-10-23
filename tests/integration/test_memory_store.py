@@ -110,10 +110,24 @@ async def test_operator_knowledge_is_imported_once(sessionmaker: SM, store: Memo
     ]
     first = await import_entries(sessionmaker, HashingEmbedder(), store.policy, items)
     again = await import_entries(sessionmaker, HashingEmbedder(), store.policy, items)
-    assert first == {"added": ["Pester on Linux", "Start the entry point"], "skipped": []}
-    assert again == {"added": [], "skipped": ["Pester on Linux", "Start the entry point"]}
+    assert first == {"added": ["Pester on Linux", "Start the entry point"], "skipped": [], "tagged": []}
+    assert again == {"added": [], "skipped": ["Pester on Linux", "Start the entry point"], "tagged": []}
     rows = {e.title: e for e in await store.entries()}
     assert rows["Pester on Linux"].source == "operator" and rows["Pester on Linux"].status == "active"
     assert rows["Start the entry point"].kind == "lesson" and rows["Start the entry point"].scope == "repo:x"
     with pytest.raises(ValueError, match="title and content"):
         await import_entries(sessionmaker, None, store.policy, [{"title": "no text"}])
+
+
+async def test_an_imported_entry_gains_code_patterns_later_and_bad_patterns_are_refused(sessionmaker: SM, store: MemoryStore) -> None:
+    """D-027: a convention imported before code patterns existed gets them from the edited file (tags are only added,
+    the text the operator may have edited stays); a pattern that is no regular expression is refused."""
+    entry = {"kind": "convention", "title": "SQL LIKE with user text", "content": "escape % and _", "tags": ["sql"]}
+    await import_entries(sessionmaker, HashingEmbedder(), store.policy, [entry])
+    tagged = {**entry, "content": "changed in the file", "tags": ["sql", r"code:\bLIKE\b"]}
+    result = await import_entries(sessionmaker, HashingEmbedder(), store.policy, [tagged])
+    assert result == {"added": [], "skipped": [], "tagged": ["SQL LIKE with user text"]}
+    [(hit, patterns)] = await store.code_entries()
+    assert hit.content == "escape % and _" and patterns[0].search("WHERE title LIKE ?") and not patterns[0].search("like this")
+    with pytest.raises(ValueError, match="invalid code pattern"):
+        await import_entries(sessionmaker, None, store.policy, [{"title": "bad", "content": "x", "tags": ["code:(unclosed"]}])
