@@ -137,7 +137,7 @@ memory:
   recall_k: 5            # entries one recall returns at most
   planner_entries: 4     # active entries given to planner/replanner with the job
   coder_entries: 2       # active entries matching a failure, given with the correction
-  coder_start_entries: 5 # active lessons/conventions closest to the step goal, in the coder's STEP GOAL from turn 1 (at most)
+  coder_start_entries: 8 # active lessons/conventions closest to the step goal, in the coder's STEP GOAL from turn 1 (at most)
   coder_start_min_score: 0.5  # ... all of them at least this similar to step goal and job text
   min_score: 0.55        # cosine similarity below which an entry is not relevant
   learn: true            # record incidents of failed or stalled work after each job

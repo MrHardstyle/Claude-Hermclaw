@@ -828,6 +828,20 @@ async def test_a_write_reports_the_syntax_errors_of_the_written_file(sessionmake
         assert "Missing closing '}'" in ps.output, ps.output
 
 
+async def test_a_command_whose_output_reports_failed_tests_fails_despite_exit_code_0(sessionmaker: SM, repo: Path) -> None:
+    """Ladder A9 #7 (BUG-329): `Invoke-Pester -Path … -Output Detailed` (no -CI) printed ten failed tests with exit code
+    0; run_command answered ok, a repeat said "It succeeded" and the coder completed the step. A run whose output
+    reports failed tests counts as failed whatever its exit code; a passing summary stays ok."""
+    h = await make_harness(sessionmaker, repo, contract=scope(**SCOPE))
+    red = "printf 'Tests completed in 1s\\nTests Passed: 0, Failed: 10, Skipped: 0, Inconclusive: 0, NotRun: 0\\n'"
+    res = await h.call("run_command", command=red)
+    assert not res.ok and res.error_code == E.COMMAND_FAILED and "10 failed test(s)" in res.output and "-CI" in res.output
+    again = await h.call("run_command", command=red)
+    assert again.error_code == E.COMMAND_REPEATED and "It succeeded" not in again.output and "Failed: 10" in again.output
+    green = await h.call("run_command", command="printf 'Tests Passed: 3, Failed: 0, Skipped: 0, Inconclusive: 0, NotRun: 0\\n'")
+    assert green.ok, green.output
+
+
 async def test_complete_step_reruns_the_check_the_correction_names(sessionmaker: SM, repo: Path) -> None:
     """Live K1 (BUG-276): the correction named ruff findings, the coder re-ran only pytest, and the runtime completed the
     step for it; the verifier failed on the same lint output and the plan was replaced. complete_step re-runs the failed

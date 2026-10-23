@@ -82,8 +82,8 @@ Dependencies: only the shared protocols `RepoContextProvider` (`inventory_summar
   below the step goal: the planner's goal summarises the job and may lose details the review checks (BUG-212).
   Below that come the active lessons and conventions that fit goal and job (`policies.memory.coder_start_entries` at
   most, each at least `coder_start_min_score` similar; fetched once per attempt, so the prefix stays stable), whole
-  entries nearest first within half of the section – one that does not fit is left out, the next still comes (BUG-325,
-  BUG-328).
+  entries nearest first in what goal and request leave of the section (12 %) – one that does not fit is left out, the
+  next still comes (BUG-325, BUG-328, BUG-330).
 
 Mandatory sections (always rendered): SYSTEM CONTRACT, STEP GOAL, SCOPE (read-only notice without a scope),
 AVAILABLE TOOLS, COMPLETION CONDITIONS. All others are omitted when empty (`omitted_reason="empty"` in the
@@ -99,8 +99,8 @@ available = floor((total - framing) * 3.2)  character equivalents
 section   = floor(available * share)        # SectionBudgets, defaults sum to 1.00
 ```
 
-Default shares: system 3 %, goal 7 %, scope 4 %, constraints 8 % (including the cited findings of research steps, up to
-2400 characters each, BUG-231), acceptance 5 %, repo facts 3 %, **code 23 %**, **tests 10 %**, diff 10 %, failure 8 %,
+Default shares: system 3 %, goal 12 % (7 % until BUG-330: goal, job request and the knowledge that fits the step), scope 4 %, constraints 8 % (including the cited findings of research steps, up to
+2400 characters each, BUG-231), acceptance 5 %, repo facts 3 %, **code 23 %**, **tests 10 %**, diff 6 %, failure 7 %,
 history 5 %, tools 11 %, completion 3 %.
 
 Token estimate (D-008): 3.2 characters per token, computed exactly with integers (`ceil(cost * 5 / 16)`);

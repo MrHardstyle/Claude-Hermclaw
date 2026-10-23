@@ -126,6 +126,17 @@ async def test_step_goal_carries_the_knowledge_that_fits_the_step() -> None:
     assert "Knowledge from earlier jobs" not in user_text(await builder.build(make_input()))
 
 
+async def test_the_coder_context_holds_six_knowledge_entries() -> None:
+    """Ladder A9 #7 (BUG-330): six active entries fit the step (0.53–0.63); at 7 % of a 32k coder context, half of it for
+    knowledge, three of ~900 characters had room. With the coder's real window all six come with goal and request."""
+    entries = [f"[convention] Entry {i}\n" + f"rule {i} " * 110 for i in range(6)]
+    builder, _, _ = make_builder(context_tokens=32768, max_output_tokens=8192)
+    step = make_step(goal="Write the script and its Pester tests. " * 10, job_request="Report services as JSON. " * 60, knowledge=entries)
+    goal = user_text(await builder.build(make_input(step=step))).split("## SCOPE")[0]
+    assert all(f"Entry {i}" in goal for i in range(6)), [i for i in range(6) if f"Entry {i}" not in goal]
+    assert "Report services as JSON." in goal and "Write the script" in goal
+
+
 async def test_response_protocol_is_single_json_action() -> None:
     builder, _, _ = make_builder()
     built = await builder.build(make_input())

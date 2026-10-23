@@ -1,4 +1,4 @@
-# Operator knowledge from the difficulty ladder on 0.1.0rc73–rc74 (2026-10-23, D-020).
+# Operator knowledge from the difficulty ladder on 0.1.0rc73–rc76 (2026-10-23, D-020).
 # Import: hermclaw memory-import config/knowledge/rc75-ladder.yaml (existing titles are skipped).
 # Every entry names the runs it comes from; edit or retire it on the page "Wissen".
 
@@ -27,3 +27,17 @@
     no parameters), or call the script with named parameters directly: `& $scriptPath -Status Running`.
     Seen: ladder A9 #6 on rc75 (coder-main) – the script was right (hidden checks 9/10), four of its own Pester tests
     failed through such a helper for 30 turns and the job ran out of time.
+
+- kind: convention
+  title: "Pester 5+: code outside BeforeAll/It runs only during discovery – set test variables inside BeforeAll"
+  tags: [powershell, pester, tests]
+  content: |
+    Pester runs a test file twice: discovery (top level and Describe/Context bodies) and run (BeforeAll, BeforeEach,
+    It). Variables set at the top of the file or in a Describe body during discovery are gone when the It blocks run:
+    `$scriptPath = Join-Path $PSScriptRoot '../Script.ps1'` above Describe leaves `& $scriptPath` with nothing ("The
+    expression after '&' in a pipeline element produced an object that was not valid"), and every test fails.
+    Put such setup in `BeforeAll { $script:scriptPath = Join-Path $PSScriptRoot '..' 'Script.ps1' }` at the top of the
+    Describe block, and stubs and mocks in BeforeAll/BeforeEach as well. Run with `Invoke-Pester -CI`: without -CI the
+    exit code stays 0 when tests fail.
+    Seen: ladder A9 #7 on rc76 (coder-main) – the script was right (hidden checks 9/10), all ten own tests failed for
+    three attempts; one run without -CI looked green and the step was completed on it.

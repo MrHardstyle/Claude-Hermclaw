@@ -169,9 +169,9 @@ def render_goal(
             sec.truncated = True
     notes = ""
     if knowledge:
-        # after goal and request, at most half of the section; whole entries only, nearest first – one that does not
-        # fit is left out and the next one still comes (BUG-328)
-        room = min(budget // 2, budget - fixed - hint_cost - char_cost(goal.strip()) - char_cost(request))
+        # what goal and request leave of the section; whole entries only, nearest first – one that does not fit is left
+        # out and the next one still comes (BUG-328, BUG-330)
+        room = budget - fixed - hint_cost - char_cost(goal.strip()) - char_cost(request)
         label = f"\n\n{KNOWLEDGE_LABEL}\n"
         kept: list[str] = []
         for entry in knowledge:

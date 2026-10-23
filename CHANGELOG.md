@@ -4,6 +4,12 @@ Format: [Keep a Changelog](https://keepachangelog.com/de/1.1.0/), Versionen nach
 
 ## [Unreleased]
 
+## [0.1.0rc77] – Release Candidate (2026-10-23)
+
+### Behoben
+- **Gescheiterte Tests trotz Exit-Code 0 (BUG-329):** Meldet die Ausgabe eines Befehls gescheiterte Tests, gilt er als gescheitert, auch wenn der Läufer 0 zurückgibt (etwa `Invoke-Pester` ohne `-CI`).
+- **Mehr Platz für Wissen (BUG-330):** STEP GOAL bekommt 12 % des Budgets (Diff 6 %, letzter Fehler 7 %), der Coder bis zu 8 passende Einträge.
+
 ## [0.1.0rc76] – Release Candidate (2026-10-23)
 
 ### Behoben

@@ -34,15 +34,17 @@ class SectionBudgets:
     """Fixed share of the available budget per section (fractions of 1.0; the sum must be <= 1.0)."""
 
     system_contract: float = 0.03
-    step_goal: float = 0.07  # goal + the job request (BUG-212); unused budget goes to the elastic sections
+    # goal + the job request (BUG-212) + the knowledge that fits the step (BUG-325/330: at 0.07 of a 32k coder context
+    # three entries fit, six matched A9); unused budget goes to the elastic sections
+    step_goal: float = 0.12
     scope: float = 0.04
     constraints: float = 0.08  # includes cited research findings (BUG-231); unused budget goes to the elastic sections
     acceptance: float = 0.05
     current_repo_facts: float = 0.03
     relevant_code: float = 0.23
     relevant_tests: float = 0.10
-    current_diff: float = 0.10
-    latest_failure: float = 0.08
+    current_diff: float = 0.06  # 0.10 until BUG-330: the coder made these edits itself; 0.04 went to the step goal
+    latest_failure: float = 0.07  # 0.08 until BUG-330: 0.01 went to the step goal
     short_step_history: float = 0.05
     available_tools: float = 0.11
     completion_conditions: float = 0.03

@@ -95,7 +95,7 @@ from hermclaw.tools.registry import (
     validate_args,
 )
 from hermclaw.tools.snapshot import DEFAULT_GENERATED_GLOBS, AuditOutcome, Decide, WorkspaceTracker
-from hermclaw.tools.testparse import TestSummary, summarise
+from hermclaw.tools.testparse import TestSummary, parse_counts, summarise
 from hermclaw.tools.workspace import (
     WorkspaceFS,
     canonical_path,
@@ -235,6 +235,7 @@ class _RunOutcome:
     cwd: str
     duration_ms: int
     error: str | None = None
+    failed_tests: int = 0  # failed tests and errors the output reports although the exit code is 0 (BUG-329)
 
     @property
     def sandbox_failed(self) -> bool:
@@ -252,6 +253,10 @@ def _duration_ms(started: float) -> int:
 # A test that writes its output into the repository is refused on every run: the file is outside the step's paths
 # and is removed again. The coder of ladder A9 #4 (rc73) ran its Pester tests five times against `test_output.json`
 # without learning where such files belong (BUG-324).
+FAILED_TESTS_HINT = (
+    "[hint] The exit code is 0, but the output reports {n} failed test(s): this runner does not fail on failing tests "
+    "(Invoke-Pester needs -CI; run_test reads the counts). The run counts as failed – fix the failures it names."
+)
 TEMP_FILES_HINT = (
     "[scope] the command created files outside the step's paths; they were removed and the run is refused while it "
     "does that. Tests write temporary files to a temporary directory, never into the repository: pytest tmp_path, "
@@ -1446,10 +1451,16 @@ class ToolEngine:
             stderr = f"{stderr}\n[sandbox] {error}" if stderr else f"[sandbox] {error}"
         exit_code = result.exit_code if result else None
         timed_out = bool(result and result.timed_out)
+        failed_tests = 0
+        if exit_code == 0 and not timed_out and error is None:
+            # a runner that does not set the exit code: Invoke-Pester without -CI printed ten failed tests with exit
+            # code 0, and the coder completed the step on it (ladder A9 #7, BUG-329)
+            counts = parse_counts(f"{stdout}\n{stderr}")
+            failed_tests = counts.failed + counts.errors if counts is not None else 0
         if timed_out:
             self._timed_out[repeat_key] = self._writes
         elif result is not None and error is None:
-            outcome = f"exit code {exit_code}"
+            outcome = f"exit code {exit_code}" + (f", {failed_tests} failed test(s) in the output" if failed_tests else "")
             self._ran[ran_key] = (self._writes, ctx.turn, outcome)
         await self.recorder.command_run(
             ctx,
@@ -1486,9 +1497,9 @@ class ToolEngine:
                 )
             ],
         )
-        run = _RunOutcome(result, audit, classification, cwd, duration, error)
+        run = _RunOutcome(result, audit, classification, cwd, duration, error, failed_tests)
         recorded = self._ran.get(ran_key)
-        if recorded is not None and recorded[1] == ctx.turn and exit_code != 0:
+        if recorded is not None and recorded[1] == ctx.turn and (exit_code != 0 or failed_tests):
             # the refusal of a repeat carries this output itself: LATEST FAILURE may have been replaced since by another
             # command that succeeded, and the coder re-proposed the refused check five times (live G1, BUG-246)
             self._ran_output[ran_key] = self._render_run(command, run, budget=self.output_limit // 2, head_ratio=0.2)[0]
@@ -1636,6 +1647,9 @@ class ToolEngine:
             error_code = E.COMMAND_TIMEOUT
         elif res.exit_code != 0:
             error_code = E.COMMAND_FAILED
+        elif run.failed_tests:
+            error_code = E.COMMAND_FAILED
+            text += f"\n{FAILED_TESTS_HINT.format(n=run.failed_tests)}"
         return ToolResult(
             tool=ToolName.run_command,
             ok=error_code is None,
