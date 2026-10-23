@@ -55,3 +55,15 @@
     the same names works too), and check `$json | Should -Match '"Status":\s*"Running"'`.
     Seen: ladder A9 #8 on rc77 (coder-main) – the script piped the service objects into ConvertTo-Json; the own tests
     mocked Status as text and passed, the hidden check got "Status of Alpha: 4".
+
+- kind: convention
+  title: "README: show the call of a delivered script exactly as it is run – with its file name and path"
+  tags: [readme, documentation, scripts, powershell, python, shell]
+  content: |
+    A usage example names the delivered file the way a user types it in the repository: `./Get-Report.ps1 -Status
+    Running` or `pwsh -File ./Get-Report.ps1`, `python script.py --flag` or `python -m package`, `./run.sh`. Writing
+    only the bare name (`Get-Report -Status Running`) describes a function or a command on PATH, not the script the job
+    delivers; a reader cannot run it, and a check that looks for the file name in the README fails. Show one call per
+    parameter or option the job names, and the default call without any.
+    Seen: ladder A9 #9 on rc77 (coder-main) – the README documented `Get-ServiceReport -Status Running`, the hidden
+    check found no `Get-ServiceReport.ps1` in it.
