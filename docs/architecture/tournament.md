@@ -82,10 +82,15 @@ levels climbed, the open level and the rest:
 
 ```
 sudo -u hermclaw hermclaw coder-tournament /var/lib/hermclaw/tournament/coder-tournament.yaml --model system --ladder \
-     --task A1 --task A6 --task A5 --task A2 --task A3 --task A4 --task A7 --task A9 --task A8 \
+     --task A1 --task A6 --task A5 --task A2 --task A3 --task A4 --task A7 --task A9 --task A8 --task A10 \
      --out /var/lib/hermclaw/tournament/ladder
 ```
 
 The order follows the rc62 tournament (share of fully correct runs over all models, then duration). Harder levels
-are added as new tasks with hidden checks at the end of the order. Ladder jobs use the model host like tournament
+are added as new tasks with hidden checks at the end of the order. The nine tournament levels were all climbed on
+0.1.0rc78 (2026-10-23). Level 10 is A10, the first brownfield level: the fixture `tasks-v1` is the task manager the
+ladder delivered for A8, extended by due dates with a migration of existing database files, partial updates, a literal
+search and sorting; its hidden checks were validated against the untouched fixture (27 of 40 fail, the 13 that pass
+check behaviour that has to stay), a reference solution (40/40) and two wrong solutions (a `LIKE` search fails the
+literal check, string-formatted SQL fails the security check). Ladder jobs use the model host like tournament
 jobs: never at the same time as a tournament or a GPU benchmark.

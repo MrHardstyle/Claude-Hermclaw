@@ -366,3 +366,68 @@ tasks:
             - {type: presence, path_glob: Get-ServiceReport.ps1}
             - {type: test, command: "pwsh -NoProfile -Command \"Invoke-Pester -Path tests -CI\"", framework: generic, min_passed: 3}
             - {type: diff, must_change: [README.md]}
+
+  # Ladder stage 10 (D-020, 2026-10-23): the first task after the nine tournament tasks. Brownfield – the fixture
+  # tasks-v1 is the task manager delivered by ladder A8 #2 (23/23); its users' databases must keep working.
+  - id: A10
+    title: Python – extend the inherited task manager (due dates, schema migration, search, sorting)
+    size: large
+    limit_minutes: 45
+    base_branch: acceptance/tasks-v1
+    prompt: |-
+      Erweitere die vorhandene Aufgabenverwaltung `tasks_app` (`python -m tasks_app`, nur Python-Standardbibliothek,
+      SQLite). Datenbankdateien, die Nutzer mit der bisherigen Version angelegt haben, müssen weiter funktionieren.
+      - Jede Aufgabe bekommt ein Fälligkeitsdatum `due`: Text `YYYY-MM-DD` oder `null` (Standard `null`). Alle Antworten
+        mit Aufgaben enthalten `id`, `title`, `done` und `due`.
+      - Eine vorhandene Datenbankdatei mit der bisherigen Tabelle (ohne `due`) wird beim Start ohne Datenverlust
+        umgestellt: bestehende Aufgaben behalten id, Titel und Status und haben `due: null`.
+      - `POST /api/tasks` nimmt zusätzlich optional `due`. `PATCH /api/tasks/<id>` ändert jedes übergebene Feld von
+        `title`, `done` und `due` (mindestens eines; `"due": null` entfernt das Datum) und lässt die übrigen unverändert.
+        Für `title` und `done` gelten die bisherigen Regeln; `due` muss ein gültiges Kalenderdatum `YYYY-MM-DD` sein
+        (also nicht `2026-02-30`) oder `null`. Ungültige Werte, ein leeres Objekt und unbekannte Felder → 400, und
+        dann ändert sich nichts.
+      - `GET /api/tasks` versteht zusätzlich `q` (Teiltext im Titel, wörtlich, Groß-/Kleinschreibung egal) und
+        `sort=id|due` (Standard id; `due`: früheste zuerst, Aufgaben ohne Datum am Ende, Gleichstand nach id), beides
+        kombinierbar mit `status`. Ein unbekannter `sort` → 400.
+      - Die Weboberfläche zeigt das Fälligkeitsdatum an und erlaubt, es beim Anlegen zu setzen. Die README beschreibt
+        die neuen Felder und Parameter.
+      Die vorhandenen Tests bleiben erhalten und grün; ergänze Tests für Umstellung, Prüfung der Eingaben, Suche und
+      Sortierung unter `tests/` (pytest).
+    expected_changes: ["tasks_app/*", "tests/*", README.md]
+    hidden: {dir: A10, image: python, command: "python -m pytest -q -p no:cacheprovider _hidden --ignore=_hidden/_base"}
+    plan:
+      goal: Due dates with migration of existing databases, partial updates, search and sorting for tasks_app
+      summary: Extend storage and API of the inherited tasks_app, keep old databases and tests working, then the page and README.
+      steps:
+        - id: S001
+          title: Due dates, migration, partial PATCH, search and sorting in tasks_app with tests
+          kind: implement
+          capability: coding
+          goal: >-
+            Extend the existing tasks_app (standard library, SQLite): every task gets `due` (text YYYY-MM-DD or null,
+            default null) and every task in a response has id, title, done and due. At start, a database file with the
+            old table (no due column) is migrated without losing data (existing tasks keep id, title, done; due null).
+            POST /api/tasks also takes an optional due; PATCH /api/tasks/<id> changes every given field of title, done
+            and due (at least one; "due": null removes the date) and keeps the others. title and done keep their rules;
+            due must be a real calendar date YYYY-MM-DD (not 2026-02-30) or null. Invalid values, an empty object and
+            unknown fields → 400 and nothing changes. GET /api/tasks also takes q (literal, case-insensitive part of the
+            title) and sort=id|due (default id; due: earliest first, tasks without a date last, ties by id), combinable
+            with status; an unknown sort → 400. Use SQL parameters, never string formatting. Keep every existing test
+            and add pytest tests for the migration, the validation, search and sorting under tests/.
+          repo_hints: [tasks_app/db.py, tasks_app/app.py, tests/test_api.py, tests/test_db.py]
+          allowed_new_paths: ["tests/**"]
+          acceptance:
+            - {type: test, command: "python -m pytest -q", framework: pytest, min_passed: 34}
+            - {type: diff, must_change: [tasks_app/db.py, tasks_app/app.py]}
+        - id: S002
+          title: Due date on the page and in the README
+          kind: implement
+          capability: coding
+          depends_on: [S001]
+          goal: >-
+            Show each task's due date on the page served at / and let the user set it when creating a task (a date
+            input, no external resources). Describe due, the PATCH fields, q and sort in README.md.
+          repo_hints: [tasks_app/templates/index.html, README.md]
+          acceptance:
+            - {type: test, command: "python -m pytest -q", framework: pytest, min_passed: 34}
+            - {type: diff, must_change: [tasks_app/templates/index.html, README.md]}

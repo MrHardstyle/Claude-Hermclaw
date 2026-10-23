@@ -1,6 +1,6 @@
 # Hidden checks of the coder tournament
 
-One directory per task (A1–A9). The coder never sees these files: the tournament runner copies the delivered
+One directory per task (A1–A10). The coder never sees these files: the tournament runner copies the delivered
 workspace, adds the task's directory as `_hidden/` and runs the task's check command there (see
 `tests/live/tournament/coder-tournament.yaml`). Each check tests the requirements of the task statement, not the
 implementation the fixture had; `_base/` holds the fixture's original files for "unchanged" comparisons.
