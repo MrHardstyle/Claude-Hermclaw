@@ -58,6 +58,7 @@ from hermclaw.core.redaction import DEFAULT_REDACTOR, REDACTED, Redactor
 from hermclaw.memory.store import FAILURE_SCORE_MARGIN, failure_matches
 from hermclaw.models.protocols import CallContext as ModelCallContext
 from hermclaw.research.questions import unanswerable_reason
+from hermclaw.scope.expansion import is_test_path
 from hermclaw.scope.guard import ScopeGuard
 from hermclaw.stagnation.fingerprints import key_error_lines, normalise_text
 from hermclaw.tools import errors as E
@@ -1070,9 +1071,17 @@ class ToolEngine:
         self._note_created([(rel, op)])
         self._file_changed(ToolName.write_file, [{"path": rel, "operation": op, "bytes": len(data)}], events)
         verb = "created" if op == "create" else ("appended to" if args.append else "overwrote")
+        lost = sorted(_test_names(old_text) - _test_names(content)) if old_text and not args.append and is_test_path(rel) else []
+        note = (
+            f"\nnote: this overwrite removed {len(lost)} test(s) the file had: {', '.join(lost[:12])}"
+            f"{' …' if len(lost) > 12 else ''}. Existing tests are kept unless the goal asks to remove them – add them "
+            "back (write the whole file again with them, or append them)."
+            if lost
+            else ""
+        )
         return self._ok(
             ToolName.write_file,
-            f"{verb} {rel} ({len(data)} bytes, {lines} lines)",
+            f"{verb} {rel} ({len(data)} bytes, {lines} lines){note}",
             mutated_paths=[rel],
             data={"path": rel, "operation": op, "bytes": len(data), "changed": True},
         )
@@ -1145,6 +1154,10 @@ class ToolEngine:
                 # difference (BUG-301). Spaces at the end of a line are invisible, so they do not decide a match.
                 return await self._replace_spans(rel, target, text, loose, new=new, want=args.count, mode=tf.mode, events=events)
         if count == 0:
+            # the coder's view of the file is wrong: a re-read of it is no repeat (BUG-335)
+            self._reads = {
+                k: v for k, v in self._reads.items() if (k[1] if k[0] == ToolName.read_file.value else k[1].rpartition(":")[0]) != rel
+            }
             raise ToolError(E.TEXT_NOT_FOUND, self._not_found_hint(rel, text, old))
         if count != args.count:
             lines = _occurrence_lines(text, old)
@@ -1240,23 +1253,30 @@ class ToolEngine:
 
     @staticmethod
     def _not_found_hint(rel: str, text: str, old: str) -> str:
+        """Why 'old' is not in the file, with the file's current lines where its first line occurs. The coder's re-read
+        of a range it already read is refused (READ_REPEATED), so the lines to copy come with the refusal; "the text
+        exists with different whitespace" also stood for text inside a longer line (`updated = db.update_task(…)`), and
+        four replaces in a row failed (ladder A10 #4, BUG-335)."""
         msg = f"'old' text not found in {rel}"
         if REDACTED in old:
             return msg + (
                 f"; it contains the redaction marker {REDACTED}: copy the masked line exactly as shown (marker included, "
                 "unique in the file) to replace the secret with new text that contains no marker"
             )
-        if old.strip() and old.strip() in text:
-            return msg + "; the text exists with different leading/trailing whitespace – copy it exactly (read_range shows it)"
-        first = next((ln.strip() for ln in old.splitlines() if ln.strip()), "")
-        if first:
-            hits = [n for n, ln in enumerate(text.splitlines(), start=1) if first in ln]
-            if hits:
-                return (
-                    msg
-                    + f"; its first line appears at line(s) {', '.join(map(str, hits[:10]))} – re-read that range, indentation must match"
-                )
-        return msg + "; re-read the file (read_range) and copy the exact current text"
+        lines = text.splitlines()
+        old_lines = old.splitlines() or [old]
+        first = next((ln.strip() for ln in old_lines if ln.strip()), "")
+        hits = [n for n, ln in enumerate(lines, start=1) if first and first in ln]
+        if not hits:
+            return msg + "; re-read the file (read_range) and copy the exact current text"
+        if all(lines[n - 1].strip() == first for n in hits):
+            why = "its first line exists with other leading/trailing whitespace (indentation), or the lines after it differ"
+        else:
+            why = "its first line is part of a longer line"
+        span = max(1, min(len(old_lines), 12))
+        shown = _numbered_lines(lines, hits[:3], span, limit=1500)
+        more = f" (and at line(s) {', '.join(map(str, hits[3:10]))})" if len(hits) > 3 else ""
+        return f"{msg}; {why}. Current text at line(s) {', '.join(map(str, hits[:3]))}{more} – copy from here exactly:\n{shown}"
 
     # ============================================================================================ 17.4 patch
     async def _apply_patch(self, args: ApplyPatchArgs, ctx: CallContext, events: list[PendingEvent]) -> ToolResult:
@@ -2222,6 +2242,41 @@ def _line_end_matches(text: str, old: str) -> list[tuple[int, int]]:
     *heads, last = old.split("\n")
     pattern = "".join(re.escape(ln.rstrip(" \t")) + r"[ \t]*\n" for ln in heads) + re.escape(last)
     return [(m.start(), m.end()) for m in re.finditer(pattern, text)]
+
+
+# test definitions by name: pytest/unittest functions, JS/TS it()/test(), Pester It, Go Test functions
+_TEST_NAME_RES = (
+    re.compile(r"^[ \t]*(?:async[ \t]+)?def[ \t]+(test\w*)[ \t]*\(", re.MULTILINE),
+    re.compile(r"\b(?:it|test)[ \t]*\([ \t]*(['\"`])(.+?)\1"),
+    re.compile(r"^[ \t]*It[ \t]+(['\"])(.+?)\1", re.MULTILINE),
+    re.compile(r"^func[ \t]+(Test\w+)[ \t]*\(", re.MULTILINE),
+)
+
+
+def _test_names(text: str) -> set[str]:
+    """The names of the tests ``text`` defines. An overwrite of test_api.py dropped three existing tests the job said to
+    keep, and nothing told the coder (ladder A10 #4, BUG-336)."""
+    names: set[str] = set()
+    for rx in _TEST_NAME_RES:
+        names.update(m.group(m.lastindex or 0) for m in rx.finditer(text))
+    return names
+
+
+def _read_path(tool: str, key: str) -> str:
+    """The file of a recorded read (read_file keys are paths, read_range keys ``path:start-end``)."""
+    return key if tool == ToolName.read_file.value else key.rpartition(":")[0]
+
+
+def _numbered_lines(lines: list[str], starts: list[int], span: int, *, limit: int) -> str:
+    """``span`` lines from each 1-based start as ``N| text`` (the read_range format), blocks separated by ``…``, clipped
+    to about ``limit`` characters."""
+    blocks = []
+    for start in starts:
+        end = min(len(lines), start + span - 1)
+        width = len(str(end))
+        blocks.append("\n".join(f"{n:>{width}}| {lines[n - 1]}" for n in range(start, end + 1)))
+    out = "\n…\n".join(blocks)
+    return out if len(out) <= limit else out[:limit] + "\n…[clipped]"
 
 
 def _occurrence_lines(text: str, needle: str) -> list[int]:

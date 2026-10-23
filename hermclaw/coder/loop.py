@@ -74,14 +74,15 @@ SALVAGED_NOTE = (
     '"append": true, at most about 250 lines per answer.'
 )
 RUNNERS_WITHHELD = (
-    "run_test and run_command are withheld until something changes: nothing changed since the refused command, so "
-    "every check gives the same result. Edit the code or the tests now, or call complete_step if the step is done, "
-    "or block_step."
+    "run_test and run_command are withheld until something changes: do not call them now – nothing changed since the "
+    "refused command, so every check gives the same result. Edit the code or the tests now, or call complete_step if "
+    "the step is done, or block_step."
 )
 
 READERS_WITHHELD = (
-    "read_file and read_range are withheld until a file changes: what you read is shown above among the files you read. "
-    "Make the change now with replace_text or write_file (or apply_patch), run a different check, or call block_step."
+    "read_file and read_range are withheld until a file changes: do not call them now – what you read is shown above "
+    "among the files you read. Make the change now with replace_text or write_file (or apply_patch), run a different "
+    "check, or call block_step."
 )
 
 CoderOutcome = Literal["completed", "blocked", "replan", "budget_exhausted", "stagnated", "cancelled", "checkpointed", "model_failed"]
@@ -373,11 +374,10 @@ class CoderLoop:
             if token.checkpoint_requested:
                 return CoderResult("checkpointed", turn - 1, records, last_failure=last_failure, detail=token.reason)
             failure_text = "\n\n".join(x for x in (notice, last_failure) if x) or None
+            # the catalogue stays the same in every turn: it is part of the system message, which llama.cpp reuses
+            # from its cache only while it is unchanged; withheld checks and reads are named in the turn notice and a
+            # repeat is refused by the engine (D-026, ladder A10 #4: three catalogue versions in 15 of 47 turns)
             tools = self.engine.tool_catalog()
-            if runners_withheld:
-                tools = [t for t in tools if t.get("name") not in _RUNNERS]
-            if readers_withheld:
-                tools = [t for t in tools if t.get("name") not in _READERS]
             built = await self.builder.build(
                 TurnContextInput(
                     step=step,

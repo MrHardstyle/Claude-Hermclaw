@@ -175,7 +175,8 @@ async def test_refused_repeat_keeps_the_real_failure_in_the_next_prompt(sessionm
 
 async def test_checks_are_withheld_after_a_refused_repeat_until_a_file_changes(sessionmaker: Any, tmp_repo: Path) -> None:
     """Live battery J1 on 0.1.0rc14: after a refused repeat the coder proposed the same test command three more times.
-    run_test/run_command leave the tool catalogue until something changes; an edit brings them back (BUG-181)."""
+    run_test/run_command are withheld until something changes; an edit brings them back (BUG-181). The catalogue itself
+    stays the same – it is part of the cached system message (D-026)."""
     cmd = f"{PY} -m pytest -q -p no:cacheprovider tests/test_app.py"
     actions = [
         act("write_file", "Test anlegen", path="tests/test_app.py", content=TEST_FILE),
@@ -194,15 +195,15 @@ async def test_checks_are_withheld_after_a_refused_repeat_until_a_file_changes(s
 
     assert "- run_test(" in prompt(3), "a first repeat is still offered (the guard refuses it)"
     for turn in (4, 5, 6):  # neither a read (turn 4) nor a write of identical content (turn 5, BUG-182) changes anything
-        assert "- run_test(" not in prompt(turn) and "- run_command(" not in prompt(turn)
         assert "withheld until something changes" in prompt(turn)
+        assert chat.prompts[turn - 1][0].content == chat.prompts[0][0].content, "the system message stays the same"
     assert "- run_test(" in prompt(7) and "withheld" not in prompt(7), "the edit in turn 6 brings the checks back"
 
 
 async def test_reads_are_withheld_after_a_refused_re_read_until_a_file_changes(sessionmaker: Any, tmp_repo: Path) -> None:
     """Live G1 (BUG-271): after refused re-reads the coder asked for the same lines again across three attempts of
     S014 without one edit until stagnation blocked the step and the job failed. read_file/read_range leave the tool
-    catalogue after a refused re-read until a file changes."""
+    catalogue after a refused re-read until a file changes – now by the turn notice, the catalogue stays (D-026)."""
     actions = [
         act("read_file", path="app.py"),
         act("read_file", "nochmal", path="app.py"),
@@ -219,8 +220,8 @@ async def test_reads_are_withheld_after_a_refused_re_read_until_a_file_changes(s
 
     assert "- read_file(" in prompt(2), "a first re-read is still offered (the guard refuses it)"
     for turn in (3, 4):
-        assert "- read_file(" not in prompt(turn) and "- read_range(" not in prompt(turn)
         assert "read_file and read_range are withheld until a file changes" in prompt(turn)
+        assert chat.prompts[turn - 1][0].content == chat.prompts[0][0].content, "the system message stays the same"
         assert "- run_test(" in prompt(turn) and "- write_file(" in prompt(turn)
     assert "- read_file(" in prompt(5) and "withheld" not in prompt(5), "the edit in turn 4 brings the reads back"
 

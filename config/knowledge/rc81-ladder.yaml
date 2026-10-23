@@ -1,0 +1,16 @@
+# Operator knowledge from the difficulty ladder on 0.1.0rc81 (2026-10-23, D-020), stage A10 (extending a Python web app).
+# Import: hermclaw memory-import config/knowledge/rc81-ladder.yaml (existing titles are skipped).
+# Every entry names the runs it comes from; edit or retire it on the page "Wissen".
+
+- kind: convention
+  title: "SQL LIKE with user text: % and _ are wildcards – escape them, or search with instr()"
+  tags: [python, sqlite3, sql, search, database, api]
+  content: |
+    `WHERE title LIKE ?` with `f"%{q}%"` is safe from injection (the value is a parameter) but not literal: a search
+    for "100%" also finds "1000", and "e_n" finds "one note". For a literal, case-insensitive substring search either
+    escape the wildcards and name the escape character –
+    `q2 = q.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")`,
+    `WHERE lower(title) LIKE lower(?) ESCAPE '\'` with `f"%{q2}%"` – or avoid LIKE:
+    `WHERE instr(lower(title), lower(?)) > 0` with `q` itself. Test it with texts containing `%`, `_` and a quote.
+    Seen: ladder A10 #4 on rc81 (coder-main) – `LOWER(title) LIKE LOWER(?)` with `%q%`: the search for "100%"
+    returned "Save 1000 now" as well; the review noticed the wildcards but judged them "likely intended".

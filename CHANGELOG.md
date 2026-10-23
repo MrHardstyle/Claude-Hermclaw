@@ -4,6 +4,16 @@ Format: [Keep a Changelog](https://keepachangelog.com/de/1.1.0/), Versionen nach
 
 ## [Unreleased]
 
+## [0.1.0rc82] – Release Candidate (2026-10-23)
+
+### Geändert
+- **D-026:** Die Werkzeugliste im Coder-Prompt bleibt in jedem Zug gleich; zurückgehaltene Prüf- und Lesewerkzeuge nennt nur der Zughinweis. A10#4 auf rc81: Ein Coder-Zug dauerte im Schnitt 33 s statt 60 s (A10#2), die Werkzeugliste wechselte aber noch in 15 von 47 Zügen.
+
+### Behoben
+- **TEXT_NOT_FOUND mit den aktuellen Zeilen (BUG-335):** Der Hinweis zeigt die Zeilen der Datei an den Fundstellen, nennt die richtige Ursache (Teil einer längeren Zeile / Leerzeichen) und erlaubt danach ein Neulesen.
+- **Überschriebene Testdatei verliert Tests (BUG-336):** `write_file` nennt Tests, die beim Überschreiben einer Testdatei verschwunden sind.
+- **Wissen:** Konvention aus A10#4: `LIKE` mit Nutzertext escapen oder `instr()` verwenden (`config/knowledge/rc81-ladder.yaml`).
+
 ## [0.1.0rc81] – Release Candidate (2026-10-23)
 
 ### Geändert

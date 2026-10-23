@@ -180,6 +180,36 @@ async def test_a_masked_secret_can_be_replaced_by_the_line_as_shown(sessionmaker
     assert (repo / "tests" / "test_both.py").read_text() == "C = dict(password='x1x1x1x1', api_key='y2y2y2y2')\n"
 
 
+async def test_a_replace_that_finds_nothing_shows_the_current_lines_and_allows_a_re_read(sessionmaker: SM, repo: Path) -> None:
+    """BUG-335 (ladder A10 #4): 'old' was part of a longer line (`updated = db.update_task(…)`), the hint said "different
+    leading/trailing whitespace – read_range shows it", and the re-read was refused as a repeat: four replaces failed."""
+    (repo / "tests" / "test_db.py").write_text("def test_u():\n    updated = db.update_task(1, True, None)\n    assert updated\n")
+    h = await make_harness(sessionmaker, repo, contract=scope(target_paths=["tests/test_db.py"]))
+    assert (await h.call("read_range", path="tests/test_db.py", start=1, end=3)).ok
+    miss = await h.call(
+        "replace_text", path="tests/test_db.py", old="    db.update_task(1, True, None)", new="    db.update_task(1, done=True)"
+    )
+    assert miss.error_code == E.TEXT_NOT_FOUND and "part of a longer line" in miss.output
+    assert "2|     updated = db.update_task(1, True, None)" in miss.output and "whitespace" not in miss.output
+    again = await h.call("read_range", path="tests/test_db.py", start=1, end=3)
+    assert again.ok, again.output  # the coder's view was wrong: no READ_REPEATED
+    indent = await h.call("replace_text", path="tests/test_db.py", old="  assert updated\n", new="  assert updated is True\n")
+    assert indent.ok or "copy from here exactly" in indent.output
+
+
+async def test_an_overwrite_that_drops_existing_tests_says_which(sessionmaker: SM, repo: Path) -> None:
+    """BUG-336 (ladder A10 #4): rewriting tests/test_api.py dropped three tests the job said to keep; the write answered
+    plainly "overwrote" and the hidden check found them missing."""
+    (repo / "tests" / "test_api.py").write_text("def test_create():\n    pass\n\n\ndef test_invalid_json():\n    pass\n")
+    h = await make_harness(sessionmaker, repo, contract=scope(target_paths=["tests/test_api.py", "src/app.py"]))
+    res = await h.call("write_file", path="tests/test_api.py", content="def test_create():\n    pass\n\n\ndef test_due():\n    pass\n")
+    assert res.ok and "removed 1 test(s) the file had: test_invalid_json" in res.output
+    kept = await h.call("write_file", path="tests/test_api.py", content="def test_create():\n    pass\n\n\ndef test_due():\n    assert 1\n")
+    assert kept.ok and "removed" not in kept.output
+    code = await h.call("write_file", path="src/app.py", content="x = 1\n")
+    assert code.ok and "removed" not in code.output
+
+
 async def test_a_masked_line_left_unchanged_keeps_its_content(sessionmaker: SM, repo: Path) -> None:
     """Live G1 (BUG-270): the coder changed the call around a fixture password; 'old' and 'new' both carried the
     masked password line unchanged and the edit was refused for the marker. A masked line copied unchanged from 'old'

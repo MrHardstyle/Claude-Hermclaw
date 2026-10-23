@@ -46,6 +46,18 @@ Noch keine.
 
 ## Behobene Bugs
 
+### BUG-336 – Ein Überschreiben einer Testdatei entfernt vorhandene Tests ohne Hinweis
+- Phase: Schwierigkeitsleiter auf rc81, 2026-10-23 (A10#4, Job b9245e25) · Komponente: tools (`engine.py`) · Severity: P2 · blockierend: nein · Status: **behoben im Repository** (`tests/integration/test_tools_engine_read_write.py::test_an_overwrite_that_drops_existing_tests_says_which`)
+- Reproduktion: Der Coder schreibt `tests/test_api.py` mit `write_file` neu. Drei der vorhandenen Tests (`test_create_array_body`, `test_create_invalid_json`, `test_python_m_starts`) fehlen danach, obwohl der Auftrag sagt „Die vorhandenen Tests bleiben erhalten“. Die Antwort lautet nur „overwrote tests/test_api.py“; die versteckte Prüfung `test_the_existing_tests_are_kept` scheitert (versteckt 37/40).
+- Ursache: Ein Überschreiben meldete nicht, was aus der Datei verschwand.
+- Fix: Überschreibt `write_file` eine Testdatei und fehlen danach Tests, die sie definierte (pytest-Funktionen, JS/TS `it`/`test`, Pester `It`, Go `Test…`), nennt das Ergebnis sie mit dem Hinweis, sie wieder aufzunehmen, sofern das Ziel ihr Entfernen nicht verlangt. Aus demselben Lauf: `LIKE` mit `%`/`_` aus der Eingabe → Konvention in `config/knowledge/rc81-ladder.yaml`, live importiert.
+
+### BUG-335 – TEXT_NOT_FOUND schickt zum Neulesen, das danach abgelehnt wird, und nennt die falsche Ursache
+- Phase: Schwierigkeitsleiter auf rc81, 2026-10-23 (A10#4, Job b9245e25) · Komponente: tools (`engine.py`) · Severity: P2 · blockierend: nein · Status: **behoben im Repository** (`tests/integration/test_tools_engine_read_write.py::test_a_replace_that_finds_nothing_shows_the_current_lines_and_allows_a_re_read`)
+- Reproduktion: Im dritten Versuch von S001 scheitern vier `replace_text` an `tests/test_db.py` mit TEXT_NOT_FOUND. Der Hinweis lautet „the text exists with different leading/trailing whitespace – copy it exactly (read_range shows it)“. Tatsächlich ist der Text Teil einer längeren Zeile (`updated = db.update_task(…)`). Das Neulesen des Bereichs lehnt die Engine zweimal mit READ_REPEATED ab. Der Schritt stagniert und wird nach 9 Zügen blockiert; der Neuplan kostet 7 min.
+- Ursache: Der Hinweis prüfte nur, ob der getrimmte Text irgendwo in der Datei steht, und schloss daraus auf Leerzeichen. Die Wiederholungssperre für Lesezugriffe galt auch, nachdem ein Ersetzen gezeigt hatte, dass das Bild des Coders von der Datei falsch ist.
+- Fix: TEXT_NOT_FOUND bringt die aktuellen Zeilen der Datei mit (nummeriert wie bei `read_range`, bis zu drei Fundstellen der ersten Zeile von `old`, so viele Zeilen wie `old` hat). Es sagt, ob die Zeile Teil einer längeren Zeile ist oder sich in Leerzeichen bzw. den Folgezeilen unterscheidet. Nach TEXT_NOT_FOUND zählen frühere Lesezugriffe auf die Datei nicht mehr als Wiederholung.
+
 ### BUG-334 – Ein Werkzeugaufruf mit verschachteltem `args` wird abgelehnt und der ganze Inhalt neu geschrieben
 - Phase: Schwierigkeitsleiter auf rc79, 2026-10-23 (A10#2, Job 922d0a40) · Komponente: tools (`registry.py`) · Severity: P3 · blockierend: nein · Status: **behoben im Repository** (`tests/unit/test_tools_units.py::test_arguments_split_over_a_nested_args_object_are_taken_as_one_set`)
 - Reproduktion: Der Coder schreibt `tests/test_partial_update.py` als `{"tool": "write_file", "args": {"args": {"path": …, "append": false}, "content": "…"}}`. Die Antwort `ARGS_INVALID` („path: Field required; args: Extra inputs are not permitted“) kostet einen Zug mit 2,5k Ausgabe-Tokens (95 s); im nächsten Zug schreibt er denselben Inhalt noch einmal.

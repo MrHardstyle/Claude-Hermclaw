@@ -94,8 +94,9 @@ Dependencies: only the shared protocols `RepoContextProvider` (`inventory_summar
   (`render.render_progress`): "Changed vs base (N): …" with git status codes, "New files written" / "Not written
   yet" for the scope's new files (BUG-228) and "Acceptance i — NOT YET CHANGED: … / met (already changed)" per diff
   criterion (BUG-182). Without a diff the section carries these lines alone when something changed or a criterion
-  waits for a change. Not yet stable: the tool list when tools are withheld after repeats, and `RELEVANT CODE` /
-  `RELEVANT TESTS` (scored and re-packed each turn).
+  waits for a change. The tool list is the same in every turn: checks and reads withheld after a refused repeat are
+  named in the turn notice, not removed from the catalogue (three catalogue versions in 15 of 47 turns of ladder A10
+  #4 voided the cached system message each time, D-026).
   `STEP GOAL` also carries the job request (job title and prompt, at most half of the section, cut in the middle)
   below the step goal: the planner's goal summarises the job and may lose details the review checks (BUG-212).
   Below that come the active lessons and conventions that fit goal and job (`policies.memory.coder_start_entries` at
