@@ -169,15 +169,16 @@ def render_goal(
             sec.truncated = True
     notes = ""
     if knowledge:
-        # after goal and request, at most a third of the section; whole entries only
-        room = min(budget // 3, budget - fixed - hint_cost - char_cost(goal.strip()) - char_cost(request))
+        # after goal and request, at most half of the section; whole entries only, nearest first – one that does not
+        # fit is left out and the next one still comes (BUG-328)
+        room = min(budget // 2, budget - fixed - hint_cost - char_cost(goal.strip()) - char_cost(request))
         label = f"\n\n{KNOWLEDGE_LABEL}\n"
         kept: list[str] = []
         for entry in knowledge:
             candidate = label + "\n\n".join([*kept, entry.strip()])
             if char_cost(candidate) > room:
                 sec.truncated = True
-                break
+                continue
             kept.append(entry.strip())
         notes = label + "\n\n".join(kept) if kept else ""
     goal_text = truncate_middle(goal.strip(), max(0, budget - fixed - hint_cost - char_cost(request) - char_cost(notes)))

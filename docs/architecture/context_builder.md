@@ -80,8 +80,10 @@ Dependencies: only the shared protocols `RepoContextProvider` (`inventory_summar
   `RELEVANT TESTS` (scored and re-packed each turn).
   `STEP GOAL` also carries the job request (job title and prompt, at most half of the section, cut in the middle)
   below the step goal: the planner's goal summarises the job and may lose details the review checks (BUG-212).
-  Below that come the active lessons and conventions closest to goal and job (`policies.memory.coder_start_entries`,
-  fetched once per attempt, so the prefix stays stable), whole entries within a third of the section (BUG-325).
+  Below that come the active lessons and conventions that fit goal and job (`policies.memory.coder_start_entries` at
+  most, each at least `coder_start_min_score` similar; fetched once per attempt, so the prefix stays stable), whole
+  entries nearest first within half of the section – one that does not fit is left out, the next still comes (BUG-325,
+  BUG-328).
 
 Mandatory sections (always rendered): SYSTEM CONTRACT, STEP GOAL, SCOPE (read-only notice without a scope),
 AVAILABLE TOOLS, COMPLETION CONDITIONS. All others are omitted when empty (`omitted_reason="empty"` in the

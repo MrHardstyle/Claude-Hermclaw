@@ -122,6 +122,7 @@ async def test_step_goal_carries_the_knowledge_that_fits_the_step() -> None:
     many = await builder.build(make_input(step=make_step(knowledge=["y" * 50_000, lesson])))
     head = user_text(many).split("## SCOPE")[0]
     assert "Fix the off-by-one error in f3" in head and "y" * 1000 not in head  # an entry is whole or left out
+    assert "-InputObject @($items)" in head  # an entry too long to fit does not keep out the next one (BUG-328)
     assert "Knowledge from earlier jobs" not in user_text(await builder.build(make_input()))
 
 

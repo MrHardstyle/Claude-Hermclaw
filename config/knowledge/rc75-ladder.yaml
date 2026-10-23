@@ -15,3 +15,15 @@
     guard it with `if ($MyInvocation.InvocationName -ne '.') { ... }`) and writes temporary files to `$TestDrive`.
     Run the tests with `pwsh -NoProfile -Command "Invoke-Pester -CI"` from the repository root.
     Seen: ladder A9 #4 on rc73 (coder-main) – two runs of 139 s and 153 s and three timeouts, the step was cancelled.
+
+- kind: convention
+  title: "PowerShell: splat parameters with a hashtable – an array splat binds '-Name' strings as positional values"
+  tags: [powershell, pester, tests, parameters]
+  content: |
+    `$a = @('-Status', 'Running'); & ./Script.ps1 @a` does not pass -Status: an array splat binds every element by
+    position, so the parameter receives the text "-Status" ("The argument "-Status" does not belong to the set …"),
+    and an empty array leaves it unbound. A test helper `param($ArgsList) & $scriptPath @ArgsList` has this bug for
+    every call with parameters. Use a hashtable: `$p = @{ Status = 'Running' }; & $scriptPath @p` (an empty `@{}` for
+    no parameters), or call the script with named parameters directly: `& $scriptPath -Status Running`.
+    Seen: ladder A9 #6 on rc75 (coder-main) – the script was right (hidden checks 9/10), four of its own Pester tests
+    failed through such a helper for 30 turns and the job ran out of time.

@@ -408,7 +408,10 @@ class MemoryPolicy(_Strict):
     coder_entries: int = Field(default=2, ge=0, le=10)  # active entries matching a failure, given with the correction
     # active lessons/conventions closest to the step goal and job text, in the coder's STEP GOAL from the first turn:
     # the planner had the PowerShell JSON convention and the coder never saw it (ladder A9 #4 on rc73, BUG-325)
-    coder_start_entries: int = Field(default=2, ge=0, le=10)
+    coder_start_entries: int = Field(default=5, ge=0, le=10)
+    # ... all of them at least this similar (BUG-328): five PowerShell entries fit A9 (0.52–0.63, the rest <= 0.43), a
+    # fixed two left out the two that would have saved ladder A9 #6 on rc75; the STEP GOAL keeps whole entries in budget
+    coder_start_min_score: float = Field(default=0.5, ge=0.0, le=1.0)
     min_score: float = Field(default=0.55, ge=0.0, le=1.0)  # cosine similarity below which an entry is not relevant
     max_entry_chars: int = Field(default=1200, ge=200, le=8000)  # one entry as a model sees it
     learn: bool = True  # record incidents of failed/stalled work after a job

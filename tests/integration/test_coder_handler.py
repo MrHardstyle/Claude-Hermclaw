@@ -1006,7 +1006,8 @@ async def test_a_requirement_no_delivered_test_checks_becomes_one_correction(wor
 
 async def test_the_coder_gets_the_knowledge_that_fits_its_step_from_the_first_turn(world: World, tmp_path: Path) -> None:
     """Ladder A9 #4 (rc73): the planner had the PowerShell JSON convention, the coder never saw it. The active lessons
-    and conventions closest to the step goal and the job come with the goal; candidates do not (BUG-325)."""
+    and conventions closest to the step goal and the job come with the goal; candidates do not (BUG-325). Every entry
+    similar enough comes, not a fixed two; an unrelated one does not (BUG-328, ladder A9 #6)."""
     from sqlalchemy import delete
 
     from hermclaw.core.config import MemoryPolicy
@@ -1020,6 +1021,10 @@ async def test_the_coder_gets_the_knowledge_that_fits_its_step_from_the_first_tu
     store = MemoryStore(world.sessionmaker, HashingEmbedder(), MemoryPolicy(min_score=0.1))
     await store.add(kind="lesson", title="VALUE in src/module.py", content="Change VALUE with a test of VALUE.", status="active")
     await store.add(kind="lesson", title="VALUE unproven", content="Change VALUE src/module.py unproven.", status="candidate")
+    # more than two entries fit, one does not (BUG-328)
+    await store.add(kind="convention", title="VALUE in src/module.py stays", content="Keep VALUE in src/module.py typed.", status="active")
+    await store.add(kind="lesson", title="VALUE of src/module.py in tests", content="Test VALUE of src/module.py.", status="active")
+    await store.add(kind="lesson", title="Rust lifetimes", content="Borrowck: annotate lifetimes on struct refs.", status="active")
     models = Models([_plan()], [EDIT, DONE])
     verifier = ScriptedVerifier(world, [True])
     jid = await _job(world)
@@ -1028,3 +1033,5 @@ async def test_the_coder_gets_the_knowledge_that_fits_its_step_from_the_first_tu
     assert jobs[jid].status == "succeeded", (jobs[jid].error_code, jobs[jid].error_message)
     first = models.coder_prompts[0][1].content
     assert "Knowledge from earlier jobs" in first and "Change VALUE with a test of VALUE." in first and "unproven" not in first
+    assert "Keep VALUE in src/module.py typed." in first and "Test VALUE of src/module.py." in first, first
+    assert "Borrowck" not in first

@@ -5,6 +5,7 @@ Format: [Keep a Changelog](https://keepachangelog.com/de/1.1.0/), Versionen nach
 ## [Unreleased]
 
 ### Behoben
+- **Alles passende Wissen für den Coder (BUG-328):** Zu Beginn kommt jeder aktive Eintrag ab Ähnlichkeit 0,5 (`policies.memory.coder_start_min_score`), höchstens 5 (`coder_start_entries`), bis zur Hälfte des Abschnitts STEP GOAL. Bisher waren es fest die zwei nächsten.
 - **`run_test` mit Sprachnamen (BUG-327):** Ein `framework`, das keinen Parser bezeichnet (etwa „powershell“), wird nicht mehr abgelehnt; der Parser wird dann erkannt.
 
 ## [0.1.0rc75] – Release Candidate (2026-10-23)

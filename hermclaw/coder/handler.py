@@ -309,8 +309,8 @@ class ImplementStepHandler:
         return "" if job is None else "\n".join(p for p in (job.title, job.prompt) if p)
 
     async def _knowledge(self, ctx: StepRunContext, step: StepContract, handle: WorkspaceHandle) -> list[str]:
-        """The active lessons and conventions closest to the step goal and the job text (BUG-325); a step never fails
-        for the knowledge."""
+        """The active lessons and conventions that fit the step goal and the job text, nearest first (BUG-325, BUG-328);
+        a step never fails for the knowledge."""
         policy = self.config.policies.memory
         if self.deps.memory is None or not policy.enabled or policy.coder_start_entries <= 0:
             return []
@@ -321,6 +321,7 @@ class ImplementStepHandler:
                 k=policy.coder_start_entries,
                 scopes=[f"repo:{handle.repository_key}"],
                 kinds=("lesson", "convention"),
+                min_score=policy.coder_start_min_score,
                 ctx=CallContext(purpose="memory", job_id=ctx.job_id, step_id=ctx.step_id, attempt_id=ctx.attempt_id),
             )
         except Exception as exc:

@@ -46,6 +46,12 @@ Noch keine.
 
 ## Behobene Bugs
 
+### BUG-328 – Der Coder bekommt zu Beginn nur zwei Wissenseinträge, auch wenn mehr passen
+- Phase: Schwierigkeitsleiter auf rc75, 2026-10-23 (A9#6, Job e9fac208) · Komponente: coder (`handler.py`), context_builder (`render.py`), config (`MemoryPolicy`) · Severity: P2 · blockierend: nein · Status: **behoben im Repository** (`tests/integration/test_coder_handler.py::test_the_coder_gets_the_knowledge_that_fits_its_step_from_the_first_turn`, `tests/unit/test_context_builder_sections.py::test_step_goal_carries_the_knowledge_that_fits_the_step`)
+- Reproduktion: Das Skript ist richtig (versteckt 9/10, die JSON-Konvention hat gewirkt). Die eigenen Pester-Tests rufen es aber über `& $scriptPath @ArgsList` mit einem Array auf. Vier Tests scheitern 30 Züge lang an „The argument "-Status" does not belong to the set“, und der Job läuft nach 20 min ab.
+- Ursache: Das Array-Splatting war noch nirgends als Wissen erfasst; es steht jetzt als Konvention in `config/knowledge/rc75-ladder.yaml`. Bei der Prüfung, ob sie den Coder erreichen würde: Zur Aufgabe passen dann fünf aktive PowerShell-Einträge (gemessen 0,52–0,63, fremde höchstens 0,43). `coder_start_entries=2` gab dem Coder davon nur die ersten zwei. Außerdem ließ ein zu langer Eintrag alle folgenden weg, und das Wissen bekam höchstens ein Drittel des Abschnitts.
+- Fix: Der Coder bekommt jeden aktiven Eintrag ab `policies.memory.coder_start_min_score` (0,5), nächste zuerst, höchstens `coder_start_entries` (jetzt 5). Das Wissen darf die Hälfte von STEP GOAL belegen. Ein Eintrag, der nicht passt, fällt weg, der nächste kommt trotzdem. Die Konvention ist live importiert.
+
 ### BUG-327 – `run_test` lehnt einen Sprachnamen als `framework` ab
 - Phase: Schwierigkeitsleiter auf rc73, 2026-10-23 (A9#4, Job 2a8f51a9) · Komponente: tools (`registry.py`) · Severity: P3 · blockierend: nein · Status: **behoben im Repository** (`tests/unit/test_tools_units.py::test_run_test_detects_the_parser_for_an_unknown_framework_name`)
 - Reproduktion: Der Coder ruft `run_test` mit `framework: "powershell"` auf. Beide Aufrufe enden mit `ARGS_INVALID` („Input should be 'pytest', … 'pester' or 'generic'“), zwei Züge sind verloren.
