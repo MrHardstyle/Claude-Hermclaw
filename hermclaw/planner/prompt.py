@@ -490,7 +490,9 @@ def _base_rules(kind_capability: dict[str, str], capability_names: Sequence[str]
         "the runtime performs all git mutations.",
         "Keep the plan short: every worker receives the job text itself, so goal is one sentence naming the outcome "
         "(never a restatement of the job), and assumptions and risks hold at most three short items each, only what "
-        "the job text does not already say. The details belong into the goals and acceptance of the steps.",
+        "the job text does not already say. The details belong into the goals and acceptance of the steps. Write each "
+        "acceptance criterion once: one diff criterion holds all must_change and must_not_change paths of the step, "
+        "and the runtime drops repeated criteria.",
         "Answer with exactly ONE JSON object that conforms to the provided JSON schema. No markdown, no prose, "
         "no comments, no explanation of your reasoning.",
     ]

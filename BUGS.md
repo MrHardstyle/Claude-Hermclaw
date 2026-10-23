@@ -46,6 +46,12 @@ Noch keine.
 
 ## Behobene Bugs
 
+### BUG-321 – Der Planer wiederholt ein Diff-Kriterium bis zur Obergrenze des Schemas
+- Phase: Schwierigkeitsleiter auf rc72, 2026-10-23 (A7#10, Job 82793296) · Komponente: planner (`planner.py`, `prompt.py`) · Severity: P3 · blockierend: nein · Status: **behoben im Repository** (`tests/unit/test_planner_loop.py::test_model_facing_schemas_leave_out_what_the_runtime_adds`)
+- Reproduktion: Nach BUG-320 ist das Plan-Ziel kurz, der Plan von A7#10 braucht trotzdem 972 Tokens und 5,0 min. Er enthält dasselbe Diff-Kriterium zwölfmal, genau die Obergrenze des Schemas (12). In sechs der zwölf Pläne davor standen 10 Diff-Kriterien.
+- Ursache: Wie bei BUG-288 schließt die Grammatik die Liste erst an der Obergrenze. qwen3.8 wiederholt ein Kriterium, statt die Liste zu schließen. Gespeicherte Schritte haben nach dem Entfernen der Duplikate höchstens 10 eigene Kriterien, 95 % höchstens 4.
+- Fix: Das Modell sieht höchstens 8 Akzeptanzkriterien je Schritt. Der Prompt verlangt jedes Kriterium nur einmal, mit einem Diff-Kriterium für alle `must_change`- und `must_not_change`-Pfade. Die Laufzeit ergänzt ihre eigenen Kriterien weiterhin bis zur Vertragsgrenze.
+
 ### BUG-320 – Der Planer schreibt, was die Laufzeit selbst ergänzt, und wiederholt es bis zu achtmal
 - Phase: Schwierigkeitsleiter auf rc71, 2026-10-22 (A7#8, Job 588a32c9) · Komponente: planner (`planner.py`, `prompt.py`) · Severity: P2 · blockierend: nein · Status: **behoben im Repository** (`tests/unit/test_planner_loop.py::test_model_facing_schemas_leave_out_what_the_runtime_adds`)
 - Reproduktion: Der Planer (qwen3.8, 3–4 tok/s) braucht für den Ein-Schritt-Plan von A7 1.071 Ausgabe-Tokens und 5,9 min; der Job scheitert später am 40-min-Limit. In der Antwort stehen `scope` und `security` je fünfmal im selben Schritt, in 27 Planer-Antworten seit dem 21.10. bis zu achtmal. Das Plan-Ziel wiederholt den ganzen Auftrag (650 Zeichen), dazu vier Annahmen und zwei Risiken.

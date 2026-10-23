@@ -81,9 +81,11 @@ MODEL_REQUIRED_STEP_FIELDS: tuple[str, ...] = ("depends_on", "repo_hints", "allo
 # Tighter list bounds for the model than the contract has: the grammar closes the array at the bound. qwen3.8 repeated
 # two diff criteria until the contract's 30 – K2 on rc60 planned 32 min for a 1000-token plan, and seven stored steps
 # hold 28–30 criteria with two or three distinct ones (BUG-288). Real steps use at most 13 criteria and 13 paths;
-# the runtime still adds its generated criteria up to the contract bound.
+# the runtime still adds its generated criteria up to the contract bound. After BUG-320 qwen3.8 repeated one diff
+# criterion up to the bound of 12 (A7 #10 on rc72; ten in six of the twelve plans before); stored steps hold at most
+# ten distinct criteria of their own, 95 % at most four (BUG-321).
 MODEL_STEP_LIST_BOUNDS: dict[str, int] = {
-    "acceptance": 12,
+    "acceptance": 8,
     "repo_hints": 20,
     "allowed_new_paths": 20,
     "forbidden_paths": 20,

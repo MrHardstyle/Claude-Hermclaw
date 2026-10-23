@@ -4,6 +4,9 @@ Format: [Keep a Changelog](https://keepachangelog.com/de/1.1.0/), Versionen nach
 
 ## [Unreleased]
 
+### Behoben
+- **Wiederholte Diff-Kriterien im Plan (BUG-321):** Das Modell sieht höchstens 8 Akzeptanzkriterien je Schritt (vorher 12), und der Prompt verlangt ein Diff-Kriterium für alle Pfade. qwen3.8 hatte in A7#10 dasselbe Diff-Kriterium zwölfmal geschrieben.
+
 ### Hinzugefügt
 - **Lehren aus behobenen Fehlern (D-025):** Nach jedem Job macht der Lernlauf aus jeder Behebung eine allgemeine Lehre. Als Behebung zählen eine bestandene Korrektur sowie ein roter Test, der nach Änderungen wieder grün wird. Ein Aufruf des Coder-Modells formuliert die Lehre, sie ist zuerst Kandidat und wird aktiv, sobald ein zweiter Job dasselbe lehrt. Lehren, die zu ihrer Aufgabe gehören, verwirft das Modell selbst. Neue Schalter unter `policies.memory`: `lessons`, `lessons_per_job`, `lesson_alias`, `lesson_similarity`, `lessons_since_days`, `lesson_wait_seconds`. Metadaten-Schlüssel `memory_lessons_at`.
 

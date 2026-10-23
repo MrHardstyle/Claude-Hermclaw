@@ -73,7 +73,7 @@ the gateway, never by the planner.
    SHA-256 of the input, never the content). No transaction stays open while the model runs.
 2. **Structured output (14.2):** `ChatModel.chat(alias_of_role("planner"), …, json_schema=PlanContract schema)`
    with the profile's `max_output_tokens`, `temperature` and `timeout_seconds`. The schema sent to the model bounds
-   the step lists more tightly than the contract (`MODEL_STEP_LIST_BOUNDS`: 12 acceptance criteria, 20 paths, hints
+   the step lists more tightly than the contract (`MODEL_STEP_LIST_BOUNDS`: 8 acceptance criteria – BUG-321 –, 20 paths, hints
    and constraints): the grammar closes the array there, so a repetition loop ends after a few items instead of at
    the contract's 30 (BUG-288). It also leaves out what the runtime adds or no worker reads: no `scope` and
    `security` evidence (enrichment adds both to every changing step), no `summary`, a plan `goal` of at most 300

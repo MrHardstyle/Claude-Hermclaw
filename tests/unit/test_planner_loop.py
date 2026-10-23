@@ -284,7 +284,7 @@ def test_model_facing_schemas_require_the_scope_fields() -> None:
         assert "rerun_reason" not in required
         # BUG-288 (K2 on rc60): qwen3.8 repeated two diff criteria up to the contract bound for 25 minutes
         props = schema["$defs"][name]["properties"]
-        assert props["acceptance"]["maxItems"] == 12 and props["repo_hints"]["maxItems"] == 20
+        assert props["acceptance"]["maxItems"] == 8 and props["repo_hints"]["maxItems"] == 20
     assert (
         PlanStep.model_validate({"id": "S001", "title": "abc", "kind": "research", "capability": "research", "goal": "find it"}).repo_hints
         == []
@@ -312,6 +312,8 @@ def test_model_facing_schemas_leave_out_what_the_runtime_adds() -> None:
         assert props["assumptions"]["maxItems"] == 3 and props["risks"]["items"]["maxLength"] == 200
     system = planner_system_prompt({"implement": "coding"}, ["coding"], 8)
     assert '"type":"scope"' not in system and "adds the scope check" in system and "goal is one sentence" in system
+    # BUG-321 (A7 #10 on rc72): the same diff criterion twelve times – one diff criterion per step, at most eight items
+    assert "one diff criterion holds all must_change and must_not_change paths" in system
     plan = PlanContract.model_validate(
         {
             "goal": "x" * 1000,
