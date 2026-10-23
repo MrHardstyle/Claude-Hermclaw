@@ -245,6 +245,11 @@ def test_steps_that_write_tests_get_test_evidence_even_with_substantive_acceptan
     assert "test" in added and test.command == "python -m pytest -q" and test.framework == "pytest"
     js = _step(allowed_new_paths=["src/slugify.js", "test/slugify.test.js"], acceptance=diff)
     assert next(a for a in generate_acceptance(js, ctx)[0] if a.type == "test").command == "node --test"
+    # BUG-322 (ladder A9 #1 on rc72): a PowerShell script with Pester tests, in tests/ or next to the script
+    for tests in ("tests/Get-Report.Tests.ps1", "Get-Report.Tests.ps1"):
+        ps = _step(allowed_new_paths=["Get-Report.ps1", tests], acceptance=[{"type": "diff", "must_change": ["README.md"]}])
+        pester = next(a for a in generate_acceptance(ps, ctx)[0] if a.type == "test")
+        assert pester.command == 'pwsh -NoProfile -Command "Invoke-Pester -CI"' and pester.framework == "generic"
     no_tests = _step(allowed_new_paths=["config/new.yaml"], acceptance=[{"type": "diff", "must_change": ["config/new.yaml"]}])
     assert "test" not in generate_acceptance(no_tests, ctx)[1]
 

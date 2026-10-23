@@ -5,6 +5,7 @@ Format: [Keep a Changelog](https://keepachangelog.com/de/1.1.0/), Versionen nach
 ## [Unreleased]
 
 ### Behoben
+- **PowerShell-Schritte ohne Testkriterium (BUG-322):** Für PowerShell-Dateien ergänzt die Laufzeit `Invoke-Pester -CI` als Testkriterium, `*.Tests.ps1` zählt als Testdatei. In A9 wurde der Schritt sonst dreimal blockiert, weil der Verifier ein Testkriterium verlangte, das kein Plan enthielt.
 - **Wiederholte Diff-Kriterien im Plan (BUG-321):** Das Modell sieht höchstens 8 Akzeptanzkriterien je Schritt (vorher 12), und der Prompt verlangt ein Diff-Kriterium für alle Pfade. qwen3.8 hatte in A7#10 dasselbe Diff-Kriterium zwölfmal geschrieben.
 
 ### Hinzugefügt

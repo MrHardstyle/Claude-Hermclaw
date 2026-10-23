@@ -446,7 +446,7 @@ def _research_question_errors(plan: PlanContract, new_steps: Sequence[PlanStep])
 
 
 TEST_PATH_RE = re.compile(
-    r"(?:^|/)(?:tests?|__tests__|spec|specs)(?:/|$)|(?:^|/)test_[^/]*$|_test\.[a-z]+$|\.(?:test|spec)\.[a-z]+$|(?:^|/)conftest\.py$",
+    r"(?:^|/)(?:tests?|__tests__|spec|specs)(?:/|$)|(?:^|/)test_[^/]*$|_test\.[a-z]+$|\.(?:test|spec)\.[a-z]+$|(?:^|/)conftest\.py$|\.tests\.ps1$",
     re.IGNORECASE,
 )
 

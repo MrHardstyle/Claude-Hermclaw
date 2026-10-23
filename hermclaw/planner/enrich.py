@@ -252,6 +252,10 @@ def generate_acceptance(
 _PY_TEST: tuple[str, TestFramework] = ("python -m pytest -q", "pytest")
 _NODE_TEST: tuple[str, TestFramework] = ("node --test", "generic")
 _GO_TEST: tuple[str, TestFramework] = ("go test ./...", "go")
+# Pester finds every *.Tests.ps1 below the working directory; the powershell sandbox image ships it. Without it an
+# empty repository's PowerShell step had no test criterion, the verifier demanded one, and the step was blocked into
+# three replans (ladder A9 #1 on rc72, BUG-322).
+_PESTER_TEST: tuple[str, TestFramework] = ('pwsh -NoProfile -Command "Invoke-Pester -CI"', "generic")
 
 
 def _test_runner_for(paths: Sequence[str]) -> tuple[str, TestFramework] | None:
@@ -263,6 +267,8 @@ def _test_runner_for(paths: Sequence[str]) -> tuple[str, TestFramework] | None:
         return _GO_TEST
     if exts & {"js", "mjs", "cjs"}:
         return _NODE_TEST
+    if exts & {"ps1", "psm1"}:
+        return _PESTER_TEST
     return None
 
 

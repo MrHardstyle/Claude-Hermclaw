@@ -46,6 +46,12 @@ Noch keine.
 
 ## Behobene Bugs
 
+### BUG-322 – Ein PowerShell-Schritt bekommt kein Testkriterium und wird ohne Ausweg blockiert
+- Phase: Schwierigkeitsleiter auf rc72, 2026-10-23 (A9#1, Job 8273c77a) · Komponente: planner (`enrich.py`, `validation.py`) · Severity: P2 · blockierend: ja (die Leiter scheitert an A9) · Status: **behoben im Repository** (`tests/unit/test_planner_enrich.py::test_steps_that_write_tests_get_test_evidence_even_with_substantive_acceptance`)
+- Reproduktion: A9 verlangt ein PowerShell-Skript mit Pester-Tests in einem leeren Repository. Der Plan hat nur Diff-Kriterien. Der Coder liefert Skript, Tests und README. Der Verifier meldet „implement step in a repository with tests has no test evidence“, der Handler blockiert mit `ACCEPTANCE_DEFECT`. Zwei Neupläne fügen wieder kein Testkriterium hinzu, Ergebnis `REPLAN_LIMIT` nach 19,2 min (versteckt 6/10).
+- Ursache: Fehlt im Plan ein Testkriterium, leitet die Laufzeit es aus der Sprache der Dateien ab – bisher nur für Python, Go und JavaScript. Für PowerShell gab es keinen Läufer, und `*.Tests.ps1` neben dem Skript galt nicht als Testdatei.
+- Fix: Für `.ps1`/`.psm1` nimmt die Laufzeit `pwsh -NoProfile -Command "Invoke-Pester -CI"` (Pester findet alle `*.Tests.ps1`; das PowerShell-Sandbox-Image hat es). `*.Tests.ps1` zählt überall als Testdatei.
+
 ### BUG-321 – Der Planer wiederholt ein Diff-Kriterium bis zur Obergrenze des Schemas
 - Phase: Schwierigkeitsleiter auf rc72, 2026-10-23 (A7#10, Job 82793296) · Komponente: planner (`planner.py`, `prompt.py`) · Severity: P3 · blockierend: nein · Status: **behoben im Repository** (`tests/unit/test_planner_loop.py::test_model_facing_schemas_leave_out_what_the_runtime_adds`)
 - Reproduktion: Nach BUG-320 ist das Plan-Ziel kurz, der Plan von A7#10 braucht trotzdem 972 Tokens und 5,0 min. Er enthält dasselbe Diff-Kriterium zwölfmal, genau die Obergrenze des Schemas (12). In sechs der zwölf Pläne davor standen 10 Diff-Kriterien.
