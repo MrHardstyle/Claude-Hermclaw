@@ -36,10 +36,10 @@ SYSTEM_SECTIONS: tuple[SectionName, ...] = (
     SectionName.AVAILABLE_TOOLS,
     SectionName.COMPLETION_CONDITIONS,
 )
-# user messages: the step-specific state; LATEST FAILURE and history last (closest to the answer). The first user
-# message holds what stays the same for the whole attempt, the second what a turn changes (D-021): llama.cpp keeps a
-# cache checkpoint only where the last message of a prompt starts, so a hybrid model (Qwen3.6) reuses the cached
-# prompt up to the turn part instead of only up to the system message
+# the step-specific state that stays the same for the whole attempt. D-021 gave it its own user message (llama.cpp keeps
+# a cache checkpoint where the last message starts); D-026 moves it into the system message, whose end also gets one,
+# and splits the rest into the files message (changes when a file changes) and the turn message (changes every turn;
+# LATEST FAILURE also holds the code at the latest failure). LATEST FAILURE and history come last, closest to the answer
 USER_STABLE_SECTIONS: tuple[SectionName, ...] = (
     SectionName.STEP_GOAL,
     SectionName.SCOPE,
@@ -47,13 +47,13 @@ USER_STABLE_SECTIONS: tuple[SectionName, ...] = (
     SectionName.ACCEPTANCE,
     SectionName.CURRENT_REPO_FACTS,
 )
-USER_TURN_SECTIONS: tuple[SectionName, ...] = (
-    SectionName.RELEVANT_CODE,
-    SectionName.RELEVANT_TESTS,
+USER_FILE_SECTIONS: tuple[SectionName, ...] = (SectionName.RELEVANT_CODE, SectionName.RELEVANT_TESTS)
+USER_TURN_ONLY_SECTIONS: tuple[SectionName, ...] = (
     SectionName.CURRENT_DIFF,
     SectionName.LATEST_FAILURE,
     SectionName.SHORT_STEP_HISTORY,
 )
+NO_FILES_SHOWN = "(No file content is shown yet: read_file or read_range shows a file.)"
 
 # sections that are always rendered (they carry a meaningful text even without data)
 MANDATORY_SECTIONS: frozenset[SectionName] = frozenset(
@@ -70,7 +70,7 @@ ELASTIC_SECTIONS: tuple[SectionName, ...] = (SectionName.RELEVANT_CODE, SectionN
 
 SECTION_SEPARATOR = "\n\n"
 MESSAGE_OVERHEAD_TOKENS = 8  # chat-template tokens per message (role markers etc.), reserved conservatively
-PROMPT_MESSAGES = 3  # system, stable user part, turn user part
+PROMPT_MESSAGES = 3  # system (with the stable sections), files, turn (D-026)
 
 
 def heading(name: SectionName) -> str:

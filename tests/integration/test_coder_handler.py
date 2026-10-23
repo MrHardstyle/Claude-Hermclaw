@@ -1031,7 +1031,7 @@ async def test_the_coder_gets_the_knowledge_that_fits_its_step_from_the_first_tu
     handler = _handler(world, models, verifier, None, memory=store)
     jobs = await _run(world, _driver(world, models, tmp_path), [handler, ReviewHandler()], [jid])
     assert jobs[jid].status == "succeeded", (jobs[jid].error_code, jobs[jid].error_message)
-    first = models.coder_prompts[0][1].content
+    first = models.coder_prompts[0][0].content  # STEP GOAL ends the system message (D-026)
     assert "Knowledge from earlier jobs" in first and "Change VALUE with a test of VALUE." in first and "unproven" not in first
     assert "Keep VALUE in src/module.py typed." in first and "Test VALUE of src/module.py." in first, first
     assert "Borrowck" not in first

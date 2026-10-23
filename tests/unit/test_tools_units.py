@@ -49,6 +49,17 @@ def test_run_test_detects_the_parser_for_an_unknown_framework_name() -> None:
     assert validate_args(spec, {"command": "pytest -q"}).framework is None  # type: ignore[attr-defined]
 
 
+def test_arguments_split_over_a_nested_args_object_are_taken_as_one_set() -> None:
+    """BUG-334 (ladder A10 #2): {"args": {"path": …, "append": false}, "content": …} was refused as ARGS_INVALID, and
+    the coder spent another 2.5k-token turn writing the same file again."""
+    spec = get_spec(ToolName.write_file)
+    args = validate_args(spec, {"args": {"path": "t.py", "append": False}, "content": "x = 1\n"})
+    assert (args.path, args.content, args.append) == ("t.py", "x = 1\n", False)  # type: ignore[attr-defined]
+    assert validate_args(spec, {"args": {"path": "a.py"}, "path": "b.py", "content": ""}).path == "b.py"  # type: ignore[attr-defined]
+    with pytest.raises(ToolError):
+        validate_args(spec, {"args": "path=t.py", "content": "x"})  # not an object: still invalid
+
+
 def test_validate_args_errors_are_value_free() -> None:
     spec = get_spec("write_file")
     with pytest.raises(ToolError) as exc:

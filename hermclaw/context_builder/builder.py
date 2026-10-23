@@ -26,7 +26,6 @@ from typing import Any
 from hermclaw.context_builder.budget import SectionBudgets, split_elastic
 from hermclaw.context_builder.config import ContextBuilderConfig
 from hermclaw.context_builder.diff import render_diff
-from hermclaw.context_builder.failure import first_error_line
 from hermclaw.context_builder.history import TurnRecord, render_history
 from hermclaw.context_builder.render import (
     NO_CHANGES,
@@ -47,17 +46,28 @@ from hermclaw.context_builder.report import BuiltContext, ContextReport, Dropped
 from hermclaw.context_builder.sections import (
     MANDATORY_SECTIONS,
     MESSAGE_OVERHEAD_TOKENS,
+    NO_FILES_SHOWN,
     PROMPT_MESSAGES,
     RESPONSE_PROTOCOL,
     SECTION_ORDER,
+    SECTION_SEPARATOR,
+    USER_FILE_SECTIONS,
     USER_STABLE_SECTIONS,
-    USER_TURN_SECTIONS,
+    USER_TURN_ONLY_SECTIONS,
     RenderedSection,
     SectionName,
     render_message,
     user_closing,
 )
-from hermclaw.context_builder.snippets import Snippet, dedupe_snippets, fence_for, make_snippet, pack_snippets, render_packed
+from hermclaw.context_builder.snippets import (
+    Snippet,
+    dedupe_snippets,
+    fence_for,
+    make_snippet,
+    pack_snippets,
+    render_packed,
+    render_snippet,
+)
 from hermclaw.context_builder.tokens import char_cost, clip_to_cost, estimate_tokens, tokens_for_cost
 from hermclaw.contracts.scope import ScopeContract, normalise_path
 from hermclaw.contracts.step import StepContract
@@ -213,13 +223,13 @@ class ContextBuilder:
         # ---- relevance inputs (16.3 / 16.8)
         targets, target_drops = self._literal_targets(step.scope, ws)
         dropped.extend(DroppedItem(SectionName.RELEVANT_CODE.value, p, r) for p, r in target_drops)
-        refs = self._failure_refs(failure, correction, ws)
+        # D-026: the files message (RELEVANT CODE/TESTS) depends only on what stays the same while no file changes – the
+        # correction evidence is fixed for the attempt; the code at the latest failure goes into the turn message
+        refs = self._failure_refs("", correction, ws)
+        fail_refs = self._failure_refs(failure, (), ws)
         acc_tests = self._acceptance_test_paths(step.acceptance, ws)
         queries = self._test_queries(targets, step.goal)
         query = f"{step.title}\n{step.goal}".strip()
-        first_err = first_error_line(failure) if failure.strip() else ""
-        if first_err:
-            query += "\n" + first_err[:300]
         elastic_chars = plan.section_cost[SectionName.RELEVANT_CODE] + plan.section_cost[SectionName.RELEVANT_TESTS]
 
         # ---- phase 1: independent provider calls (concurrent, bounded, order-preserving)
@@ -249,7 +259,7 @@ class ContextBuilder:
         ]
         for p, start, end in file_heads:
             jobs.append((f"repo.read {p}", read(p, start, end), None))
-        for ref in refs:
+        for ref in (*refs, *fail_refs):
             if ref.line is None:
                 jobs.append((f"{_REF_LABEL} {ref.path}", read(ref.path, 1, cfg.test_head_lines), None))
             else:
@@ -266,19 +276,20 @@ class ContextBuilder:
         pos = 5
         head_texts = values[pos : pos + len(file_heads)]
         pos += len(file_heads)
-        ref_texts = values[pos : pos + len(refs)]
-        pos += len(refs)
+        ref_texts = values[pos : pos + len(refs) + len(fail_refs)]
+        pos += len(refs) + len(fail_refs)
         search_results: list[list[RepoHit]] = values[pos:]
 
         # ---- candidate snippets
         candidates: list[Snippet] = []
-        for i, ref in enumerate(refs):
+        fail_cands: list[Snippet] = []
+        for i, ref in enumerate((*refs, *fail_refs)):
             text = ref_texts[i]
             if not isinstance(text, str) or not text.strip():
                 dropped.append(DroppedItem(_section_for(ref.path).value, ref.path, "read_failed"))
                 continue
             start = 1 if ref.line is None else max(1, ref.line - cfg.failure_region_lines)
-            candidates.append(make_snippet(ref.path, start, text, 3.0 - i * 0.001, "failure"))
+            (candidates if i < len(refs) else fail_cands).append(make_snippet(ref.path, start, text, 3.0 - i * 0.001, "failure"))
         for i, (p, start, _) in enumerate(file_heads):
             text = head_texts[i]
             if not isinstance(text, str) or not text.strip():
@@ -313,6 +324,8 @@ class ContextBuilder:
         dropped.extend(DroppedItem(SectionName.RELEVANT_TESTS.value, lbl, r) for lbl, r in test_d.dropped)
         code_snips = [self._redact_snippet(s) for s in code_d.snippets]
         test_snips = [self._redact_snippet(s) for s in test_d.snippets]
+        fail_d = await dedupe_snippets(fail_cands, merge_gap=cfg.merge_gap_lines, reader=reader, max_lines=cfg.max_snippet_lines)
+        fail_snips = [self._redact_snippet(s) for s in fail_d.snippets]
 
         # ---- fixed-budget sections
         cost = plan.section_cost
@@ -374,7 +387,14 @@ class ContextBuilder:
 
         # ---- elastic sections with redistributed budget (16.2)
         used = {name: char_cost(sec.body) for name, sec in rendered.items() if sec.present}
-        split = split_elastic(plan, cfg.budgets, used)
+        # D-026: what the turn sections leave unused changes every turn; it goes to the code at the latest failure (in
+        # the turn message), so the budget – and with it the content – of RELEVANT CODE/TESTS stays the same from turn
+        # to turn while no file changes, and llama.cpp reuses the cached files message
+        turn_spare = sum(max(0, cost[n] - used.get(n, 0)) for n in USER_TURN_ONLY_SECTIONS)
+        split = split_elastic(plan, cfg.budgets, {**used, **{n: cost[n] for n in USER_TURN_ONLY_SECTIONS}})
+        reserve = int((split.code_cost + split.tests_cost) * cfg.failure_code_share) if fail_snips else 0
+        reserve_tests = int(reserve * split.tests_cost / max(1, split.code_cost + split.tests_cost))
+        split = replace(split, code_cost=split.code_cost - (reserve - reserve_tests), tests_cost=split.tests_cost - reserve_tests)
         # unused code budget -> tests; then unused tests budget -> code (only if code had to leave snippets out).
         # The reported section budget is what the section was allowed when it was (last) packed.
         code_allowed = split.code_cost
@@ -400,16 +420,30 @@ class ContextBuilder:
             elif not pack.selected:
                 sec.omitted_reason = "budget"
             rendered[name] = sec
+        fail_budget = turn_spare + reserve + (tests_allowed - test_pack.cost if fail_snips else 0)
+        final_budget[SectionName.LATEST_FAILURE] = cost[SectionName.LATEST_FAILURE] + fail_budget
+        self._add_failure_code(rendered[SectionName.LATEST_FAILURE], fail_snips, [*code_pack.selected, *test_pack.selected], fail_budget)
 
         # ---- messages
         for name, sec in rendered.items():
             dropped.extend(DroppedItem(name.value, item, reason) for item, reason in sec.dropped)
-        system_msg = render_message(
-            [rendered[n] for n in (SectionName.SYSTEM_CONTRACT, SectionName.AVAILABLE_TOOLS, SectionName.COMPLETION_CONDITIONS)],
-            suffix=RESPONSE_PROTOCOL,
+        # D-026: three cache levels – the system message holds everything fixed for the attempt, the files message what
+        # changes when a file changes, the turn message what every turn changes. llama.cpp keeps a cache checkpoint
+        # where the system message ends and where the last message starts: a turn that changed no file reuses the
+        # whole files message (measured on .224: 6.4 s instead of 23 s prefill), one that did reuses the system message
+        system_msg = SECTION_SEPARATOR.join(
+            m
+            for m in (
+                render_message(
+                    [rendered[n] for n in (SectionName.SYSTEM_CONTRACT, SectionName.AVAILABLE_TOOLS, SectionName.COMPLETION_CONDITIONS)],
+                    suffix=RESPONSE_PROTOCOL,
+                ),
+                render_message([rendered[n] for n in USER_STABLE_SECTIONS]),
+            )
+            if m
         )
-        stable_msg = render_message([rendered[n] for n in USER_STABLE_SECTIONS])
-        turn_msg = render_message([rendered[n] for n in USER_TURN_SECTIONS], suffix=user_closing(inp.turn, inp.max_turns))
+        stable_msg = render_message([rendered[n] for n in USER_FILE_SECTIONS]) or NO_FILES_SHOWN
+        turn_msg = render_message([rendered[n] for n in USER_TURN_ONLY_SECTIONS], suffix=user_closing(inp.turn, inp.max_turns))
         contents = [system_msg, stable_msg, turn_msg]
         estimated = sum(estimate_tokens(c) for c in contents) + PROMPT_MESSAGES * MESSAGE_OVERHEAD_TOKENS
         if estimated > plan.total_tokens:  # pragma: no cover - budgets are disjoint; kept as a hard guarantee
@@ -454,6 +488,26 @@ class ContextBuilder:
         return BuiltContext(messages=messages, report=report)
 
     # ------------------------------------------------------------------ relevance helpers
+    @staticmethod
+    def _add_failure_code(sec: RenderedSection, snippets: Sequence[Snippet], shown: Sequence[tuple[Snippet, str]], budget: int) -> None:
+        """Append the code at the latest failure to LATEST FAILURE, without the parts RELEVANT CODE/TESTS already show
+        whole (D-026)."""
+        whole = [s for s, block in shown if block == render_snippet(s)]
+        fresh = [s for s in snippets if not any(w.path == s.path and w.start <= s.start and s.end <= w.end for w in whole)]
+        title = "Code at the latest failure (current content; files shown in RELEVANT CODE/TESTS are not repeated):\n"
+        room = budget - char_cost(title) - 2
+        if not fresh or room <= 0:
+            return
+        pack = pack_snippets(fresh, room, min_cost=min(300, room), max_items=len(fresh))
+        for label, reason in pack.dropped:
+            sec.drop(label, reason)
+        if not pack.selected:
+            return
+        sec.body = SECTION_SEPARATOR.join(p for p in (sec.body, title + render_packed(pack.selected)) if p)
+        sec.items_included += len(pack.selected)
+        sec.truncated = sec.truncated or pack.truncated
+        sec.omitted_reason = None
+
     def _excluded_raw(self, path: str) -> bool:
         try:
             return self._excluded(normalise_path(path))

@@ -200,8 +200,11 @@ def make_builder(
 
 
 def user_text(built: Any) -> str:
-    """The user part of a built context: the stable message and the turn message (D-021) as one text."""
-    return SECTION_SEPARATOR.join(m.content for m in built.messages if m.role == "user")
+    """The step part of a built context as one text: the stable sections at the end of the system message (D-026), the
+    files message and the turn message."""
+    system = next((m.content for m in built.messages if m.role == "system"), "")
+    stable = system[system.index("## STEP GOAL") :] if "## STEP GOAL" in system else ""
+    return SECTION_SEPARATOR.join([stable, *(m.content for m in built.messages if m.role == "user")])
 
 
 def correction_items() -> list[CorrectionItem]:

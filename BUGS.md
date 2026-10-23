@@ -46,6 +46,12 @@ Noch keine.
 
 ## Behobene Bugs
 
+### BUG-334 – Ein Werkzeugaufruf mit verschachteltem `args` wird abgelehnt und der ganze Inhalt neu geschrieben
+- Phase: Schwierigkeitsleiter auf rc79, 2026-10-23 (A10#2, Job 922d0a40) · Komponente: tools (`registry.py`) · Severity: P3 · blockierend: nein · Status: **behoben im Repository** (`tests/unit/test_tools_units.py::test_arguments_split_over_a_nested_args_object_are_taken_as_one_set`)
+- Reproduktion: Der Coder schreibt `tests/test_partial_update.py` als `{"tool": "write_file", "args": {"args": {"path": …, "append": false}, "content": "…"}}`. Die Antwort `ARGS_INVALID` („path: Field required; args: Extra inputs are not permitted“) kostet einen Zug mit 2,5k Ausgabe-Tokens (95 s); im nächsten Zug schreibt er denselben Inhalt noch einmal.
+- Ursache: Die Argumente wurden nur in der vorgesehenen Form angenommen, obwohl die Absicht eindeutig war.
+- Fix: `validate_args` führt ein verschachteltes `args`-Objekt mit den übrigen Schlüsseln zusammen (die äußeren gewinnen), sofern das Werkzeug kein eigenes Feld `args` hat. Ein `args`, das kein Objekt ist, bleibt ungültig. Aus demselben Lauf: Der Code-/Testteil des Prompts änderte sich in 75 % der Züge, jeder Zug brauchte 35–45 s Prefill → D-026 (drei Cache-Stufen). Der Coder änderte die Signatur einer vorhandenen Funktion und brach sieben bestehende Tests → Konvention in `config/knowledge/rc78-ladder.yaml`, live importiert.
+
 ### BUG-333 – Der Plan lässt eine Datei weg, die der Auftrag nur beim Namen nennt
 - Phase: Schwierigkeitsleiter auf rc78, 2026-10-23 (A10#1, Job d47e87ab) · Komponente: planner (`validation.py`, `planner.py`) · Severity: P2 · blockierend: nein · Status: **behoben im Repository** (`tests/unit/test_planner_validation.py::test_a_file_the_job_names_without_a_path_goes_into_the_step_that_delivers_it`)
 - Reproduktion: Der Auftrag sagt „Die README beschreibt die neuen Felder und Parameter.“ Das Plan-Ziel verspricht „update the web UI and README“. Der einzige Implement-Schritt nennt aber weder README noch Oberfläche; nur der Prüfschritt führt `README.md` – als Datei, die sich nicht ändern darf. Der Coder arbeitet nach den Vorgaben des Schritts, die README bleibt unverändert (versteckt: README-Prüfung rot).

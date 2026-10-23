@@ -4,6 +4,15 @@ Format: [Keep a Changelog](https://keepachangelog.com/de/1.1.0/), Versionen nach
 
 ## [Unreleased]
 
+## [0.1.0rc80] – Release Candidate (2026-10-23)
+
+### Geändert
+- **Drei Cache-Stufen im Coder-Prompt (D-026):** Die stabilen Abschnitte stehen am Ende der Systemnachricht, RELEVANT CODE/TESTS bilden eine eigene Nachricht, deren Inhalt und Budget nicht vom letzten Fehler, Diff oder Verlauf abhängen. Der Code an der Fehlerstelle steht in LATEST FAILURE. Gemessen auf .224: 6,4 s statt 23 s Prefill für einen Zug, der keine Datei geändert hat.
+
+### Behoben
+- **Verschachteltes `args` im Werkzeugaufruf (BUG-334):** `{"args": {…}, "content": …}` wird als ein Argumentsatz angenommen statt mit `ARGS_INVALID` abgelehnt.
+- **Wissen:** Konvention aus Leiterstufe A10#2: Signaturen, die bestehende Tests und Aufrufer nutzen, beim Erweitern beibehalten.
+
 ## [0.1.0rc79] – Release Candidate (2026-10-23)
 
 ### Behoben

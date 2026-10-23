@@ -142,7 +142,7 @@ async def test_real_git_diff_status_and_files(workspace: WorkspaceHandle) -> Non
     assert "### app.py lines 1-6 [target, context]" in user and "return a + b + 0" in user
     diff_section = user.split("## CURRENT DIFF\n", 1)[1].split("\n## ", 1)[0]
     assert ".env" not in diff_section and "[changes to 1 excluded path(s) not shown]" in diff_section
-    assert "### tests/test_app.py lines 1-5 [failure, acceptance" in user
+    assert "### tests/test_app.py lines 1-5 [acceptance" in user  # the failure region lies inside it: not repeated (D-026)
     assert built.report.estimated_prompt_tokens <= builder.plan.total_tokens
     # determinism against the real tree
     again = await builder.build(inp)

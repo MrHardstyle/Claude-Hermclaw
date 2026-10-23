@@ -53,9 +53,20 @@ async def test_full_context_has_all_sections_in_order() -> None:
     builder, _, _ = make_builder(git=FakeGit(diff_text=DIFF, status_entries=[GitStatusEntry("app.py", " M")], changed=["app.py"]))
     built = await builder.build(make_input(latest_failure=FAILURE, correction=correction_items()))
     assert [m.role for m in built.messages] == ["system", "user", "user"]
-    assert headings(built.messages[1].content) == ["STEP GOAL", "SCOPE", "CONSTRAINTS", "ACCEPTANCE", "CURRENT REPO FACTS"]
+    assert headings(built.messages[1].content) == ["RELEVANT CODE", "RELEVANT TESTS"]
+    assert headings(built.messages[2].content) == ["CURRENT DIFF", "LATEST FAILURE", "SHORT STEP HISTORY"]
     system, user = built.messages[0].content, user_text(built)
-    assert headings(system) == ["SYSTEM CONTRACT", "AVAILABLE TOOLS", "COMPLETION CONDITIONS", "RESPONSE PROTOCOL"]
+    assert headings(system) == [
+        "SYSTEM CONTRACT",
+        "AVAILABLE TOOLS",
+        "COMPLETION CONDITIONS",
+        "RESPONSE PROTOCOL",
+        "STEP GOAL",
+        "SCOPE",
+        "CONSTRAINTS",
+        "ACCEPTANCE",
+        "CURRENT REPO FACTS",
+    ]
     assert headings(user) == [
         "STEP GOAL",
         "SCOPE",
@@ -88,7 +99,7 @@ async def test_full_context_has_all_sections_in_order() -> None:
     assert user.rstrip().endswith("Turn 3/20, 17 left. Reply with one JSON action.")
     assert "- read_range(path: string, start: integer, end: integer): Read lines" in system
     assert "count?: integer" in system and 'reason_code?: "other"|"test_conflict"' in system
-    assert "Turn" not in system and "turn 3" not in system
+    assert "Turn 3" not in system and "turn 3" not in system
 
 
 async def test_step_goal_carries_the_job_request() -> None:
@@ -465,7 +476,10 @@ def test_progress_lists_written_new_files_and_the_missing_ones() -> None:
 async def test_the_prompt_up_to_relevant_code_is_the_same_every_turn() -> None:
     """D-021: the coder spent 94 % of the tournament in model calls, 32 s each for ~200 answer tokens, growing with the
     whole prompt: the turn count in the system message and STEP GOAL and the progress marks in SCOPE, ACCEPTANCE and
-    REPO FACTS changed the beginning of the prompt every turn, so llama.cpp could not reuse its cached prefix."""
+    REPO FACTS changed the beginning of the prompt every turn, so llama.cpp could not reuse its cached prefix.
+    D-026 (ladder A10 #2 on rc79: 35-45 s prefill per turn, ~12k tokens of code and tests recomputed every turn): the
+    stable sections end the system message, RELEVANT CODE/TESTS are a message of their own whose content and budget
+    do not depend on the latest failure, diff or history, and the turn message holds those."""
     acceptance = [DiffEvidence(must_change=["app.py"]), TestEvidence(command="pytest -q", framework="pytest")]
     step = make_step(acceptance=acceptance)
     first_builder, _, _ = make_builder()
@@ -473,10 +487,8 @@ async def test_the_prompt_up_to_relevant_code_is_the_same_every_turn() -> None:
     git = FakeGit(diff_text=DIFF, status_entries=[GitStatusEntry("tests/test_extra.py", "??")], changed=["app.py"])
     later_builder, _, _ = make_builder(git=git)
     later = await later_builder.build(make_input(step=step, turn=18, latest_failure=FAILURE, correction=correction_items()))
-    assert first.messages[0].content == later.messages[0].content
-    # the stable part is its own message: llama.cpp keeps a cache checkpoint where the last message starts
-    assert first.messages[1].content == later.messages[1].content and "## CURRENT REPO FACTS" in first.messages[1].content
-    assert later.messages[2].content.startswith("## RELEVANT CODE")
+    assert first.messages[0].content == later.messages[0].content and "## CURRENT REPO FACTS" in first.messages[0].content
+    assert later.messages[1].content.startswith("## RELEVANT CODE") and later.messages[2].content.startswith("## CURRENT DIFF")
     progress = user_text(later).split("## CURRENT DIFF")[1]
     assert "Changed vs base (2): app.py, ?? tests/test_extra.py" in progress
     assert "Acceptance 1 — met (already changed)" in progress and "New files written: tests/test_extra.py" in progress
@@ -485,6 +497,13 @@ async def test_the_prompt_up_to_relevant_code_is_the_same_every_turn() -> None:
         .content.rstrip()
         .endswith("Turn 18/20, 2 left. Almost out of turns: complete_step, block_step or request_replan. Reply with one JSON action.")
     )
+    # another failure, another diff and a longer history: the files message stays the same while no file changes
+    other = "FAILED tests/test_app.py::test_f9 - AssertionError: assert 9 == 10\napp.py:30: AssertionError\n"
+    git2 = FakeGit(diff_text="", status_entries=[], changed=[])
+    again, _, _ = make_builder(git=git2)
+    turn19 = await again.build(make_input(step=step, turn=19, latest_failure=other, correction=correction_items()))
+    assert turn19.messages[1].content == later.messages[1].content
+    assert turn19.messages[2].content != later.messages[2].content
 
 
 def test_research_findings_reach_the_coder_with_their_facts() -> None:

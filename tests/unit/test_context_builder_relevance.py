@@ -79,6 +79,8 @@ async def test_tests_found_via_target_stems_symbols_and_acceptance() -> None:
 
 
 async def test_failure_references_become_regions() -> None:
+    """The code at the latest failure is shown in LATEST FAILURE, in the turn message: the files message stays the same
+    while no file changes (D-026). A region RELEVANT TESTS already shows whole is not repeated."""
     repo = default_repo()
     repo.files["lib/core.py"] = numbered(200, "core")
     failure = (
@@ -92,11 +94,12 @@ async def test_failure_references_become_regions() -> None:
     builder, _, _ = make_builder(repo=repo, failure_region_lines=5)
     built = await builder.build(make_input(latest_failure=failure))
     user = user_text(built)
-    code = section(user, "RELEVANT CODE")
-    tests = section(user, "RELEVANT TESTS")
-    assert "### lib/core.py lines 115-125 [failure]" in code
-    assert "core 120" in code and "core 114" not in code
-    assert "tests/test_app.py lines 1-" in tests and "[failure" in tests
+    latest = section(user, "LATEST FAILURE")
+    assert "Code at the latest failure" in latest and "### lib/core.py lines 115-125 [failure]" in latest
+    assert "core 120" in latest and "core 114" not in latest
+    assert "lib/core.py" not in section(user, "RELEVANT CODE")
+    assert "tests/test_app.py lines 1-" in section(user, "RELEVANT TESTS") and "### tests/test_app.py" not in latest
+    assert "core 120" not in built.messages[1].content, "the files message does not depend on the latest failure"
     reads = [c[1][0] for c in repo.calls if c[0] == "read"]
     assert not any(p.startswith(("/", "usr/")) for p in reads)  # files outside the workspace are never read
     assert not built.report.warnings  # unreadable failure references are expected, not warnings

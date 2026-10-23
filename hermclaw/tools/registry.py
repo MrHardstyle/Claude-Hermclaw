@@ -416,8 +416,14 @@ def format_validation_error(exc: ValidationError) -> str:
 
 
 def validate_args(spec: ToolSpec, args: Mapping[str, Any]) -> BaseModel:
+    data = dict(args)
+    nested = data.get("args")
+    if isinstance(nested, Mapping) and "args" not in spec.args_model.model_fields:
+        # {"args": {"path": …}, "content": …} – the arguments split over a nested "args" object: one set, the outer
+        # keys win. A write of 2.5k tokens was refused for it and written again (ladder A10 #2, BUG-334)
+        data = {**nested, **{k: v for k, v in data.items() if k != "args"}}
     try:
-        return spec.args_model.model_validate(dict(args))
+        return spec.args_model.model_validate(data)
     except ValidationError as exc:
         raise ToolError(
             E.ARGS_INVALID,

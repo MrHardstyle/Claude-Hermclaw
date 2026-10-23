@@ -59,13 +59,26 @@ Dependencies: only the shared protocols `RepoContextProvider` (`inventory_summar
 
 * **system**: `SYSTEM CONTRACT` (runtime-owned rules, never truncated; includes the rule to parse JSON/TOML/CSV/INI/XML with the language's own parser and to read written output back with it, BUG-245), `AVAILABLE TOOLS`, `COMPLETION CONDITIONS`
   and the fixed `RESPONSE PROTOCOL`: exactly one JSON object
-  `{"tool": ..., "args": {...}, "status": "...", "decision": "..."}`.
-* **user (stable)**: `STEP GOAL`, `SCOPE`, `CONSTRAINTS`, `ACCEPTANCE`, `CURRENT REPO FACTS` – the same for the
-  whole attempt.
-* **user (turn)**: `RELEVANT CODE`, `RELEVANT TESTS`, `CURRENT DIFF`, `LATEST FAILURE`, `SHORT STEP HISTORY`, then the
+  `{"tool": ..., "args": {...}, "status": "...", "decision": "..."}`; then the stable sections `STEP GOAL`, `SCOPE`,
+  `CONSTRAINTS`, `ACCEPTANCE`, `CURRENT REPO FACTS` – the same for the whole attempt (D-026; before, they were a user
+  message of their own, D-021).
+* **user (files)**: `RELEVANT CODE`, `RELEVANT TESTS` – they change only when a file, a read or the correction
+  evidence changes (D-026). Their snippets come from the targets, acceptance tests, reads of the attempt, dependency
+  files, the correction evidence and searches for title and goal; their budget is the base share plus what the system
+  and stable sections leave unused, less `failure_code_share` (0.2) while there is code at a failure to show.
+* **user (turn)**: `CURRENT DIFF`, `LATEST FAILURE`, `SHORT STEP HISTORY`, then the
   closing line
   "Turn N/M, R left. Reply with one JSON action." (with two turns or fewer left: "Almost out of turns: complete_step,
   block_step or request_replan.").
+* **Three cache levels (D-026):** llama.cpp keeps a checkpoint where the system message ends and where the last
+  message starts. Measured on .224 (qwen3.6-35b, 2026-10-23, ~18k-token prompts, 4.4k system, 4.3k stable, 6.9k
+  files, 2.3k turn): stable part as its own user message – 22 s prefill whatever changed; stable part in the system
+  message and files as their own message – 6.4 s when the files are unchanged, 23 s when they changed. In ladder A10
+  #2 the files part had changed in 75 % of the turns: the code at the latest failure (traceback regions) and the
+  budget left by diff, failure and history moved it. Both now go to the turn message: `LATEST FAILURE` ends with
+  "Code at the latest failure" (regions of the latest failure's references that `RELEVANT CODE/TESTS` do not
+  already show whole, packed into the reserve plus what diff, failure and history leave unused), and the retrieval
+  query no longer contains the first error line.
 * **Stable prefix (D-021):** the system message and the stable user message are the same in every turn of an attempt,
   so llama.cpp reuses its cached prompt prefix and only processes what changed. They are separate messages because
   llama.cpp keeps a cache checkpoint for a hybrid model (Qwen3.6: recurrent layers, the cache cannot be cut at any

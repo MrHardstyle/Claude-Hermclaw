@@ -162,6 +162,8 @@ behind `on_scope_expansion`, research events by the research service.
 
 ## Failure behaviour
 
+- Arguments split over a nested `args` object (`{"args": {"path": …}, "content": …}`) are taken as one set, the
+  outer keys winning, for every tool without an own `args` field (BUG-334).
 - Invalid arguments / unknown keys -> `ARGS_INVALID` with the JSON schema in `data`; unknown tools and malformed
 - `status`/`decision` written inside `args` belong to the action envelope: `CoderAction` lifts them out of `args` before validation; they fill the envelope only where it is empty (BUG-269).
   actions -> `ActionRejected` (persisted as `refused` tool calls).

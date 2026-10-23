@@ -33,6 +33,8 @@ class ContextBuilderConfig:
     max_acceptance_test_files: int = 6
     max_failure_refs: int = 8
     failure_region_lines: int = 20
+    # share of the RELEVANT CODE/TESTS budget kept for the code at the latest failure, shown in the turn message (D-026)
+    failure_code_share: float = 0.2
     search_k: int = 8
     max_hits_per_query: int = 40  # context_for / search hits considered (highest score first)
     max_test_queries: int = 6

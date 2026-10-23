@@ -26,3 +26,16 @@
     a test keeps failing, print the row before and after the UPDATE instead of re-running the test unchanged.
     Seen: ladder A10 #1 on rc78 (coder-main) – `update_task` returned the row it fetched before the UPDATE; the same
     two tests failed in two attempts, the coder re-ran them four times unchanged and the step stagnated.
+
+- kind: convention
+  title: "Extending existing code: keep the signatures the existing tests and callers use – add new parameters with defaults"
+  tags: [python, brownfield, refactoring, api, tests]
+  content: |
+    Before changing a function that existing code or tests call, find its callers (`find_text` for the name) and keep
+    their calls valid: add new parameters after the old ones with a default, or as keyword-only (`*, due=_UNSET`);
+    do not rename, reorder or remove the old ones, and do not change the shape of what the function returns. The
+    existing tests are the contract of the old behaviour: run them right after the first change to an existing module,
+    before writing new test files, so a broken call shows up while it is one edit to fix.
+    Seen: ladder A10 #2 on rc79 (coder-main) – `update_task(task_id, done, db_path)` became
+    `update_task(task_id, *, title, done, due)`; seven existing tests failed with TypeError, found only after eight new
+    files were written, and the job ran out of time.
