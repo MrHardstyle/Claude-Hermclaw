@@ -85,6 +85,8 @@ async def test_identical_read_of_an_unchanged_file_is_refused_within_the_context
     again = await h.call("read_file", path="./src//calc.py")
     assert again.error_code == E.READ_REPEATED and again.data["repeated"] is True and "turn 1" in again.output
     assert (await h.call("read_range", path="src/util.py", start=1, end=1)).ok, "a different read runs"
+    follow = await h.call("read_range", path="src/util.py", start=1, end=1)
+    assert follow.ok and follow.data["following"] and "[src/util.py: lines 2-2 of 2, after lines 1-1" in follow.output
     assert (await h.call("read_range", path="src/util.py", start=1, end=1)).error_code == E.READ_REPEATED
     assert (await h.call("read_file", path="missing.py")).error_code == E.NOT_FOUND
     assert (await h.call("read_file", path="missing.py")).error_code == E.NOT_FOUND, "failed reads are not remembered"
@@ -105,7 +107,21 @@ async def test_a_read_the_context_cannot_show_in_full_may_be_repeated(sessionmak
     assert (await h.call("read_range", path="long.py", start=1, end=450)).ok
     assert (await h.call("read_range", path="long.py", start=1, end=450)).ok, "range longer than the context shows"
     assert (await h.call("read_range", path="long.py", start=10, end=40)).ok
+    assert (await h.call("read_range", path="long.py", start=10, end=40)).data["start"] == 41, "the lines after it (BUG-342)"
     assert (await h.call("read_range", path="long.py", start=10, end=40)).error_code == E.READ_REPEATED
+
+
+async def test_a_repeated_read_brings_the_lines_after_it_once(sessionmaker: SM, repo: Path) -> None:
+    """Ladder A10 #8 (BUG-342): the context showed app.py lines 1-160, the method the coder looked for ran to line 190;
+    it asked for lines 100-160 six times across two attempts, each refused, until both attempts stagnated. A repeated
+    read of lines the coder has gets the lines after them once, with a header that names their span."""
+    (repo / "app.py").write_text("".join(f"a{i} = {i}\n" for i in range(1, 202)))
+    h = await make_harness(sessionmaker, repo, contract=scope(target_paths=["app.py"]))
+    assert (await h.call("read_range", path="app.py", start=100, end=160)).ok
+    after = await h.call("read_range", path="app.py", start=100, end=160)
+    assert after.ok and after.output.startswith("[app.py: lines 161-201 of 201, after lines 100-160, which are shown above")
+    assert "190| a190 = 190" in after.output and "[end of file: 201 lines]" in after.output
+    assert (await h.call("read_range", path="app.py", start=100, end=160)).error_code == E.READ_REPEATED
 
 
 async def test_a_part_of_a_visible_read_is_refused_until_a_file_changes(sessionmaker: SM, repo: Path) -> None:
@@ -114,6 +130,8 @@ async def test_a_part_of_a_visible_read_is_refused_until_a_file_changes(sessionm
     (repo / "mid.py").write_text("".join(f"m{i} = {i}\n" for i in range(1, 201)))
     h = await make_harness(sessionmaker, repo, contract=scope(target_paths=["mid.py"]))
     assert (await h.call("read_range", path="mid.py", start=100, end=160)).ok
+    inner = await h.call("read_range", path="mid.py", start=110, end=145)
+    assert inner.ok and "[mid.py: lines 161-200 of 200, after lines 110-145" in inner.output, "after the visible 100-160"
     inner = await h.call("read_range", path="mid.py", start=110, end=145)
     assert inner.error_code == E.READ_REPEATED and "turn 1" in inner.output and "lines 100-160" in inner.output
     assert (await h.call("read_range", path="mid.py", start=90, end=120)).ok, "reaches beyond what was read"

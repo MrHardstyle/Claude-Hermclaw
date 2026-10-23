@@ -412,6 +412,13 @@ async def test_pages_of_a_clipped_file_are_shown_from_where_they_started() -> No
     code = section(user_text(built), "RELEVANT CODE")
     assert "### pkg/huge.py lines 521-640 [read]" in code and "y600 = 600" in code
 
+    # a repeated read_range answered with the lines after it names them the same way (BUG-342)
+    follow = TurnRecord(
+        3, "read_range", '{"end": 160, "path": "pkg/huge.py", "start": 100}', True, "[pkg/huge.py: lines 161-220 of 700, after lines"
+    )
+    built = await builder.build(make_input(history=[*history, follow]))
+    assert "### pkg/huge.py lines 161-220 [read]" in section(user_text(built), "RELEVANT CODE")
+
 
 async def test_files_delivered_by_dependency_steps_are_shown() -> None:
     """Live G1 (BUG-242): the frontend step depended on the collector step but saw neither its file name nor its

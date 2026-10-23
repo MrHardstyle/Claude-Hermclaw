@@ -30,6 +30,7 @@ from hermclaw.contracts.verification import VerificationReport
 from hermclaw.core.errors import HermclawError, ResourceUnavailable
 from hermclaw.core.interfaces import GitReader, RepoContextProvider, RepoHit, WorkspaceHandle
 from hermclaw.core.logging import get_logger
+from hermclaw.memory.store import MemoryStore
 from hermclaw.models.gateway import MODEL_LOAD_FAILED, MODEL_UNAVAILABLE
 from hermclaw.persistence.models import CommandRun, Job, ToolCallRow
 from hermclaw.review.reviewer import HeavyReviewer
@@ -86,10 +87,13 @@ _HOST_DOWN = frozenset({MODEL_UNAVAILABLE, MODEL_LOAD_FAILED})
 class WorkspaceReviewer:
     """Collects the review input for a workspace and runs the heavy review (``ReviewerPort``)."""
 
-    def __init__(self, reviewer: HeavyReviewer, git: GitReader, repo: RepoContextProvider | None = None) -> None:
+    def __init__(
+        self, reviewer: HeavyReviewer, git: GitReader, repo: RepoContextProvider | None = None, memory: MemoryStore | None = None
+    ) -> None:
         self.reviewer = reviewer
         self.git = git
         self.repo = repo
+        self.memory = memory
 
     def should_review(self, step_kind: str, verifier_passed: bool) -> bool:
         return self.reviewer.should_review(step_kind, verifier_passed)
@@ -165,6 +169,7 @@ class WorkspaceReviewer:
             commands = await self._commands(step_id, attempt_id)
         snippets = await self._snippets(step, workspace, changed)
         docs = await asyncio.to_thread(self._requirement_docs, step, workspace, goal)
+        conventions = await self._conventions(diff, workspace)
         return ReviewInput(
             job_id=job_id,
             step_id=step_id,
@@ -178,7 +183,23 @@ class WorkspaceReviewer:
             changed_files=changed,
             earlier_findings=tuple(earlier),
             requirement_docs=docs,
+            conventions=conventions,
         )
+
+    async def _conventions(self, diff: str, workspace: WorkspaceHandle) -> list[str]:
+        """Active lessons and conventions whose code patterns match a line the diff adds (D-027); never fails the
+        review."""
+        policy = self.reviewer.config.policies.memory
+        if self.memory is None or not diff or not policy.enabled or policy.coder_entries <= 0:
+            return []
+        added = "\n".join(line[1:] for line in diff.splitlines() if line.startswith("+") and not line.startswith("+++"))
+        try:
+            entries = await self.memory.code_entries(scopes=[f"repo:{workspace.repository_key}"])
+        except Exception as exc:
+            log.warning("knowledge for the review unavailable", extra={"error_type": type(exc).__name__})
+            return []
+        hits = [h for h, patterns in entries if any(p.search(added) for p in patterns)]
+        return [h.render(policy.max_entry_chars) for h in hits[: policy.coder_entries]]
 
     def _requirement_docs(self, step: StepContract, workspace: WorkspaceHandle, goal: str) -> list[tuple[str, str]]:
         root = Path(workspace.path).resolve()

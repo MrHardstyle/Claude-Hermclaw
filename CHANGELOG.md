@@ -4,6 +4,14 @@ Format: [Keep a Changelog](https://keepachangelog.com/de/1.1.0/), Versionen nach
 
 ## [Unreleased]
 
+## [0.1.0rc86] – Release Candidate (2026-10-23)
+
+### Behoben
+- **Wiederholter Lesezugriff (BUG-342):** Ein schon gezeigter Lesebereich bringt einmal die folgenden Zeilen statt nur READ_REPEATED.
+
+### Neu
+- **D-027 im Review:** Lehren und Konventionen, deren Code-Muster auf eine hinzugefügte Zeile des Diffs passen, stehen im Review-Prompt; eine nicht befolgte Konvention ist ein Befund `major`.
+
 ## [0.1.0rc85] – Release Candidate (2026-10-23)
 
 ### Neu

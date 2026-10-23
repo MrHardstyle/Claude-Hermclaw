@@ -172,6 +172,19 @@ def render_step(inp: ReviewInput, settings: ReviewSettings) -> str:
     return "\n".join(lines)
 
 
+def render_conventions(entries: Sequence[str], settings: ReviewSettings) -> str:
+    """Knowledge whose code patterns match lines the change adds (D-027): the coder was given the LIKE convention while
+    writing the search and did not apply it; nothing checked it (ladder A10 #8)."""
+    shown = [clip(redact(e.strip()), settings.goal_chars // 2) for e in entries]
+    return "\n".join(
+        [
+            "## CONVENTIONS FOR CODE LIKE THIS CHANGE (Hermclaw's knowledge from earlier jobs; the change adds code they are "
+            "about – a change that does not follow one where it applies is a major finding naming the file)",
+            *(fence(e) for e in shown),
+        ]
+    )
+
+
 def render_earlier(findings: Sequence[str], settings: ReviewSettings) -> str:
     """The review findings this correction attempt had to address (BUG-284)."""
     shown = [f"- {clip(one_line(redact(f)), settings.item_chars)}" for f in findings[: settings.max_acceptance]]
@@ -310,6 +323,8 @@ def _fixed_sections(inp: ReviewInput, budget: int, settings: ReviewSettings) -> 
             fixed.insert(1, render_requirement_docs(inp.requirement_docs, current))
         if inp.earlier_findings:
             fixed.append(render_earlier(inp.earlier_findings, current))
+        if inp.conventions:
+            fixed.append(render_conventions(inp.conventions, current))
         if sum(len(s) for s in fixed) <= budget * _FIXED_SHARE or current.item_chars <= _MIN_ITEM_CHARS:
             return fixed
         current = replace(

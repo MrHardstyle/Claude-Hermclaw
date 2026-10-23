@@ -96,6 +96,8 @@ class ReviewInput:
     earlier_findings: Sequence[str] = ()  # review findings the current correction attempt had to address (BUG-284)
     # (path, text) of documentation files the job or step names as the source of its rules (BUG-290)
     requirement_docs: Sequence[tuple[str, str]] = ()
+    # Hermclaw's lessons and conventions whose code patterns match lines the diff adds (D-027), rendered entries
+    conventions: Sequence[str] = ()
 
 
 @dataclass(frozen=True)

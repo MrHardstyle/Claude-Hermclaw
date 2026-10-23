@@ -74,7 +74,7 @@ build_correction_request(step_id=…, attempt_id=…, verification: Verification
    `REVIEW_PROFILE_MISSING`. The model is not called.
 3. Prompt (22.1): job goal, requirement documents (documentation files in the step's `repo_hints` that the job or
    the step goal names, e.g. "the rules in the README": read whole from the workspace, clipped like the goal; protected
-   paths never – BUG-290), plan step (key, title, kind, risk, capability, goal, constraints incl. cited research findings up to 2400 chars each – BUG-231 –, acceptance criteria as
+   paths never – BUG-290), conventions for code like this change (D-027: active lessons and conventions of the job's repository scope whose `code:<regex>` tags match a line the diff adds, `coder_entries` at most; not following one is a major finding – A10#8: the coder got the `LIKE` convention while writing and ignored it), plan step (key, title, kind, risk, capability, goal, constraints incl. cited research findings up to 2400 chars each – BUG-231 –, acceptance criteria as
    compact JSON), explicit scope, verifier report (facts only: status, failed checks with evidence first – the first three with a failure excerpt of their output: `E …`/`FAILED`/error lines plus the end, BUG-274 –, other checks,
    changed files), executed-command log (if any), size-budgeted diff, relevant code/test snippets. All
    repository-derived text is redacted and fenced with a fence longer than any backtick run inside it, so diff content

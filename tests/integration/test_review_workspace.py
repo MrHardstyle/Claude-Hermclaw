@@ -6,13 +6,17 @@ import uuid
 from pathlib import Path
 
 import pytest
+from sqlalchemy import delete
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from hermclaw.contracts.events import EventType
+from hermclaw.core.config import MemoryPolicy
 from hermclaw.core.errors import ExternalServiceError
 from hermclaw.core.interfaces import RepoHit, WorkspaceHandle
-from hermclaw.persistence.models import CommandRun
+from hermclaw.memory.store import MemoryStore, import_entries
+from hermclaw.persistence.models import CommandRun, MemoryEntry
 from hermclaw.review import REVIEW_CONTEXT_ERROR, HeavyReviewer, WorkspaceReviewer, is_test_path
+from tests.integration.test_repo_intelligence_support import HashingEmbedder
 from tests.integration.test_review_support import (
     GitCliReader,
     ScriptedChatModel,
@@ -103,6 +107,42 @@ async def test_documents_named_as_rules_are_read_from_the_workspace(sessionmaker
     inp = await adapter.collect(step, handle(tmp_repo, job_id, base), report(), job_id=job_id, step_id=step_id, attempt_id=None)
     assert [p for p, _ in inp.requirement_docs] == ["README.md"]
     assert "whole numbers only" in inp.requirement_docs[0][1]
+
+
+async def test_conventions_for_code_the_change_adds_reach_the_review(sessionmaker: SM, tmp_repo: Path) -> None:
+    """Ladder A10 #8: the coder was given the convention about SQL LIKE with user text when it wrote the search and did
+    not apply it, and the review never heard of it. Entries whose code patterns match an added line reach the review;
+    one about other code, one scoped to another repository and a pattern found only in removed lines do not."""
+    async with sessionmaker() as s:
+        await s.execute(delete(MemoryEntry))
+        await s.commit()
+    policy = MemoryPolicy()
+    entries = [
+        {"kind": "convention", "title": "SQL LIKE with user text", "content": "escape % and _ with ESCAPE", "tags": [r"code:\bLIKE\b"]},
+        {"kind": "convention", "title": "Strict dates", "content": "YYYY-MM-DD only", "tags": [r"code:strptime\("]},
+        {"kind": "convention", "title": "Other repo", "content": "not here", "tags": [r"code:\bLIKE\b"], "scope": "repo:elsewhere"},
+        {"kind": "convention", "title": "Removed code", "content": "about sub", "tags": [r"code:return a - b"]},
+    ]
+    await import_entries(sessionmaker, HashingEmbedder(), policy, entries)
+    _change_repo(tmp_repo)
+    git(tmp_repo, "add", "-A")
+    git(tmp_repo, "commit", "-qm", "sub")
+    base = git(tmp_repo, "rev-parse", "HEAD").strip()
+    write(tmp_repo, "app.py", 'def find(db, q):\n    return db.execute("SELECT * FROM t WHERE title LIKE ?", (f"%{q}%",))\n')
+    job_id, step_id = await make_job_step(sessionmaker)
+    chat = ScriptedChatModel([{"verdict": "pass", "findings": [], "summary": "fine"}])
+    memory = MemoryStore(sessionmaker, HashingEmbedder(), policy)
+    adapter = WorkspaceReviewer(HeavyReviewer(chat, sessionmaker, config()), GitCliReader(), StaticRepoContext(hits=[]), memory)
+    step = make_step(job_id, step_id)
+    ws = handle(tmp_repo, job_id, base)
+    inp = await adapter.collect(step, ws, report(changed=("app.py",)), job_id=job_id, step_id=step_id, attempt_id=None)
+    assert len(inp.conventions) == 1 and "SQL LIKE with user text" in inp.conventions[0]
+    await adapter.review(step, ws, report(changed=("app.py",)), job_id=job_id, step_id=step_id, attempt_id=None)
+    user = chat.calls[0].messages[1].content
+    assert "## CONVENTIONS FOR CODE LIKE THIS CHANGE" in user and "escape % and _ with ESCAPE" in user
+    assert "YYYY-MM-DD" not in user and "not here" not in user and "about sub" not in user
+    plain = WorkspaceReviewer(HeavyReviewer(chat, sessionmaker, config()), GitCliReader(), StaticRepoContext(hits=[]))
+    assert (await plain.collect(step, ws, report(), job_id=job_id, step_id=step_id, attempt_id=None)).conventions == []
 
 
 async def test_review_outcome_persists_run(sessionmaker: SM, tmp_repo: Path) -> None:

@@ -315,7 +315,7 @@ def build_services(
         return await executor_for(ws, step)
 
     verifier = VerifierAdapter(sessionmaker, config, git.reader(), executor_for)
-    reviewer = WorkspaceReviewer(HeavyReviewer(chat, sessionmaker, config), git.reader(), repo)
+    reviewer = WorkspaceReviewer(HeavyReviewer(chat, sessionmaker, config), git.reader(), repo, memory)
 
     # research (P12): SearXNG on .225 unless disabled by policy or override
     research: ResearchRunner | None = ov.research

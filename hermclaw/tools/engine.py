@@ -123,6 +123,7 @@ PIPEFAIL = "(set -o pipefail) 2>/dev/null && set -o pipefail"
 
 READ_REPEAT_WINDOW = 6  # turns; the context shows the files of the last 6 reads (context_builder ``_read_spans``)
 READ_VISIBLE_LINES = 400  # the context shows at most this many lines of one read (context_builder ``max_snippet_lines``)
+READ_FOLLOW_MIN_LINES = 60  # lines after a repeated read that the coder is given instead of a refusal (BUG-342)
 IMAGE_CONSTRAINTS = "/tmp/hermclaw-image-constraints.txt"  # noqa: S108 - path inside the sandbox
 PYTHON_DEPS_DIR = "/deps/python"
 
@@ -339,6 +340,7 @@ class ToolEngine:
         # keyed without the timeout: a command that finished is not changed by another timeout (BUG-211)
         self._ran: dict[tuple[str, str], tuple[int, int, str]] = {}
         self._hinted: set[tuple[str, str]] = set()  # (tool, error code) whose knowledge this attempt was given (D-019)
+        self._followed: dict[str, int] = {}  # read_range spans answered with the lines after them (BUG-342), by write count
         self._code_entries: list[tuple[MemoryHit, list[re.Pattern[str]]]] | None = None  # D-027, loaded at the first write
         self._shown: set[uuid.UUID] = set()  # knowledge entries this attempt was given with a refusal or failed run
         self._looked_up: set[str] = set()  # error lines of failed runs already looked up in the knowledge
@@ -811,7 +813,11 @@ class ToolEngine:
     async def _read_range(self, args: ReadRangeArgs, ctx: CallContext, events: list[PendingEvent]) -> ToolResult:
         path = self.fs.resolve(args.path)[0]
         key = f"{path}:{args.start}-{args.end}"
-        self._check_read_repeat(ToolName.read_range, key, ctx.turn)
+        try:
+            self._check_read_repeat(ToolName.read_range, key, ctx.turn)
+            repeated: ToolError | None = None
+        except ToolError as exc:
+            repeated = exc
         rel, lines, total = await asyncio.to_thread(self.fs.read_lines, args.path, args.start, args.end)
         if args.start > total > 0:
             raise ToolError(E.RANGE_INVALID, f"'{rel}' has only {total} lines (start={args.start})", data={"total_lines": total})
@@ -819,8 +825,14 @@ class ToolEngine:
             self._reads[(ToolName.read_range.value, key)] = (self._writes, ctx.turn, True)
             return self._ok(ToolName.read_range, "(empty file)", data={"path": rel, "start": 0, "end": 0, "total_lines": 0})
         end = min(args.end, total)
-        covering = self._covering_read(path, args.start, end, ctx.turn)
-        if covering is not None:
+        covering = None if repeated is not None else self._covering_read(path, args.start, end, ctx.turn)
+        if repeated is not None or covering is not None:
+            following = await self._following_lines(args, path, rel, end=end, total=total, turn=ctx.turn)
+            if following is not None:
+                return following
+            if repeated is not None:
+                raise repeated
+            assert covering is not None
             raise ToolError(
                 E.READ_REPEATED,
                 f"read refused: lines {args.start}-{end} are part of what you read in turn {covering[1]} ({covering[0]}) "
@@ -837,6 +849,39 @@ class ToolEngine:
             text += f"\n[end of file: {total} lines]"
         return self._ok(
             ToolName.read_range, text, truncated=clipped, data={"path": rel, "start": args.start, "end": end, "total_lines": total}
+        )
+
+    async def _following_lines(self, args: ReadRangeArgs, path: str, rel: str, *, end: int, total: int, turn: int) -> ToolResult | None:
+        """The lines after a read the coder already has, instead of refusing it again: the method it looked for ran past
+        the 160 lines the context showed of app.py, and the coder asked for lines 100-160 six times across two attempts
+        until both stagnated (ladder A10 #8, BUG-342). ``None`` when the file ends there or the lines after it were read
+        already; the header names the span, so the next turn's context shows it (as for pages of read_file)."""
+        asked = f"{path}:{args.start}-{end}"
+        if self._followed.get(asked) == self._writes:  # once per range: a loop on it must not page through the file
+            return None
+        start = end + 1
+        while start <= total and (covering := self._covering_read(path, start, start, turn)) is not None:
+            if not covering[0].startswith("lines "):  # the whole file is shown
+                return None
+            start = int(covering[0].rpartition("-")[2]) + 1  # past a visible read that reaches further
+        stop = min(total, start - 1 + max(READ_FOLLOW_MIN_LINES, end - args.start + 1), start - 1 + READ_VISIBLE_LINES)
+        previous = self._reads.get((ToolName.read_range.value, f"{path}:{start}-{stop}"))
+        if start > total or (previous is not None and previous[0] == self._writes):
+            return None
+        key = f"{path}:{start}-{stop}"
+        _, lines, _ = await asyncio.to_thread(self.fs.read_lines, args.path, start, stop)
+        width = len(str(stop))
+        body = "\n".join(f"{n:>{width}}| {line}" for n, line in enumerate(lines, start=start))
+        text, clipped = clip_head(body, self.output_limit)
+        self._reads[(ToolName.read_range.value, key)] = (self._writes, turn, not clipped)
+        self._followed[asked] = self._writes
+        head = f"[{rel}: lines {start}-{stop} of {total}, after lines {args.start}-{end}, which are shown above unchanged]\n"
+        tail = f"\n[end of file: {total} lines]" if stop == total else ""
+        return self._ok(
+            ToolName.read_range,
+            head + text + tail,
+            truncated=clipped,
+            data={"path": rel, "start": start, "end": stop, "total_lines": total, "following": True},
         )
 
     async def _find_text(self, args: FindTextArgs, ctx: CallContext, events: list[PendingEvent]) -> ToolResult:

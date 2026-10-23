@@ -606,10 +606,11 @@ class ContextBuilder:
         if not p:
             return None
         start, end = 1, max_lines
-        page = _PAGE_SPAN_RE.match(r.result_digest) if r.tool == "read_file" else None
+        page = _PAGE_SPAN_RE.match(r.result_digest)
         if page is not None:
             # a page of a clipped file is shown from where it started: as lines 1-max_lines the coder never saw
-            # lines 316-845 of a read it continued twice and re-read the file until it stagnated (live G1, BUG-266)
+            # lines 316-845 of a read it continued twice and re-read the file until it stagnated (live G1, BUG-266); a
+            # repeated read_range answered with the lines after it names them the same way (BUG-342)
             start = int(page.group(1))
             end = min(int(page.group(2)), start + max_lines - 1)
         elif r.tool == "read_range":
