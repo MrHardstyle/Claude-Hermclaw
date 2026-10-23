@@ -14,3 +14,16 @@
     threading server. A test that creates two records and checks distinct ids and the list length finds it.
     Seen: ladder A7 #6, #7 and #9 (coder-main) – distinct ids failed three times; in #9 the coder's own test showed
     1 != 2 and three attempts changed the test instead of the counter.
+
+- kind: convention
+  title: "PowerShell: `$items | ConvertTo-Json` turns one item into an object and none into nothing – pass the array"
+  tags: [powershell, json, pester, tests]
+  content: |
+    The pipeline unrolls arrays: `$items | ConvertTo-Json` prints a single object (not `[ {...} ]`) for one item and
+    an empty string for none, even after `$result = @($result)`. Write `ConvertTo-Json -InputObject @($items)`
+    (or `ConvertTo-Json -AsArray` in PowerShell 7) and print `'[]'` yourself when the list is empty.
+    Tests cannot find this through `ConvertFrom-Json`: it unrolls a one-item array again and `$parsed[0]` also works on
+    a single object. Check the raw text instead: `$json.Trim() | Should -Match '^\['` for one item and
+    `$json.Trim() | Should -Be '[]'` for none.
+    Seen: tournament stage 1 A9 (both coder models) and ladder A9 #3 on rc73 – own Pester tests passed, the hidden
+    checks for one service and for no service failed.

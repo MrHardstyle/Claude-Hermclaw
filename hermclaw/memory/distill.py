@@ -15,6 +15,7 @@ lesson on the "Wissen" page; a retired one is never written again.
 
 from __future__ import annotations
 
+import re
 import uuid
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, field
@@ -33,6 +34,16 @@ _MAX_GOAL = 800
 _MAX_FAILURE = 2500
 _MAX_EDIT = 900
 _MAX_EDITS = 4500
+# What a fix of these teaches is no lesson about the language or its tools: lint and format findings, secrets, the
+# plan's diff and scope demands, a spent turn budget, a minor review remark. The first pass on rc73 wrote "remove
+# unused variable assignments" (F841) as a lesson. A correction teaches when one of its items is a failing test,
+# start, import, syntax or compile check, a blocker or major review finding, a coverage gap or a stall.
+_TEACHING_VERIFIER = ("unit:", "start:", "imports:", "syntax:", "compile:", "command:")
+_TEACHING_SOURCES = frozenset({"coverage", "stagnation"})
+_LINT_COMMAND = re.compile(
+    r"\b(ruff|flake8|pylint|pyflakes|mypy|black|isort|eslint|prettier|tsc|shellcheck|golangci-lint|gofmt|Invoke-ScriptAnalyzer)\b",
+    re.IGNORECASE,
+)
 
 SYSTEM_PROMPT = """You turn one fixed mistake of a coding agent into a lesson for its future tasks.
 You get the step goal, the FAILURE (check results or the output of a red test or command) and the CHANGES that fixed it.
@@ -93,10 +104,19 @@ def _run_key(call: Any) -> tuple[str, str]:
     return call.tool, str(args.get("command") or args.get("test_command") or args.get("testpaths") or "")
 
 
+def teaches(item: Mapping[str, Any]) -> bool:
+    source, label = str(item.get("source", "")), str(item.get("label", ""))
+    if source == "verifier":
+        return label.startswith(_TEACHING_VERIFIER)
+    if source == "review":
+        return label in ("blocker", "major")
+    return source in _TEACHING_SOURCES
+
+
 def _correction_failure(correction_input: Mapping[str, Any] | None) -> str:
-    items = (correction_input or {}).get("items") or []
-    lines = [f"- {_clip(str(i.get('message', '')), 600)}" for i in items if isinstance(i, Mapping) and i.get("message")]
-    return "\n".join(lines) or _clip(str((correction_input or {}).get("detail", "")), 600)
+    """The messages of the items a fix can teach from; empty when there is none."""
+    items = [i for i in (correction_input or {}).get("items") or [] if isinstance(i, Mapping) and i.get("message") and teaches(i)]
+    return "\n".join(f"- {_clip(str(i['message']), 600)}" for i in items)
 
 
 def fix_episodes(attempts: Sequence[Any], calls: Sequence[Any], goals: Mapping[uuid.UUID, str], *, limit: int) -> list[FixEpisode]:
@@ -114,16 +134,20 @@ def fix_episodes(attempts: Sequence[Any], calls: Sequence[Any], goals: Mapping[u
         if attempt.kind == "correction" and attempt.status == "completed":
             edits = [describe_edit(c.tool, c.arguments or {}) for c in own if c.tool in EDIT_TOOLS and c.status == "succeeded"]
             failure = _correction_failure(attempt.correction_input)
+            if not failure:
+                continue
             red = next((c for c in own if c.tool in RUN_TOOLS and c.error_code in E.RUN_FAILED), None)
             if red is not None:
                 failure += f"\n\nA run in the attempt:\n{_clip(red.result_summary, 1500)}"
-            if edits and failure.strip():
+            if edits:
                 corrections.append(FixEpisode(attempt.id, attempt.step_id, "correction", goal, _clip(failure, _MAX_FAILURE), tuple(edits)))
             continue
         red_call: Any = None
         pending: list[str] = []
         for call in own:
             if call.tool in RUN_TOOLS and call.error_code in E.RUN_FAILED:
+                if _LINT_COMMAND.search(_run_key(call)[1]):
+                    continue
                 if red_call is None or _run_key(call) != _run_key(red_call):
                     red_call, pending = call, []
                 continue

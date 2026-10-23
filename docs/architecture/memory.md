@@ -75,15 +75,18 @@ entries, 8 active incidents and exactly two suspicions – `replace_text:TEXT_NO
 After the incident pass, the learner reads finished **and cancelled** jobs (not older than `lessons_since_days`) without
 `metadata.memory_lessons_at`. A job's fixes are, corrections first, at most `lessons_per_job`:
 
-- a correction attempt that completed (it passed the checks): its correction input is the failure, plus the first red
-  run of the attempt; its successful edits are the change;
-- inside any other attempt, a red `run_test`/`run_command` (`errors.RUN_FAILED`) followed by successful edits and the
-  same command green again.
+- a correction attempt that completed (it passed the checks) with at least one item a fix can teach from – a failing
+  test, start, import, syntax, compile or command check, a `blocker`/`major` review finding, a coverage gap or a stall
+  (not lint, secrets, diff, scope or the turn budget, BUG-323): those items are the failure, plus the first red run of
+  the attempt; its successful edits are the change;
+- inside any other attempt, a red `run_test`/`run_command` (`errors.RUN_FAILED`, not a linter or formatter) followed
+  by successful edits and the same command green again.
 
 Each fix goes to one structured call of the coder profile (`lesson_alias` overrides it), purpose `lesson`, with the
 step goal, the failure and the edits (redacted, clipped). The model answers `{general, title, mistake, fix,
 applies_to}` and sets `general` false for a requirement of this task, a typo, a wrong expected value or a lint fix. A
-general lesson is searched among lessons and conventions (also candidates and retired ones) at `lesson_similarity`.
+general lesson is searched among lessons and conventions (also candidates and retired ones) at `lesson_similarity`
+(0.72: the same lesson in other words scored 0.76–0.83 with embeddinggemma, different ones at most 0.58).
 A match counts the job (`note_job`), and a system candidate seen in `promote_after` jobs becomes active. A retired
 match stays retired. Without a match the lesson is a new candidate (`source = system`, tag `learned`, signature
 `lesson:<hash of the title>`). The calls hold the model lease (`lesson_wait_seconds`). While the GPU is busy the pass

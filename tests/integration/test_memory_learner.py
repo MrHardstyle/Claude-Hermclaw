@@ -311,7 +311,9 @@ async def _fixed_job(sessionmaker: SM, *, status: str = "succeeded") -> uuid.UUI
             kind="correction",
             model_alias="coder-main",
             status="completed",
-            correction_input={"items": [{"message": "verifier: 3 tests failed with 401"}]},
+            correction_input={
+                "items": [{"source": "verifier", "label": "unit:acceptance[0]:test", "message": "verifier: 3 tests failed with 401"}]
+            },
         )
         s.add(attempt)
         await s.flush()

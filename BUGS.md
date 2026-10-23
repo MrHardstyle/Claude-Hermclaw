@@ -46,6 +46,12 @@ Noch keine.
 
 ## Behobene Bugs
 
+### BUG-323 – Der Lernlauf macht aus Lint-Korrekturen Lehren und erkennt dieselbe Lehre in anderen Worten nicht
+- Phase: erster Lernlauf von D-025 auf rc73, 2026-10-23 · Komponente: memory (`distill.py`, `config.py`) · Severity: P3 · blockierend: nein · Status: **behoben im Repository** (`tests/unit/test_distill.py::test_a_passing_correction_and_a_red_run_turned_green_are_fixes`)
+- Reproduktion: Der erste Durchlauf über die Jobs der letzten zwei Tage schrieb sechs Lehren. Darunter waren „Remove unused variable assignments“ (eine F841-Lint-Korrektur, Ablauf `ruff` rot → grün) sowie zwei Umschreibungen der schon bekannten Lehre „setUp statt setUpClass“ als eigene Kandidaten.
+- Ursache: Jede bestandene Korrektur und jeder rot → grün gewordene Lauf ging an das Modell, auch reine Lint-, Geheimnis-, Diff- und Scope-Befunde. Die Ähnlichkeitsschwelle 0,85 war geschätzt. Gemessen mit embeddinggemma liegt dieselbe Lehre in anderen Worten bei 0,76–0,83, verschiedene Lehren höchstens bei 0,58.
+- Fix: Eine Korrektur lehrt nur mit mindestens einem dieser Befunde: fehlschlagender Test, Start-, Import-, Syntax-, Compile- oder Befehlsprüfung, Review-Befund `blocker`/`major`, Abdeckungslücke oder Stall. Nur deren Texte gehen an das Modell. Rote Läufe von Lintern und Formatierern zählen nicht. `lesson_similarity` steht jetzt auf 0,72.
+
 ### BUG-322 – Ein PowerShell-Schritt bekommt kein Testkriterium und wird ohne Ausweg blockiert
 - Phase: Schwierigkeitsleiter auf rc72, 2026-10-23 (A9#1, Job 8273c77a) · Komponente: planner (`enrich.py`, `validation.py`) · Severity: P2 · blockierend: ja (die Leiter scheitert an A9) · Status: **behoben im Repository** (`tests/unit/test_planner_enrich.py::test_steps_that_write_tests_get_test_evidence_even_with_substantive_acceptance`)
 - Reproduktion: A9 verlangt ein PowerShell-Skript mit Pester-Tests in einem leeren Repository. Der Plan hat nur Diff-Kriterien. Der Coder liefert Skript, Tests und README. Der Verifier meldet „implement step in a repository with tests has no test evidence“, der Handler blockiert mit `ACCEPTANCE_DEFECT`. Zwei Neupläne fügen wieder kein Testkriterium hinzu, Ergebnis `REPLAN_LIMIT` nach 19,2 min (versteckt 6/10).

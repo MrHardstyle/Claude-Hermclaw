@@ -43,7 +43,12 @@ RUN = {"command": "python -m pytest -q"}
 
 def test_a_passing_correction_and_a_red_run_turned_green_are_fixes() -> None:
     first = _attempt()
-    fix = _attempt("correction", "completed", {"items": [{"message": "2 of 5 tests failed: test_ids_are_distinct"}]}, no=2)
+    fix = _attempt(
+        "correction",
+        "completed",
+        {"items": [{"source": "verifier", "label": "unit:acceptance[0]:test", "message": "2 of 5 tests failed: test_ids_are_distinct"}]},
+        no=2,
+    )
     failed_fix = _attempt("correction", "failed", {"items": [{"message": "lint"}]}, no=3)
     calls = [
         _call(first, 1, "run_test", RUN, code="TESTS_FAILED", out="FAILED test_env – 401 != 200"),
@@ -63,6 +68,19 @@ def test_a_passing_correction_and_a_red_run_turned_green_are_fixes() -> None:
         "replace_text app.py\n--- old\nTOKEN = os.environ\n+++ new\ndef token():",
     )
     assert len(fix_episodes([first, fix], calls, {}, limit=1)) == 1
+
+    # a fix of lint findings or of the plan's diff demand teaches nothing about the language (first pass on rc73: F841)
+    lint_fix = _attempt(
+        "correction", "completed", {"items": [{"source": "verifier", "label": "lint:lint:python", "message": "F841"}]}, no=4
+    )
+    red_lint = _attempt(no=5)
+    lint_calls = [
+        _call(lint_fix, 1, "replace_text", {"path": "a.py", "old": "x = 1\n", "new": ""}),
+        _call(red_lint, 1, "run_command", {"command": "ruff check a.py"}, code="COMMAND_FAILED", out="F841"),
+        _call(red_lint, 2, "replace_text", {"path": "a.py", "old": "y = 2\n", "new": ""}),
+        _call(red_lint, 3, "run_command", {"command": "ruff check a.py"}),
+    ]
+    assert fix_episodes([lint_fix, red_lint], lint_calls, {}, limit=5) == []
 
     user = build_messages(episodes[1])[1].content
     assert user.startswith("STEP GOAL\nBuild the notes API") and "FAILURE\n" in user and "CHANGES\nreplace_text app.py" in user

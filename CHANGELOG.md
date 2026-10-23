@@ -4,6 +4,9 @@ Format: [Keep a Changelog](https://keepachangelog.com/de/1.1.0/), Versionen nach
 
 ## [Unreleased]
 
+### Behoben
+- **Lernlauf ohne Lint-Lehren (BUG-323):** Nur Behebungen echter Fehler werden zu Lehren: Tests, Start, Import, Syntax, schwere Review-Befunde, Abdeckungslücken, Stalls. Lint, Geheimnisse, Diff- und Scope-Vorgaben nicht. Dieselbe Lehre in anderen Worten zählt jetzt ab Ähnlichkeit 0,72 als dieselbe (gemessen: 0,76–0,83 gegenüber höchstens 0,58).
+
 ## [0.1.0rc73] – Release Candidate (2026-10-23)
 
 ### Behoben

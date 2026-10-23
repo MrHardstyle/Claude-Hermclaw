@@ -419,7 +419,8 @@ class MemoryPolicy(_Strict):
     lessons: bool = True
     lessons_per_job: int = Field(default=2, ge=0, le=10)  # fixes of one job turned into lessons at most
     lesson_alias: str | None = None  # model profile that writes them (default: the coder role)
-    lesson_similarity: float = Field(default=0.85, ge=0.5, le=1.0)  # a lesson this close to a known one is the same
+    # the same lesson in other words scored 0.76–0.83 with embeddinggemma, different lessons at most 0.58 (rc73)
+    lesson_similarity: float = Field(default=0.72, ge=0.5, le=1.0)  # a lesson this close to a known one is the same
     lessons_since_days: int = Field(default=2, ge=0, le=3650)  # jobs finished earlier get no lessons (0 = all)
     lesson_wait_seconds: float = Field(default=30.0, ge=0.0, le=3600.0)  # model lease wait; busy GPU = next pass
 
