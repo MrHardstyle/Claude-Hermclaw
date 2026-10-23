@@ -4,6 +4,9 @@ Format: [Keep a Changelog](https://keepachangelog.com/de/1.1.0/), Versionen nach
 
 ## [Unreleased]
 
+### Behoben
+- **`run_test` mit Sprachnamen (BUG-327):** Ein `framework`, das keinen Parser bezeichnet (etwa „powershell“), wird nicht mehr abgelehnt; der Parser wird dann erkannt.
+
 ## [0.1.0rc75] – Release Candidate (2026-10-23)
 
 ### Behoben

@@ -13,13 +13,13 @@ from collections.abc import Iterable, Mapping
 from dataclasses import dataclass
 from typing import Any, Literal
 
-from pydantic import BaseModel, ConfigDict, Field, ValidationError, model_validator
+from pydantic import BaseModel, ConfigDict, Field, ValidationError, field_validator, model_validator
 
 from hermclaw.contracts.scope import ScopeExpansionRequest
 from hermclaw.contracts.tools import MUTATING_TOOLS, TERMINAL_TOOLS, BlockReport, CoderAction, CompletionReport, ToolName
 from hermclaw.tools import errors as E
 from hermclaw.tools.errors import ToolError, ToolProtocolError
-from hermclaw.tools.testparse import Framework
+from hermclaw.tools.testparse import FRAMEWORKS, Framework
 
 MAX_WRITE_CHARS = 1_000_000
 MAX_PATCH_CHARS = 1_000_000
@@ -117,6 +117,16 @@ class RunTestArgs(ToolArgs):
     cwd: str = Field(default=".", max_length=1000)
     timeout_seconds: int | None = Field(default=None, ge=1, le=7200, description=_TIMEOUT_DOC)
     framework: Framework | None = Field(default=None, description="output parser; auto-detected when omitted")
+
+    @field_validator("framework", mode="before")
+    @classmethod
+    def _unknown_framework_is_detected(cls, value: Any) -> Any:
+        """A language or tool name ("powershell", "npm") is no refusal: the parser is then detected from the command and
+        its output (BUG-327 – ladder A9#4 lost two turns to framework="powershell")."""
+        if isinstance(value, str):
+            name = value.strip().lower()
+            return name if name in FRAMEWORKS else None
+        return value
 
 
 class InstallDependenciesArgs(ToolArgs):

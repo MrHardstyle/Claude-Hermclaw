@@ -40,6 +40,15 @@ def test_registry_covers_all_tools_with_flags() -> None:
     assert "- write_file(path, content, append?):" in catalog and "list_files(path?, recursive?, pattern?, max_entries?)" in catalog
 
 
+def test_run_test_detects_the_parser_for_an_unknown_framework_name() -> None:
+    """BUG-327 (ladder A9#4): framework="powershell" was refused as ARGS_INVALID twice; a name that is no parser now
+    leaves the parser to detection, a known one is kept whatever its case."""
+    spec = get_spec(ToolName.run_test)
+    assert validate_args(spec, {"command": "pwsh -Command Invoke-Pester", "framework": "powershell"}).framework is None  # type: ignore[attr-defined]
+    assert validate_args(spec, {"command": "pwsh -Command Invoke-Pester", "framework": " Pester"}).framework == "pester"  # type: ignore[attr-defined]
+    assert validate_args(spec, {"command": "pytest -q"}).framework is None  # type: ignore[attr-defined]
+
+
 def test_validate_args_errors_are_value_free() -> None:
     spec = get_spec("write_file")
     with pytest.raises(ToolError) as exc:

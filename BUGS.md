@@ -46,6 +46,12 @@ Noch keine.
 
 ## Behobene Bugs
 
+### BUG-327 – `run_test` lehnt einen Sprachnamen als `framework` ab
+- Phase: Schwierigkeitsleiter auf rc73, 2026-10-23 (A9#4, Job 2a8f51a9) · Komponente: tools (`registry.py`) · Severity: P3 · blockierend: nein · Status: **behoben im Repository** (`tests/unit/test_tools_units.py::test_run_test_detects_the_parser_for_an_unknown_framework_name`)
+- Reproduktion: Der Coder ruft `run_test` mit `framework: "powershell"` auf. Beide Aufrufe enden mit `ARGS_INVALID` („Input should be 'pytest', … 'pester' or 'generic'“), zwei Züge sind verloren.
+- Ursache: `framework` wählt nur den Parser der Ausgabe, und den erkennt das Tool ohnehin aus Befehl und Ausgabe. Trotzdem wurde ein Name außerhalb der Liste als ungültiges Argument abgelehnt.
+- Fix: Ein Name, der keinen Parser bezeichnet, überlässt die Wahl der Erkennung; ein bekannter Name zählt unabhängig von Groß- und Kleinschreibung.
+
 ### BUG-326 – PowerShell-Skripte werden nie geparst; ein Syntaxfehler überlebt zwei Versuche
 - Phase: Schwierigkeitsleiter auf rc74, 2026-10-23 (A9#5, Job c2eadea1) · Komponente: verifier (`syntax.py`, `checks.py`), tools (`engine.py`) · Severity: P2 · blockierend: nein · Status: **behoben im Repository** (`tests/integration/test_verifier_engine.py::test_powershell_is_parsed_in_the_sandbox`, `tests/integration/test_tools_engine_exec.py::test_a_write_reports_the_syntax_errors_of_the_written_file`)
 - Reproduktion: In `function Get-ServiceReport {` fehlt die schließende Klammer. Der Verifier meldet „no syntax checker for powershell“ und überspringt die Datei. Der Coder arbeitet 2 Versuche und 35 Züge weiter, ohne den Fehler zu sehen; der Job wird nach 20,5 min abgebrochen, versteckt 3/10.
