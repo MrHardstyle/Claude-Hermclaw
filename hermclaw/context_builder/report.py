@@ -36,6 +36,10 @@ class SectionReport:
     items_included: int = 0
     items_dropped: int = 0
     omitted_reason: str | None = None
+    # D-026: a short hash of the body and the labels (path:lines) of the shown snippets – which part of the prompt
+    # changed from turn to turn, and so where the model server's cache stopped, is visible without the content
+    digest: str = ""
+    labels: tuple[str, ...] = ()
 
     def as_dict(self) -> dict[str, Any]:
         # NOTE: payload keys avoid the substring "token" – the shared redactor masks such keys (see module doc)
@@ -49,6 +53,8 @@ class SectionReport:
             "items_included": self.items_included,
             "items_dropped": self.items_dropped,
             "omitted_reason": self.omitted_reason,
+            "digest": self.digest,
+            "labels": list(self.labels[:PAYLOAD_MAX_DROPPED]),
         }
 
 

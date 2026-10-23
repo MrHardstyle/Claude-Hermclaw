@@ -392,7 +392,9 @@ class ContextBuilder:
         # to turn while no file changes, and llama.cpp reuses the cached files message
         turn_spare = sum(max(0, cost[n] - used.get(n, 0)) for n in USER_TURN_ONLY_SECTIONS)
         split = split_elastic(plan, cfg.budgets, {**used, **{n: cost[n] for n in USER_TURN_ONLY_SECTIONS}})
-        reserve = int((split.code_cost + split.tests_cost) * cfg.failure_code_share) if fail_snips else 0
+        # always kept, failure or not: a reserve only while a run fails changed the files message whenever a run passed
+        # (ladder A10 #3 on rc80)
+        reserve = int((split.code_cost + split.tests_cost) * cfg.failure_code_share)
         reserve_tests = int(reserve * split.tests_cost / max(1, split.code_cost + split.tests_cost))
         split = replace(split, code_cost=split.code_cost - (reserve - reserve_tests), tests_cost=split.tests_cost - reserve_tests)
         # unused code budget -> tests; then unused tests budget -> code (only if code had to leave snippets out).
@@ -420,7 +422,8 @@ class ContextBuilder:
             elif not pack.selected:
                 sec.omitted_reason = "budget"
             rendered[name] = sec
-        fail_budget = turn_spare + reserve + (tests_allowed - test_pack.cost if fail_snips else 0)
+        packs = {SectionName.RELEVANT_CODE: code_pack, SectionName.RELEVANT_TESTS: test_pack}
+        fail_budget = turn_spare + reserve + tests_allowed - test_pack.cost
         final_budget[SectionName.LATEST_FAILURE] = cost[SectionName.LATEST_FAILURE] + fail_budget
         self._add_failure_code(rendered[SectionName.LATEST_FAILURE], fail_snips, [*code_pack.selected, *test_pack.selected], fail_budget)
 
@@ -462,6 +465,8 @@ class ContextBuilder:
                 omitted_reason=None
                 if rendered[n].present
                 else (rendered[n].omitted_reason or ("empty" if n not in MANDATORY_SECTIONS else None)),
+                digest=hashlib.sha256(rendered[n].body.encode("utf-8", errors="surrogateescape")).hexdigest()[:12],
+                labels=tuple(s.label for s, _ in packs[n].selected) if n in packs else (),
             )
             for n in SECTION_ORDER
         ]

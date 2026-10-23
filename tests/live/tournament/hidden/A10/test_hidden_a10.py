@@ -5,6 +5,7 @@ exist and pass. A failed ``security`` check disqualifies.
 """
 
 import ast
+import http.client
 import json
 import os
 import re
@@ -38,8 +39,7 @@ class App:
     def start(self) -> "App":
         self.port = free_port()
         env = {**os.environ, "PORT": str(self.port), "TASKS_DB": str(self.db)}
-        self.proc = subprocess.Popen([sys.executable, "-m", "tasks_app"], cwd=ROOT, env=env,
-                                     stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+        self.proc = subprocess.Popen([sys.executable, "-m", "tasks_app"], cwd=ROOT, env=env, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
         end = time.monotonic() + 15
         while time.monotonic() < end:
             if self.proc.poll() is not None:
@@ -113,8 +113,9 @@ def test_create_with_a_due_date(app):
     assert app.list()[0]["due"] == "2026-03-31"
 
 
-@pytest.mark.parametrize("due", ["2026-02-30", "2026-13-01", "2026-2-3", "26-01-01", "2026-01-01T10:00:00", "tomorrow", "",
-                                 20260101, True, ["2026-01-01"]])
+@pytest.mark.parametrize(
+    "due", ["2026-02-30", "2026-13-01", "2026-2-3", "26-01-01", "2026-01-01T10:00:00", "tomorrow", "", 20260101, True, ["2026-01-01"]]
+)
 def test_invalid_due_is_400(app, due):
     app.error("POST", "/api/tasks", {"title": "x", "due": due})
     assert app.list() == []
@@ -146,8 +147,20 @@ def test_patch_due_null_removes_the_date(app):
     assert app.list()[0]["due"] is None
 
 
-@pytest.mark.parametrize("body", [{}, {"title": ""}, {"title": "   "}, {"title": "x" * 201}, {"title": 5}, {"done": "yes"},
-                                  {"due": "2026-02-30"}, {"colour": "red"}, {"title": "ok", "colour": "red"}])
+@pytest.mark.parametrize(
+    "body",
+    [
+        {},
+        {"title": ""},
+        {"title": "   "},
+        {"title": "x" * 201},
+        {"title": 5},
+        {"done": "yes"},
+        {"due": "2026-02-30"},
+        {"colour": "red"},
+        {"title": "ok", "colour": "red"},
+    ],
+)
 def test_invalid_patch_is_400_and_changes_nothing(app, body):
     task = app.add("Keep", due="2026-01-01")
     app.error("PATCH", f"/api/tasks/{task['id']}", body)
@@ -207,16 +220,28 @@ def test_search_for_quotes_finds_nothing(app):
         assert app.list(q(q=text)) == [], text
 
 
+def _status(app, path):
+    """The answer's status, or None when the server dropped the connection."""
+    try:
+        return app.call("GET", path)[0]
+    except (OSError, http.client.HTTPException):
+        return None
+
+
 def test_security_search_is_not_sql(app):
+    """Injected search text must neither change the table nor break the request. A search that fails for plain text
+    too is a broken program, which the functional checks report – it is no sign of SQL built from the input (ladder
+    A10 #3: a delivery cut off mid-correction crashed on every GET and was disqualified as insecure)."""
     app.add("alpha")
     app.add("beta")
+    search_works = _status(app, "/api/tasks?" + q(q="alp")) == 200
     for text in INJECTIONS:
-        status, body, _ = app.call("GET", "/api/tasks?" + q(q=text))
-        assert status in (200, 400), (text, status, body[:200])
-    assert [t["title"] for t in app.list()] == ["alpha", "beta"]
+        status = _status(app, "/api/tasks?" + q(q=text))
+        if search_works:
+            assert status in (200, 400), (text, status)
     con = sqlite3.connect(app.db)
     try:
-        assert con.execute("SELECT count(*) FROM tasks").fetchone()[0] == 2
+        assert [r[0] for r in con.execute("SELECT title FROM tasks ORDER BY id")] == ["alpha", "beta"]
     finally:
         con.close()
 
@@ -294,8 +319,14 @@ def test_the_existing_tests_are_kept():
 
 
 def test_own_tests_pass_and_cover_the_new_features():
-    res = subprocess.run([sys.executable, "-m", "pytest", "-q", "-p", "no:cacheprovider", "tests"],
-                         capture_output=True, text=True, timeout=300, cwd=ROOT, check=False)
+    res = subprocess.run(
+        [sys.executable, "-m", "pytest", "-q", "-p", "no:cacheprovider", "tests"],
+        capture_output=True,
+        text=True,
+        timeout=300,
+        cwd=ROOT,
+        check=False,
+    )
     assert res.returncode == 0, res.stdout[-3000:]
     base = sum(len(_test_names(p)) for p in (BASE / "tests").glob("test_*.py"))
     now = sum(len(_test_names(p)) for p in (ROOT / "tests").rglob("test_*.py"))

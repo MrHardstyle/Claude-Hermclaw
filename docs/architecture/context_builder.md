@@ -60,12 +60,16 @@ Dependencies: only the shared protocols `RepoContextProvider` (`inventory_summar
 * **system**: `SYSTEM CONTRACT` (runtime-owned rules, never truncated; includes the rule to parse JSON/TOML/CSV/INI/XML with the language's own parser and to read written output back with it, BUG-245), `AVAILABLE TOOLS`, `COMPLETION CONDITIONS`
   and the fixed `RESPONSE PROTOCOL`: exactly one JSON object
   `{"tool": ..., "args": {...}, "status": "...", "decision": "..."}`; then the stable sections `STEP GOAL`, `SCOPE`,
-  `CONSTRAINTS`, `ACCEPTANCE`, `CURRENT REPO FACTS` – the same for the whole attempt (D-026; before, they were a user
-  message of their own, D-021).
-* **user (files)**: `RELEVANT CODE`, `RELEVANT TESTS` – they change only when a file, a read or the correction
-  evidence changes (D-026). Their snippets come from the targets, acceptance tests, reads of the attempt, dependency
-  files, the correction evidence and searches for title and goal; their budget is the base share plus what the system
-  and stable sections leave unused, less `failure_code_share` (0.2) while there is code at a failure to show.
+  `CONSTRAINTS`, `ACCEPTANCE` – the same for the whole attempt (D-026; before, they were a user message of their own,
+  D-021).
+* **user (files)**: `CURRENT REPO FACTS`, `RELEVANT CODE`, `RELEVANT TESTS` – they change only when a file, a read or
+  the correction evidence changes (D-026). The repository facts list the files and grow with every new one, so they
+  open this message: at the end of the system message they voided its checkpoint on every new file (ladder A10 #3 on
+  rc80). The snippets come from the targets, acceptance tests, reads of the attempt, dependency files, the correction
+  evidence and searches for title and goal; their budget is the base share plus what the system and stable sections
+  leave unused, less `failure_code_share` (0.2) – kept also while no run fails, else every passing run changed it.
+  The context report gives each section a short `digest` of its body and the `labels` of the shown snippets, so which
+  part changed from turn to turn is visible without the content.
 * **user (turn)**: `CURRENT DIFF`, `LATEST FAILURE`, `SHORT STEP HISTORY`, then the
   closing line
   "Turn N/M, R left. Reply with one JSON action." (with two turns or fewer left: "Almost out of turns: complete_step,

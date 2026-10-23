@@ -39,15 +39,16 @@ SYSTEM_SECTIONS: tuple[SectionName, ...] = (
 # the step-specific state that stays the same for the whole attempt. D-021 gave it its own user message (llama.cpp keeps
 # a cache checkpoint where the last message starts); D-026 moves it into the system message, whose end also gets one,
 # and splits the rest into the files message (changes when a file changes) and the turn message (changes every turn;
-# LATEST FAILURE also holds the code at the latest failure). LATEST FAILURE and history come last, closest to the answer
+# LATEST FAILURE also holds the code at the latest failure). LATEST FAILURE and history come last, closest to the answer.
+# CURRENT REPO FACTS lists the repository's files and grows with every new one: it opens the files message – at the end
+# of the system message it voided that message's checkpoint on every new file (ladder A10 #3 on rc80)
 USER_STABLE_SECTIONS: tuple[SectionName, ...] = (
     SectionName.STEP_GOAL,
     SectionName.SCOPE,
     SectionName.CONSTRAINTS,
     SectionName.ACCEPTANCE,
-    SectionName.CURRENT_REPO_FACTS,
 )
-USER_FILE_SECTIONS: tuple[SectionName, ...] = (SectionName.RELEVANT_CODE, SectionName.RELEVANT_TESTS)
+USER_FILE_SECTIONS: tuple[SectionName, ...] = (SectionName.CURRENT_REPO_FACTS, SectionName.RELEVANT_CODE, SectionName.RELEVANT_TESTS)
 USER_TURN_ONLY_SECTIONS: tuple[SectionName, ...] = (
     SectionName.CURRENT_DIFF,
     SectionName.LATEST_FAILURE,

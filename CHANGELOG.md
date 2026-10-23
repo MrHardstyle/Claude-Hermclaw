@@ -4,6 +4,14 @@ Format: [Keep a Changelog](https://keepachangelog.com/de/1.1.0/), Versionen nach
 
 ## [Unreleased]
 
+## [0.1.0rc81] – Release Candidate (2026-10-23)
+
+### Geändert
+- **D-026 nachgeschärft:** CURRENT REPO FACTS eröffnet die Code-/Testnachricht (die Dateiliste wächst mit jeder neuen Datei und machte den Cache-Checkpoint der Systemnachricht wertlos). Die Reserve für den Fehlercode gilt immer, sonst änderte jeder bestandene Lauf die Code-/Testnachricht. Der Kontextbericht nennt je Abschnitt einen kurzen Hash (`digest`) und die gezeigten Ausschnitte (`labels`).
+
+### Behoben
+- **Leiterstufe A10, Sicherheitsprüfung:** Eine Lieferung, deren Suche schon bei normalem Text abstürzt, gilt nicht mehr als SQL-Injection. Die Prüfung verlangt dann nur, dass die Tabelle unverändert ist; die Funktionsprüfungen melden den Absturz.
+
 ## [0.1.0rc80] – Release Candidate (2026-10-23)
 
 ### Geändert

@@ -53,7 +53,7 @@ async def test_full_context_has_all_sections_in_order() -> None:
     builder, _, _ = make_builder(git=FakeGit(diff_text=DIFF, status_entries=[GitStatusEntry("app.py", " M")], changed=["app.py"]))
     built = await builder.build(make_input(latest_failure=FAILURE, correction=correction_items()))
     assert [m.role for m in built.messages] == ["system", "user", "user"]
-    assert headings(built.messages[1].content) == ["RELEVANT CODE", "RELEVANT TESTS"]
+    assert headings(built.messages[1].content) == ["CURRENT REPO FACTS", "RELEVANT CODE", "RELEVANT TESTS"]
     assert headings(built.messages[2].content) == ["CURRENT DIFF", "LATEST FAILURE", "SHORT STEP HISTORY"]
     system, user = built.messages[0].content, user_text(built)
     assert headings(system) == [
@@ -65,7 +65,6 @@ async def test_full_context_has_all_sections_in_order() -> None:
         "SCOPE",
         "CONSTRAINTS",
         "ACCEPTANCE",
-        "CURRENT REPO FACTS",
     ]
     assert headings(user) == [
         "STEP GOAL",
@@ -487,8 +486,12 @@ async def test_the_prompt_up_to_relevant_code_is_the_same_every_turn() -> None:
     git = FakeGit(diff_text=DIFF, status_entries=[GitStatusEntry("tests/test_extra.py", "??")], changed=["app.py"])
     later_builder, _, _ = make_builder(git=git)
     later = await later_builder.build(make_input(step=step, turn=18, latest_failure=FAILURE, correction=correction_items()))
-    assert first.messages[0].content == later.messages[0].content and "## CURRENT REPO FACTS" in first.messages[0].content
-    assert later.messages[1].content.startswith("## RELEVANT CODE") and later.messages[2].content.startswith("## CURRENT DIFF")
+    assert first.messages[0].content == later.messages[0].content and first.messages[0].content.rstrip().endswith(
+        later.messages[0].content.split("## ACCEPTANCE", 1)[1].rstrip()
+    )
+    # the file list grows with every new file: CURRENT REPO FACTS opens the files message (ladder A10 #3 on rc80)
+    assert "## CURRENT REPO FACTS" not in later.messages[0].content
+    assert later.messages[1].content.startswith("## CURRENT REPO FACTS") and later.messages[2].content.startswith("## CURRENT DIFF")
     progress = user_text(later).split("## CURRENT DIFF")[1]
     assert "Changed vs base (2): app.py, ?? tests/test_extra.py" in progress
     assert "Acceptance 1 — met (already changed)" in progress and "New files written: tests/test_extra.py" in progress
@@ -504,6 +507,12 @@ async def test_the_prompt_up_to_relevant_code_is_the_same_every_turn() -> None:
     turn19 = await again.build(make_input(step=step, turn=19, latest_failure=other, correction=correction_items()))
     assert turn19.messages[1].content == later.messages[1].content
     assert turn19.messages[2].content != later.messages[2].content
+    # a passing run (no failure to show) keeps it too: the reserve for the code at a failure is always kept (A10 #3)
+    green = await again.build(make_input(step=step, turn=20, latest_failure=None, correction=correction_items()))
+    assert green.messages[1].content == later.messages[1].content
+    digests = [{s.name: s.digest for s in b.report.sections} for b in (later, green)]
+    assert digests[0]["RELEVANT TESTS"] == digests[1]["RELEVANT TESTS"] and digests[0]["CURRENT DIFF"] != digests[1]["CURRENT DIFF"]
+    assert later.report.section("RELEVANT CODE").labels and later.report.to_event_payload()["sections"][0]["digest"]
 
 
 def test_research_findings_reach_the_coder_with_their_facts() -> None:
