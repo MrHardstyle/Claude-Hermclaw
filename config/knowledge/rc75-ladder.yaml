@@ -1,0 +1,17 @@
+# Operator knowledge from the difficulty ladder on 0.1.0rc73–rc74 (2026-10-23, D-020).
+# Import: hermclaw memory-import config/knowledge/rc75-ladder.yaml (existing titles are skipped).
+# Every entry names the runs it comes from; edit or retire it on the page "Wissen".
+
+- kind: convention
+  title: "Pester: a *.Tests.ps1 file never calls Invoke-Pester or Import-Module Pester – the runner does"
+  tags: [powershell, pester, tests]
+  content: |
+    `Invoke-Pester` discovers every *.Tests.ps1 file and runs it. A test file that calls `Invoke-Pester` itself (for
+    example at its end with a configuration) starts discovery again from inside the run: the output repeats
+    "Running tests from 1 files." until the command times out, and every run takes minutes.
+    `Import-Module Pester -RequiredVersion <x>` in the file fails or loads a second Pester when another version is
+    installed. A test file only holds Describe/Context/It blocks; it loads the code under test in BeforeAll
+    (`BeforeAll { . "$PSScriptRoot/../Script.ps1" }` – the script must not run its main part when dot-sourced, e.g.
+    guard it with `if ($MyInvocation.InvocationName -ne '.') { ... }`) and writes temporary files to `$TestDrive`.
+    Run the tests with `pwsh -NoProfile -Command "Invoke-Pester -CI"` from the repository root.
+    Seen: ladder A9 #4 on rc73 (coder-main) – two runs of 139 s and 153 s and three timeouts, the step was cancelled.

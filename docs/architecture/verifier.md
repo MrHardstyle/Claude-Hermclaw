@@ -31,7 +31,7 @@ Invariants:
 | `changes.py` | `collect_changes` (GitReader + base tree → create/modify/delete), added lines (`git diff -U0 <base>` per file, untracked = whole file, GitReader-diff fallback), inventory, safe file reads | 21.1, 21.7, 21.8 |
 | `checks.py` | scope + forbidden, generated files, changed-file count, deletions, secrets, conflicts, syntax orchestration, compile, lint, implement-step test requirement | 21.1–21.8, 21.12 |
 | `evidence.py` | presence, absence, diff, command, test (framework-aware), schema, artifact, mirrored scope/security criteria | 21.5, 21.6, 21.9–21.13 |
-| `syntax.py` | in-process parsers, local `bash -n`, sandbox batches for `php -l` / `node --check` with nonce markers | 21.2 |
+| `syntax.py` | in-process parsers, local `bash -n`, sandbox batches for `php -l` / `node --check` / the PowerShell parser (`pwsh`, `[Parser]::ParseFile`, BUG-326) with nonce markers; `sandbox_check_command` for the write-time check of the tools engine | 21.2 |
 | `secrets.py` | `SecretScanner` (redaction patterns + prefixed assignments + well-known token shapes + entropy heuristic); findings in test files ask for an obvious placeholder (`dummy`, `fake`, `example`) instead of an environment variable (BUG-243, `checks.py`); values made only of role words count as placeholders (`is_role_value`, shared with the redactor, BUG-279/293) | 21.7 |
 | `conflicts.py` | conflict marker scan | 21.8 |
 | `entrypoints.py` | start check (BUG-309): changed packages with `__main__.py`, environment from the variable names, driver script, traceback classification | start |
@@ -73,7 +73,7 @@ report = await verifier.verify(...)  # same, report only
    `generated_files` (`policies.verifier.generated_file_globs`), `changed_file_count`
    (`policies.verifier.max_changed_files`), `deleted_files` (`allow_deletions` **and** scope allows `delete`),
    `secrets:*` / `conflicts:*` over **added lines only**, presence/absence/diff/schema/artifact criteria.
-5. Commands (serialised; snapshot before the first one): syntax batches (PHP, JS; shell when bash is missing
+5. Commands (serialised; snapshot before the first one): syntax batches (PHP, JS, PowerShell; shell when bash is missing
    locally), compile (`npx tsc --noEmit` if `tsconfig.json` + `node_modules/typescript`, `go build ./...` if `go.mod`,
    `cargo check [--offline]` if `Cargo.toml` – only when changed files are relevant to the toolchain), new imports,
    start (`python -m <package>` once for every changed package with a `__main__.py`, BUG-309), lint

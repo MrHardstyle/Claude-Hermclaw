@@ -25,6 +25,7 @@ from hermclaw.verifier.report import EXECUTOR_ERROR
 from hermclaw.verifier.secrets import SecretScanner
 from hermclaw.verifier.syntax import (
     IN_PROCESS,
+    SANDBOX_TOOLS,
     SyntaxResult,
     check_in_sandbox,
     check_shell_local,
@@ -237,14 +238,14 @@ async def syntax_checks(ctx: VerifyContext) -> list[VerificationCheck]:
             results.append(await asyncio.to_thread(IN_PROCESS[language], rel, text))
         elif language == "shell":
             shell.append(rel)
-        elif language == "php":
-            sandbox["php"].append(rel)
         elif language == "javascript":
             skip = javascript_needs_compile_check(rel, text)
             if skip:
                 results.append(SyntaxResult(rel, language, "skip", skip))
             else:
                 sandbox["javascript"].append(rel)
+        elif language in SANDBOX_TOOLS:
+            sandbox[language].append(rel)  # php, powershell (BUG-326)
         elif language == "typescript":
             results.append(SyntaxResult(rel, language, "skip", "TypeScript is checked by the compile check (tsc)"))
         elif language in CODE_LANGUAGES:

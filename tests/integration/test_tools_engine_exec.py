@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import shlex
+import shutil
 import sys
 from pathlib import Path
 from typing import Any
@@ -796,7 +797,7 @@ async def test_a_write_reports_the_lint_findings_of_the_written_file(sessionmake
     pol.verifier.lint_commands = {"python": "! grep -Hn UNUSED {files}"}
     h = await make_harness(sessionmaker, repo, contract=scope(**SCOPE), policy=pol)
     res = await h.call("write_file", path="src/calc.py", content="import os\nUNUSED = 1\n")
-    assert res.ok and "lint, run as the verifier runs it" in res.output and "src/calc.py:2:" in res.output, res.output
+    assert res.ok and "syntax and lint, checked as the verifier checks them" in res.output and "src/calc.py:2:" in res.output, res.output
     assert res.data.get("lint_findings") is True
     fixed = await h.call("replace_text", path="src/calc.py", old="UNUSED = 1", new="USED = 1")
     assert fixed.ok and "lint" not in fixed.output, fixed.output
@@ -807,6 +808,24 @@ async def test_a_write_reports_the_lint_findings_of_the_written_file(sessionmake
     pol.verifier.lint_commands = {"python": "exit 127"}
     h = await make_harness(sessionmaker, repo, contract=scope(**SCOPE), policy=pol)
     assert "lint" not in (await h.call("write_file", path="src/calc.py", content="UNUSED = 3\n")).output
+
+
+async def test_a_write_reports_the_syntax_errors_of_the_written_file(sessionmaker: SM, repo: Path) -> None:
+    """BUG-326 (ladder A9#5): a missing "}" in a PowerShell function survived 35 turns – nothing parsed the script the
+    coder wrote. A write now carries the verifier's syntax findings: parsers that run here (JSON) directly, the others
+    (bash -n, the PowerShell parser) as one sandbox command per language; a parser missing from the image adds nothing."""
+    h = await make_harness(sessionmaker, repo, contract=scope(target_paths=["src/calc.py"], allowed_new_paths=["src/*"]))
+    res = await h.call("write_file", path="src/config.json", content='{"a": [1, 2}\n')
+    assert res.ok and "syntax and lint" in res.output and "src/config.json:" in res.output, res.output
+    res = await h.call("write_file", path="src/run.sh", content="#!/bin/bash\nif true; then echo hi\n")
+    assert res.ok and "syntax and lint" in res.output and "bash -n" in res.output, res.output
+    fixed = await h.call("write_file", path="src/run.sh", content="#!/bin/bash\nif true; then echo hi; fi\n")
+    assert fixed.ok and "syntax and lint" not in fixed.output, fixed.output
+    ps = await h.call("write_file", path="src/report.ps1", content="function Get-Report {\n  'x'\n")
+    if shutil.which("pwsh") is None:
+        assert ps.ok and "syntax and lint" not in ps.output, ps.output
+    else:
+        assert "Missing closing '}'" in ps.output, ps.output
 
 
 async def test_complete_step_reruns_the_check_the_correction_names(sessionmaker: SM, repo: Path) -> None:

@@ -4,6 +4,11 @@ Format: [Keep a Changelog](https://keepachangelog.com/de/1.1.0/), Versionen nach
 
 ## [Unreleased]
 
+## [0.1.0rc75] – Release Candidate (2026-10-23)
+
+### Behoben
+- **Syntaxprüfung für PowerShell und nach jedem Schreiben (BUG-326):** Der Verifier parst PowerShell-Skripte mit dem PowerShell-Parser im Sandbox-Image (Zeile und Spalte je Fehler). Jedes Schreiben meldet Syntaxfehler der geschriebenen Datei sofort, für alle Sprachen mit Parser (JSON, YAML, TOML, Python, PHP, JavaScript, Shell, PowerShell).
+
 ## [0.1.0rc74] – Release Candidate (2026-10-23)
 
 ### Behoben

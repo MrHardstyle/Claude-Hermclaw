@@ -2024,13 +2024,16 @@ class ToolEngine:
         return out
 
     async def _lint_after_write(self, result: ToolResult, ctx: CallContext, events: list[PendingEvent]) -> ToolResult:
-        """The verifier's lint findings in the files just written, added to the write's result: Agents-A1 (tournament
-        A3) learned of an unused import only at complete_step, fixed one of two findings and spent seven turns calling
-        ruff with invented options (BUG-302). A lint that cannot run here adds nothing."""
-        commands = await self._lint_commands(result.mutated_paths)
-        if not commands or ctx.turn >= self.max_turns:
+        """The verifier's syntax and lint findings in the files just written, added to the write's result: Agents-A1
+        (tournament A3) learned of an unused import only at complete_step, fixed one of two findings and spent seven
+        turns calling ruff with invented options (BUG-302); a missing "}" in a PowerShell function survived two attempts
+        of A9 because nothing parsed the script (BUG-326). A check that cannot run here adds nothing."""
+        from hermclaw.verifier.syntax import ESM_HINTS
+
+        if ctx.turn >= self.max_turns:
             return result
-        found: list[str] = []
+        found, syntax = await asyncio.to_thread(self._syntax_after_write, result.mutated_paths or [])
+        commands = [*syntax, *await self._lint_commands(result.mutated_paths)]
         for command in commands:
             try:
                 run = await self._sandbox_run(
@@ -2046,14 +2049,44 @@ class ToolEngine:
                 continue
             if run.sandbox_failed or run.result is None or run.result.timed_out or run.result.exit_code in (0, 126, 127):
                 continue
+            if command in syntax and any(h in run.result.stdout + run.result.stderr for h in ESM_HINTS):
+                continue  # node --check on ESM in a CommonJS context: the verifier skips it too
             found.append(self._render_run(command, run, budget=self.output_limit // 2, head_ratio=0.5)[0])
         if not found:
             return result
         note = (
-            "\n\nlint, run as the verifier runs it, finds problems in the file(s) just written. Fix every finding now "
+            "\n\nsyntax and lint, checked as the verifier checks them, find problems in the file(s) just written. Fix every finding now "
             "(the step cannot complete with them; if you are still writing the file in parts, finish it first):\n"
         )
         return result.model_copy(update={"output": result.output + note + "\n".join(found), "data": result.data | {"lint_findings": True}})
+
+    def _syntax_after_write(self, paths: Sequence[str]) -> tuple[list[str], list[str]]:
+        """The verifier's syntax check of written files (BUG-326): the findings of the parsers that run here (JSON, YAML,
+        TOML, Python – a language with a lint command is left to the lint) and one sandbox command per language whose
+        parser runs in the sandbox image (PHP, JavaScript, shell, PowerShell)."""
+        from hermclaw.verifier.checks import MAX_SYNTAX_FILE_BYTES
+        from hermclaw.verifier.languages import detect_language
+        from hermclaw.verifier.syntax import IN_PROCESS, SANDBOX_TOOLS, javascript_needs_compile_check, sandbox_check_command
+
+        linted = self.policies.verifier.lint_commands or {}
+        found: list[str] = []
+        sandbox: dict[str, list[str]] = {}
+        for rel in paths:
+            path = self.fs.root / rel
+            if not path.is_file() or path.stat().st_size > MAX_SYNTAX_FILE_BYTES:
+                continue
+            data = path.read_bytes()
+            language = detect_language(rel, data[:256])
+            if language is None or language in linted:
+                continue
+            text = data.decode("utf-8", errors="replace")
+            if language in IN_PROCESS:
+                checked = IN_PROCESS[language](rel, text)
+                if checked.status == "fail":
+                    found.append(f"{rel}: {checked.message}")
+            elif language in SANDBOX_TOOLS and not (language == "javascript" and javascript_needs_compile_check(rel, text)):
+                sandbox.setdefault(language, []).append(rel)
+        return found, [sandbox_check_command(lang, files) for lang, files in sorted(sandbox.items())]
 
     async def _lint_commands(self, paths: list[str] | None = None) -> list[str]:
         """The verifier's lint commands for the files changed now, or for ``paths`` – a review correction on K1 (cycle

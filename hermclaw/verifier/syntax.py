@@ -32,7 +32,7 @@ from hermclaw.verifier.report import EXECUTOR_ERROR
 SYNTAX_TIMEOUT_SECONDS = 300
 _TEMPLATE_MARKERS = ("{{", "{%")
 _JSX = re.compile(r"(?:^|[=(,:?&|]\s*|return\s+)<[A-Za-z][\w.]*(?:\s[^<>]*)?/?>|</[A-Za-z][\w.]*>", re.M)
-_ESM_HINTS = ("Cannot use import statement outside a module", "ERR_REQUIRE_ESM", "Unexpected token 'export'")
+ESM_HINTS = ("Cannot use import statement outside a module", "ERR_REQUIRE_ESM", "Unexpected token 'export'")
 
 
 @dataclass
@@ -195,12 +195,31 @@ async def check_shell_local(root: Path, paths: Sequence[str], *, timeout_seconds
 
 
 # ------------------------------------------------------------------------------------------- sandbox batches
+# The script for ``pwsh -Command`` in single quotes (so no single quote inside); braces doubled for str.format.
+PWSH_PARSE = (
+    "$errs = $null; $null = [System.Management.Automation.Language.Parser]::ParseFile("
+    "[IO.Path]::GetFullPath($env:HC_SYNTAX_PATH), [ref]$null, [ref]$errs); "
+    'foreach ($e in $errs) {{ "$($env:HC_SYNTAX_PATH): line $($e.Extent.StartLineNumber), '
+    'column $($e.Extent.StartColumnNumber): $($e.Message)" }}; '
+    "if ($errs.Count) {{ exit 1 }}"
+)
 SANDBOX_TOOLS: dict[str, tuple[str, str]] = {
     # language -> (tool, command template applied to one quoted "./path")
     "php": ("php", "php -l {path}"),
     "javascript": ("node", "node --check {path}"),
     "shell": ("bash", "bash -n {path}"),
+    # the PowerShell parser without running the script: every parse error with its line (BUG-326 – a missing "}" in a
+    # function survived two attempts of A9 because the verifier skipped .ps1 files and the coder never ran the script)
+    "powershell": ("pwsh", "HC_SYNTAX_PATH={path} pwsh -NoLogo -NoProfile -NonInteractive -Command '" + PWSH_PARSE + "'"),
 }
+
+
+def sandbox_check_command(language: str, paths: Sequence[str]) -> str:
+    """One shell command that parses ``paths`` with the language's checker and fails when one does not parse; it passes
+    when the tool is not in the sandbox image (the write-time syntax feedback of BUG-326)."""
+    tool, template = SANDBOX_TOOLS[language]
+    checks = " ".join(f"{template.format(path=shlex.quote('./' + rel))} || rc=1;" for rel in paths)
+    return f"command -v {tool} >/dev/null 2>&1 || exit 0; rc=0; {checks} exit $rc"
 
 
 def build_batch_script(language: str, paths: Sequence[str], nonce: str) -> str:
@@ -244,7 +263,7 @@ async def check_in_sandbox(runner: CommandRunner, language: str, paths: Sequence
             results.append(SyntaxResult(rel, language, "pass", f"{tool}: no syntax errors"))
         elif rc in (126, 127):
             results.append(SyntaxResult(rel, language, "skip", f"{tool} is not available in the sandbox image"))
-        elif language == "javascript" and any(h in text for h in _ESM_HINTS):
+        elif language == "javascript" and any(h in text for h in ESM_HINTS):
             results.append(SyntaxResult(rel, language, "skip", "module-type detection failed (ESM syntax in a CommonJS context)"))
         else:
             results.append(SyntaxResult(rel, language, "fail", f"{tool}: {text or 'syntax error'}", {"exit_code": rc}))

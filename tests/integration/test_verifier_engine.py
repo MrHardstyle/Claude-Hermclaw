@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import dataclasses
+import shutil
 from pathlib import Path
 from typing import Any
 
@@ -288,6 +289,30 @@ async def test_missing_sandbox_tool_skips_with_reason(sessionmaker: Any, tmp_pat
     check = by_name(outcome.report)["syntax:a.php"]
     assert check.status == "skip" and "not available" in check.message
     assert outcome.report.passed
+
+
+async def test_powershell_is_parsed_in_the_sandbox(sessionmaker: Any, tmp_path: Path) -> None:
+    """BUG-326 (ladder A9#5, rc74): a missing "}" in a PowerShell function survived two attempts – the verifier skipped
+    .ps1 files ("no syntax checker"). They are parsed by the PowerShell parser in the sandbox image now; without pwsh
+    the check is skipped with that reason."""
+    repo = init_repo(tmp_path / "repo", {"README.md": "x\n"})
+    write(repo, "scripts/report one.ps1", "function Get-Report {\n  'x'\n")
+    executor = WorkspaceShellExecutor()
+    outcome, *_ = await run(
+        sessionmaker,
+        repo,
+        step("documentation", scope_contract=scope(allowed_new_paths=["scripts/*.ps1"])),
+        verifier=make_verifier(sessionmaker, executor),
+        kind="documentation",
+    )
+    check = by_name(outcome.report)["syntax:scripts/report one.ps1"]
+    assert "no syntax checker" not in check.message
+    commands = [r.command for r in executor.requests if "ParseFile" in r.command]
+    assert len(commands) == 1 and "HC_SYNTAX_PATH='./scripts/report one.ps1' pwsh" in commands[0]
+    if shutil.which("pwsh") is None:
+        assert check.status == "skip" and "pwsh is not available" in check.message, check.message
+    else:
+        assert check.status == "fail" and "line 1" in check.message and "Missing closing '}'" in check.message, check.message
 
 
 # ------------------------------------------------------------------------------------------- 21.3 compile / 21.4 lint

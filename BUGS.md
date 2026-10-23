@@ -46,6 +46,12 @@ Noch keine.
 
 ## Behobene Bugs
 
+### BUG-326 – PowerShell-Skripte werden nie geparst; ein Syntaxfehler überlebt zwei Versuche
+- Phase: Schwierigkeitsleiter auf rc74, 2026-10-23 (A9#5, Job c2eadea1) · Komponente: verifier (`syntax.py`, `checks.py`), tools (`engine.py`) · Severity: P2 · blockierend: nein · Status: **behoben im Repository** (`tests/integration/test_verifier_engine.py::test_powershell_is_parsed_in_the_sandbox`, `tests/integration/test_tools_engine_exec.py::test_a_write_reports_the_syntax_errors_of_the_written_file`)
+- Reproduktion: In `function Get-ServiceReport {` fehlt die schließende Klammer. Der Verifier meldet „no syntax checker for powershell“ und überspringt die Datei. Der Coder arbeitet 2 Versuche und 35 Züge weiter, ohne den Fehler zu sehen; der Job wird nach 20,5 min abgebrochen, versteckt 3/10.
+- Ursache: Für PowerShell gab es keinen Syntaxprüfer, obwohl `pwsh` im Sandbox-Image liegt. Nach dem Schreiben lief nur der Lint, und den gibt es nur für Python; Syntaxfehler anderer Sprachen sah der Coder erst, wenn ein Test oder Lauf scheiterte.
+- Fix: Allgemein für alle Sprachen mit Parser. Der Verifier parst `.ps1`/`.psm1` mit dem PowerShell-Parser (`[Parser]::ParseFile`) im Sandbox-Image und meldet jeden Fehler mit Zeile und Spalte; ohne `pwsh` wird übersprungen. Jede Sprache in `SANDBOX_TOOLS` wird so geroutet. Jedes Schreiben (`write_file`, `replace_text`, `apply_patch`) prüft die geschriebenen Dateien jetzt auch auf Syntax, wie der Verifier: JSON, YAML, TOML und Python direkt (Python nur ohne Lint-Befehl), PHP, JavaScript, Shell und PowerShell mit einem Sandbox-Befehl je Sprache. Ein Parser, der im Image fehlt, fügt nichts hinzu.
+
 ### BUG-325 – Der Coder sieht passendes Wissen erst nach einem Fehlschlag
 - Phase: Schwierigkeitsleiter auf rc73, 2026-10-23 (A9#4, Job 2a8f51a9) · Komponente: coder (`handler.py`), context_builder (`render.py`) · Severity: P2 · blockierend: nein · Status: **behoben im Repository** (`tests/integration/test_coder_handler.py::test_the_coder_gets_the_knowledge_that_fits_its_step_from_the_first_turn`)
 - Reproduktion: Die Konvention „`$items | ConvertTo-Json` macht aus einem Element ein Objekt“ ist aktiv, der Planer ruft sie für A9 ab. Der Plan nennt sie nicht, und der Coder schreibt wieder `$result | ConvertTo-Json`. Versteckt 6/10: ein Dienst, kein Dienst und `-OutFile` scheitern.
