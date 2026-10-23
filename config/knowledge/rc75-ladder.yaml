@@ -1,4 +1,4 @@
-# Operator knowledge from the difficulty ladder on 0.1.0rc73–rc76 (2026-10-23, D-020).
+# Operator knowledge from the difficulty ladder on 0.1.0rc73–rc77 (2026-10-23, D-020).
 # Import: hermclaw memory-import config/knowledge/rc75-ladder.yaml (existing titles are skipped).
 # Every entry names the runs it comes from; edit or retire it on the page "Wissen".
 
@@ -41,3 +41,17 @@
     exit code stays 0 when tests fail.
     Seen: ladder A9 #7 on rc76 (coder-main) – the script was right (hidden checks 9/10), all ten own tests failed for
     three attempts; one run without -CI looked green and the step was completed on it.
+
+- kind: convention
+  title: "PowerShell: ConvertTo-Json writes enum properties as numbers – select the fields and convert them to text"
+  tags: [powershell, json, enums, tests]
+  content: |
+    `Get-Service | ConvertTo-Json` (or any object with enum properties) writes `Status` as 4 and `StartType` as 2, not
+    "Running"/"Automatic", and it carries every other property of the object as well. Build the output yourself:
+    `[PSCustomObject]@{ Name = $_.Name; Status = $_.Status.ToString(); StartType = "$($_.StartType)" }` with exactly
+    the fields asked for (`ConvertTo-Json -EnumsAsStrings` exists only in PowerShell 7).
+    Tests cannot find this with mocks that return strings: let the mock return the real enum values, e.g.
+    `Status = [System.ServiceProcess.ServiceControllerStatus]::Running` (on Linux an `enum` defined in the test with
+    the same names works too), and check `$json | Should -Match '"Status":\s*"Running"'`.
+    Seen: ladder A9 #8 on rc77 (coder-main) – the script piped the service objects into ConvertTo-Json; the own tests
+    mocked Status as text and passed, the hidden check got "Status of Alpha: 4".
