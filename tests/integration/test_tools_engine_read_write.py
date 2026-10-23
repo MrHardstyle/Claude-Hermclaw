@@ -124,6 +124,25 @@ async def test_a_repeated_read_brings_the_lines_after_it_once(sessionmaker: SM, 
     assert (await h.call("read_range", path="app.py", start=100, end=160)).error_code == E.READ_REPEATED
 
 
+async def test_a_file_that_does_not_parse_is_named_with_its_line_when_read_or_left_behind(sessionmaker: SM, repo: Path) -> None:
+    """Ladder A10 #9 (BUG-343): db.py was written with an unclosed string literal; the coder wrote seven more files and
+    then read it 22 times in four attempts before fixing it. A read of the file, a write of another file
+    and a failed command name the line the parser points at."""
+    h = await make_harness(sessionmaker, repo, contract=scope(target_paths=["db.py", "app.py", "conf.json"]))
+    broken = 'import sqlite3\n\n\ndef connect():\n    return sqlite3.connect(\n        "tasks.db\n    )\n'
+    assert (await h.call("write_file", path="db.py", content=broken)).ok
+    other = await h.call("write_file", path="app.py", content="from db import connect\n")
+    assert other.ok and "changed files that do not parse as they are now" in other.output
+    assert "db.py:6: SyntaxError: unterminated string literal" in other.output and '    6|         "tasks.db' in other.output
+    read = await h.call("read_range", path="db.py", start=1, end=7)
+    assert read.ok and "this file does not parse as it is now" in read.output and "db.py:6:" in read.output
+    again = await h.call("read_range", path="db.py", start=1, end=7)
+    assert again.error_code == E.READ_REPEATED and "db.py:6:" in again.output, "a refused re-read names it too"
+    assert "does not parse" not in (await h.call("read_file", path="app.py")).output
+    assert (await h.call("replace_text", path="db.py", old='"tasks.db\n', new='"tasks.db"\n')).ok
+    assert "does not parse" not in (await h.call("write_file", path="conf.json", content='{"a": 1}\n')).output
+
+
 async def test_a_part_of_a_visible_read_is_refused_until_a_file_changes(sessionmaker: SM, repo: Path) -> None:
     """Live G1 (BUG-244): the coder read collector.py 100-160, then 110-160, then 110-145 – each a part of what the
     context already showed – one ~45 s turn per read. A range inside a fully visible read of the window is refused."""

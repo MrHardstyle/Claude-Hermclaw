@@ -124,6 +124,7 @@ PIPEFAIL = "(set -o pipefail) 2>/dev/null && set -o pipefail"
 READ_REPEAT_WINDOW = 6  # turns; the context shows the files of the last 6 reads (context_builder ``_read_spans``)
 READ_VISIBLE_LINES = 400  # the context shows at most this many lines of one read (context_builder ``max_snippet_lines``)
 READ_FOLLOW_MIN_LINES = 60  # lines after a repeated read that the coder is given instead of a refusal (BUG-342)
+PARSE_FAILURES_SHOWN = 3  # files that do not parse, named after a write or a failed command (BUG-343)
 IMAGE_CONSTRAINTS = "/tmp/hermclaw-image-constraints.txt"  # noqa: S108 - path inside the sandbox
 PYTHON_DEPS_DIR = "/deps/python"
 
@@ -463,7 +464,8 @@ class ToolEngine:
                     )
                 )
                 raise
-            result = await self._with_code_knowledge(await self._with_failure_knowledge(self._finalise(result), ctx), action.args)
+            result = await self._with_parse_failures(self._finalise(result), action.args)
+            result = await self._with_code_knowledge(await self._with_failure_knowledge(result, ctx), action.args)
             if result.ok and result.terminal:
                 self._finished_by = spec.name
             duration = _duration_ms(started)
@@ -972,6 +974,56 @@ class ToolEngine:
         return result.model_copy(
             update={"output": result.output + note, "data": result.data | {"knowledge": [str(h.id) for h in hits[:want]]}}
         )
+
+    async def _with_parse_failures(self, result: ToolResult, args: Mapping[str, Any]) -> ToolResult:
+        """Files that do not parse, named with the line the parser points at (BUG-343): a write of ``db.py`` left an
+        unclosed string literal; the lint note after it came while the coder was writing seven more files, and later it
+        read it 22 times in four attempts without seeing the quote that was missing. A read of such a
+        file says so, as does a write of another file and a failed command while a changed file does not parse."""
+        tool = result.tool
+        if tool in (ToolName.read_file, ToolName.read_range) and (result.ok or result.error_code == E.READ_REPEATED):
+            try:
+                paths = [self.fs.resolve(str(args.get("path", "")))[0]]
+            except ToolError:
+                return result
+            head = "this file does not parse as it is now – fix this first, the lines read show it as it is:"
+        elif (tool in MUTATING_TOOLS and result.ok) or (tool in (ToolName.run_command, ToolName.run_test) and not result.ok):
+            done = set(result.mutated_paths or [])  # the lint after the write names their findings
+            paths = [f for f in await self._changed_files() or [] if f not in done]
+            head = "changed files that do not parse as they are now – nothing that loads them can run; fix them first:"
+        else:
+            return result
+        found = [f for rel in paths if (f := await asyncio.to_thread(self._parse_failure, rel))]
+        if not found:
+            return result
+        note = self.redactor.text("\n\n" + head + "\n" + "\n".join(found[:PARSE_FAILURES_SHOWN]))
+        return result.model_copy(update={"output": result.output + note, "data": result.data | {"parse_failures": len(found)}})
+
+    def _parse_failure(self, rel: str) -> str | None:
+        """The verifier's in-process parser on one file (Python, JSON, YAML, TOML): its message and the line it names."""
+        from hermclaw.verifier.checks import MAX_SYNTAX_FILE_BYTES
+        from hermclaw.verifier.languages import detect_language
+        from hermclaw.verifier.syntax import IN_PROCESS
+
+        path = self.fs.root / rel
+        try:
+            if self._hidden(rel) or not path.is_file() or path.stat().st_size > MAX_SYNTAX_FILE_BYTES:
+                return None
+            data = path.read_bytes()
+        except OSError:
+            return None
+        language = detect_language(rel, data[:256])
+        if language not in IN_PROCESS:
+            return None
+        text = data.decode("utf-8", errors="replace")
+        checked = IN_PROCESS[language](rel, text)
+        if checked.status != "fail":
+            return None
+        line = checked.evidence.get("line")
+        lines = text.splitlines()
+        if not isinstance(line, int) or not 0 < line <= len(lines):
+            return f"{rel}: {checked.message}"
+        return f"{rel}:{line}: {checked.message}\n{line:>5}| {lines[line - 1][:200]}"
 
     async def _with_code_knowledge(self, result: ToolResult, args: Mapping[str, Any]) -> ToolResult:
         """Lessons and conventions whose code patterns (tags ``code:<regex>``) match what a write just put into a file,

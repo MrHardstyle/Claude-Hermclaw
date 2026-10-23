@@ -145,6 +145,17 @@ async def test_run_command_executes_persists_and_redacts(sessionmaker: SM, repo:
     assert (await tool_calls(sessionmaker, h.step.id))[-1].status == "failed"
 
 
+async def test_a_failed_command_names_a_changed_file_that_does_not_parse(sessionmaker: SM, repo: Path) -> None:
+    """Ladder A10 #9 (BUG-343): pytest failed at collection because db.py had an unclosed string literal; the failure
+    names the changed file and the line, a run that passes does not."""
+    h = await make_harness(sessionmaker, repo)
+    (repo / "src" / "calc.py").write_text("def add(a, b):\n    return (a +\n")
+    failed = await h.call("run_command", command="exit 3")
+    assert failed.error_code == E.COMMAND_FAILED and "changed files that do not parse as they are now" in failed.output
+    assert "src/calc.py:2: SyntaxError:" in failed.output and "    2|     return (a +" in failed.output
+    assert "does not parse" not in (await h.call("run_command", command="true")).output
+
+
 async def test_a_failing_command_piped_into_tail_is_a_failed_run(sessionmaker: SM, repo: Path) -> None:
     """Live G1 (BUG-267): 'python -m pytest -q test_collector.py 2>&1 | tail -80' exited 0 with 28 failing tests; the
     repeat guard called it a success and the runtime completed the step. A pipeline reports its first failing command."""

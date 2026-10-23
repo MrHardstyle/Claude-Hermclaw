@@ -4,6 +4,11 @@ Format: [Keep a Changelog](https://keepachangelog.com/de/1.1.0/), Versionen nach
 
 ## [Unreleased]
 
+## [0.1.0rc87] – Release Candidate (2026-10-23)
+
+### Behoben
+- **Syntaxfehler bleibt unerkannt (BUG-343):** Lesen einer Datei, die nicht parst, Schreiben einer anderen Datei und gescheiterte Befehle nennen die Datei mit Zeile und Parsermeldung.
+
 ## [0.1.0rc86] – Release Candidate (2026-10-23)
 
 ### Behoben
