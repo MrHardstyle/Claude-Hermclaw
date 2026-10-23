@@ -958,11 +958,13 @@ def test_a_job_literal_no_step_names_goes_into_the_step_that_delivers_it() -> No
     from hermclaw.planner.validation import carry_job_literals
 
     text = "Schreibe eine REST-API für Notizen in notes_api/server.py. Jede Anfrage braucht den Header "
-    text += "`Authorization: Bearer <token>`. Fehler antworten mit `{\"error\": \"...\"}`.\n"
+    text += '`Authorization: Bearer <token>`. Fehler antworten mit `{"error": "..."}`.\n'
     text += "Beschreibe die Endpunkte in docs/api.md, mit Beispiel `curl -H X`."
     ctx = ValidationContext.build(get_config(), FASTAPI.inputs, PlannerSettings(), job_text=text)
     api = _impl("S001", goal="Implement the notes REST API with token authentication.", allowed_new_paths=["notes_api/server.py"])
-    docs = step("S002", "documentation", "documentation", "Document every endpoint.", depends_on=["S001"], allowed_new_paths=["docs/api.md"])
+    docs = step(
+        "S002", "documentation", "documentation", "Document every endpoint.", depends_on=["S001"], allowed_new_paths=["docs/api.md"]
+    )
     check = step("S003", "test", "testing", "Run the API tests.", depends_on=["S001"])
     data = plan("goal", [api, docs, check])
     assert [e for e in _errors(data, ctx) if "the job names" in e], "without the fix: a repair turn"
@@ -1022,3 +1024,31 @@ def test_a_step_creating_more_files_than_one_attempt_can_write_is_split() -> Non
     errors = _errors(plan("goal", [_impl(allowed_new_paths=files)]), ctx)
     assert any("creates 9 new files" in e and "split it by component" in e for e in errors)
     assert not any("new files" in e for e in _errors(plan("goal", [_impl(allowed_new_paths=files[:8])]), ctx))
+
+
+def test_a_file_the_job_names_without_a_path_goes_into_the_step_that_delivers_it() -> None:
+    """BUG-333 (ladder A10 #1 on rc78): "Die README beschreibt die neuen Felder" – the only implement step named no
+    README, the verify step listed README.md as a file not to change, and the README stayed as it was."""
+    from hermclaw.planner.validation import carry_job_named_files
+
+    text = "Ergänze `limit` und `offset` am Users-Endpunkt.\n- Die README beschreibt\n  die neuen Parameter."
+    ctx = ValidationContext.build(get_config(), FASTAPI.inputs, PlannerSettings(), job_text=text)
+    api = _impl("S001", goal="Add limit and offset to list_users.")
+    check = step("S002", "test", "testing", "Run the tests.", depends_on=["S001"])
+    check["acceptance"] = [{"type": "diff", "allow_empty": True, "must_not_change": ["README.md"]}]
+    fixed, notes = carry_job_named_files(PlanContract.model_validate(plan("goal", [api, check])), ctx)
+    s1, s2 = fixed.steps
+    assert s1.goal == (
+        "Add limit and offset to list_users. Files the job names: `README.md`. "
+        "The job also asks: Die README beschreibt die neuen Parameter."
+    )
+    assert s1.repo_hints == ["app/routers/users.py", "README.md"]
+    assert s2.goal == "Run the tests." and notes == ["step S001: file(s) the job names 'README.md' added to goal and hints"]
+    assert carry_job_named_files(fixed, ctx) == (fixed, [])  # named now: unchanged
+
+    docs = step("S002", "documentation", "documentation", "Update the README.", depends_on=["S001"])
+    named = PlanContract.model_validate(plan("goal", [api, docs]))
+    assert carry_job_named_files(named, ctx) == (named, []), "a step that names it by its stem delivers it"
+    code_only = ValidationContext.build(get_config(), FASTAPI.inputs, PlannerSettings(), job_text="Die models und users ändern.")
+    plain = PlanContract.model_validate(plan("goal", [_impl("S001", goal="Change things.")]))
+    assert carry_job_named_files(plain, code_only) == (plain, []), "code files reach the coder through imports"

@@ -44,6 +44,7 @@ TurnRecord(turn, tool, args_digest="", ok=True, result_digest="", error_code=Non
 TurnRecord.from_mapping(row)                     # unknown keys (status/decision/reasoning …) are ignored
 CorrectionItem(source, label, message, path="", suggested_fix="")
 CorrectionItem.from_verification(VerificationReport) / .from_review(ReviewContract)   # blocking failures / severity order
+# from_review clips summary, evidence and fix to 800 chars each and cuts untagged model deliberation (BUG-332)
 ContextBuilderConfig.from_config(HermclawConfig, role="coder", **overrides)
 ContextReport.to_event_payload() -> dict          # caller decides the event type
 await record_context_report(session, report, event_type=..., job_id=, step_id=, attempt_id=, source_id=)

@@ -1,0 +1,28 @@
+# Operator knowledge from the difficulty ladder on 0.1.0rc78 (2026-10-23, D-020), stage A10 (extending a Python web app).
+# Import: hermclaw memory-import config/knowledge/rc78-ladder.yaml (existing titles are skipped).
+# Every entry names the runs it comes from; edit or retire it on the page "Wissen".
+
+- kind: convention
+  title: "Partial update (PATCH): change only the fields present in the body – a missing field is not null"
+  tags: [python, api, http, patch, rest, validation]
+  content: |
+    `data.get("due")` returns None both for `{"due": null}` (remove the date) and for a body without `due` (keep it);
+    passing it on clears the field on every PATCH that does not name it. Tell the cases apart with `"due" in data` or a
+    sentinel (`_UNSET = object()`; `def update_task(task_id, *, title=_UNSET, done=_UNSET, due=_UNSET)`), and build the
+    UPDATE only from the fields given. Validate every given field before writing any (an invalid one → 400, nothing
+    changes), reject an empty object and unknown keys, and pass every validated field on – also `title`. Test a PATCH
+    of one field and assert the other fields kept their values.
+    Seen: ladder A10 #1 on rc78 (coder-main) – PATCH {"done": true} cleared `due`, and a validated `title` was never
+    passed to the database function.
+
+- kind: convention
+  title: "After an UPDATE return the row read afterwards – not the row read before the change"
+  tags: [python, sqlite3, sql, database, api]
+  content: |
+    A function that reads the row (to check it exists), runs the UPDATE and then returns a dict built from the first
+    read answers with the old values: PATCH {"done": true} responds `"done": false` although the database holds true.
+    Check existence first (`cursor.rowcount == 0` after the UPDATE, or a SELECT before), commit, then SELECT the row
+    again and return that. A test that changes a field and asserts the response shows the new value finds it; when such
+    a test keeps failing, print the row before and after the UPDATE instead of re-running the test unchanged.
+    Seen: ladder A10 #1 on rc78 (coder-main) – `update_task` returned the row it fetched before the UPDATE; the same
+    two tests failed in two attempts, the coder re-ran them four times unchanged and the step stagnated.

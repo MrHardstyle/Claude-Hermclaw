@@ -755,9 +755,19 @@ _SENTENCE_END = re.compile(r"(?<=[.!?:])\s+|\n+")
 _WORD = re.compile(r"[A-Za-zÄÖÜäöüß][\wÄÖÜäöüß-]{3,}")
 
 
+_WRAPPED_LINE = re.compile(r"[ \t]*\n[ \t]*(?![-*•][ \t])")
+
+
+def _job_sentences(job_text: str) -> list[str]:
+    """The sentences of the job; a line that continues a wrapped sentence joins it, a list item starts a new one
+    ("Die README beschreibt⏎die neuen Felder" is one sentence, BUG-333)."""
+    sentences = (s.strip().lstrip("-*•").strip() for s in _SENTENCE_END.split(_WRAPPED_LINE.sub(" ", job_text)))
+    return [s for s in sentences if s]
+
+
 def _literal_context(literal: str, job_text: str) -> str:
     """The job sentence(s) naming ``literal`` – they say which part of the work it belongs to."""
-    return " ".join(s for s in _SENTENCE_END.split(job_text) if literal in s) or literal
+    return " ".join(s for s in _job_sentences(job_text) if literal in s) or literal
 
 
 def _delivering_step(literal: str, steps: Sequence[PlanStep], ctx: ValidationContext) -> PlanStep:
@@ -796,6 +806,79 @@ def carry_job_literals(plan: PlanContract, ctx: ValidationContext) -> tuple[Plan
 
     updated = [with_literals(s, carried[s.id]) if s.id in carried else s for s in plan.steps]
     notes = [f"step {sid}: job literal(s) {', '.join(repr(lit) for lit in lits)} added to the goal" for sid, lits in carried.items()]
+    return plan.model_copy(update={"steps": updated}), notes
+
+
+# documentation, page and configuration files: code files reach the coder through imports and the files it changes,
+# these drop out of a plan unnoticed
+_NAMED_FILE_SUFFIXES = frozenset(
+    {"md", "rst", "txt", "adoc", "html", "htm", "css", "yaml", "yml", "toml", "json", "ini", "cfg", "conf", "xml", "csv"}
+)
+
+
+def _named_files(ctx: ValidationContext) -> dict[str, str]:
+    """Existing documentation, page and configuration files the job names by their stem without a path – "Die README
+    beschreibt …" → README.md, "das Dockerfile" → Dockerfile – each with the job sentence(s) naming it. A stem shared
+    by more than two files is ambiguous and left out."""
+    by_stem: dict[str, list[str]] = {}
+    for path in ctx.known_paths:
+        name = path.rsplit("/", 1)[-1]
+        stem, _, suffix = name.partition(".")
+        if ctx.is_known_dir(path) or not stem or stem.startswith("_"):
+            continue
+        if not suffix or suffix.rsplit(".", 1)[-1].lower() in _NAMED_FILE_SUFFIXES:
+            by_stem.setdefault(stem, []).append(path)
+    out: dict[str, str] = {}
+    for stem, paths in by_stem.items():
+        if len(paths) > 2 or not _names_component(stem, ctx.job_text):
+            continue
+        sentences = [s for s in _job_sentences(ctx.job_text) if _names_component(stem, s)]
+        for path in paths:
+            out[path] = " ".join(sentences)
+    return out
+
+
+def carry_job_named_files(plan: PlanContract, ctx: ValidationContext) -> tuple[PlanContract, list[str]]:
+    """Give an existing file the job names but no workspace-changing step names to the step that delivers it: the
+    file joins its hints and the job sentence its goal.
+
+    Ladder A10 #1 on rc78: the job said "Die README beschreibt die neuen Felder und Parameter"; the plan's own goal
+    promised to "update the web UI and README", yet its only implement step named neither and only the verify step
+    listed README.md – as a file not to change. The coder worked to the step's demands, and the README stayed as it
+    was (BUG-333). A name without a path is no literal (``job_literals``), so this compares it with the files of the
+    repository; a step that names the file – also as a file it must not change – is the planner's decision."""
+    named = _named_files(ctx)
+    steps = [s for s in plan.steps if s.kind.value in WORKSPACE_MUTATING_KINDS]
+    if not named or not steps:
+        return plan, []
+    raw = "\n".join(_strings([s.model_dump(mode="json", exclude={"id", "depends_on"}) for s in steps]))
+    text = raw.lower()
+
+    def stem(path: str) -> str:
+        return path.rsplit("/", 1)[-1].split(".", 1)[0]
+
+    missing = {
+        p: sentence
+        for p, sentence in named.items()
+        if p.lower() not in text and p.rsplit("/", 1)[-1].lower() not in text and not _names_component(stem(p), raw)
+    }
+    if not missing:
+        return plan, []
+    carried: dict[str, list[str]] = {}
+    for path in missing:
+        carried.setdefault(_delivering_step(stem(path), steps, ctx).id, []).append(path)
+
+    def with_files(step: PlanStep, paths: list[str]) -> PlanStep:
+        sentences = list(dict.fromkeys(missing[p] for p in paths if missing[p]))
+        asks = f" The job also asks: {' '.join(sentences)}" if sentences else ""
+        goal = f"{step.goal.rstrip()} Files the job names: {', '.join(f'`{p}`' for p in paths)}.{asks}"
+        hints = [*step.repo_hints, *(p for p in paths if p not in step.repo_hints)]
+        return step.model_copy(update={"goal": goal[:4000], "repo_hints": hints})
+
+    updated = [with_files(s, carried[s.id]) if s.id in carried else s for s in plan.steps]
+    notes = [
+        f"step {sid}: file(s) the job names {', '.join(repr(p) for p in paths)} added to goal and hints" for sid, paths in carried.items()
+    ]
     return plan.model_copy(update={"steps": updated}), notes
 
 

@@ -31,7 +31,7 @@ from hermclaw.contracts.review import ReviewContract, ReviewFinding
 from hermclaw.contracts.scope import ScopeContract, normalise_path
 from hermclaw.contracts.step import StepContract
 from hermclaw.contracts.verification import VerificationCheck, VerificationReport
-from hermclaw.review.text import clip, compact_json, one_line, redact, strip_reasoning
+from hermclaw.review.text import clip, compact_json, cut_self_talk, one_line, redact, strip_reasoning
 from hermclaw.review.types import BLOCKING_SEVERITIES, EMPTY_DIFF, SEVERITY_RANK, ReviewOutcome
 
 CORRECTION_REQUEST_KIND = "correction_request"
@@ -493,15 +493,15 @@ def _review_findings(review: ReviewContract | None, lim: CorrectionLimits) -> li
 
 def _finding(f: ReviewFinding, lim: CorrectionLimits) -> CorrectionFinding:
     path = _canonical(f.path) if f.path else ""
-    summary = one_line(redact(strip_reasoning(f.summary)))
+    summary = one_line(redact(cut_self_talk(strip_reasoning(f.summary))))
     if f.path and not path:
         summary = f"{summary} (cited path {clip(one_line(redact(f.path)), 120)!r} is not a repository path)"
     return CorrectionFinding(
         severity=f.severity,
         summary=clip(summary, lim.summary_chars),
         path=path,
-        evidence=clip(redact(strip_reasoning(f.evidence)).strip(), lim.evidence_chars),
-        suggested_fix=clip(one_line(redact(strip_reasoning(f.suggested_fix))), lim.fix_chars),
+        evidence=clip(redact(cut_self_talk(strip_reasoning(f.evidence))).strip(), lim.evidence_chars),
+        suggested_fix=clip(one_line(redact(cut_self_talk(strip_reasoning(f.suggested_fix)))), lim.fix_chars),
     )
 
 

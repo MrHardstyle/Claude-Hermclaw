@@ -76,15 +76,23 @@ class CorrectionItem:
         return items
 
     @classmethod
-    def from_review(cls, review: ReviewContract) -> list[CorrectionItem]:
+    def from_review(cls, review: ReviewContract, chars: int = 800) -> list[CorrectionItem]:
+        """One item per finding, each text clipped to ``chars`` and cut before untagged model deliberation, as the
+        correction request does it: the stored finding may hold 4 KB of evidence, and a blocker's 3.6 KB of
+        self-talk reached the coder whole (ladder A10 #1, BUG-332)."""
+        from hermclaw.review.text import clip, cut_self_talk  # the review package builds on this module's types
+
+        def text(value: str) -> str:
+            return clip(cut_self_talk(strip_reasoning(value or "")).strip(), chars)
+
         findings = sorted(enumerate(review.findings), key=lambda t: (_SEVERITY_ORDER.get(str(t[1].severity), 9), t[0]))
         return [
             cls(
                 source="review",
                 label=str(f.severity),
-                message=f.summary + (f" — evidence: {f.evidence}" if f.evidence else ""),
+                message=text(f.summary) + (f" — evidence: {text(f.evidence)}" if f.evidence.strip() else ""),
                 path=f.path,
-                suggested_fix=f.suggested_fix,
+                suggested_fix=text(f.suggested_fix),
             )
             for _, f in findings
         ]

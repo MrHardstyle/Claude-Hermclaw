@@ -13,6 +13,13 @@ _REASONING_TAGS = "think|thinking|reasoning|thought|scratchpad"
 _REASONING_BLOCK = re.compile(rf"<(?P<tag>{_REASONING_TAGS})\b[^>]*>.*?(?:</(?P=tag)\s*>|\Z)", re.IGNORECASE | re.DOTALL)
 _REASONING_CLOSE = re.compile(rf"^.*?</(?:{_REASONING_TAGS})\s*>", re.IGNORECASE | re.DOTALL)
 _WS = re.compile(r"\s+")
+# untagged self-talk of a reasoning model at the start of a sentence: "Wait, …", "Let's look closer.", "Why does it fail?"
+_SELF_TALK = re.compile(
+    r"(?:^|(?<=[.?!:])[ \t]+|\n[ \t]*)"
+    r"(?:(?:Wait|Hmm+|Ah|Oh|Actually|Let me|Maybe|But wait|Okay, so)(?=[\s,.!])|"
+    r"Let'?s (?:look|check|see|think|trace|re-?check)\b|Why (?:does|did|is|would)\b|So the (?:issue|problem|question)\b)"
+)
+SELF_TALK_NOTE = "…[the model's own deliberation omitted]"
 _NOTE_RESERVE = 40
 
 
@@ -28,6 +35,17 @@ def strip_reasoning(text: str) -> str:
         return text
     out = _REASONING_BLOCK.sub("", text)
     return _REASONING_CLOSE.sub("", out).strip()
+
+
+def cut_self_talk(text: str) -> str:
+    """``text`` up to the first sentence of untagged model deliberation ("Wait, …", "Let's look closer.", "Why did
+    the test fail?"), with a note that the rest was left out. A reasoning model wrote 3.6 KB of such self-talk into the
+    evidence of a blocker finding, and the coder received it – with a wrong guess as its last word – as the fact to fix
+    (ladder A10 #1, BUG-332). Text that starts with self-talk is kept: there is nothing before it."""
+    match = _SELF_TALK.search(text or "")
+    if match is None or not text[: match.start()].strip():
+        return text
+    return f"{text[: match.start()].rstrip()} {SELF_TALK_NOTE}"
 
 
 def clip(text: str, limit: int, *, what: str = "chars") -> str:

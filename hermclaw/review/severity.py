@@ -23,7 +23,7 @@ from pydantic import ConfigDict, PrivateAttr, ValidatorFunctionWrapHandler, mode
 from hermclaw.contracts.common import FindingSeverity
 from hermclaw.contracts.review import ReviewContract, ReviewFinding
 from hermclaw.contracts.scope import normalise_path
-from hermclaw.review.text import clip, one_line, redact, strip_reasoning
+from hermclaw.review.text import clip, cut_self_talk, one_line, redact, strip_reasoning
 from hermclaw.review.types import SEVERITY_RANK
 
 MAX_FINDINGS = 50
@@ -202,6 +202,8 @@ def _normalise_raw_finding(raw: object, idx: int, notes: list[str]) -> dict[str,
         if name == "summary" and name not in out:
             continue  # a finding without summary stays invalid → repair
         text = _text(out.get(name))
+        if name != "path":
+            text = cut_self_talk(text)
         if len(text) > limit:
             notes.append(f"finding[{idx}]: {name} clipped")
         out[name] = clip(text, limit)

@@ -193,6 +193,24 @@ async def test_correction_evidence_alone_creates_failure_section() -> None:
     assert "suggested fix: use x + 3" in section
 
 
+def test_review_correction_items_are_clipped_and_without_self_talk() -> None:
+    """BUG-332 (ladder A10 #1 on rc78): the stagnation review's blocker reached the coder with 3.6 KB of evidence, most
+    of it the reviewer's own deliberation; the correction request clipped it, the coder's items did not."""
+    talk = "Code in db.py:88 returns `row` read before the UPDATE. Wait, let me check the API again. " + "x" * 3000
+    review = ReviewContract(
+        verdict="fix_required",
+        findings=[
+            ReviewFinding(severity=FindingSeverity.blocker, path="db.py", summary="stale row", evidence=talk, suggested_fix="y" * 2000)
+        ],
+    )
+    (item,) = CorrectionItem.from_review(review)
+    assert (
+        item.message
+        == "stale row — evidence: Code in db.py:88 returns `row` read before the UPDATE. …[the model's own deliberation omitted]"
+    )
+    assert len(item.suggested_fix) <= 800
+
+
 async def test_verifier_correction_items_carry_the_check_evidence() -> None:
     """Live G1 (BUG-247): the coder got "lint reported problems (exit code 1)" without the ruff output and fixed none
     of the unused imports in four attempts. A verifier item carries its evidence (output first), without the path."""

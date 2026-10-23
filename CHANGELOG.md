@@ -4,6 +4,13 @@ Format: [Keep a Changelog](https://keepachangelog.com/de/1.1.0/), Versionen nach
 
 ## [Unreleased]
 
+## [0.1.0rc79] – Release Candidate (2026-10-23)
+
+### Behoben
+- **Review-Befunde ohne Selbstgespräch des Modells (BUG-332):** Unmarkierte Überlegungen („Wait, …“, „Let's look closer.“, „Why does it fail?“) werden aus Zusammenfassung, Beleg und Vorschlag eines Befunds ab dem ersten solchen Satz entfernt, mit Hinweis. Die Korrektur-Einträge des Coders kürzen jeden Text auf 800 Zeichen, wie die Korrekturanforderung es schon tat.
+- **Dateien, die der Auftrag ohne Pfad nennt, kommen in den Plan (BUG-333):** Nennt der Auftrag eine Doku-, Seiten- oder Konfigurationsdatei des Repositorys nur beim Namen („die README“), und kein ändernder Schritt nennt sie, bekommt der liefernde Schritt sie als Hinweis und den Auftragssatz im Ziel – ohne Reparaturrunde des Planers.
+- **Wissen:** zwei Konventionen aus Leiterstufe A10 (`config/knowledge/rc78-ladder.yaml`): Teil-PATCH ändert nur übergebene Felder, nach einem UPDATE die neu gelesene Zeile zurückgeben.
+
 ## [0.1.0rc78] – Release Candidate (2026-10-23)
 
 ### Behoben

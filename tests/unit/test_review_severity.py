@@ -17,7 +17,7 @@ from hermclaw.review import (
     should_review,
 )
 from hermclaw.review.severity import MAX_FINDINGS, normalise_verdict, redact_review
-from hermclaw.review.text import clip, clip_lines, fence, strip_reasoning
+from hermclaw.review.text import SELF_TALK_NOTE, clip, clip_lines, cut_self_talk, fence, strip_reasoning
 from hermclaw.review.types import OVERRIDE_BLOCKING_FINDING, OVERRIDE_MINOR_ONLY, OVERRIDE_VERIFIER_FAILED
 
 
@@ -129,6 +129,31 @@ def test_draft_strips_reasoning_markup_and_caps_findings() -> None:
     assert draft.summary == "Summary text"
     assert len(draft.findings) == MAX_FINDINGS
     assert any(f.severity == FindingSeverity.blocker and f.summary == "the blocker" for f in draft.findings)  # most severe kept
+
+
+A10_EVIDENCE = (
+    "Command: python -m pytest -q tests/test_api.py -x\nResult: exit 1 (failure)\n"
+    "Code in tasks_app/db.py:88: `def update_task(task_id, done=_UNSET, due=_UNSET):` expects keyword args. "
+    "Actually, `True` becomes `done`. This might work. Let's look closer. Why does it fail?\n"
+    "Ah, look at `test_api.py` line 150.\nWait, the verifier log says it failed.\n" * 3
+)
+
+
+def test_untagged_self_talk_is_cut_from_findings() -> None:
+    """BUG-332 (ladder A10 #1 on rc78): a blocker's evidence held 3.6 KB of the reviewer's own deliberation ("Wait …",
+    "Why did the test fail?") ending in a wrong guess; the coder got it whole as the fact to fix."""
+    cut = cut_self_talk(A10_EVIDENCE)
+    assert cut.endswith(f"expects keyword args. {SELF_TALK_NOTE}") and cut.startswith("Command: python -m pytest")
+    assert cut_self_talk("Wait, this is all self-talk.") == "Wait, this is all self-talk."  # nothing before it: kept
+    assert cut_self_talk("`f()` returns None; the test expects 3.") == "`f()` returns None; the test expects 3."
+    assert cut_self_talk("Line 3 waits for the lock. Maybe-values are fine.") == "Line 3 waits for the lock. Maybe-values are fine."
+    draft = ReviewDraft.model_validate(
+        {
+            "verdict": "fix_required",
+            "findings": [{"severity": "blocker", "summary": "update_task returns the old row", "evidence": A10_EVIDENCE}],
+        }
+    )
+    assert draft.findings[0].evidence == cut and len(cut) < 400
 
 
 def test_draft_clips_overlong_text() -> None:

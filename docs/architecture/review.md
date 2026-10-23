@@ -23,7 +23,10 @@ Invariants (deterministic, enforced by the runtime – never left to the model):
 - a mutating step kind (`MUTATING_STEP_KINDS`) without change evidence (empty diff *and* no executed-command log)
   fails closed (`REVIEW_EMPTY_DIFF`) without calling the model;
 - model reasoning is never requested, stored, logged or displayed: unknown answer fields (`reasoning`, `thinking`, …)
-  are dropped, `<think>…</think>`-style markup is stripped from every text field;
+  are dropped, `<think>…</think>`-style markup is stripped from every text field, and untagged deliberation in a
+  finding's summary, evidence or fix (a sentence starting "Wait,", "Actually,", "Let's look closer", "Why does it
+  fail?") is cut from its first such sentence on, with a note (`text.cut_self_talk`; text that starts with it is kept,
+  BUG-332);
 - secrets never reach the prompt, a database row, an event or a correction request (`hermclaw.core.redaction` on
   every repository-derived text; files matching `policies.scope.always_forbidden` – `.env`, keys, `.git/**` – are
   listed by name only, their content is withheld, also for repo-context snippets);
