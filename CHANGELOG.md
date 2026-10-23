@@ -4,6 +4,8 @@ Format: [Keep a Changelog](https://keepachangelog.com/de/1.1.0/), Versionen nach
 
 ## [Unreleased]
 
+## [0.1.0rc74] – Release Candidate (2026-10-23)
+
 ### Behoben
 - **Wissen für den Coder von Anfang an (BUG-325):** Die aktiven Lehren und Konventionen, die Schrittziel und Auftrag am nächsten liegen, stehen ab dem ersten Zug im Abschnitt STEP GOAL (`policies.memory.coder_start_entries`, Standard 2). Bisher kamen sie nur nach einem Fehlschlag oder über `recall`.
 - **Temporäre Dateien aus Tests (BUG-324):** Legt ein Lauf Dateien außerhalb des Scopes an, sagt die Meldung jetzt, dass Tests temporäre Dateien in ein temporäres Verzeichnis schreiben.
