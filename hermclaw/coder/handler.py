@@ -683,9 +683,16 @@ class ImplementStepHandler:
                     source="stagnation", label="stagnation", message=f"stagnation detected: {result.detail}. Change the approach."
                 )
             ]
-            if result.recommendation == "heavy_review" and self.deps.reviewer is not None and run.review:
-                return await self._review_and_correct(run, VerificationReport(passed=False, checks=[], summary="stagnation"), items)
-            if result.recommendation == "heavy_review":  # no review in a tournament run: the stagnation note is the correction
+            if result.recommendation == "heavy_review":
+                # the next attempt and the review see what fails now: with only the stagnation note and an empty report
+                # the correction lost the verifier's lint and test failures (undefined names in three test files), the
+                # review invented an SQLite blocker and the next attempt re-ran the suite until it stagnated again
+                # (ladder A10 #6, BUG-341)
+                report = await self._stagnation_report(run)
+                items += [] if report.passed or executor_failure(report) else CorrectionItem.from_verification(report)
+                if self.deps.reviewer is not None and run.review:
+                    return await self._review_and_correct(run, report, items)
+                # no review in a tournament run: the stagnation note and the failures are the correction
                 return await self._correction(ctx, row, "stagnation", items, "STAGNATION", f"stagnation: {result.detail}")
             if result.recommendation == "research" and self.deps.research is not None:
                 question = (
@@ -941,6 +948,11 @@ class ImplementStepHandler:
                 },
             )
             await s.commit()
+
+    async def _stagnation_report(self, run: _Run) -> VerificationReport:
+        """The verifier's judgement of the state a stagnated attempt left (its failures go into the correction)."""
+        await self._status(run.ctx, f"Verifier prüft den Stand von {run.row.step_key} nach der Stagnation")
+        return (await self._verify(run)).report
 
     async def _review_and_correct(self, run: _Run, report: VerificationReport, items: list[CorrectionItem]) -> StepOutcome:
         ctx, row, step, handle = run.ctx, run.row, run.step, run.handle

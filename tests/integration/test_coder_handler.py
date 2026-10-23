@@ -539,6 +539,45 @@ async def test_stagnation_research_recommendation_feeds_research_into_correction
     assert any("Official docs" in m.content for m in models.coder_prompts[1]), "research result must reach the correction attempt"
 
 
+async def test_a_stagnation_review_and_its_correction_see_what_the_verifier_finds_now(world: World, tmp_path: Path) -> None:
+    """Ladder A10 #6 (BUG-341): after a stagnation the heavy review got an empty report and the correction only the
+    stagnation note and the review findings; the verifier's lint and test failures (undefined names in three test
+    files) were gone, the review invented a blocker and the next attempt re-ran the suite until it stagnated again."""
+    from hermclaw.coder import StagnationDirective
+
+    class StopOnce:
+        calls = 0
+
+        async def observe(self, obs: Any) -> StagnationDirective:
+            StopOnce.calls += 1
+            if StopOnce.calls == 1:
+                return StagnationDirective("stop", recommendation="heavy_review", reasons=("same failing tests 4x",))
+            return StagnationDirective()
+
+    class Reviewer(ScriptedReviewer):
+        reports: ClassVar[list[VerificationReport]] = []
+
+        async def review(
+            self, step: StepContract, workspace: WorkspaceHandle, verification: VerificationReport, **kw: Any
+        ) -> ReviewContract:
+            Reviewer.reports.append(verification)
+            return await super().review(step, workspace, verification, **kw)
+
+    async def stagnation_factory(ctx: Any) -> StopOnce:
+        return StopOnce()
+
+    models = Models([_plan()], [EDIT, DONE, DONE])
+    verifier = ScriptedVerifier(world, [False, True])
+    handler = _handler(world, models, verifier, Reviewer(["pass", "pass"]))
+    handler.deps.stagnation_factory = stagnation_factory
+    jid = await _job(world)
+    jobs = await _run(world, _driver(world, models, tmp_path), [handler, ReviewHandler()], [jid])
+    assert jobs[jid].status == "succeeded", (jobs[jid].error_code, jobs[jid].error_message)
+    assert Reviewer.reports[0].checks and not Reviewer.reports[0].passed  # the review judged the real report
+    correction = "\n".join(m.content for m in models.coder_prompts[1])
+    assert "stagnation detected" in correction and "pattern 'VALUE = 3' not found" in correction
+
+
 async def test_two_implement_steps_with_real_verifier_commit_separately(world: World, tmp_path: Path) -> None:
     """Step baseline: S002 is verified against the HEAD after S001's commit, not against the job base."""
     from hermclaw.runtime.adapters import VerifierAdapter

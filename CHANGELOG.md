@@ -4,6 +4,11 @@ Format: [Keep a Changelog](https://keepachangelog.com/de/1.1.0/), Versionen nach
 
 ## [Unreleased]
 
+## [0.1.0rc84] – Release Candidate (2026-10-23)
+
+### Behoben
+- **Stagnation ohne Befunde (BUG-341):** Nach einer Stagnation prüft der Verifier den Stand; das Review bekommt seinen Bericht, die Korrektur seine Fehlschläge.
+
 ## [0.1.0rc83] – Release Candidate (2026-10-23)
 
 ### Behoben
