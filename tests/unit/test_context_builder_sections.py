@@ -109,6 +109,22 @@ async def test_step_goal_carries_the_job_request() -> None:
     assert "Job request" not in user_text(plain)
 
 
+async def test_step_goal_carries_the_knowledge_that_fits_the_step() -> None:
+    """Ladder A9 #4 (rc73): the planner had the PowerShell JSON convention, the coder never saw it and piped the array
+    into ConvertTo-Json. The closest active lessons come with the goal from the first turn, after goal and request,
+    whole entries within a third of the section (BUG-325)."""
+    lesson = "[convention] PowerShell: pass the array to ConvertTo-Json\nUse ConvertTo-Json -InputObject @($items)."
+    builder, _, _ = make_builder()
+    built = await builder.build(make_input(step=make_step(job_request="Report services as JSON.", knowledge=[lesson])))
+    goal = user_text(built).split("## SCOPE")[0]
+    assert "Knowledge from earlier jobs" in goal and "-InputObject @($items)" in goal
+    assert goal.index("Job request") < goal.index("Knowledge from earlier jobs")
+    many = await builder.build(make_input(step=make_step(knowledge=["y" * 50_000, lesson])))
+    head = user_text(many).split("## SCOPE")[0]
+    assert "Fix the off-by-one error in f3" in head and "y" * 1000 not in head  # an entry is whole or left out
+    assert "Knowledge from earlier jobs" not in user_text(await builder.build(make_input()))
+
+
 async def test_response_protocol_is_single_json_action() -> None:
     builder, _, _ = make_builder()
     built = await builder.build(make_input())

@@ -27,7 +27,7 @@ import stat
 import time
 import uuid
 from collections import Counter
-from collections.abc import Awaitable, Callable, Iterable, Mapping
+from collections.abc import Awaitable, Callable, Iterable, Mapping, Sequence
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
@@ -247,6 +247,24 @@ Handler = Callable[[Any, CallContext, list[PendingEvent]], Awaitable[ToolResult]
 
 def _duration_ms(started: float) -> int:
     return int((time.monotonic() - started) * 1000)
+
+
+# A test that writes its output into the repository is refused on every run: the file is outside the step's paths
+# and is removed again. The coder of ladder A9 #4 (rc73) ran its Pester tests five times against `test_output.json`
+# without learning where such files belong (BUG-324).
+TEMP_FILES_HINT = (
+    "[scope] the command created files outside the step's paths; they were removed and the run is refused while it "
+    "does that. Tests write temporary files to a temporary directory, never into the repository: pytest tmp_path, "
+    "tempfile.TemporaryDirectory(), Pester $TestDrive, os.tmpdir() in Node, t.TempDir() in Go."
+)
+
+
+def violation_lines(violations: Sequence[Any]) -> list[str]:
+    """The ``[scope]`` lines of a run's out-of-scope changes, with the temporary-file hint when it created files."""
+    lines = [f"[scope] {v.operation} {v.path}: {v.reason} ({'reverted' if v.reverted else 'NOT reverted'})" for v in violations[:20]]
+    if any(v.operation == "create" for v in violations):
+        lines.append(TEMP_FILES_HINT)
+    return lines
 
 
 class ToolEngine:
@@ -1487,10 +1505,7 @@ class ToolEngine:
             status = f"timed out after {run.duration_ms / 1000:.1f}s (killed)"
         else:
             status = f"exit code {res.exit_code} · {run.duration_ms / 1000:.1f}s"
-        footer: list[str] = []
-        for v in run.audit.violations[:20]:
-            state = "reverted" if v.reverted else "NOT reverted"
-            footer.append(f"[scope] {v.operation} {v.path}: {v.reason} ({state})")
+        footer: list[str] = violation_lines(run.audit.violations)
         if run.audit.allowed:
             footer.append("[files] changed: " + ", ".join(f"{c.operation} {c.path}" for c in run.audit.allowed[:30]))
         if run.audit.cleaned:

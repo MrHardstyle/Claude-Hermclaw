@@ -406,6 +406,9 @@ class MemoryPolicy(_Strict):
     recall_k: int = Field(default=5, ge=1, le=20)  # entries a recall returns at most
     planner_entries: int = Field(default=4, ge=0, le=20)  # active entries given to planner/replanner with the job
     coder_entries: int = Field(default=2, ge=0, le=10)  # active entries matching a failure, given with the correction
+    # active lessons/conventions closest to the step goal and job text, in the coder's STEP GOAL from the first turn:
+    # the planner had the PowerShell JSON convention and the coder never saw it (ladder A9 #4 on rc73, BUG-325)
+    coder_start_entries: int = Field(default=2, ge=0, le=10)
     min_score: float = Field(default=0.55, ge=0.0, le=1.0)  # cosine similarity below which an entry is not relevant
     max_entry_chars: int = Field(default=1200, ge=200, le=8000)  # one entry as a model sees it
     learn: bool = True  # record incidents of failed/stalled work after a job

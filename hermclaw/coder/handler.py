@@ -40,7 +40,7 @@ from hermclaw.core.logging import get_logger
 from hermclaw.core.redaction import DEFAULT_REDACTOR
 from hermclaw.events.store import append_event
 from hermclaw.gitops.engine import path_matches
-from hermclaw.models.protocols import ChatModel
+from hermclaw.models.protocols import CallContext, ChatModel
 from hermclaw.persistence.models import Event, Job, JobInput, Step, StepAttempt, StepDependency
 from hermclaw.research.findings import research_findings
 from hermclaw.runtime.transitions import emit_status
@@ -308,6 +308,26 @@ class ImplementStepHandler:
             job = await s.get(Job, job_id)
         return "" if job is None else "\n".join(p for p in (job.title, job.prompt) if p)
 
+    async def _knowledge(self, ctx: StepRunContext, step: StepContract, handle: WorkspaceHandle) -> list[str]:
+        """The active lessons and conventions closest to the step goal and the job text (BUG-325); a step never fails
+        for the knowledge."""
+        policy = self.config.policies.memory
+        if self.deps.memory is None or not policy.enabled or policy.coder_start_entries <= 0:
+            return []
+        query = f"{step.goal}\n{await self._job_request(ctx.job_id)}"[:4000]
+        try:
+            hits = await self.deps.memory.search(
+                query,
+                k=policy.coder_start_entries,
+                scopes=[f"repo:{handle.repository_key}"],
+                kinds=("lesson", "convention"),
+                ctx=CallContext(purpose="memory", job_id=ctx.job_id, step_id=ctx.step_id, attempt_id=ctx.attempt_id),
+            )
+        except Exception as exc:
+            log.warning("knowledge for the coder unavailable", extra={"step_id": str(ctx.step_id), "error_type": type(exc).__name__})
+            return []
+        return [h.render(policy.max_entry_chars) for h in hits]
+
     async def _own_changes(self, step_id: uuid.UUID) -> set[str]:
         """Paths this step's own attempts changed (``file.changed`` events): never adopted as another step's leftovers,
         so an out-of-scope change of its own stays a violation."""
@@ -549,6 +569,7 @@ class ImplementStepHandler:
                         StepBrief.from_contract(step),
                         job_request=await self._job_request(ctx.job_id),
                         dependency_files=await self._dependency_files(ctx.step_id),
+                        knowledge=await self._knowledge(ctx, step, handle),
                     ),
                     workspace=handle,
                     job_id=ctx.job_id,

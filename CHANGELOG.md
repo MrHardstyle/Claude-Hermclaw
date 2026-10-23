@@ -5,6 +5,8 @@ Format: [Keep a Changelog](https://keepachangelog.com/de/1.1.0/), Versionen nach
 ## [Unreleased]
 
 ### Behoben
+- **Wissen für den Coder von Anfang an (BUG-325):** Die aktiven Lehren und Konventionen, die Schrittziel und Auftrag am nächsten liegen, stehen ab dem ersten Zug im Abschnitt STEP GOAL (`policies.memory.coder_start_entries`, Standard 2). Bisher kamen sie nur nach einem Fehlschlag oder über `recall`.
+- **Temporäre Dateien aus Tests (BUG-324):** Legt ein Lauf Dateien außerhalb des Scopes an, sagt die Meldung jetzt, dass Tests temporäre Dateien in ein temporäres Verzeichnis schreiben.
 - **Lernlauf ohne Lint-Lehren (BUG-323):** Nur Behebungen echter Fehler werden zu Lehren: Tests, Start, Import, Syntax, schwere Review-Befunde, Abdeckungslücken, Stalls. Lint, Geheimnisse, Diff- und Scope-Vorgaben nicht. Dieselbe Lehre in anderen Worten zählt jetzt ab Ähnlichkeit 0,72 als dieselbe (gemessen: 0,76–0,83 gegenüber höchstens 0,58).
 
 ## [0.1.0rc73] – Release Candidate (2026-10-23)

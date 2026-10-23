@@ -101,6 +101,8 @@ class StepBrief:
     #: files the completed steps this one depends on delivered: the frontend step never saw the backend's JSON and
     #: guessed its fields (live G1 quality review, BUG-242); shown in STEP GOAL and as file heads
     dependency_files: Sequence[str] = ()
+    #: active lessons and conventions closest to the goal and the job (rendered entries), shown in STEP GOAL (BUG-325)
+    knowledge: Sequence[str] = ()
 
     @classmethod
     def from_contract(cls, step: StepContract) -> StepBrief:
@@ -325,6 +327,7 @@ class ContextBuilder:
             repo_hints=[self._red(h) for h in step.repo_hints],
             dependency_files=[self._red(f) for f in step.dependency_files],
             job_request=self._red(step.job_request),
+            knowledge=[self._red(k) for k in step.knowledge],
             budget=cost[SectionName.STEP_GOAL],
         )
         # D-021: everything up to RELEVANT CODE stays the same from turn to turn (no turn count, no progress marks), so

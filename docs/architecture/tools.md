@@ -129,7 +129,9 @@ run_test: test.started before, summarise(output, exit code) -> test_runs + test.
 
 Result codes: `COMMAND_SCOPE_VIOLATION` (takes precedence), `SANDBOX_ERROR`, `COMMAND_TIMEOUT`, `COMMAND_FAILED`;
 for tests `TESTS_FAILED` / `TEST_ERROR` (timeout, no tests ran, no exit code). Allowed side effects are reported as
-`mutated_paths`.
+`mutated_paths`. A run that created files outside the scope ends with `TEMP_FILES_HINT`: tests write temporary files
+to a temporary directory (pytest `tmp_path`, `tempfile`, Pester `$TestDrive`, `os.tmpdir()`, `t.TempDir()`), never into the
+repository (BUG-324).
 
 ## Events
 

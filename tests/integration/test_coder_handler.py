@@ -146,7 +146,9 @@ class ScriptedReviewer:
         return ReviewContract(verdict="pass", summary="looks good")
 
 
-def _handler(world: World, models: Models, verifier: ScriptedVerifier, reviewer: ScriptedReviewer | None) -> ImplementStepHandler:
+def _handler(
+    world: World, models: Models, verifier: ScriptedVerifier, reviewer: ScriptedReviewer | None, memory: Any = None
+) -> ImplementStepHandler:
     cfg = get_config()
     intel = FakeIntel()
 
@@ -163,6 +165,7 @@ def _handler(world: World, models: Models, verifier: ScriptedVerifier, reviewer:
         executor_factory=executor_factory,
         verifier=verifier,
         reviewer=reviewer,
+        memory=memory,
     )
     return ImplementStepHandler(world.sessionmaker, cfg, deps)
 
@@ -999,3 +1002,29 @@ async def test_a_requirement_no_delivered_test_checks_becomes_one_correction(wor
     async with world.sessionmaker() as s:
         st = (await s.execute(select(Step).where(Step.job_id == jid, Step.step_key == "S001"))).scalar_one()
     assert st.correction_count == 1 and sorted(st.result["files"]) == ["src/module.py", "tests/test_module.py"]
+
+
+async def test_the_coder_gets_the_knowledge_that_fits_its_step_from_the_first_turn(world: World, tmp_path: Path) -> None:
+    """Ladder A9 #4 (rc73): the planner had the PowerShell JSON convention, the coder never saw it. The active lessons
+    and conventions closest to the step goal and the job come with the goal; candidates do not (BUG-325)."""
+    from sqlalchemy import delete
+
+    from hermclaw.core.config import MemoryPolicy
+    from hermclaw.memory.store import MemoryStore
+    from hermclaw.persistence.models import MemoryEntry
+    from tests.integration.test_repo_intelligence_support import HashingEmbedder
+
+    async with world.sessionmaker() as s:
+        await s.execute(delete(MemoryEntry))
+        await s.commit()
+    store = MemoryStore(world.sessionmaker, HashingEmbedder(), MemoryPolicy(min_score=0.1))
+    await store.add(kind="lesson", title="VALUE in src/module.py", content="Change VALUE with a test of VALUE.", status="active")
+    await store.add(kind="lesson", title="VALUE unproven", content="Change VALUE src/module.py unproven.", status="candidate")
+    models = Models([_plan()], [EDIT, DONE])
+    verifier = ScriptedVerifier(world, [True])
+    jid = await _job(world)
+    handler = _handler(world, models, verifier, None, memory=store)
+    jobs = await _run(world, _driver(world, models, tmp_path), [handler, ReviewHandler()], [jid])
+    assert jobs[jid].status == "succeeded", (jobs[jid].error_code, jobs[jid].error_message)
+    first = models.coder_prompts[0][1].content
+    assert "Knowledge from earlier jobs" in first and "Change VALUE with a test of VALUE." in first and "unproven" not in first

@@ -46,6 +46,18 @@ Noch keine.
 
 ## Behobene Bugs
 
+### BUG-325 – Der Coder sieht passendes Wissen erst nach einem Fehlschlag
+- Phase: Schwierigkeitsleiter auf rc73, 2026-10-23 (A9#4, Job 2a8f51a9) · Komponente: coder (`handler.py`), context_builder (`render.py`) · Severity: P2 · blockierend: nein · Status: **behoben im Repository** (`tests/integration/test_coder_handler.py::test_the_coder_gets_the_knowledge_that_fits_its_step_from_the_first_turn`)
+- Reproduktion: Die Konvention „`$items | ConvertTo-Json` macht aus einem Element ein Objekt“ ist aktiv, der Planer ruft sie für A9 ab. Der Plan nennt sie nicht, und der Coder schreibt wieder `$result | ConvertTo-Json`. Versteckt 6/10: ein Dienst, kein Dienst und `-OutFile` scheitern.
+- Ursache: Wissen erreichte den Coder nur über `recall` und als Anhang an einen fehlgeschlagenen Lauf, dessen Fehlerzeilen zu einer Lehre passen. Ein Test, der den Fehler gar nicht bemerkt, bringt keine Lehre. Der Planer gibt sein Wissen nur weiter, wenn er es ins Ziel schreibt.
+- Fix: Zu Beginn jedes Versuchs holt der Handler die aktiven Lehren und Konventionen, die Schrittziel und Auftrag am nächsten liegen (`policies.memory.coder_start_entries`, Standard 2). Sie stehen in STEP GOAL hinter dem Auftrag, als ganze Einträge in höchstens einem Drittel des Abschnitts. Kandidaten kommen nicht mit.
+
+### BUG-324 – Ein Testlauf, der Dateien ins Repository schreibt, wird abgelehnt, ohne dass der Coder erfährt, wohin sie gehören
+- Phase: Schwierigkeitsleiter auf rc73, 2026-10-23 (A9#4, Job 2a8f51a9) · Komponente: tools (`engine.py`) · Severity: P3 · blockierend: nein · Status: **behoben im Repository** (`tests/unit/test_tool_run_output.py::test_a_run_that_created_files_outside_the_scope_says_where_temporary_files_belong`)
+- Reproduktion: Die eigenen Pester-Tests schreiben `test_output.json` ins Repository. Jeder Lauf meldet `COMMAND_SCOPE_VIOLATION` mit „creating 'test_output.json' is outside allowed_new_paths“, die Datei wird entfernt. Der Coder ruft die Tests fünfmal auf, bis der Stall-Monitor stoppt.
+- Ursache: Die Meldung sagt, dass die Datei außerhalb des Scopes liegt, aber nicht, dass sie aus dem Test stammt und wohin solche Dateien gehören.
+- Fix: Hat ein Lauf Dateien außerhalb des Scopes angelegt, folgt der Hinweis, dass Tests temporäre Dateien in ein temporäres Verzeichnis schreiben (pytest `tmp_path`, `tempfile`, Pester `$TestDrive`, `os.tmpdir()`, `t.TempDir()`).
+
 ### BUG-323 – Der Lernlauf macht aus Lint-Korrekturen Lehren und erkennt dieselbe Lehre in anderen Worten nicht
 - Phase: erster Lernlauf von D-025 auf rc73, 2026-10-23 · Komponente: memory (`distill.py`, `config.py`) · Severity: P3 · blockierend: nein · Status: **behoben im Repository** (`tests/unit/test_distill.py::test_a_passing_correction_and_a_red_run_turned_green_are_fixes`)
 - Reproduktion: Der erste Durchlauf über die Jobs der letzten zwei Tage schrieb sechs Lehren. Darunter waren „Remove unused variable assignments“ (eine F841-Lint-Korrektur, Ablauf `ruff` rot → grün) sowie zwei Umschreibungen der schon bekannten Lehre „setUp statt setUpClass“ als eigene Kandidaten.

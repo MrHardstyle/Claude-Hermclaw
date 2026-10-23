@@ -139,6 +139,7 @@ def render_goal(
     budget: int,
     job_request: str = "",
     dependency_files: Sequence[str] = (),
+    knowledge: Sequence[str] = (),
 ) -> RenderedSection:
     sec = RenderedSection(SectionName.STEP_GOAL)
     head_parts = [p for p in (f"Step {step_key}" if step_key else "", f"kind: {kind}" if kind else "", title) if p]
@@ -166,10 +167,23 @@ def render_goal(
             request = f"{label}{text}"
         else:
             sec.truncated = True
-    goal_text = truncate_middle(goal.strip(), max(0, budget - fixed - hint_cost - char_cost(request)))
+    notes = ""
+    if knowledge:
+        # after goal and request, at most a third of the section; whole entries only
+        room = min(budget // 3, budget - fixed - hint_cost - char_cost(goal.strip()) - char_cost(request))
+        label = f"\n\n{KNOWLEDGE_LABEL}\n"
+        kept: list[str] = []
+        for entry in knowledge:
+            candidate = label + "\n\n".join([*kept, entry.strip()])
+            if char_cost(candidate) > room:
+                sec.truncated = True
+                break
+            kept.append(entry.strip())
+        notes = label + "\n\n".join(kept) if kept else ""
+    goal_text = truncate_middle(goal.strip(), max(0, budget - fixed - hint_cost - char_cost(request) - char_cost(notes)))
     if goal_text != goal.strip():
         sec.truncated = True
-    sec.body = clip_to_cost(f"{meta}Goal:\n{goal_text}{hints}{request}", budget)
+    sec.body = clip_to_cost(f"{meta}Goal:\n{goal_text}{hints}{request}{notes}", budget)
     sec.items_included = 1
     return sec
 
@@ -177,6 +191,10 @@ def render_goal(
 JOB_REQUEST_LABEL = (
     "Job request (the user's own words for the whole job; this step delivers its part of it – take names, fields, "
     "ranges, formats and messages from here when the goal above leaves them out):"
+)
+
+KNOWLEDGE_LABEL = (
+    "Knowledge from earlier jobs that fits this step (lessons and conventions; hints – the goal, the job request and the files decide):"
 )
 
 
