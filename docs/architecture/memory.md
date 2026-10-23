@@ -70,6 +70,25 @@ Dry run (2026-10-21, copy of the production database, 200 finished jobs): 192 in
 entries, 8 active incidents and exactly two suspicions – `replace_text:TEXT_NOT_FOUND` (BUG-301) and
 `run_test:COMMAND_SCOPE_VIOLATION` (Pester report, BUG-305), both real tool bugs found by hand before.
 
+### Lessons from fixes (`hermclaw/memory/distill.py`, D-025)
+
+After the incident pass, the learner reads finished **and cancelled** jobs (not older than `lessons_since_days`) without
+`metadata.memory_lessons_at`. A job's fixes are, corrections first, at most `lessons_per_job`:
+
+- a correction attempt that completed (it passed the checks): its correction input is the failure, plus the first red
+  run of the attempt; its successful edits are the change;
+- inside any other attempt, a red `run_test`/`run_command` (`errors.RUN_FAILED`) followed by successful edits and the
+  same command green again.
+
+Each fix goes to one structured call of the coder profile (`lesson_alias` overrides it), purpose `lesson`, with the
+step goal, the failure and the edits (redacted, clipped). The model answers `{general, title, mistake, fix,
+applies_to}` and sets `general` false for a requirement of this task, a typo, a wrong expected value or a lint fix. A
+general lesson is searched among lessons and conventions (also candidates and retired ones) at `lesson_similarity`.
+A match counts the job (`note_job`), and a system candidate seen in `promote_after` jobs becomes active. A retired
+match stays retired. Without a match the lesson is a new candidate (`source = system`, tag `learned`, signature
+`lesson:<hash of the title>`). The calls hold the model lease (`lesson_wait_seconds`). While the GPU is busy the pass
+ends and the job waits for the next pass. The tournament does not count purpose `lesson` as a call of the job.
+
 The operator's word wins: an entry whose title or text was edited on the page becomes `source = operator` and is not
 rewritten, a retired entry keeps counting but stays retired.
 
@@ -94,7 +113,8 @@ run it comes from; the Pester stub was checked in the PowerShell sandbox image).
 
 `policies.memory` (`config/policies.example.yaml`): `enabled`, `recall_k`, `planner_entries`, `coder_entries`,
 `min_score`, `max_entry_chars`, `learn`, `promote_after`, `learn_interval_seconds`, `learn_batch`, `learn_since_days`,
-`min_repeats`, `research_days`.
+`min_repeats`, `research_days`, `lessons`, `lessons_per_job`, `lesson_alias`, `lesson_similarity`,
+`lessons_since_days`, `lesson_wait_seconds` (D-025).
 
 ## Guard rails
 

@@ -34,7 +34,7 @@ from hermclaw.core.config import HermclawConfig, WakeOnLanPolicy, get_config
 from hermclaw.core.errors import HermclawError
 from hermclaw.core.logging import configure_logging, get_logger
 from hermclaw.core.settings import Settings, get_settings
-from hermclaw.memory.learner import MemoryLearner
+from hermclaw.memory.learner import MemoryLearner, lesson_model
 from hermclaw.persistence.db import make_engine
 from hermclaw.runtime.maintenance import WorkspaceJanitor
 from hermclaw.runtime.services import RuntimeServices, ServiceOverrides, build_services
@@ -178,7 +178,7 @@ class SchedulerProcess:
         janitor.start()  # workspace retention (policies.git.workspace_retention_hours)
         learner = None
         if services.memory is not None:  # D-019: what finished jobs teach goes into the knowledge
-            learner = MemoryLearner(self.sm, services.memory, self.config.policies.memory)
+            learner = MemoryLearner(self.sm, services.memory, self.config.policies.memory, lesson_model=lesson_model(self.config, services))
             learner.start()
         maintenance = asyncio.create_task(services.resources.run_maintenance(self._stop), name="resource-maintenance")
         idle = self._idle_sleep_task(services)  # P10.9 / BUG-071: idle workers are suspended over SSH

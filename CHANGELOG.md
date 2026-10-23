@@ -4,6 +4,9 @@ Format: [Keep a Changelog](https://keepachangelog.com/de/1.1.0/), Versionen nach
 
 ## [Unreleased]
 
+### Hinzugefügt
+- **Lehren aus behobenen Fehlern (D-025):** Nach jedem Job macht der Lernlauf aus jeder Behebung eine allgemeine Lehre. Als Behebung zählen eine bestandene Korrektur sowie ein roter Test, der nach Änderungen wieder grün wird. Ein Aufruf des Coder-Modells formuliert die Lehre, sie ist zuerst Kandidat und wird aktiv, sobald ein zweiter Job dasselbe lehrt. Lehren, die zu ihrer Aufgabe gehören, verwirft das Modell selbst. Neue Schalter unter `policies.memory`: `lessons`, `lessons_per_job`, `lesson_alias`, `lesson_similarity`, `lessons_since_days`, `lesson_wait_seconds`. Metadaten-Schlüssel `memory_lessons_at`.
+
 ## [0.1.0rc72] – Release Candidate (2026-10-23)
 
 ### Behoben

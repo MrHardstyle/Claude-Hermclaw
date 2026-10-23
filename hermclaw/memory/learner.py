@@ -10,6 +10,9 @@ A pass reads finished jobs that were not read yet (``jobs.metadata.memory_learne
 * **Failed jobs** – signature ``job:<error code>``.
 * **Research** – each completed research run becomes an active ``research`` entry (question, synthesis, confident
   claims, sources) that ages out after ``research_days``.
+* **Lessons** (D-025, :mod:`hermclaw.memory.distill`) – each fix of a finished or cancelled job (a correction that
+  passed, a red run turned green) goes to one model call that writes a general lesson or none. Needs the model lease;
+  while the GPU is busy the job waits for a later pass (``jobs.metadata.memory_lessons_at`` marks it done).
 
 An incident starts as a candidate. Seen in ``promote_after`` jobs and with something that helped, it becomes active
 and reaches the models. A refusal that models of different kinds could not get past in ``promote_after`` jobs is a
@@ -24,6 +27,7 @@ import contextlib
 import hashlib
 import uuid
 from collections import Counter
+from collections.abc import AsyncIterator
 from dataclasses import dataclass, field
 from datetime import UTC, datetime, timedelta
 from typing import Any
@@ -33,9 +37,12 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from hermclaw.contracts.events import EventType
 from hermclaw.core import job_metadata
-from hermclaw.core.config import MemoryPolicy
+from hermclaw.core.config import HermclawConfig, MemoryPolicy, ModelProfileConfig
+from hermclaw.core.errors import ConfigError, HermclawError
 from hermclaw.core.logging import get_logger
-from hermclaw.memory.store import MemoryStore
+from hermclaw.memory.distill import FixEpisode, distill, fix_episodes
+from hermclaw.memory.store import MemoryStore, entry_text
+from hermclaw.models.protocols import ChatModel
 from hermclaw.persistence.models import (
     BugRecord,
     Event,
@@ -54,7 +61,10 @@ from hermclaw.tools import errors as E
 log = get_logger(__name__)
 
 LEARNED_KEY = job_metadata.MEMORY_LEARNED_AT  # reserved: a client cannot keep its job out of learning (BUG-308)
+LESSONS_KEY = job_metadata.MEMORY_LESSONS_AT
 FINISHED = ("succeeded", "failed")
+# a fix that passed the checks teaches the same in a job cancelled later (the tournament's time limit)
+LESSON_JOBS = (*FINISHED, "cancelled")
 # refusals that say nothing about a tool or the task: the step was over, the budget spent, the call cancelled; and
 # runs that executed and failed – a red test run is work in progress, not a refusal (BUG-306)
 _NOT_LEARNED = frozenset({"CANCELLED", "STEP_FINISHED", "TURN_BUDGET_EXHAUSTED", E.SANDBOX_ERROR, *E.RUN_FAILED})
@@ -82,7 +92,19 @@ class LearnReport:
     research: int = 0
     promoted: int = 0
     suspicions: int = 0
+    lessons: int = 0  # new lesson candidates
+    lessons_seen: int = 0  # fixes that repeated a known lesson
+    no_lesson: int = 0  # fixes the model judged specific to their task
     errors: list[str] = field(default_factory=list)
+
+
+@dataclass
+class LessonModel:
+    """What writing lessons needs (D-025): the model and its lease (``resources`` is a ResourceManager or None)."""
+
+    chat: ChatModel
+    profile: ModelProfileConfig
+    resources: Any = None
 
 
 @dataclass
@@ -94,6 +116,19 @@ class _Refusal:
     steps: set[str] = field(default_factory=set)
     message: str = ""
     helped: str | None = None
+
+
+def lesson_model(config: HermclawConfig, services: Any) -> LessonModel | None:
+    """The coder profile (or ``policies.memory.lesson_alias``) with the runtime's chat and resource manager; None
+    when there is no enabled one."""
+    alias = config.policies.memory.lesson_alias
+    try:
+        profile = config.models.by_alias(alias) if alias else config.models.by_role("coder")
+    except ConfigError:
+        return None
+    if not profile.enabled:
+        return None
+    return LessonModel(services.chat, profile, getattr(services, "resources", None))
 
 
 def _clip(text: str | None, n: int) -> str:
@@ -159,8 +194,16 @@ def _sha(text: str, n: int = 12) -> str:
 class MemoryLearner:
     """Reads finished jobs into the knowledge; ``run_once`` is one pass, ``start`` runs passes in the background."""
 
-    def __init__(self, sessionmaker: async_sessionmaker[AsyncSession], store: MemoryStore, policy: MemoryPolicy) -> None:
+    def __init__(
+        self,
+        sessionmaker: async_sessionmaker[AsyncSession],
+        store: MemoryStore,
+        policy: MemoryPolicy,
+        *,
+        lesson_model: LessonModel | None = None,
+    ) -> None:
         self.sm, self.store, self.policy = sessionmaker, store, policy
+        self.lesson_model = lesson_model
         self._task: asyncio.Task[None] | None = None
         self._stop = asyncio.Event()
 
@@ -179,6 +222,8 @@ class MemoryLearner:
                 report.errors.append(f"{job_id}: {type(exc).__name__}")
             await self._mark(job_id)
             report.jobs += 1
+        if self.policy.lessons and self.lesson_model is not None and self.policy.lessons_per_job:
+            await self._lessons(report)
         return report
 
     async def _pending(self) -> list[uuid.UUID]:
@@ -194,8 +239,9 @@ class MemoryLearner:
         async with self.sm() as s:
             return list((await s.execute(stmt)).scalars().all())
 
-    async def _mark(self, job_id: uuid.UUID) -> None:
-        stamp = func.jsonb_build_object(LEARNED_KEY, datetime.now(UTC).isoformat())
+    async def _mark(self, job_id: uuid.UUID, *, lessons: bool = False) -> None:
+        when = datetime.now(UTC).isoformat()
+        stamp = func.jsonb_build_object(LESSONS_KEY, when) if lessons else func.jsonb_build_object(LEARNED_KEY, when)
         async with self.sm() as s, s.begin():  # a JSON merge: no row version, a control on the job is not disturbed
             await s.execute(update(Job).where(Job.id == job_id).values(metadata_=Job.metadata_.op("||")(stamp)))
 
@@ -480,6 +526,96 @@ class MemoryLearner:
                 tags=["research"],
             )
         report.research += 1
+
+    # ------------------------------------------------------------------------------------------ lessons (D-025)
+    async def _lessons(self, report: LearnReport) -> None:
+        stmt = (
+            select(Job.id)
+            .where(Job.status.in_(LESSON_JOBS), ~Job.metadata_.has_key(LESSONS_KEY))
+            .order_by(Job.finished_at.asc().nulls_last(), Job.created_at.asc(), Job.id)
+            .limit(self.policy.learn_batch)
+        )
+        if self.policy.lessons_since_days:
+            since = datetime.now(UTC) - timedelta(days=self.policy.lessons_since_days)
+            stmt = stmt.where(or_(Job.finished_at.is_(None), Job.finished_at >= since))
+        async with self.sm() as s:
+            pending = list((await s.execute(stmt)).scalars().all())
+        for job_id in pending:
+            episodes = await self._episodes(job_id)
+            if episodes:
+                try:
+                    async with self._lease():
+                        for episode in episodes:
+                            await self._lesson(job_id, episode, report)
+                except HermclawError as exc:  # the GPU is busy (or the profile unusable): this job waits for a later pass
+                    if exc.code != "RESOURCE_WAIT_TIMEOUT":
+                        report.errors.append(f"{job_id}: lesson lease {exc.code}")
+                    return
+            await self._mark(job_id, lessons=True)
+
+    async def _episodes(self, job_id: uuid.UUID) -> list[FixEpisode]:
+        async with self.sm() as s:
+            attempts = list((await s.execute(select(StepAttempt).where(StepAttempt.job_id == job_id))).scalars())
+            goals = {st.id: st.goal for st in (await s.execute(select(Step).where(Step.job_id == job_id))).scalars()}
+            calls = list((await s.execute(select(ToolCallRow).where(ToolCallRow.job_id == job_id))).scalars())
+        return fix_episodes(attempts, calls, goals, limit=self.policy.lessons_per_job)
+
+    @contextlib.asynccontextmanager
+    async def _lease(self) -> AsyncIterator[None]:
+        assert self.lesson_model is not None
+        resources = self.lesson_model.resources
+        if resources is None:
+            yield
+            return
+        async with resources.hold_model(self.lesson_model.profile, wait_timeout=self.policy.lesson_wait_seconds, preemptible=False):
+            yield
+
+    async def _lesson(self, job_id: uuid.UUID, episode: FixEpisode, report: LearnReport) -> None:
+        assert self.lesson_model is not None
+        profile = self.lesson_model.profile
+        try:
+            draft = await distill(
+                self.lesson_model.chat,
+                profile.alias,
+                episode,
+                job_id=job_id,
+                max_tokens=min(profile.max_output_tokens, 1024),
+                temperature=profile.temperature,
+            )
+        except HermclawError as exc:  # an unusable answer costs this fix, not the pass
+            report.errors.append(f"{job_id}: lesson {exc.code}")
+            return
+        if not draft.usable():
+            report.no_lesson += 1
+            return
+        evidence = {"job": str(job_id), "attempt": str(episode.attempt_id), "source": episode.source, "model": profile.alias}
+        hits = await self.store.search(
+            entry_text(draft.title, draft.content()),
+            k=1,
+            kinds=("lesson", "convention"),
+            statuses=("active", "candidate", "retired"),
+            min_score=self.policy.lesson_similarity,
+            count=False,
+        )
+        if hits:  # a known lesson: one more job; a retired one stays retired and is not written again
+            hit = hits[0]
+            seen = await self.store.note_job(hit.id, job_id, evidence)
+            row = await self.store.get(hit.id)
+            if row is not None and row.status == "candidate" and row.source == "system" and seen >= self.policy.promote_after:
+                await self.store.update(hit.id, status="active")
+                report.promoted += 1
+            report.lessons_seen += 1
+            return
+        await self.store.add(
+            kind="lesson",
+            title=draft.title,
+            content=draft.content(),
+            signature=f"lesson:{_sha(' '.join(draft.title.lower().split()), 16)}",
+            job_id=job_id,
+            tags=["learned", *[t[:40] for t in draft.applies_to]],
+            evidence={"jobs": [str(job_id)], "examples": [evidence]},
+        )
+        report.lessons += 1
 
     # ------------------------------------------------------------------------------------------ loop
     async def _run(self) -> None:

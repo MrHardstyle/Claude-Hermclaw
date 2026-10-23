@@ -53,6 +53,7 @@ CREATE_MERGE_REQUEST = "create_merge_request"
 TOURNAMENT = "tournament"
 # --- knowledge (hermclaw/memory/learner.py) -----------------------------------------------------------------------
 MEMORY_LEARNED_AT = "memory_learned_at"
+MEMORY_LESSONS_AT = "memory_lessons_at"
 
 RESERVED_KEYS: Mapping[str, str] = MappingProxyType(
     {
@@ -74,6 +75,7 @@ RESERVED_KEYS: Mapping[str, str] = MappingProxyType(
         CREATE_MERGE_REQUEST: "typed field create_merge_request of POST /api/jobs",
         TOURNAMENT: "coder tournament run: prescribed plan, coder alias, review and replan switches (CLI coder-tournament)",
         MEMORY_LEARNED_AT: "when the learner read the finished job (D-019); a planted key would keep the job out of it",
+        MEMORY_LESSONS_AT: "when the learner distilled the job's fixes into lessons (D-025); a planted key would skip it",
     }
 )
 RESERVED_PREFIXES: tuple[str, ...] = ("_", "hermclaw.")
@@ -135,6 +137,7 @@ __all__ = [
     "CREATE_MERGE_REQUEST",
     "LAST_REPLAN",
     "MEMORY_LEARNED_AT",
+    "MEMORY_LESSONS_AT",
     "PLANNER_FALLBACK_ALIAS",
     "PLANNER_MODEL_ALIAS",
     "PLANNER_MODEL_FALLBACK",

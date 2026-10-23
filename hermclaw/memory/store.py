@@ -195,12 +195,7 @@ class MemoryStore:
                 )
             ).scalar_one_or_none()
             if row is not None:
-                jobs = list(row.evidence.get("jobs", []))
-                if job_id is not None and str(job_id) not in jobs:
-                    jobs.append(str(job_id))
-                    row.occurrences = len(jobs)
-                    examples = list(row.evidence.get("examples", []))[-4:]
-                    row.evidence = {**row.evidence, "jobs": jobs[-50:], "examples": [*examples, evidence]}
+                _count_job(row, job_id, evidence)
                 await s.commit()
                 return row.id, row.occurrences
         jobs = [str(job_id)] if job_id is not None else []
@@ -216,6 +211,17 @@ class MemoryStore:
             ctx=ctx,
         )
         return entry_id, 1
+
+    async def note_job(self, entry_id: uuid.UUID, job_id: uuid.UUID, evidence: dict[str, Any]) -> int:
+        """Count one more job for an entry (once per job, the latest examples kept); returns the jobs seen, 0 when the
+        entry is gone."""
+        async with self.sessionmaker() as s:
+            row = (await s.execute(select(MemoryEntry).where(MemoryEntry.id == entry_id).with_for_update())).scalar_one_or_none()
+            if row is None:
+                return 0
+            _count_job(row, job_id, evidence)
+            await s.commit()
+            return row.occurrences
 
     # ------------------------------------------------------------------------------------------ reading
     async def by_signature(self, signature: str, *, kinds: Sequence[str] | None = None) -> list[MemoryEntry]:
@@ -310,6 +316,15 @@ class MemoryStore:
                 )
             await s.commit()
         return ranked
+
+
+def _count_job(row: MemoryEntry, job_id: uuid.UUID | None, evidence: dict[str, Any]) -> None:
+    jobs = list(row.evidence.get("jobs", []))
+    if job_id is not None and str(job_id) not in jobs:
+        jobs.append(str(job_id))
+        row.occurrences = len(jobs)
+        examples = list(row.evidence.get("examples", []))[-4:]
+        row.evidence = {**row.evidence, "jobs": jobs[-50:], "examples": [*examples, evidence]}
 
 
 # exception and test words every failure log shares: no evidence that a lesson is about this failure

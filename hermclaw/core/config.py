@@ -415,6 +415,13 @@ class MemoryPolicy(_Strict):
     learn_since_days: int = Field(default=30, ge=0, le=3650)  # finished jobs older than this are not read (0 = all)
     min_repeats: int = Field(default=2, ge=1, le=20)  # refusals of one tool with one error code in a job that count
     research_days: int = Field(default=180, ge=1, le=3650)  # validity of a research finding in the knowledge
+    # D-025: lessons from fixed mistakes – one model call per fix after the job, a candidate until seen in promote_after jobs
+    lessons: bool = True
+    lessons_per_job: int = Field(default=2, ge=0, le=10)  # fixes of one job turned into lessons at most
+    lesson_alias: str | None = None  # model profile that writes them (default: the coder role)
+    lesson_similarity: float = Field(default=0.85, ge=0.5, le=1.0)  # a lesson this close to a known one is the same
+    lessons_since_days: int = Field(default=2, ge=0, le=3650)  # jobs finished earlier get no lessons (0 = all)
+    lesson_wait_seconds: float = Field(default=30.0, ge=0.0, le=3600.0)  # model lease wait; busy GPU = next pass
 
 
 class PoliciesConfig(_Strict):

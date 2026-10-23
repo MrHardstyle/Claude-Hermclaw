@@ -145,3 +145,9 @@ memory:
   learn_since_days: 30   # finished jobs older than this are not read (0 = all)
   min_repeats: 2         # refusals of one tool with one error code in a job that make an incident
   research_days: 180     # validity of a research finding in the knowledge
+  lessons: true          # D-025: turn each fix of a job (passed correction, red run turned green) into a lesson
+  lessons_per_job: 2     # fixes of one job sent to the model at most
+  # lesson_alias: coder-main   # model profile that writes lessons (default: the coder role)
+  lesson_similarity: 0.85  # a lesson this close to a known one counts that job instead of a new entry
+  lessons_since_days: 2  # jobs finished earlier get no lessons (0 = all)
+  lesson_wait_seconds: 30  # wait for the model lease; a busy GPU leaves the job for a later pass

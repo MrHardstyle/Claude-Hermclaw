@@ -275,8 +275,8 @@ bestanden; ansible-lint (production) sauber. `test_deploy_converge` ist angepass
    (`infra/sandbox-images/README.md`) bleibt für Systempakete nötig.
 
 ## Paket B – Modellfamilien (Research R-035)
-Nächster Teil: fertig (Betreiber 2026-10-22: Teil 4 entfällt); D-024 mit rc70/rc71 ausgerollt, Leiter steht bei A7
-Hintergrundlauf: Leiter A7, drei Wiederholungen (Betreiber 2026-10-23): #9 auf rc71, #10 und #11 auf rc72 (kürzere Pläne, BUG-320)
+Nächster Teil: fertig (Betreiber 2026-10-22: Teil 4 entfällt); D-024 mit rc70/rc71 ausgerollt; Leiter: A7 mit rc72 bestanden (A7#10, 31/31), weiter bei A9
+Hintergrundlauf: Leiter auf rc72 (Betreiber 2026-10-23: drei Wiederholungen): A7#9 rc71 abgebrochen 28/31, A7#10 rc72 bestanden 31/31, danach A9#1; D-025 (Lehren aus behobenen Fehlern) für rc73 bereit
 Offene Fragen: sudoers-Datei auf .224 entfernt? (Betreiber)
 - Root auf .224: Option (b) aus R-034 (`/etc/sudoers.d/90-hermclaw-tuning`), bleibt bis Paketende.
 - Teil 1 fertig (2026-10-22): Gemma 4 26B, gpt-oss-20b, GLM-4.7-Flash bestehen das Screening (Research R-035).

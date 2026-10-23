@@ -29,6 +29,7 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 from hermclaw.acceptance.job_metrics import INFRASTRUCTURE_ERRORS, collect, is_terminal
 from hermclaw.contracts.common import JobStatus
 from hermclaw.core.interfaces import CommandExecutor, ExecutionRequest, WorkspaceHandle
+from hermclaw.memory.distill import LESSON_PURPOSE
 from hermclaw.persistence.models import Event, Job, ModelInvocation
 from hermclaw.runtime.transitions import transition_job
 from hermclaw.tools.output import strip_ansi
@@ -163,7 +164,11 @@ async def _model_usage(sm: async_sessionmaker[AsyncSession], job_id: uuid.UUID) 
                     func.coalesce(func.sum(ModelInvocation.prompt_tokens), 0),
                     func.coalesce(func.sum(ModelInvocation.completion_tokens), 0),
                     func.coalesce(func.sum(ModelInvocation.latency_ms), 0),
-                ).where(ModelInvocation.job_id == job_id, ModelInvocation.role != "embedding")
+                ).where(
+                    ModelInvocation.job_id == job_id,
+                    ModelInvocation.role != "embedding",
+                    ModelInvocation.purpose != LESSON_PURPOSE,  # learning after the job (D-025)
+                )
             )
         ).one()
     return int(row[0] or 0), int(row[1] or 0), int(row[2] or 0), float(row[3] or 0) / 1000.0

@@ -1,0 +1,16 @@
+# Operator knowledge from the difficulty ladder on 0.1.0rc68–rc71 (2026-10-22/23, D-020).
+# Import: hermclaw memory-import config/knowledge/rc72-ladder.yaml (existing titles are skipped).
+# Every entry names the runs it comes from; edit or retire it on the page "Wissen".
+
+- kind: lesson
+  title: "Python: `self.counter += 1` on a class attribute creates an instance attribute – shared state stays unchanged"
+  tags: [python, http.server, state, ids]
+  content: |
+    `self.next_id += 1` reads the class attribute and writes a new attribute on the instance; the class attribute
+    keeps its old value. With http.server every request gets a new BaseHTTPRequestHandler instance, so every request
+    sees next_id == 1: all records get the same id, the dict overwrites them, "list after two creates" returns one item.
+    Keep shared state outside the handler (a module-level store object, or `self.server.<attr>` set on the server) and
+    change it through that object (`store.next_id += 1`, `type(self).next_id += 1`), guarded by a lock for a
+    threading server. A test that creates two records and checks distinct ids and the list length finds it.
+    Seen: ladder A7 #6, #7 and #9 (coder-main) – distinct ids failed three times; in #9 the coder's own test showed
+    1 != 2 and three attempts changed the test instead of the counter.

@@ -2310,7 +2310,7 @@
       "additionalProperties": true,
       "type": "object",
       "title": "Metadata",
-      "description": "Free-form client keys (stored and returned, never trusted by the runtime). Runtime-reserved keys are rejected with 422 JOB_METADATA_RESERVED_KEY (compared case- and whitespace-insensitively): allow_network_research, auto_commit, create_merge_request, last_replan, memory_learned_at, planner_fallback_alias, planner_model_alias, planner_model_fallback, recovered_prepare_from, replan_budget_base, replan_progress_mark, replan_reason, replan_requested, retry_requested, ssh_approvals, ssh_approvals_consumed, tournament, triage. Keys starting with '_' or 'hermclaw.' are reserved as well."
+      "description": "Free-form client keys (stored and returned, never trusted by the runtime). Runtime-reserved keys are rejected with 422 JOB_METADATA_RESERVED_KEY (compared case- and whitespace-insensitively): allow_network_research, auto_commit, create_merge_request, last_replan, memory_learned_at, memory_lessons_at, planner_fallback_alias, planner_model_alias, planner_model_fallback, recovered_prepare_from, replan_budget_base, replan_progress_mark, replan_reason, replan_requested, retry_requested, ssh_approvals, ssh_approvals_consumed, tournament, triage. Keys starting with '_' or 'hermclaw.' are reserved as well."
      }
     },
     "additionalProperties": false,

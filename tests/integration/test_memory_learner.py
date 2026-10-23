@@ -11,7 +11,7 @@ from sqlalchemy import delete, func, select, update
 
 from hermclaw.contracts.events import EventType
 from hermclaw.core.config import MemoryPolicy
-from hermclaw.memory.learner import LEARNED_KEY, MemoryLearner, helped_after
+from hermclaw.memory.learner import LEARNED_KEY, LESSONS_KEY, MemoryLearner, helped_after
 from hermclaw.memory.store import MemoryStore
 from hermclaw.persistence.models import (
     BugRecord,
@@ -38,7 +38,8 @@ async def learner(sessionmaker: SM) -> MemoryLearner:
         await s.execute(delete(MemoryEntry))
         await s.execute(delete(BugRecord).where(BugRecord.bug_key.like("AUTO-%")))
         # jobs of other tests are not this test's evidence
-        await s.execute(update(Job).values(metadata_=Job.metadata_.op("||")(func.jsonb_build_object(LEARNED_KEY, "earlier"))))
+        stamp = func.jsonb_build_object(LEARNED_KEY, "earlier", LESSONS_KEY, "earlier")
+        await s.execute(update(Job).values(metadata_=Job.metadata_.op("||")(stamp)))
         await s.commit()
     policy = MemoryPolicy(min_score=0.2, promote_after=2, learn_since_days=0)
     return MemoryLearner(sessionmaker, MemoryStore(sessionmaker, HashingEmbedder(), policy), policy)
@@ -269,3 +270,124 @@ async def test_a_guard_refusal_is_no_tool_bug_suspicion(sessionmaker: SM, learne
     await _job(sessionmaker, model="coder-glm47-flash", calls=repeated, model_in_turns=True)
     report = await learner.run_once()
     assert report.incidents == 2 and report.suspicions == 0
+
+
+class LessonChat:
+    """Answers the lesson calls (D-025) with the queued drafts."""
+
+    def __init__(self, drafts: list[dict[str, Any]]) -> None:
+        self.drafts, self.calls = list(drafts), []
+
+    async def structured(self, alias: str, messages: list[Any], schema: Any, *, ctx: Any, **kw: Any) -> Any:
+        from hermclaw.models.protocols import ChatResult, StructuredResult
+
+        assert ctx.purpose == "lesson" and ctx.job_id is not None
+        self.calls.append(messages[1].content)
+        return StructuredResult(value=schema.model_validate(self.drafts.pop(0)), result=ChatResult(content="{}", alias=alias, model="m"))
+
+
+LESSON = {
+    "general": True,
+    "title": "Read configuration from the environment when it is used",
+    "mistake": "A module-level os.environ read runs when the tests import the package, before they set the variable.",
+    "fix": "Read the variable inside the function that needs it.",
+    "applies_to": ["python"],
+}
+
+
+async def _fixed_job(sessionmaker: SM, *, status: str = "succeeded") -> uuid.UUID:
+    """A job whose correction attempt passed after one edit."""
+    async with sessionmaker() as s:
+        job = Job(title="learn", prompt="p", status=status)
+        s.add(job)
+        await s.flush()
+        step = Step(job_id=job.id, step_key="S001", title="API", kind="implement", capability="code", goal="Build the API", status=status)
+        s.add(step)
+        await s.flush()
+        attempt = StepAttempt(
+            step_id=step.id,
+            job_id=job.id,
+            attempt_no=2,
+            kind="correction",
+            model_alias="coder-main",
+            status="completed",
+            correction_input={"items": [{"message": "verifier: 3 tests failed with 401"}]},
+        )
+        s.add(attempt)
+        await s.flush()
+        s.add(
+            ToolCallRow(
+                job_id=job.id,
+                step_id=step.id,
+                attempt_id=attempt.id,
+                turn=1,
+                tool="replace_text",
+                arguments={"path": "api.py", "old": "TOKEN = os.environ['T']", "new": "def token():\n    return os.environ['T']"},
+                status="succeeded",
+                result_summary="ok",
+            )
+        )
+        await s.commit()
+        return job.id
+
+
+async def test_a_fix_becomes_a_lesson_that_another_job_activates(sessionmaker: SM, learner: MemoryLearner) -> None:
+    """D-025: every active lesson so far was written by the operator; the learner now asks the coder model to turn a
+    passing correction into a general lesson – a candidate first, active once a second job teaches the same."""
+    from hermclaw.core.config import ModelProfileConfig
+    from hermclaw.memory.learner import LessonModel
+
+    chat = LessonChat([LESSON, LESSON, {**LESSON, "general": False}])
+    learner.lesson_model = LessonModel(chat, ModelProfileConfig(alias="coder-main", role="coder", model="qwen"))  # type: ignore[arg-type]
+    first = await _fixed_job(sessionmaker, status="cancelled")  # a fix in a job cancelled later still teaches
+    report = await learner.run_once()
+    assert report.lessons == 1 and "verifier: 3 tests failed with 401" in chat.calls[0] and "replace_text api.py" in chat.calls[0]
+    [lesson] = await _entries(sessionmaker, "lesson")
+    assert lesson.status == "candidate" and lesson.source == "system" and "learned" in lesson.tags
+    assert lesson.content.endswith("Fix: Read the variable inside the function that needs it.")
+
+    await _fixed_job(sessionmaker)
+    report = await learner.run_once()
+    assert report.lessons == 0 and report.lessons_seen == 1 and report.promoted == 1
+    [lesson] = await _entries(sessionmaker, "lesson")
+    assert lesson.status == "active" and lesson.occurrences == 2
+
+    await _fixed_job(sessionmaker)  # judged specific to its task: nothing written
+    report = await learner.run_once()
+    assert report.no_lesson == 1 and len(await _entries(sessionmaker, "lesson")) == 1
+    async with sessionmaker() as s:
+        job = await s.get(Job, first)
+        assert job is not None and LESSONS_KEY in job.metadata_
+    assert (await learner.run_once()).lessons_seen == 0 and len(chat.calls) == 3  # each job once
+
+
+async def test_a_retired_lesson_is_not_written_again_and_a_busy_gpu_waits(sessionmaker: SM, learner: MemoryLearner) -> None:
+    import contextlib
+
+    from hermclaw.core.config import ModelProfileConfig
+    from hermclaw.core.errors import HermclawError
+    from hermclaw.memory.learner import LessonModel
+
+    class BusyGpu:
+        @contextlib.asynccontextmanager
+        async def hold_model(self, profile: Any, **kw: Any) -> Any:
+            raise HermclawError("busy", code="RESOURCE_WAIT_TIMEOUT")
+            yield
+
+    chat = LessonChat([LESSON])
+    profile = ModelProfileConfig(alias="coder-main", role="coder", model="qwen")  # type: ignore[call-arg]
+    learner.lesson_model = LessonModel(chat, profile, BusyGpu())  # type: ignore[arg-type]
+    job_id = await _fixed_job(sessionmaker)
+    await learner.run_once()
+    async with sessionmaker() as s:
+        job = await s.get(Job, job_id)
+        assert job is not None and LESSONS_KEY not in job.metadata_ and chat.calls == []  # waits for a later pass
+
+    entry = await learner.store.add(
+        kind="lesson", title=LESSON["title"], content=f"{LESSON['mistake']}\n\nFix: {LESSON['fix']}", status="retired"
+    )
+    learner.lesson_model = LessonModel(chat, profile)  # type: ignore[arg-type]
+    report = await learner.run_once()
+    assert report.lessons == 0 and report.lessons_seen == 1
+    [lesson] = await _entries(sessionmaker, "lesson")
+    assert lesson.id == entry and lesson.status == "retired"
