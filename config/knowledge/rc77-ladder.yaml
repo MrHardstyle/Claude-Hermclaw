@@ -1,0 +1,41 @@
+# Operator knowledge from the difficulty ladder on 0.1.0rc77 (2026-10-23, D-020), stage A8 (Python web app, SQLite).
+# Import: hermclaw memory-import config/knowledge/rc77-ladder.yaml (existing titles are skipped).
+# Every entry names the runs it comes from; edit or retire it on the page "Wissen".
+
+- kind: convention
+  title: "SQLite: ':memory:' is a new empty database for every connection – tests use a file in tmp_path"
+  tags: [python, sqlite3, tests, pytest]
+  content: |
+    `sqlite3.connect(":memory:")` creates a private database that lives only as long as that one connection. An app
+    that opens a connection per request (or per function call) sees an empty table every time: a POST returns 201,
+    the next GET lists nothing and a PATCH of the new id answers 404. Point tests at a real file instead:
+    `monkeypatch.setenv("TASKS_DB", str(tmp_path / "tasks.db"))` (read the variable when the connection is opened, not
+    at import), or keep one shared connection for the app's lifetime. A test that creates and then reads back through
+    a second request finds the mistake.
+    Seen: ladder A8 #1 on rc77 (coder-main) – the API fixture set the database to ":memory:"; four own tests failed with
+    0 == 2 and 404 == 200 for two attempts while the app itself passed the hidden checks.
+
+- kind: convention
+  title: "HTTP JSON API: check that the parsed body is an object before reading fields – any other JSON is a 400"
+  tags: [python, http.server, json, api, validation]
+  content: |
+    `json.loads(body)` also returns a list, a number, a string, True or None. Calling `data.get("title")` on `[]`
+    raises AttributeError inside the handler; http.server then drops the connection without a response, and the client
+    sees "RemoteDisconnected" instead of 400. Validate in this order: body parses as JSON (else 400 "invalid JSON"),
+    `isinstance(data, dict)` (else 400 "body must be a JSON object"), then each field's type and range. Test the bad
+    bodies explicitly: `[]`, `"text"`, `null`, `{"title": 5}`.
+    Seen: ladder A8 #1 on rc77 (coder-main) – the hidden check posting `[]` got a dropped connection instead of 400.
+
+- kind: convention
+  title: "http.server in pytest: serve_forever in a thread on port 0, shutdown only while it runs – else it blocks"
+  tags: [python, http.server, socketserver, tests, pytest, fixtures]
+  content: |
+    `HTTPServer.shutdown()` waits for the `serve_forever()` loop to stop; called on a server whose loop never started
+    (or from the loop's own thread) it blocks forever, and the test run hits its timeout with no output after the
+    first test. The reliable fixture: `httpd = ThreadingHTTPServer(("127.0.0.1", 0), Handler)`;
+    `t = threading.Thread(target=httpd.serve_forever, daemon=True); t.start()`;
+    `yield f"http://127.0.0.1:{httpd.server_address[1]}"`; then `httpd.shutdown(); httpd.server_close(); t.join(5)`.
+    Do not start the app in a subprocess and read its stdout byte by byte; give each test its own database file
+    (tmp_path) and set environment variables with monkeypatch before the server is created.
+    Seen: ladder A8 #1 on rc77 (coder-main) – the first fixture created an HTTPServer it never served, started a
+    second one in a subprocess and called shutdown() on the first: test runs timed out after 180 s, 60 s and 30 s.

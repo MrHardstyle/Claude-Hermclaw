@@ -4,6 +4,11 @@ Format: [Keep a Changelog](https://keepachangelog.com/de/1.1.0/), Versionen nach
 
 ## [Unreleased]
 
+## [0.1.0rc78] – Release Candidate (2026-10-23)
+
+### Behoben
+- **Wissensschwelle des Coders (BUG-331):** `coder_start_min_score` sinkt von 0,5 auf 0,45. Bei der Python-Aufgabe A8 lagen passende Einträge ab 0,45, fremde bei höchstens 0,40.
+
 ## [0.1.0rc77] – Release Candidate (2026-10-23)
 
 ### Behoben

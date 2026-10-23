@@ -1035,3 +1035,5 @@ async def test_the_coder_gets_the_knowledge_that_fits_its_step_from_the_first_tu
     assert "Knowledge from earlier jobs" in first and "Change VALUE with a test of VALUE." in first and "unproven" not in first
     assert "Keep VALUE in src/module.py typed." in first and "Test VALUE of src/module.py." in first, first
     assert "Borrowck" not in first
+    # measured with embeddinggemma: fitting entries 0.45–0.73 (A8, A9), unrelated ones at most 0.41 (BUG-331)
+    assert MemoryPolicy().coder_start_min_score == 0.45

@@ -46,6 +46,12 @@ Noch keine.
 
 ## Behobene Bugs
 
+### BUG-331 – Die Wissensschwelle des Coders lässt bei einer Python-Aufgabe die Hälfte der passenden Einträge weg
+- Phase: Schwierigkeitsleiter auf rc77, 2026-10-23 (A8#1, Job 6ca05a5b) · Komponente: config (`MemoryPolicy.coder_start_min_score`) · Severity: P3 · blockierend: nein · Status: **behoben im Repository** (`tests/integration/test_coder_handler.py::test_the_coder_gets_the_knowledge_that_fits_its_step_from_the_first_turn`)
+- Reproduktion: A8#1 wird nach 40 min abgebrochen (versteckt 21/23). Die Ursachen werden zu drei neuen Konventionen in `config/knowledge/rc77-ladder.yaml`: SQLite `:memory:` je Verbindung, JSON-Body muss ein Objekt sein, `shutdown()` ohne laufendes `serve_forever()` blockiert. Gemessen gegen A8 liegen die passenden Einträge bei 0,45–0,57, fremde bei höchstens 0,40. Bei der Schwelle 0,5 hätten nur zwei von sechs den Coder erreicht.
+- Ursache: Die Schwelle 0,5 aus BUG-328 war nur an A9 gemessen (passend ab 0,53). Wie ähnlich die Einträge sind, hängt von der Aufgabe ab: Der deutsche Auftrag mit einem englischen Schrittziel liegt bei Python-Einträgen niedriger.
+- Fix: `coder_start_min_score` ist jetzt 0,45. Das trennt beide gemessenen Aufgaben: A9 bekommt seine acht PowerShell-Einträge (die Obergrenze), A8 sechs Python-Einträge, fremde Sprachen bleiben draußen.
+
 ### BUG-330 – Der Abschnitt STEP GOAL fasst nur drei Wissenseinträge
 - Phase: Schwierigkeitsleiter auf rc76, 2026-10-23 (A9#7, Job 0fb0f6f5) · Komponente: context_builder (`budget.py`), config (`MemoryPolicy`) · Severity: P2 · blockierend: nein · Status: **behoben im Repository** (`tests/unit/test_context_builder_sections.py::test_the_coder_context_holds_six_knowledge_entries`, `tests/unit/test_context_builder_relevance.py::test_huge_inputs_respect_every_budget`)
 - Reproduktion: Nach der Pester-Konvention aus A9#7 passen sechs aktive Einträge zur Aufgabe (0,53–0,63). STEP GOAL hat bei 32k Kontext 7 % ≈ 5 600 Zeichen; die Hälfte für Wissen fasst drei Einträge zu je 800–900 Zeichen. Die Coder-Prompts nutzten dabei höchstens 9,7k der rund 25k Tokens.
