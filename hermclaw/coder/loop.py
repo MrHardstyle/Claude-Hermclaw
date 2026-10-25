@@ -120,6 +120,9 @@ class ToolExecutor(Protocol):
 
     def tool_catalog(self) -> list[dict[str, Any]]: ...
 
+    @property
+    def granted_turns(self) -> int: ...
+
 
 @dataclass(frozen=True)
 class TurnObservation:
@@ -368,7 +371,9 @@ class CoderLoop:
         probed: set[str] = set()
         invalid_streak = 0
         turn = start_turn - 1
-        for turn in range(start_turn, s.max_turns + 1):
+        # the engine may grant turns once when complete_step in the last turn finds a failing check (BUG-349)
+        while turn < s.max_turns + self.engine.granted_turns:
+            turn += 1
             if token.cancelled:
                 return CoderResult("cancelled", turn - 1, records, last_failure=last_failure, detail=token.reason)
             if token.checkpoint_requested:
@@ -383,7 +388,7 @@ class CoderLoop:
                     step=step,
                     workspace=workspace,
                     turn=turn,
-                    max_turns=s.max_turns,
+                    max_turns=s.max_turns + self.engine.granted_turns,
                     tools=tools,
                     completion_contract=completion_contract,
                     history=records,
@@ -520,5 +525,5 @@ class CoderLoop:
             records,
             last_failure=last_failure,
             error_code="TURN_BUDGET_EXHAUSTED",
-            detail=f"no terminal tool within {s.max_turns} turns",
+            detail=f"no terminal tool within {turn} turns",
         )

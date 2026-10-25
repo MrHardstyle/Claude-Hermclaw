@@ -20,7 +20,7 @@ An answer cut off at the output limit is invalid; a cut-off `write_file` is salv
 1. workspace of the job (GitEngine), scope via `ScopeEngine.current_contract/create_scope` (unavailable → blocked `scope_unavailable`)
 2. `ToolEngine` with `ScopeGuard`, executor from `executor_factory` (local sandbox / remote `.222`), `ToolPermissions.for_step`,
    callbacks: research port, `ScopeExpansionHandler`
-3. `CoderLoop` (turn budget = min(step.turn_budget, max(policies.coder.max_turns, max_turns_per_step)), BUG-339; requested output = the context builder's `max_output_tokens`, i.e. max(profile, policies.coder.max_output_tokens), BUG-235)
+3. `CoderLoop` (turn budget = min(step.turn_budget, max(policies.coder.max_turns, max_turns_per_step)), BUG-339; plus `policies.coder.grace_turns` (3) once when `complete_step` in the last turn finds a failing check, BUG-349; requested output = the context builder's `max_output_tokens`, i.e. max(profile, policies.coder.max_output_tokens), BUG-235)
 4. completed → `ScopeAuditor.audit_status` → `VerifierPort.verify` (P21) → `ReviewerPort.review` (P22, `enforce_review_invariant`)
    → `GitEngine.stage_allowed` + `commit_verified(verification_run_id)` – **commit only after a passed verification**
 

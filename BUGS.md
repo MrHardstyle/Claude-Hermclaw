@@ -46,6 +46,42 @@ Noch keine.
 
 ## Behobene Bugs
 
+### BUG-352 – Der Planer ordnet in jeder Reparatur andere Schritte und scheitert an fehlenden Abhängigkeiten
+- Phase: G1 auf Strata IQ3_XXS mit 0.1.0rc88, 2026-10-25 (Job 818d8524) · Komponente: planner (`validation.py`) · Severity: P1 · blockierend: ja (Job scheitert in der Planung) · Status: **behoben im Repository** (`tests/unit/test_planner_validation.py::test_the_dependency_a_named_component_needs_is_added_without_a_repair_turn`)
+- Reproduktion: Drei Planantworten (je ~6 min): Die erste lässt S006 Tests für Code zweier Schritte schreiben, die zweite lässt S003 Proxmox und Unraid ohne Abhängigkeit nennen, die dritte S005 und S008 dasselbe. Nach zwei Reparaturen endet der Job mit `PLANNER_INVALID_OUTPUT`.
+- Ursache: Die Regel aus BUG-251 meldete fehlende Abhängigkeiten nur an das Modell zurück. Jede Antwort ordnete die genannten Paare und ließ andere ungeordnet, obwohl die Korrektur mechanisch ist und die Meldung sie selbst nennt.
+- Fix: Die Normalisierung vor der Prüfung (`prune_unreachable_must_change`, auch beim Neuplanen) ergänzt die Abhängigkeit des Schritts, der eine Komponente nennt, auf den Schritt, der sie schreibt; ein Zyklus kann nicht entstehen, weil nur ungeordnete Paare betroffen sind. Ein Schritt, der nur Tests schreibt, bleibt dem Planer überlassen (er gehört mit dem Code-Schritt zusammengelegt). Jede Ergänzung steht als Notiz im Plan.
+
+### BUG-351 – Der Akzeptanztest des Schritts läuft erst im Verifier
+- Phase: G1 auf Strata IQ3_XXS, 2026-10-25 (Job 98280696) · Komponente: tools (`engine.py`), coder (`handler.py`) · Severity: P1 · blockierend: nein · Status: **behoben im Repository** (`tests/integration/test_tools_engine_exec.py::test_complete_step_runs_the_steps_acceptance_tests_as_the_verifier_does`)
+- Reproduktion: S007 (Härtung), Versuch 1: Die Akzeptanz des Schritts verlangt `python -m unittest discover`. Der Coder testet mit `-s tests` (alles grün) und meldet `complete_step`. Im Verifier laufen keine Tests (`NO TESTS RAN`, `tests/` ist kein Paket); ein ganzer Korrekturversuch folgt.
+- Ursache: `complete_step` führte nur die Befehle aus, die eine Korrektur nennt, nicht die Testbefehle der Schritt-Akzeptanz, die der Verifier sicher ausführt.
+- Fix: Der Handler gibt der Engine die Testbefehle der Akzeptanz (`expect_acceptance_tests`). `complete_step` führt sie wie der Verifier aus und lehnt einmal mit der Ausgabe ab, solange einer scheitert (gemeinsam mit den eigenen roten Testläufen aus BUG-349 höchstens eine Ablehnung, damit ein falscher Planerbefehl den Coder nicht festhält).
+
+### BUG-350 – Der Verifier prüft die Scope-Version vor der Erweiterung durch den Coder
+- Phase: G1 auf Strata IQ3_XXS, 2026-10-25 (Job 98280696) · Komponente: coder (`handler.py`) · Severity: P1 · blockierend: nein · Status: **behoben im Repository** (`tests/integration/test_coder_handler.py::test_the_verifier_checks_the_scope_the_coder_expanded_to`)
+- Reproduktion: S007, Versuch 2: `request_scope_expansion` gewährt v3 (v2 → v3), der Coder legt `tests/__init__.py` an. Der Verifier meldet „1 change(s) outside scope v2: creating 'tests/__init__.py'“ und schickt den Schritt in einen weiteren Versuch.
+- Ursache: Der `StepContract` mit dem Scope wurde vor der Coder-Schleife gebaut und unverändert an den Verifier gegeben; die Erweiterung landete nur in der Datenbank (der Scope-Auditor liest sie dort und war zufrieden).
+- Fix: Nach der Coder-Schleife holt der Handler den aktuellen Scope-Vertrag des Schritts; ist er neuer, prüft der Verifier gegen ihn.
+
+### BUG-349 – Ein roter Testlauf, danach Änderungen und `complete_step` ohne neuen Lauf kosten einen ganzen Versuch
+- Phase: G1 auf Strata IQ3_XXS, 2026-10-25 (Job 98280696) · Komponente: tools (`engine.py`), coder (`loop.py`), core (`config.py`) · Severity: P1 · blockierend: nein · Status: **behoben im Repository** (`tests/integration/test_tools_engine_exec.py::test_complete_step_reruns_a_failed_own_test_once`, `::test_a_check_failing_in_the_last_turn_gets_the_grace_turns_once`, `tests/integration/test_coder_loop.py::test_turns_the_engine_grants_in_the_last_turn_are_run`)
+- Reproduktion: S004, Versuch 2: `run_test` scheitert in Zug 15 (1 von 20 Tests), der Coder ändert `index.html` und `app.js` und meldet in Zug 20 von 20 `complete_step`. Der Verifier scheitert am selben Test, der nächste Versuch liest erst zehn Züge lang alle Dateien neu (~45 min auf Strata). Bei S005, Versuch 2, dasselbe in Zug 16 → 19.
+- Ursache: `complete_step` prüfte nur die Checks einer Korrektur und den Lint, nicht die eigenen roten Testläufe des Versuchs. Im letzten Zug lief gar nichts, weil eine Ablehnung dort nur das Budget aufgebraucht hätte.
+- Fix: Die Engine merkt sich die Testläufe des Versuchs, deren letztes Ergebnis rot war (nach Kern des Befehls). `complete_step` führt sie einmal erneut aus und lehnt einmal ab, solange sie scheitern; ein zweites `complete_step` geht durch, denn der Fehler kann mit dem Schritt nichts zu tun haben. Im letzten Zug laufen die Checks jetzt auch: Scheitert einer, bekommt der Versuch einmal `policies.coder.grace_turns` Züge (3, 0 schaltet ab) mit der Ausgabe, statt Verifier-Lauf und neuem Versuch. Ein Befehl mit Exit-Code 0, dessen Ausgabe gescheiterte Tests meldet, zählt dabei als gescheitert (wie BUG-329).
+
+### BUG-348 – Dokumentierte Token-Formate und Variablennamen gelten als Secret
+- Phase: G1 auf Strata IQ3_XXS, 2026-10-25 (Job 98280696) · Komponente: core (`redaction.py`), verifier (`secrets.py`) · Severity: P2 · blockierend: nein · Status: **behoben im Repository** (`tests/unit/test_verifier_secrets.py::test_formats_and_names_are_placeholders_values_are_not`)
+- Reproduktion: Die README beschreibt das Proxmox-Format `PVEAPIToken=USER@REALM!TOKENID=UUID`; die Secret-Prüfung meldet `secret_assignment`, der Prompt zeigt `PVEAPIToken=***REDACTED***`. Der Coder löscht die Formatangabe statt sie zu behalten. Ebenso `api_key = "UNRAID_API_KEY"`, `token = "TOKEN_ID=SECRET"`, `widget@pve!widget=<secret>`.
+- Ursache: Scanner und Redactor kannten nur Platzhalter, die mit `<`/`${` beginnen oder Wörter wie `example` enthalten; ein Wert aus Großbuchstaben-Wörtern oder mit eingebettetem `<…>`/`{…}` sah wie ein Wert aus.
+- Fix: Gemeinsame Regel `is_notation_value`: nur Großbuchstaben-Wörter ohne Ziffern (ein einzelnes höchstens 8 Buchstaben) oder ein eingebetteter `<platzhalter>`/`{name}`/`${…}` ist eine Notation – für den Scanner des Verifiers und den Redactor gleich. Zufällig wirkende Werte (`JBSWYDPEHPKPXPAB`, UUIDs, gemischte Zeichen) bleiben Secrets.
+
+### BUG-347 – Ein Test-Token, das wie echt aussieht, fällt erst im Verifier auf
+- Phase: G1 auf Strata IQ3_XXS, 2026-10-25 (Job 98280696) · Komponente: tools (`engine.py`), verifier (`checks.py`) · Severity: P2 · blockierend: nein · Status: **behoben im Repository** (`tests/integration/test_tools_engine_read_write.py::test_a_write_reports_the_secrets_the_verifier_would_find`)
+- Reproduktion: S003 schreibt `tests/test_collector.py` mit `api_token="…"`; der Versuch endet, der Verifier meldet `secret_assignment` (Zeile 28, im nächsten Versuch Zeile 131), ein ganzer Korrekturversuch (~1 h auf Strata) geht dafür drauf. Zwei der vier gescheiterten Verifier-Läufe des Jobs hatten Secret-Befunde.
+- Ursache: Syntax und Lint liefen schon nach jedem Schreiben (BUG-302/326), der Secret-Scan erst im Verifier und – nach einem Befund – bei `complete_step` (BUG-279).
+- Fix: Nach jedem Schreiben scannt die Engine die neuen Zeilen der geschriebenen Dateien (gegen ihre Basisversion) mit dem Scanner des Verifiers und hängt Datei, Zeilen, Regel und die Abhilfe des Verifiers (`secret_remedy`: Platzhalter in Tests und Doku, Umgebung im Code) an das Ergebnis an.
+
 ### BUG-346 – Alle Schritte bestehen, das gelieferte Programm zeigt aber nicht das gebaute Frontend
 - Phase: G1 auf Strata IQ3_XXS, 2026-10-25 (Job 98280696) · Komponente: verifier (`serve.py`, `checks.py`) · Severity: P1 · blockierend: nein · Status: **behoben im Repository** (`tests/integration/test_verifier_engine.py::test_the_delivered_web_server_is_loaded_like_its_user_loads_it`)
 - Reproduktion: S003 baut den Collector (`collector.py`, `http.server`), S004 das Frontend in `frontend/`, S007 härtet das Backend. Jeder Schritt besteht seine Tests und das Review, der Job endet `succeeded`. Gestartet wie im README liefert der Collector auf `/` eine in `collector.py` eingebaute Notseite; `frontend/` wird nie ausgeliefert, und `frontend/app.js` ruft `/api/token`, das S007 entfernt hatte.

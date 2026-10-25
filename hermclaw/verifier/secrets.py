@@ -21,7 +21,7 @@ from collections import Counter
 from dataclasses import dataclass
 
 from hermclaw.core import redaction as _redaction
-from hermclaw.core.redaction import DEFAULT_REDACTOR, REDACTED, Redactor, is_role_value
+from hermclaw.core.redaction import DEFAULT_REDACTOR, REDACTED, Redactor, is_notation_value, is_role_value
 from hermclaw.verifier.languages import CODE_LANGUAGES, detect_language, is_lock_or_data_file
 from hermclaw.verifier.types import AddedLine
 
@@ -156,7 +156,7 @@ def is_placeholder(value: str) -> bool:
         return True
     if any(part in low for part in _PLACEHOLDER_PARTS):
         return True
-    if is_role_value(low):
+    if is_role_value(low) or is_notation_value(v):
         return True
     return len(set(v)) <= 2 or v.isdigit()
 

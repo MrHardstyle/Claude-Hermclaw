@@ -913,39 +913,81 @@ def _names_component(stem: str, text: str) -> bool:
     return re.search(rf"(?<![\w]){re.escape(stem.upper())}(?![a-z])", text) is not None
 
 
+def _component_stems(plan: PlanContract, ctx: ValidationContext, preserved: frozenset[str]) -> dict[str, set[str]]:
+    """The code components (file stems, not tests, docs or generic names) each open workspace-mutating step writes."""
+    code: dict[str, set[str]] = {}
+    for s in plan.steps:
+        if s.kind.value in WORKSPACE_MUTATING_KINDS and s.id not in preserved:
+            stems = {_code_stem(p) for p in _step_paths(s, ctx) if not TEST_PATH_RE.search(p) and not DOC_PATH_RE.search(p)}
+            code[s.id] = {t for t in stems if len(t) >= 3 and t not in _GENERIC_STEMS}
+    return code
+
+
+def _unordered_references(
+    plan: PlanContract, new_ids: Sequence[str], ctx: ValidationContext, preserved: frozenset[str]
+) -> list[tuple[PlanStep, PlanStep, list[str]]]:
+    """(step, other, components): ``step`` names components ``other`` writes and neither depends on the other."""
+    code = _component_stems(plan, ctx, preserved)
+    by_id = {s.id: s for s in plan.steps}
+    out: list[tuple[PlanStep, PlanStep, list[str]]] = []
+    reported: set[frozenset[str]] = set()
+    for sid in new_ids:
+        step = by_id.get(sid)
+        if step is None or step.id not in code:
+            continue
+        text = f"{step.title}\n{step.goal}"
+        ancestors = _reachable(plan, step.id)
+        for other in plan.steps:
+            pair = frozenset({step.id, other.id})
+            if other.id not in code or other.id == step.id or pair in reported or other.id in ancestors:
+                continue
+            if step.id in _reachable(plan, other.id):
+                continue
+            named = sorted(t for t in code[other.id] - code[step.id] if _names_component(t, text))
+            if named:
+                reported.add(pair)
+                out.append((step, other, named))
+    return out
+
+
 def _unordered_reference_errors(
     plan: PlanContract, new_steps: Sequence[PlanStep], ctx: ValidationContext, preserved: frozenset[str]
 ) -> list[str]:
     """A step whose title or goal names a component another step writes ("startet den Collector" – collector.py) must
     be ordered with that step by a dependency: unordered, it runs first and guesses the interface. The planner left the
     frontend and the start scripts beside the collector step without one, and both guessed config format, port and
-    JSON fields (live G1 on rc39, BUG-251; the written-interface rule of BUG-234 alone did not hold)."""
-    mutating = [s for s in plan.steps if s.kind.value in WORKSPACE_MUTATING_KINDS and s.id not in preserved]
-    code: dict[str, set[str]] = {}
-    for s in mutating:
-        stems = {_code_stem(p) for p in _step_paths(s, ctx) if not TEST_PATH_RE.search(p) and not DOC_PATH_RE.search(p)}
-        code[s.id] = {t for t in stems if len(t) >= 3 and t not in _GENERIC_STEMS}
-    errors: list[str] = []
-    reported: set[frozenset[str]] = set()
-    for step in new_steps:
-        if step.id not in code:
-            continue
-        text = f"{step.title}\n{step.goal}"
-        ancestors = _reachable(plan, step.id)
-        for other in mutating:
-            pair = frozenset({step.id, other.id})
-            if other.id == step.id or pair in reported or other.id in ancestors or step.id in _reachable(plan, other.id):
-                continue
-            named = sorted(t for t in code[other.id] - code[step.id] if _names_component(t, text))
-            if named:
-                reported.add(pair)
-                errors.append(
-                    f"step {step.id} refers to {', '.join(named)}, which step {other.id} writes, but neither step depends "
-                    f"on the other: add {other.id} to {step.id}'s depends_on (or the reverse, if {other.id} uses "
-                    f"{step.id}'s files) so the consuming step runs after the providing one and works with its real "
-                    "interface instead of guessing it"
-                )
-    return errors
+    JSON fields (live G1 on rc39, BUG-251; the written-interface rule of BUG-234 alone did not hold).
+    ``_order_unordered_references`` adds most of these dependencies before the check; what is left is reported."""
+    return [
+        f"step {step.id} refers to {', '.join(named)}, which step {other.id} writes, but neither step depends "
+        f"on the other: add {other.id} to {step.id}'s depends_on (or the reverse, if {other.id} uses "
+        f"{step.id}'s files) so the consuming step runs after the providing one and works with its real "
+        "interface instead of guessing it"
+        for step, other, named in _unordered_references(plan, [s.id for s in new_steps], ctx, preserved)
+    ]
+
+
+def _order_unordered_references(plan: PlanContract, ctx: ValidationContext, preserved: frozenset[str]) -> tuple[PlanContract, list[str]]:
+    """Add the dependency ``_unordered_reference_errors`` asks for: the step that names another step's component
+    depends on it. Live G1 on rc88: each of three planner answers fixed the pairs the repair named and left others
+    unordered, and the job failed after 17 minutes of planning (BUG-352). A step that only writes tests is left to the
+    planner (it belongs merged into the code step, ``_split_test_errors``); so is a dependency that would close a
+    cycle, which the reachability check already excludes."""
+    notes: list[str] = []
+    new_ids = [s.id for s in plan.steps if s.id not in preserved]
+    for _ in range(len(plan.steps) ** 2):
+        pending = [
+            (step, other, named)
+            for step, other, named in _unordered_references(plan, new_ids, ctx, preserved)
+            if _component_stems(plan, ctx, preserved).get(step.id) or not any(TEST_PATH_RE.search(p) for p in _step_paths(step, ctx))
+        ]
+        if not pending:
+            break
+        step, other, named = pending[0]
+        updated = step.model_copy(update={"depends_on": [*step.depends_on, other.id]})
+        plan = plan.model_copy(update={"steps": [updated if s.id == step.id else s for s in plan.steps]})
+        notes.append(f"step {step.id}: depends on {other.id} now, whose {', '.join(named)} it uses")
+    return plan, notes
 
 
 _GOAL_FILE_RE = re.compile(r"(?<![\w./-])((?:[\w-]+/)*[\w-]+(?:\.[\w-]+)*\.[A-Za-z][A-Za-z0-9]{0,7})(?![\w/-])")
@@ -1041,6 +1083,8 @@ def prune_unreachable_must_change(
     notes += contradicting
     plan, moved = _move_foreign_tests(plan, ctx, preserved)
     notes += moved
+    plan, ordered = _order_unordered_references(plan, ctx, preserved)
+    notes += ordered
     plan, unnamed = _drop_unnamed_existing_must_change(plan, ctx, preserved)
     notes += unnamed
     steps: list[PlanStep] = []

@@ -637,7 +637,8 @@ def test_tests_for_another_steps_code_are_moved_into_that_step() -> None:
     assert "tests/test_frontend.py" in s2.allowed_new_paths, "tests of the step's own code stay"
     assert [g for c in s2.acceptance if c.type == "diff" for g in c.must_change] == ["web/frontend.js"]
     assert ["tests/test_service.py"] in [c.must_change for c in s1.acceptance if c.type == "diff"]
-    assert notes == ["step S002: moved tests tests/test_service.py to step S001, which writes the code they test"]
+    assert notes[0] == "step S002: moved tests tests/test_service.py to step S001, which writes the code they test"
+    assert notes[1:] == ["step S002: depends on S001 now, whose service it uses"], "it names the service (BUG-352)"
     assert not any("writes tests for code" in e for e in semantic_errors(moved, _ctx()))
     # a stem named by the code of two steps stays for the planner to decide
     twin = step("S003", "implement", "coding", "Create the service CLI.", allowed_new_paths=["cli/service.py"])
@@ -677,6 +678,27 @@ def test_a_step_naming_another_steps_component_must_be_ordered_with_it() -> None
     assert not any("refers to" in e for e in _errors(plan("goal", ordered))), "a transitive dependency orders them"
     # a completed provider (replan history) needs no dependency: its files are in the workspace
     assert not any("refers to" in e for e in _errors(plan("goal", [collector, scripts]), preserved=frozenset({"S002"})))
+
+
+def test_the_dependency_a_named_component_needs_is_added_without_a_repair_turn() -> None:
+    """Live G1 on rc88 (BUG-352): each of three planner answers ordered the pairs the repair named and left others
+    unordered; the job failed after 17 minutes of planning. The normalisation adds the dependency of the step that
+    names a component on the step that writes it; a step that only writes tests stays with the planner."""
+    collector = step("S002", "implement", "coding", "Implementiere den Collector.", allowed_new_paths=["collector.py"])
+    frontend = step("S003", "implement", "coding", "Frontend liest die JSON-API des Collectors.", allowed_new_paths=["frontend.js"])
+    scripts = step("S004", "implement", "coding", "Skript, das den Collector startet.", allowed_new_paths=["start_widget.ps1"])
+    fixed, notes = prune_unreachable_must_change(PlanContract.model_validate(plan("goal", [collector, frontend, scripts])), _ctx())
+    assert [s.depends_on for s in fixed.steps] == [[], ["S002"], ["S002"]]
+    assert "step S003: depends on S002 now, whose collector it uses" in notes
+    assert not any("refers to" in e for e in semantic_errors(fixed, _ctx()))
+    # mutual references: one dependency orders the pair, no cycle
+    back = step("S002", "implement", "coding", "Collector, den das Skript start_widget startet.", allowed_new_paths=["collector.py"])
+    mutual, _ = prune_unreachable_must_change(PlanContract.model_validate(plan("goal", [back, scripts])), _ctx())
+    assert sorted(len(s.depends_on) for s in mutual.steps) == [0, 1]
+    # a tests-only step is not ordered: it belongs merged into the code step
+    tests = step("S005", "implement", "coding", "Tests für den Collector.", allowed_new_paths=["tests/test_widget.py"])
+    kept, _ = prune_unreachable_must_change(PlanContract.model_validate(plan("goal", [collector, tests])), _ctx())
+    assert kept.steps[1].depends_on == []
 
 
 def test_an_acronym_names_a_short_component() -> None:

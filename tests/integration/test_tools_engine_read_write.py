@@ -716,3 +716,15 @@ async def test_a_flagged_secret_stays_until_a_placeholder_replaces_it(sessionmak
     fixed = await h.call("replace_text", path="tests/test_api.py", old=masked, new="def call(token='dummy-token'):")
     assert fixed.ok and "replaced by the new text" in fixed.output
     assert (await h.call("complete_step", summary="secrets removed")).ok
+
+
+async def test_a_write_reports_the_secrets_the_verifier_would_find(sessionmaker: SM, repo: Path) -> None:
+    """Live G1 on rc88 (BUG-347): an attempt failed in the verifier on a realistic token in a test the coder had just
+    written. A write now carries the verifier's secret findings of its added lines with the placeholder remedy; lines
+    already in the base version and an obvious placeholder add nothing."""
+    h = await make_harness(sessionmaker, repo, contract=scope(target_paths=["tests/test_api.py"], allowed_new_paths=["tests/*"]))
+    res = await h.call("write_file", path="tests/test_api.py", content="TOKEN = 'zq81vkpw3mxt5r7'\n\ndef test_a():\n    assert TOKEN\n")
+    assert res.ok and "secret checks" in res.output and "tests/test_api.py: possible secret(s): line 1" in res.output, res.output
+    assert "'dummy'" in res.output and "zq81vkpw3mxt5r7" not in res.output and res.data.get("lint_findings") is True
+    fixed = await h.call("replace_text", path="tests/test_api.py", old="zq81vkpw3mxt5r7", new="dummy-token")
+    assert fixed.ok and "possible secret" not in fixed.output, fixed.output

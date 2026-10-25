@@ -14,7 +14,7 @@ from typing import Any, ClassVar, TypeVar
 
 import pytest
 from pydantic import BaseModel
-from sqlalchemy import select, update
+from sqlalchemy import func, select, update
 
 from hermclaw.coder.handler import ImplementDeps, ImplementStepHandler, VerificationOutcome
 from hermclaw.context_builder import ContextBuilderConfig
@@ -24,7 +24,7 @@ from hermclaw.contracts.verification import VerificationCheck, VerificationRepor
 from hermclaw.core.config import get_config
 from hermclaw.core.interfaces import WorkspaceHandle
 from hermclaw.models.protocols import CallContext, ChatMessage, ChatResult, StructuredResult
-from hermclaw.persistence.models import Event, Job, Step, StepAttempt, VerificationRun
+from hermclaw.persistence.models import Event, Job, ScopeContractRow, Step, StepAttempt, VerificationRun
 from hermclaw.planner import Planner, Replanner
 from hermclaw.runtime.driver import DriverSettings, RuntimeJobDriver
 from hermclaw.scope.audit import ScopeAuditor
@@ -87,11 +87,13 @@ class ScriptedVerifier:
 
     def __init__(self, world: World, results: list[bool]) -> None:
         self.world, self.results, self.calls = world, list(results), 0
+        self.scope_versions: list[int | None] = []
 
     async def verify(
         self, step: StepContract, workspace: WorkspaceHandle, *, job_id: uuid.UUID, step_id: uuid.UUID, attempt_id: uuid.UUID
     ) -> VerificationOutcome:
         self.calls += 1
+        self.scope_versions.append(step.scope.version if step.scope is not None else None)
         passed = self.results.pop(0) if self.results else True
         changed = await self.world.engine.changed_files(workspace.id)
         checks = [
@@ -219,6 +221,22 @@ async def test_implement_step_happy_path_commits_and_pushes(world: World, tmp_pa
     cfg = get_config()
     expected = max(cfg.models.by_role("coder").max_output_tokens, cfg.policies.coder.max_output_tokens)
     assert set(models.coder_max_tokens) == {ContextBuilderConfig.from_config(cfg).max_output_tokens} == {expected}
+
+
+async def test_the_verifier_checks_the_scope_the_coder_expanded_to(world: World, tmp_path: Path) -> None:
+    """Live G1 S007 (BUG-350): the attempt was granted scope v3, the verifier still checked v2 and failed the step for a
+    file v3 allows. The verifier gets the step's scope as it is after the coder loop."""
+    expand = act("request_scope_expansion", paths=["tests/test_module.py"], operations=["create"], justification="a test for src/module.py")
+    models = Models([_plan()], [expand, EDIT, DONE])
+    verifier, reviewer = ScriptedVerifier(world, [True]), ScriptedReviewer(["pass"])
+    jid = await _job(world)
+    jobs = await _run(world, _driver(world, models, tmp_path), [_handler(world, models, verifier, reviewer), ReviewHandler()], [jid])
+    assert jobs[jid].status == "succeeded", (jobs[jid].error_code, jobs[jid].error_message)
+    async with world.sessionmaker() as s:
+        step = (await s.execute(select(Step).where(Step.job_id == jid, Step.step_key == "S001"))).scalar_one()
+        version = (await s.execute(select(func.max(ScopeContractRow.version)).where(ScopeContractRow.step_id == step.id))).scalar_one()
+    assert version is not None and version > 1, "the expansion was granted"
+    assert verifier.scope_versions == [version]
 
 
 async def test_verifier_failure_triggers_correction_with_evidence(world: World, tmp_path: Path) -> None:

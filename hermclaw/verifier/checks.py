@@ -140,6 +140,18 @@ def deletions_check(ctx: VerifyContext) -> VerificationCheck:
 
 
 # ------------------------------------------------------------------------------------------- 21.7 / 21.8 content
+def secret_remedy(path: str) -> str:
+    """How a secret finding in ``path`` is fixed – tests and docs get placeholders, code reads the environment."""
+    if is_test_path(path):
+        return (
+            "Tests must not carry real-looking credentials: use an obvious placeholder value containing "
+            "'dummy', 'fake' or 'example' (e.g. 'dummy-token'); never read real secrets in tests."
+        )
+    if path.lower().endswith((".md", ".rst", ".txt", ".adoc")):
+        return "Documentation shows placeholders, never values: write <your-token> or $AUTH_TOKEN where the value is."
+    return "Remove the value and load it from the environment or a secret store."
+
+
 def secret_checks(ctx: VerifyContext, added: AddedContent, scanner: SecretScanner) -> list[VerificationCheck]:
     out: list[VerificationCheck] = []
     total_lines = 0
@@ -150,16 +162,7 @@ def secret_checks(ctx: VerifyContext, added: AddedContent, scanner: SecretScanne
         if findings:
             rules = sorted({f.rule for f in findings})
             where = ", ".join(f"line {f.line} ({f.rule})" for f in findings[:5])
-            remedy = (
-                "Tests must not carry real-looking credentials: use an obvious placeholder value containing "
-                "'dummy', 'fake' or 'example' (e.g. 'dummy-token'); never read real secrets in tests."
-                if is_test_path(path)
-                else (
-                    "Documentation shows placeholders, never values: write <your-token> or $AUTH_TOKEN where the value is."
-                    if path.lower().endswith((".md", ".rst", ".txt", ".adoc"))
-                    else "Remove the value and load it from the environment or a secret store."
-                )
-            )
+            remedy = secret_remedy(path)
             out.append(
                 ctx.check(
                     "secrets",

@@ -4,6 +4,17 @@ Format: [Keep a Changelog](https://keepachangelog.com/de/1.1.0/), Versionen nach
 
 ## [Unreleased]
 
+## [0.1.0rc89] – Release Candidate (2026-10-25)
+
+### Behoben
+- **Planung scheitert an fehlenden Abhängigkeiten (BUG-352):** Nennt ein Schritt die Komponente eines anderen, ergänzt die Normalisierung die Abhängigkeit selbst, statt eine Reparaturrunde des Planers (~6 min) zu verlangen.
+- **Verifier prüft alten Scope (BUG-350):** Nach einer Scope-Erweiterung im Versuch prüft der Verifier gegen die neue Version.
+- **Rote Tests vor `complete_step` (BUG-349, BUG-351):** `complete_step` führt die Akzeptanztests des Schritts und rote eigene Testläufe des Versuchs aus und lehnt einmal ab, solange einer scheitert; im letzten Zug gibt es dafür einmal `policies.coder.grace_turns` (3) Extra-Züge statt Verifier-Lauf und neuem Versuch.
+- **Platzhalter als Secret (BUG-348):** `USER@REALM!TOKENID=UUID`, `UNRAID_API_KEY` und Werte mit `<platzhalter>`/`{name}` gelten im Secret-Scan und im Redactor als Notation.
+
+### Neu
+- **Secret-Scan nach dem Schreiben (BUG-347):** Jeder Schreibvorgang meldet Secret-Befunde der neuen Zeilen mit der Abhilfe des Verifiers.
+
 ## [0.1.0rc88] – Release Candidate (2026-10-25)
 
 ### Behoben

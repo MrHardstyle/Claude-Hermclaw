@@ -21,6 +21,7 @@ from hermclaw.core.errors import ModelOutputInvalid, ModelOutputTruncated, Model
 from hermclaw.models.protocols import CallContext, ChatMessage, ChatResult, StructuredResult
 from hermclaw.persistence.models import Event, StepAttempt
 from hermclaw.scheduler import CancelToken
+from hermclaw.tools.context import ToolPermissions
 from tests.integration.test_tools_support import GitCliReader, ScriptedRepo, make_harness
 
 pytestmark = pytest.mark.asyncio(loop_scope="session")
@@ -67,10 +68,11 @@ class ScriptedStagnation:
 
 
 async def _setup(
-    sessionmaker: Any, tmp_repo: Path, actions: list[Any], *, max_turns: int = 20, stagnation: Any = None
+    sessionmaker: Any, tmp_repo: Path, actions: list[Any], *, max_turns: int = 20, stagnation: Any = None, engine_turns: bool = False
 ) -> tuple[Any, CoderLoop, ScriptedCoder]:
     (tmp_repo / "tests").mkdir(exist_ok=True)
-    h = await make_harness(sessionmaker, tmp_repo, contract=SCOPE)
+    permissions = ToolPermissions(max_turns=max_turns) if engine_turns else None
+    h = await make_harness(sessionmaker, tmp_repo, contract=SCOPE, permissions=permissions)
     async with sessionmaker() as s:
         s.add(StepAttempt(id=h.attempt_id, step_id=h.step.id, job_id=h.step.job_id, attempt_no=1, kind="initial", status="running"))
         await s.commit()
@@ -307,6 +309,23 @@ async def test_turn_budget_exhausted(sessionmaker: Any, tmp_repo: Path) -> None:
     h, loop, _ = await _setup(sessionmaker, tmp_repo, [act("read_file", path="app.py")] * 3, max_turns=3)
     res = await _run(h, loop)
     assert res.outcome == "budget_exhausted" and res.turns == 3 and res.error_code == "TURN_BUDGET_EXHAUSTED"
+
+
+async def test_turns_the_engine_grants_in_the_last_turn_are_run(sessionmaker: Any, tmp_repo: Path) -> None:
+    """BUG-349: complete_step in the last turn found the coder's own test still failing; the engine grants the grace
+    turns once and the loop runs them, so the fix lands in this attempt instead of after a verifier run and a new one."""
+    red = "grep -q FIXED app.py || { echo 'test_add3 FAILED'; exit 1; }"
+    actions = [
+        act("run_test", command=red),
+        act("write_file", path="app.py", content="def add(a, b, c=0):\n    return a + b + c\n"),
+        act("complete_step", summary="done"),
+        act("write_file", path="app.py", content="def add(a, b, c=0):  # FIXED\n    return a + b + c\n"),
+        act("complete_step", summary="fixed"),
+    ]
+    h, loop, _ = await _setup(sessionmaker, tmp_repo, actions, max_turns=3, engine_turns=True)
+    res = await _run(h, loop)
+    assert res.outcome == "completed" and res.turns == 5, (res.outcome, res.turns, [r.error_code for r in res.history])
+    assert res.history[2].error_code == "CHECK_STILL_FAILING"
 
 
 async def test_stagnation_diagnosis_is_injected_and_stop_ends_loop(sessionmaker: Any, tmp_repo: Path) -> None:

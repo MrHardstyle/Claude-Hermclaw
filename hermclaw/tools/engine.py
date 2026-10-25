@@ -110,6 +110,7 @@ from hermclaw.tools.workspace import (
 
 if TYPE_CHECKING:
     from hermclaw.memory.store import MemoryStore
+    from hermclaw.verifier.secrets import SecretFinding
 
 log = get_logger(__name__)
 
@@ -367,6 +368,12 @@ class ToolEngine:
         self._recheck_secrets: list[str] = []  # files whose secret check failed (BUG-279)
         self._changed_now: set[str] = set()
         self._correction_reminded = False
+        # test runs of this attempt whose last result failed, by core, and the step's acceptance test commands:
+        # complete_step re-runs them and refuses once while one fails (BUG-349, BUG-351)
+        self._failed_tests: dict[tuple[str, str], str] = {}
+        self._acceptance_tests: list[str] = []
+        self._tests_reminded = False
+        self._granted_turns = 0  # turns granted once beyond the budget when complete_step found a failing check
         self._handlers: dict[ToolName, Handler] = {
             ToolName.list_files: self._list_files,
             ToolName.read_file: self._read_file,
@@ -408,7 +415,12 @@ class ToolEngine:
 
     @property
     def max_turns(self) -> int:
-        return self.permissions.max_turns or self.policies.coder.max_turns
+        return (self.permissions.max_turns or self.policies.coder.max_turns) + self._granted_turns
+
+    @property
+    def granted_turns(self) -> int:
+        """Turns granted beyond the budget (BUG-349); the loop runs them."""
+        return self._granted_turns
 
     def _provided(self, tool: ToolName) -> bool:
         if tool is ToolName.recall:
@@ -2040,6 +2052,11 @@ class ToolEngine:
         if run.sandbox_failed:
             summary = TestSummary(summary.framework, "error", 0, 0, 0, 0, None, f"sandbox error: {run.error}")
         test_event = EventType.TEST_PASSED if summary.status == "passed" else EventType.TEST_FAILED
+        test_key = (run.cwd, core_command(args.command))
+        if summary.status == "failed":
+            self._failed_tests[test_key] = args.command.strip()
+        elif summary.status == "passed":
+            self._failed_tests.pop(test_key, None)
         await self.recorder.test_run(
             ctx,
             command=args.command,
@@ -2213,6 +2230,10 @@ class ToolEngine:
         """The commands of the lint/test checks whose failure the correction attempt must resolve (BUG-276)."""
         self._recheck_commands = list(dict.fromkeys(c.strip() for c in commands if c and c.strip()))
 
+    def expect_acceptance_tests(self, commands: Iterable[str]) -> None:
+        """The test commands of the step's acceptance criteria: complete_step runs them as the verifier does (BUG-351)."""
+        self._acceptance_tests = list(dict.fromkeys(c.strip() for c in commands if c and c.strip()))
+
     def expect_secret_rechecks(self, paths: Iterable[str]) -> None:
         """The files whose secret check failed: complete_step scans their added lines again (BUG-279)."""
         self._recheck_secrets = list(dict.fromkeys(canonical_path(p) for p in paths if p))
@@ -2220,17 +2241,24 @@ class ToolEngine:
     async def _secrets_left(self) -> list[str]:
         """Lines of the flagged files, not in their base version, on which the verifier's scanner still finds a
         secret – as the verifier shows them (masked)."""
+        found = await self._secret_findings(self._recheck_secrets)
+        return [f"{f.path}:{f.line} ({f.rule}): {f.preview}" for findings in found.values() for f in findings]
+
+    async def _secret_findings(self, paths: Sequence[str]) -> dict[str, list[SecretFinding]]:
+        """The verifier's secret findings on the lines of ``paths`` that are not in their base version (the lines the
+        verifier scans). A scan that cannot run here finds nothing – the verifier keeps the judgement."""
         from hermclaw.verifier.languages import detect_language, is_lock_or_data_file
         from hermclaw.verifier.secrets import SecretScanner
 
-        scanner, out = SecretScanner(), list[str]()
-        for rel in self._recheck_secrets:
+        scanner = SecretScanner()
+        out: dict[str, list[SecretFinding]] = {}
+        show_base = getattr(self.git, "show_base_file", None)  # GitReader extension of the real reader
+        if show_base is None:
+            return out
+        for rel in paths:
             if not (self.fs.root / rel).is_file():
                 continue
             text = (await asyncio.to_thread(self.fs.read_text, rel, max_bytes=self.max_read_bytes)).text
-            show_base = getattr(self.git, "show_base_file", None)  # GitReader extension of the real reader
-            if show_base is None:
-                return []
             try:
                 base = await show_base(self.workspace, rel) or ""
             except Exception as exc:  # a scan that cannot run here leaves the judgement to the verifier
@@ -2243,10 +2271,21 @@ class ToolEngine:
                 if before[key] > 0:
                     before[key] -= 1
                     continue
-                out.extend(
-                    f"{rel}:{n} ({f.rule}): {f.preview}" for f in scanner.scan_line(rel, n, line, language=language, entropy=not noisy)
-                )
+                hits = scanner.scan_line(rel, n, line[:20_000], language=language, entropy=not noisy)
+                if hits:
+                    out.setdefault(rel, []).extend(hits)
         return out
+
+    async def _secrets_after_write(self, paths: Sequence[str]) -> list[str]:
+        """The secret check of the verifier on the files just written: live G1 (rc88) failed an attempt in the
+        verifier on a realistic test token the coder could have replaced while writing the test (BUG-347)."""
+        from hermclaw.verifier.checks import secret_remedy
+
+        found = await self._secret_findings(paths)
+        return [
+            f"{rel}: possible secret(s): " + ", ".join(f"line {f.line} ({f.rule})" for f in findings[:5]) + f". {secret_remedy(rel)}"
+            for rel, findings in found.items()
+        ]
 
     async def _lint_after_write(self, result: ToolResult, ctx: CallContext, events: list[PendingEvent]) -> ToolResult:
         """The verifier's syntax and lint findings in the files just written, added to the write's result: Agents-A1
@@ -2258,6 +2297,7 @@ class ToolEngine:
         if ctx.turn >= self.max_turns:
             return result
         found, syntax = await asyncio.to_thread(self._syntax_after_write, result.mutated_paths or [])
+        found += await self._secrets_after_write(result.mutated_paths or [])
         commands = [*syntax, *await self._lint_commands(result.mutated_paths)]
         for command in commands:
             try:
@@ -2280,7 +2320,8 @@ class ToolEngine:
         if not found:
             return result
         note = (
-            "\n\nsyntax and lint, checked as the verifier checks them, find problems in the file(s) just written. Fix every finding now "
+            "\n\nsyntax, lint and secret checks, run as the verifier runs them, find problems in the file(s) just written. "
+            "Fix every finding now "
             "(the step cannot complete with them; if you are still writing the file in parts, finish it first):\n"
         )
         return result.model_copy(update={"output": result.output + note + "\n".join(found), "data": result.data | {"lint_findings": True}})
@@ -2333,35 +2374,48 @@ class ToolEngine:
                 by_language.setdefault(language, []).append(rel)
         return [lint_command(templates[lang], files) for lang, files in sorted(by_language.items())]
 
-    async def _still_failing(self, ctx: CallContext, events: list[PendingEvent]) -> tuple[str, str] | None:
-        """The first failed check of the correction that still fails, or a lint finding in the changed files, run as
-        the verifier runs it – on the last turn nothing is re-run (a refusal there would only exhaust the budget); a
-        check that cannot run here is skipped."""
-        if ctx.turn >= self.max_turns:
+    async def _still_failing(self, ctx: CallContext, events: list[PendingEvent]) -> tuple[str, str, str] | None:
+        """The first failed check of the correction that still fails, a lint finding in the changed files, or – once – an
+        acceptance test of the step or a test run of this attempt whose last result failed, run as the verifier runs
+        it, with its kind (``check``, ``acceptance``, ``own``); a check that cannot run here is skipped. In the last turn
+        the checks run only while the turns of ``policies.coder.grace_turns`` can still be granted (BUG-349)."""
+        if ctx.turn >= self.max_turns and (self._granted_turns or not self.policies.coder.grace_turns):
             return None
         lint = [c for c in await self._lint_commands() if c not in self._recheck_commands]
-        for command in [*self._recheck_commands, *lint]:
+        checks = [(".", c, "check") for c in [*self._recheck_commands, *lint]]
+        if not self._tests_reminded:
+            # live G1 S007: the step's acceptance ran 'python -m unittest discover' – no tests ran, tests/ was no package –
+            # while the coder ran its suite with '-s tests' and completed (BUG-351); a test run failed in turn 15, the
+            # coder changed two files and completed without running it again (BUG-349)
+            checks += [(".", c, "acceptance") for c in self._acceptance_tests if c not in self._recheck_commands]
+            ran = {c for _, c, _ in checks}
+            checks += [(cwd, c, "own") for (cwd, _), c in self._failed_tests.items() if c not in ran]
+        for cwd, command, kind in checks:
             try:
                 run = await self._sandbox_run(
-                    ToolName.run_command, command=command, cwd_raw=".", timeout_seconds=None, purpose="verifier", ctx=ctx, events=events
+                    ToolName.run_command, command=command, cwd_raw=cwd, timeout_seconds=None, purpose="verifier", ctx=ctx, events=events
                 )
             except ToolError as exc:
-                previous = self._ran.get((".", command.strip()))
+                previous = self._ran.get((cwd, command.strip()))
                 missing_tool = previous is not None and previous[2] in ("exit code 126", "exit code 127")
                 if exc.code == E.COMMAND_REPEATED and not exc.data.get("passed") and not missing_tool:
-                    return command, self._ran_output.get((".", core_command(command)), "(output not kept)")
+                    return command, self._ran_output.get((cwd, core_command(command)), "(output not kept)"), kind
                 continue
-            if run.sandbox_failed or run.result is None or run.result.timed_out or run.result.exit_code in (0, 126, 127):
+            if run.sandbox_failed or run.result is None or run.result.timed_out:
+                continue
+            if run.result.exit_code in (0, 126, 127) and not run.failed_tests:
                 continue  # 126/127: the tool is not in the image, the verifier skips it too
-            return command, self._render_run(command, run, budget=self.output_limit, head_ratio=0.3)[0]
+            return command, self._render_run(command, run, budget=self.output_limit, head_ratio=0.3)[0], kind
         left = await self._secrets_left() if self._recheck_secrets else []
         if left:
             # live M3: the coder swapped one README placeholder for another for eleven turns while four other flagged
             # lines stayed, and re-wrote a masked test token unchanged; nothing told it which lines still failed (BUG-279)
             shown = "\n".join(left[:20]) + (f"\n(+{len(left) - 20} more)" if len(left) > 20 else "")
-            return "secret scan", (
+            return (
+                "secret scan",
                 f"{shown}\nReplace each value (shown as {REDACTED} where it is masked) with an obvious placeholder: in docs "
-                "<your-token> or $AUTH_TOKEN, in tests a value containing 'dummy', 'fake' or 'example'."
+                "<your-token> or $AUTH_TOKEN, in tests a value containing 'dummy', 'fake' or 'example'.",
+                "check",
             )
         return None
 
@@ -2390,12 +2444,31 @@ class ToolEngine:
         if failing is not None:
             # live K1: the correction named ruff findings, the coder re-ran only pytest and the runtime completed the step
             # for it; the verifier failed on the same lint output twice and the plan was replaced (BUG-276)
-            command, output = failing
+            command, output, kind = failing
+            granted = ""
+            if ctx.turn >= self.max_turns:
+                self._granted_turns = self.policies.coder.grace_turns
+                granted = f" You get {self._granted_turns} more turn(s) for this, once."
+            if kind != "check":
+                self._tests_reminded = True
+                what = (
+                    f"the step's acceptance test `{command}`, run as the verifier runs it, fails, so the verifier would "
+                    "reject the step. Make it pass as written"
+                    if kind == "acceptance"
+                    else f"your test run `{command}` failed in this attempt and still fails, so the verifier would most "
+                    "likely reject the step. Fix what its output names and run it again"
+                )
+                raise ToolError(
+                    E.CHECK_STILL_FAILING,
+                    f"complete_step refused once: {what}; if the failure cannot be fixed within this step, call complete_step "
+                    f"again.{granted} Its output:\n{output}",
+                    data={"command": command, "test_kind": kind, "granted_turns": self._granted_turns},
+                )
             raise ToolError(
                 E.CHECK_STILL_FAILING,
                 "complete_step refused: a check the verifier runs on this step still fails, so the verifier would reject "
-                f"the step. Fix what its output names, then call complete_step. Its output:\n{output}",
-                data={"command": command},
+                f"the step. Fix what its output names, then call complete_step.{granted} Its output:\n{output}",
+                data={"command": command, "granted_turns": self._granted_turns},
             )
         reported: list[str] = []
         for raw in args.changed_files:

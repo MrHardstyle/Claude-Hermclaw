@@ -559,6 +559,7 @@ class ImplementStepHandler:
             corrections = await self._fresh_verifier_items(ctx, step, handle, corrections)
         engine.expect_corrections(c.path for c in corrections)  # complete_step reminds of untouched files (BUG-258)
         engine.expect_rechecks(c.command for c in corrections if c.source == "verifier")  # and re-runs failed checks (BUG-276)
+        engine.expect_acceptance_tests(c.command for c in step.acceptance if c.type == "test")  # and the step's tests (BUG-351)
         engine.expect_secret_rechecks(  # and re-scans files with flagged secrets (BUG-279)
             c.path for c in corrections if c.source == "verifier" and c.label.startswith(("secrets:", "security:"))
         )
@@ -584,6 +585,11 @@ class ImplementStepHandler:
                 )
         except ResourceUnavailable as exc:
             return StepOutcome("failed", error_code=exc.code, error_message=exc.message, retryable=True)
+        # a scope the coder expanded during the loop is the one the verifier checks: the verifier failed G1's S007 on
+        # 'tests/__init__.py outside scope v2' although the attempt had been granted v3 (BUG-350)
+        current = await self.deps.scope_engine.current_contract(ctx.step_id)
+        if current is not None and (step.scope is None or current.version > step.scope.version):
+            step = step.model_copy(update={"scope": current})
         try:
             earlier = tuple(c.message for c in corrections if c.source == "review")
             review = tournament is None or tournament.review

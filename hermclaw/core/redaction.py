@@ -62,10 +62,31 @@ def is_role_value(value: str) -> bool:
     return bool(words) and all(_role_word(w) for w in words) and not all(w.isdigit() for w in words)
 
 
+# live G1 (rc87): the README's ``PVEAPIToken=USER@REALM!TOKENID=UUID`` and a test's ``api_key = "UNRAID_API_KEY"`` failed
+# the secret check and showed as the marker, and the coder deleted the documented token format instead (BUG-348)
+_EMBEDDED_PLACEHOLDER = re.compile(r"<[A-Za-z][\w .-]*>|\{\{?\s*[A-Za-z_][\w.]*\s*\}\}?|\$\{[^}]+\}")
+_NOTATION_SPLIT = re.compile(r"[@!=.:/+_-]+")
+_NOTATION_WORD = re.compile(r"[A-Z]{2,12}")
+
+
+def is_notation_value(value: str) -> bool:
+    """A format or a name, not a value: ``USER@REALM!TOKENID=UUID``, ``UNRAID_API_KEY`` (capital words without
+    digits, a single one at most 8 letters) or a value with a ``<placeholder>``/``{name}`` in it."""
+    v = value.strip("\"'`")
+    if _EMBEDDED_PLACEHOLDER.search(v):
+        return True
+    parts = [p for p in _NOTATION_SPLIT.split(v) if p]
+    if not parts or not all(_NOTATION_WORD.fullmatch(p) for p in parts):
+        return False
+    return len(parts) > 1 or len(parts[0]) <= 8
+
+
 def is_benign_value(value: str, *, quoted: bool) -> bool:
     """A ``key = value`` match that is no secret: an obvious placeholder, or (unquoted) a short code reference."""
     low = value.lower()
     if low.startswith(_PLACEHOLDER_START) or any(part in low for part in _PLACEHOLDER_PARTS) or not set(low) - set("x*-."):
+        return True
+    if is_notation_value(value):
         return True
     # cycle 2 M3 on rc60: ``token="test-token-123"`` and ``token="wrong-token"`` both showed as the marker, and the review
     # could not tell the valid-token test from the wrong-token test (BUG-293). Unquoted, such a value is a variable:

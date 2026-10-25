@@ -865,7 +865,9 @@ async def test_a_write_reports_the_lint_findings_of_the_written_file(sessionmake
     pol.verifier.lint_commands = {"python": "! grep -Hn UNUSED {files}"}
     h = await make_harness(sessionmaker, repo, contract=scope(**SCOPE), policy=pol)
     res = await h.call("write_file", path="src/calc.py", content="import os\nUNUSED = 1\n")
-    assert res.ok and "syntax and lint, checked as the verifier checks them" in res.output and "src/calc.py:2:" in res.output, res.output
+    assert res.ok and "syntax, lint and secret checks, run as the verifier runs them" in res.output and "src/calc.py:2:" in res.output, (
+        res.output
+    )
     assert res.data.get("lint_findings") is True
     fixed = await h.call("replace_text", path="src/calc.py", old="UNUSED = 1", new="USED = 1")
     assert fixed.ok and "lint" not in fixed.output, fixed.output
@@ -884,14 +886,14 @@ async def test_a_write_reports_the_syntax_errors_of_the_written_file(sessionmake
     (bash -n, the PowerShell parser) as one sandbox command per language; a parser missing from the image adds nothing."""
     h = await make_harness(sessionmaker, repo, contract=scope(target_paths=["src/calc.py"], allowed_new_paths=["src/*"]))
     res = await h.call("write_file", path="src/config.json", content='{"a": [1, 2}\n')
-    assert res.ok and "syntax and lint" in res.output and "src/config.json:" in res.output, res.output
+    assert res.ok and "syntax, lint and secret checks" in res.output and "src/config.json:" in res.output, res.output
     res = await h.call("write_file", path="src/run.sh", content="#!/bin/bash\nif true; then echo hi\n")
-    assert res.ok and "syntax and lint" in res.output and "bash -n" in res.output, res.output
+    assert res.ok and "syntax, lint and secret checks" in res.output and "bash -n" in res.output, res.output
     fixed = await h.call("write_file", path="src/run.sh", content="#!/bin/bash\nif true; then echo hi; fi\n")
-    assert fixed.ok and "syntax and lint" not in fixed.output, fixed.output
+    assert fixed.ok and "syntax, lint and secret checks" not in fixed.output, fixed.output
     ps = await h.call("write_file", path="src/report.ps1", content="function Get-Report {\n  'x'\n")
     if shutil.which("pwsh") is None:
-        assert ps.ok and "syntax and lint" not in ps.output, ps.output
+        assert ps.ok and "syntax, lint and secret checks" not in ps.output, ps.output
     else:
         assert "Missing closing '}'" in ps.output, ps.output
 
@@ -922,6 +924,61 @@ async def test_complete_step_reruns_the_check_the_correction_names(sessionmaker:
     assert again.error_code == E.CHECK_STILL_FAILING and "F841 still bad" in again.output
     assert (await h.call("write_file", path="src/calc.py", content="# LINT_CLEAN\n")).ok
     assert (await h.call("complete_step", summary="done, lint clean")).ok
+
+
+RED_TEST = "grep -q FIXED src/calc.py || { echo 'test_add FAILED'; exit 1; }"
+
+
+async def test_complete_step_reruns_a_failed_own_test_once(sessionmaker: SM, repo: Path) -> None:
+    """Live G1 (BUG-349): a test run failed in turn 15, the coder changed two files and completed without running it
+    again; the verifier failed the same test and a new attempt re-read every file. complete_step re-runs a test run of
+    the attempt whose last result failed and refuses once while it still fails; a fixed one passes."""
+    h = await make_harness(sessionmaker, repo, contract=scope(**SCOPE))
+    assert (await h.call("run_test", command=RED_TEST)).error_code == E.TESTS_FAILED
+    assert (await h.call("write_file", path="src/calc.py", content="x = 1\n")).ok
+    refused = await h.call("complete_step", summary="done")
+    assert refused.error_code == E.CHECK_STILL_FAILING and "your test run" in refused.output and "test_add FAILED" in refused.output
+    assert (await h.call("complete_step", summary="the failure is unrelated")).ok, "refused once only"
+    h = await make_harness(sessionmaker, repo, contract=scope(**SCOPE))
+    assert (await h.call("run_test", command=RED_TEST)).error_code == E.TESTS_FAILED
+    assert (await h.call("write_file", path="src/calc.py", content="# FIXED\n")).ok
+    assert (await h.call("complete_step", summary="fixed")).ok
+
+
+async def test_complete_step_runs_the_steps_acceptance_tests_as_the_verifier_does(sessionmaker: SM, repo: Path) -> None:
+    """Live G1 S007 (BUG-351): the step's acceptance ran 'python -m unittest discover', where no tests ran because tests/
+    was no package, while the coder ran its suite with '-s tests' and completed; the verifier failed the step.
+    complete_step runs the acceptance test commands and refuses once while one fails."""
+    h = await make_harness(sessionmaker, repo, contract=scope(**SCOPE))
+    h.engine.expect_acceptance_tests([RED_TEST])
+    assert (await h.call("write_file", path="src/calc.py", content="x = 1\n")).ok
+    refused = await h.call("complete_step", summary="done")
+    assert refused.error_code == E.CHECK_STILL_FAILING and "acceptance test" in refused.output and "test_add FAILED" in refused.output
+    assert (await h.call("complete_step", summary="cannot be fixed here")).ok, "refused once only"
+    h = await make_harness(sessionmaker, repo, contract=scope(**SCOPE))
+    h.engine.expect_acceptance_tests([RED_TEST])
+    assert (await h.call("write_file", path="src/calc.py", content="# FIXED\n")).ok
+    assert (await h.call("complete_step", summary="fixed")).ok
+
+
+async def test_a_check_failing_in_the_last_turn_gets_the_grace_turns_once(sessionmaker: SM, repo: Path) -> None:
+    """BUG-349: in the last turn complete_step re-ran nothing, the verifier failed the step and a new attempt began.
+    Now the checks run there too; a failing one grants ``policies.coder.grace_turns`` once, with its output."""
+    h = await make_harness(sessionmaker, repo, contract=scope(**SCOPE), permissions=ToolPermissions(max_turns=3))
+    assert (await h.call("run_test", command=RED_TEST)).error_code == E.TESTS_FAILED
+    assert (await h.call("write_file", path="src/calc.py", content="x = 1\n")).ok
+    refused = await h.call("complete_step", summary="done")
+    assert refused.error_code == E.CHECK_STILL_FAILING and "3 more turn(s)" in refused.output, refused.output
+    assert h.engine.granted_turns == 3 and h.engine.max_turns == 6
+    assert (await h.call("write_file", path="src/calc.py", content="# FIXED\n")).ok
+    assert (await h.call("complete_step", summary="fixed")).ok
+    pol = policies()
+    pol.coder.grace_turns = 0
+    (repo / "src" / "calc.py").write_text("x = 0\n")
+    h = await make_harness(sessionmaker, repo, contract=scope(**SCOPE), permissions=ToolPermissions(max_turns=3), policy=pol)
+    assert (await h.call("run_test", command=RED_TEST)).error_code == E.TESTS_FAILED
+    assert (await h.call("write_file", path="src/calc.py", content="x = 2\n")).ok
+    assert (await h.call("complete_step", summary="done")).ok and h.engine.granted_turns == 0
 
 
 async def test_a_failed_run_shows_the_source_lines_its_output_names(sessionmaker: SM, repo: Path) -> None:

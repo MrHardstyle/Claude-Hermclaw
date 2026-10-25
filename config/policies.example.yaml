@@ -58,6 +58,7 @@ scope:
 coder:
   max_turns: 20
   max_turns_per_step: 40   # a step with many files gets more turns, up to this (BUG-339)
+  grace_turns: 3           # once, when complete_step in the last turn finds a failing check (BUG-349)
   max_output_tokens: 6144
   tool_output_chars: 12000
 stagnation: {warn_after: 2, diagnose_after: 3, stop_after: 4, sequence_length: 3, max_diagnoses: 2, strip_line_numbers: true}
