@@ -23,6 +23,7 @@ from hermclaw.verifier.imports import MISSING_EXIT_CODE, interpreter_for, new_un
 from hermclaw.verifier.languages import CODE_LANGUAGES, detect_language, repo_has_tests
 from hermclaw.verifier.report import EXECUTOR_ERROR
 from hermclaw.verifier.secrets import SecretScanner
+from hermclaw.verifier.serve import pages, parse_serve_output, serve_command, serve_driver, servers
 from hermclaw.verifier.syntax import (
     IN_PROCESS,
     SANDBOX_TOOLS,
@@ -433,6 +434,67 @@ async def start_checks(ctx: VerifyContext) -> list[VerificationCheck]:
                 why += "; no criterion names the project's interpreter, so this does not block the step"
             message = f"python -m {entry.module} crashed on start with {result.exception}: {why}"
             out.append(ctx.check("start", name, "fail", message, evidence, blocking=blocking))
+    return out
+
+
+# ------------------------------------------------------------------------------------------- serve (BUG-346)
+_WEB_SUFFIXES = (".html", ".htm", ".js", ".mjs", ".css")
+
+
+async def serve_checks(ctx: VerifyContext) -> list[VerificationCheck]:
+    """Start the project's HTTP server like its user and load its page, the files and routes the page uses and every
+    HTML page of the project (``hermclaw.verifier.serve``): blocking on the whole job, a note on a single step."""
+    seconds = ctx.policies.verifier.serve_seconds
+    if not seconds:
+        return [ctx.check("serve", "serve", "skip", "disabled (policies.verifier.serve_seconds = 0)")]
+    files = await ctx.files()
+    found = await asyncio.to_thread(servers, ctx.root, files)
+    if not found:
+        return [ctx.check("serve", "serve", "skip", "the project has no Python program that serves HTTP")]
+    touched = {c.path for c in ctx.changes.existing}
+    if not ctx.step.job_level and not any(p.lower().endswith(_WEB_SUFFIXES) for p in touched) and not touched & {s.path for s in found}:
+        return [ctx.check("serve", "serve", "skip", "the change touches neither the server nor its web files")]
+    own = [c.command for c in ctx.step.acceptance if isinstance(c, (TestEvidence, CommandEvidence))]
+    hints = [*own, *ctx.step.command_hints]
+    interpreter, _ = interpreter_for(hints)
+    page_paths = pages(files)
+    out: list[VerificationCheck] = []
+    for server in found:
+        name = f"serve:{server.path}"
+        command, how = serve_command(server, interpreter, hints)
+        res = await ctx.runner.run(
+            serve_driver(interpreter, command, server, page_paths, seconds),
+            purpose="verifier",
+            timeout_seconds=int(seconds) + 120,
+            network=False,
+        )
+        result = parse_serve_output(res.output) if not res.failed_to_run else None
+        evidence: dict[str, Any] = {"command": command, "started": how, "pages": page_paths}
+        if result is None:
+            evidence[EXECUTOR_ERROR] = res.failed_to_run
+            evidence["output"] = ctx.runner.clip(res.output, 2000)
+            problem = res.problem or (f"exit code {res.exit_code}" if not res.timed_out else "timed out")
+            out.append(ctx.check("serve", name, "error", f"serve check could not run: {problem}", evidence))
+            continue
+        evidence["probes"] = result.probes[:40]
+        if result.stderr:
+            evidence["stderr"] = ctx.runner.clip(result.stderr, 3000)
+        if not result.listening:
+            ended = f"exited with code {result.exit_code}" if result.exit_code is not None else "did not listen"
+            message = f"{command} ({how}) {ended} within {seconds:g}s; the served pages were not checked"
+            out.append(ctx.check("serve", name, "skip", message, evidence))
+        elif not result.problems:
+            message = f"{command} ({how}) serves its page, {len(result.probes) - 1} file(s), route(s) and page(s) it uses"
+            out.append(ctx.check("serve", name, "pass", message, evidence))
+        else:
+            why = (
+                "Serve the project's pages and the files they load from this program (or remove pages nothing serves), "
+                "and keep every route the pages call"
+            )
+            if not ctx.step.job_level:
+                why += " – not blocking on a single step, a later step may still connect the parts"
+            message = f"started {command} ({how}) and loaded it like its user: " + "; ".join(result.problems[:8]) + f". {why}"
+            out.append(ctx.check("serve", name, "fail", message, evidence, blocking=ctx.step.job_level))
     return out
 
 

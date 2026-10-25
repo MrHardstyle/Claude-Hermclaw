@@ -252,15 +252,40 @@ def render_scope(scope: ScopeContract | None, exclude_globs: Sequence[str], budg
 
 
 # ---------------------------------------------------------------------------------------------- CONSTRAINTS
-def render_constraints(constraints: Sequence[str], budget: int, *, item_chars: int = 2400) -> RenderedSection:
-    """Constraints include the cited findings of research steps (up to 2400 chars each, ``research_findings``):
-    clipping them to a few hundred characters dropped the facts the coder needed (BUG-231)."""
+def _constraint_item(text: str, item_chars: int) -> str:
+    """A one-line constraint clipped as a line; a multi-line one (the facts of a research step, ``facts_block``) keeps
+    its lines – flattened into one, the facts were hard to tell apart (BUG-345) – and is cut at a line boundary."""
+    if "\n" not in text:
+        return f"- {clip_line(text, item_chars)}"
+    lines = [line.rstrip() for line in text.splitlines() if line.strip()]
+    out = [f"- {clip_line(lines[0], item_chars)}"]
+    used = char_cost(out[0])
+    for line in lines[1:]:
+        piece = f"  {line}"
+        if used + 1 + char_cost(piece) > item_chars:
+            out.append(f"  (+{len(lines) - len(out)} more lines not shown)")
+            break
+        out.append(piece)
+        used += 1 + char_cost(piece)
+    return "\n".join(out)
+
+
+def render_constraints(constraints: Sequence[str], budget: int, *, item_chars: int = 3600) -> RenderedSection:
+    """Constraints include the facts of research steps (up to 3600 chars each, ``research_findings``): clipping them to
+    a few hundred characters dropped the facts the coder needed (BUG-231). When all of them do not fit, every item is
+    shortened (research facts keep their most concrete lines first) before one is left out (BUG-345)."""
     sec = RenderedSection(SectionName.CONSTRAINTS)
-    items = [c.strip() for c in constraints if c and c.strip()]
+    items = list(dict.fromkeys(c.strip() for c in constraints if c and c.strip()))
     if not items:
         sec.omitted_reason = "empty"
         return sec
-    fit_lines(sec, [f"- {clip_line(c, item_chars)}" for c in dict.fromkeys(items)], budget, what="constraints")
+    limit = item_chars
+    lines = [_constraint_item(c, limit) for c in items]
+    while sum(char_cost(line) + 1 for line in lines) > budget and limit > 600:
+        limit = max(600, limit * 2 // 3)
+        lines = [_constraint_item(c, limit) for c in items]
+        sec.truncated = True
+    fit_lines(sec, lines, budget, what="constraints")
     return sec
 
 

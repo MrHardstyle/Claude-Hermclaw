@@ -745,6 +745,27 @@ async def test_identical_command_on_unchanged_files_is_not_rerun(sessionmaker: S
     assert len(_runs(rec)) == 3
 
 
+async def test_another_slice_of_an_unchanged_run_is_refused_after_one(sessionmaker: SM, repo: Path) -> None:
+    """Live G1 on Strata (BUG-344): the coder re-ran the unchanged test suite with only another slice of its output
+    (| tail -80, -v | tail -120, | tail -220; true, echo label; …) for most of an attempt. One re-run with another
+    slice is allowed per file-change count, the next is refused with the earlier output."""
+    rec = InstallRecorder("FAIL: test_state (tests.test_api)\nAssertionError: 404 != 200\nFAILED (failures=1)\n", exit_code=1)
+    h = await make_harness(sessionmaker, repo, contract=scope(**SCOPE), executor=rec)
+    assert not (await h.call("run_command", command="python -m unittest discover -s tests 2>&1 | tail -80")).ok
+    second = await h.call("run_command", command="python -m unittest discover -s tests -v 2>&1 | tail -120")
+    assert second.error_code == E.COMMAND_FAILED, "one other slice runs"
+    third = await h.call("run_command", command="echo '=== failures ==='; python -m unittest discover -s tests 2>&1 | tail -220; true")
+    assert third.error_code == E.COMMAND_REPEATED and third.data["repeated"] is True
+    assert "another slice of its output" in third.output and "AssertionError: 404 != 200" in third.output
+    assert len(_runs(rec)) == 2
+    assert (await h.call("run_command", command="python -m unittest discover -s tests -k state")).error_code == E.COMMAND_FAILED, (
+        "a command that selects other tests is another command"
+    )
+    assert (await h.call("write_file", path="src/gen_new.py", content="X = 1\n")).ok
+    assert (await h.call("run_command", command="python -m unittest discover -s tests | tail -5")).error_code == E.COMMAND_FAILED
+    assert len(_runs(rec)) == 4
+
+
 async def test_a_refused_repeat_of_a_failed_command_carries_its_output(sessionmaker: SM, repo: Path) -> None:
     """Live G1 (BUG-246): a diagnostic command that succeeded replaced LATEST FAILURE; the refusal of the failing test
     command then pointed at "its exact output in LATEST FAILURE", which no longer showed it, and the coder re-proposed

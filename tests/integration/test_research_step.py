@@ -101,6 +101,9 @@ async def test_research_step_completes_with_cited_summary_for_dependent_steps(
     await _complete(sessionmaker, research.id, out.result)
     findings = await research_findings(sessionmaker, work.id)
     assert len(findings) == 1 and findings[0].startswith("Research S001") and "docs.toolkit.test" in findings[0]
+    # BUG-345: the facts are kept one per line, the concrete ones first, with the sources they cite
+    assert out.result["facts"] and "binding facts" in findings[0] and "\n- " in findings[0]
+    assert "Python 3.8" in findings[0].split("Sources:")[0]
     assert await research_findings(sessionmaker, research.id) == [], "a research step does not receive itself"
 
 

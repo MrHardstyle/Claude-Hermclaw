@@ -98,6 +98,9 @@ class ReviewInput:
     requirement_docs: Sequence[tuple[str, str]] = ()
     # Hermclaw's lessons and conventions whose code patterns match lines the diff adds (D-027), rendered entries
     conventions: Sequence[str] = ()
+    # facts of the research steps the step depends on (``research_findings``): job-level review steps never saw them
+    # and the delivered code contradicted three of them (live G1 on Strata, BUG-345)
+    research: Sequence[str] = ()
 
 
 @dataclass(frozen=True)

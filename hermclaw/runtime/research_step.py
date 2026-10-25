@@ -28,6 +28,7 @@ from hermclaw.core.errors import ValidationFailed
 from hermclaw.persistence.models import Step
 from hermclaw.research.engine import ResearchOutcome, format_for_worker
 from hermclaw.research.errors import SearchUnavailable
+from hermclaw.research.findings import concrete_facts, fact_sources
 from hermclaw.research.text import clip
 from hermclaw.runtime.transitions import emit_status
 from hermclaw.scheduler.handlers import StepOutcome, StepRunContext
@@ -118,6 +119,8 @@ class ResearchStepHandler:
                 )
             return StepOutcome("failed", error_code="RESEARCH_NO_SOURCES", error_message=message, result=result, retryable=True)
         result["worker_summary"] = format_for_worker(contract, max_chars=self.summary_chars)
+        result["facts"] = concrete_facts(contract)
+        result["fact_sources"] = fact_sources(contract)
         result["synthesis"] = clip(contract.synthesis, 4000)
         summary = f"Research {contract.status}: {len(contract.sources)} Quellen, {len(contract.claims)} Claims"
         return StepOutcome("completed", summary=summary, result=result)

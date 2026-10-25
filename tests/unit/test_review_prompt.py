@@ -132,7 +132,7 @@ def test_system_prompt_rules() -> None:
         "imported",
         "language of the JOB GOAL",
         # G1 quality review (BUG-231): Bearer instead of the researched x-api-key, verify_ssl read but never applied
-        "cited research",
+        "RESEARCH FACTS",
         "never applies",
         "Hand-written parsers",
         "Hollow tests",
@@ -150,6 +150,23 @@ def test_research_findings_reach_the_reviewer_in_full() -> None:
     step = _step().model_copy(update={"constraints": [finding]})
     user, _ = _user(_file("export.py", 2), step=step)
     assert "x-api-key" in user
+
+
+def test_research_facts_are_their_own_section_with_their_lines() -> None:
+    """Live G1 on Strata (BUG-345): the job-level review never saw the research, and the step reviews saw it flattened
+    into a constraint; the collector sent the Proxmox token without 'PVEAPIToken=' and Unraid keys as Bearer."""
+    block = (
+        "Research S001 (Proxmox VE API) – binding facts from the cited documentation:\n"
+        "- The Authorization header has the format PVEAPIToken=USER@REALM!TOKENID=UUID. (S1)\n"
+        "- GET /nodes/{node}/storage returns the fields 'storage', 'type', 'used', 'total'. (S1)"
+    )
+    step = _step().model_copy(update={"constraints": ["Keep the public API stable.", block]})
+    user, _ = _user(_file("collector.py", 2), step=step, research=[block])
+    section = user.split("## RESEARCH FACTS", 1)[1]
+    assert "PVEAPIToken=USER@REALM!TOKENID=UUID. (S1)\n- GET /nodes/{node}/storage" in section, "one fact per line"
+    assert "major" in user.split("## RESEARCH FACTS", 1)[1].split("\n", 1)[0]
+    plan = user.split("## PLAN STEP", 1)[1].split("## ", 1)[0]
+    assert "Keep the public API stable." in plan and "PVEAPIToken" not in plan, "shown once, as RESEARCH FACTS"
 
 
 def test_failed_verifier_facts_first_with_evidence() -> None:

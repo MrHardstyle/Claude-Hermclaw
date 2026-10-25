@@ -339,6 +339,9 @@ class VerifierPolicy(_Strict):
     # a changed package with a __main__.py is started once in the sandbox (BUG-309): passed when it still runs after
     # this many seconds or exits without a traceback; 0 disables the check
     start_seconds: float = Field(default=5, ge=0, le=60)
+    # a Python program that serves HTTP is started once and loaded like its user loads it (BUG-346): seconds it gets to
+    # listen; 0 disables the check
+    serve_seconds: float = Field(default=15, ge=0, le=120)
 
 
 class ReviewPolicy(_Strict):

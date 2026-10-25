@@ -963,3 +963,76 @@ async def test_a_delivered_package_that_does_not_start_fails(sessionmaker: Any, 
     write(repo, "calc.py", CALC + "# touched\n")
     untouched, *_ = await run(sessionmaker, repo, st)
     assert by_name(untouched.report)["start:python"].status == "skip"
+
+
+WEB_SERVER = """\
+import json
+import os
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+
+PAGE = '<!doctype html><html><head><link rel="stylesheet" href="/static/app.css"></head><body><script src="/static/app.js"></script></body></html>'
+FILES = {"/static/app.css": ("text/css", "body{}"), "/static/app.js": ("text/javascript", 'api("/api/state"); api("/api/token");')}
+
+
+class Handler(BaseHTTPRequestHandler):
+    def log_message(self, *args):
+        pass
+
+    def do_GET(self):
+        if self.path == "/":
+            body, ctype = PAGE, "text/html"
+        elif self.path in FILES:
+            ctype, body = FILES[self.path]
+        elif self.path == "/api/state":
+            body, ctype = json.dumps({"ok": True}), "application/json"
+        else:
+            self.send_error(404)
+            return
+        data = body.encode()
+        self.send_response(200)
+        self.send_header("Content-Type", ctype)
+        self.send_header("Content-Length", str(len(data)))
+        self.end_headers()
+        self.wfile.write(data)
+
+
+if __name__ == "__main__":
+    ThreadingHTTPServer(("127.0.0.1", int(os.environ.get("APP_PORT", "8765"))), Handler).serve_forever()
+"""
+
+
+async def test_the_delivered_web_server_is_loaded_like_its_user_loads_it(sessionmaker: Any, tmp_path: Path) -> None:
+    """Live G1 on Strata (BUG-346): every step passed, but the collector served a page built into it instead of the
+    frontend/ folder, and the frontend called /api/token, which a later step had removed. The server is started and
+    its page, the files and routes the page uses and every HTML page of the project are loaded: blocking on the whole
+    job, a note on a single step."""
+    repo = py_repo(tmp_path)
+    write(repo, "server.py", WEB_SERVER)
+    write(repo, "frontend/index.html", "<!doctype html><html><body>designed page</body></html>\n")
+    st = step(scope_contract=scope(allowed_new_paths=["server.py", "frontend/**"], target_paths=["calc.py"]))
+    job = dataclasses.replace(st, job_level=True)
+    outcome, *_ = await run(sessionmaker, repo, job, kind="review")
+    check = by_name(outcome.report)["serve:server.py"]
+    assert check.status == "fail" and check.blocking and not outcome.report.passed, check.message
+    assert "calls GET /api/token, but the server answered 404" in check.message
+    assert "frontend/index.html is part of the project, but the running server does not serve it" in check.message
+    assert "/api/state" not in check.message and "/static/app.css" not in check.message, "what exists passes"
+    assert ["GET", "/static/app.js", 200] in check.evidence["probes"]
+    single, *_ = await run(sessionmaker, repo, st)
+    note = by_name(single.report)["serve:server.py"]
+    assert note.status == "fail" and not note.blocking and "a later step may still connect" in note.message
+    # routes and pages that exist pass; a server that never listens is skipped
+    write(
+        repo,
+        "server.py",
+        WEB_SERVER.replace(' api("/api/token");', "").replace(
+            '"/static/app.css": (', '"/frontend/index.html": ("text/html", open("frontend/index.html").read()), "/static/app.css": ('
+        ),
+    )
+    fixed, *_ = await run(sessionmaker, repo, job, kind="review")
+    assert by_name(fixed.report)["serve:server.py"].status == "pass", by_name(fixed.report)["serve:server.py"].message
+    write(repo, "server.py", WEB_SERVER.replace("ThreadingHTTPServer((", "raise SystemExit('no config')\n    ThreadingHTTPServer(("))
+    quiet, *_ = await run(sessionmaker, repo, job, kind="review")
+    assert by_name(quiet.report)["serve:server.py"].status == "skip"
+    off, *_ = await run(sessionmaker, repo, job, verifier=make_verifier(sessionmaker, serve_seconds=0), kind="review")
+    assert by_name(off.report)["serve"].status == "skip"

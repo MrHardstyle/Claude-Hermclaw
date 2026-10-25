@@ -20,6 +20,7 @@ from hermclaw.contracts.verification import VerificationCheck, VerificationRepor
 from hermclaw.core.config import ModelProfileConfig
 from hermclaw.models.protocols import ChatMessage
 from hermclaw.models.tokens import CHARS_PER_TOKEN, MESSAGE_OVERHEAD_TOKENS, REPLY_PRIMING_TOKENS, context_budget, estimate_tokens
+from hermclaw.research.findings import RESEARCH_PREFIX
 from hermclaw.review.diff import FileDiff, render_diff, split_diff
 from hermclaw.review.severity import ReviewDraft
 from hermclaw.review.text import clip, clip_lines, compact_json, fence, one_line, redact
@@ -42,9 +43,8 @@ unreadable output are defects even when every test passed.
 connections that are never closed.
 - User-facing text (messages, labels, output) in the language of the JOB GOAL; new options, environment variables \
 or commands documented where the repository documents its usage (README).
-- External APIs, protocols and formats (endpoints, headers, field names, auth schemes) match the cited research \
-findings among the PLAN STEP constraints; code that contradicts them, or fixtures shaped like the code instead of \
-like the documented responses, is major.
+- External APIs, protocols and formats (endpoints, headers, field names, auth schemes) match the RESEARCH FACTS; code \
+that contradicts one, or test fixtures shaped like the code instead of like the documented responses, is major.
 - Configuration options the code reads but never applies (e.g. a TLS or timeout setting) are major.
 - Hand-written parsers for formats the language's standard library reads (JSON, TOML, CSV, INI, XML, URLs) are \
 major: they break on valid input the real parser handles.
@@ -158,7 +158,8 @@ def render_step(inp: ReviewInput, settings: ReviewSettings) -> str:
         "goal:",
         fence(clip(redact(step.goal), settings.step_goal_chars)),
     ]
-    constraints = step.constraints[: settings.max_constraints]
+    # research constraints are shown in full as RESEARCH FACTS (BUG-345)
+    constraints = [c for c in step.constraints if not (inp.research and c.startswith(RESEARCH_PREFIX))][: settings.max_constraints]
     lines.append("constraints:" if constraints else "constraints: (none)")
     lines.extend(f"- {clip(one_line(redact(c)), settings.constraint_chars)}" for c in constraints)
     if len(step.constraints) > len(constraints):
@@ -181,6 +182,19 @@ def render_conventions(entries: Sequence[str], settings: ReviewSettings) -> str:
             "## CONVENTIONS FOR CODE LIKE THIS CHANGE (Hermclaw's knowledge from earlier jobs; the change adds code they are "
             "about – a change that does not follow one where it applies is a major finding naming the file)",
             *(fence(e) for e in shown),
+        ]
+    )
+
+
+def render_research(facts: Sequence[str], settings: ReviewSettings) -> str:
+    """The facts of the research steps this step depends on (BUG-345), lines kept."""
+    shown = [clip(redact(f.strip()), settings.constraint_chars * 3 // 2) for f in facts]
+    return "\n".join(
+        [
+            "## RESEARCH FACTS (cited documentation found by this job's research steps; endpoints, auth headers, field "
+            "names and formats in the change and in its test fixtures must match them – a contradiction is a major "
+            "finding naming the file and the fact)",
+            *(fence(f) for f in shown),
         ]
     )
 
@@ -325,6 +339,8 @@ def _fixed_sections(inp: ReviewInput, budget: int, settings: ReviewSettings) -> 
             fixed.append(render_earlier(inp.earlier_findings, current))
         if inp.conventions:
             fixed.append(render_conventions(inp.conventions, current))
+        if inp.research:
+            fixed.append(render_research(inp.research, current))
         if sum(len(s) for s in fixed) <= budget * _FIXED_SHARE or current.item_chars <= _MIN_ITEM_CHARS:
             return fixed
         current = replace(

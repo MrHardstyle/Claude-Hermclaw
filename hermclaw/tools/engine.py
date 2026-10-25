@@ -95,6 +95,7 @@ from hermclaw.tools.registry import (
     tool_schemas,
     validate_args,
 )
+from hermclaw.tools.shellread import ShellRead, core_command, shell_read
 from hermclaw.tools.snapshot import DEFAULT_GENERATED_GLOBS, AuditOutcome, Decide, WorkspaceTracker
 from hermclaw.tools.testparse import TestSummary, parse_counts, summarise
 from hermclaw.tools.workspace import (
@@ -340,6 +341,10 @@ class ToolEngine:
         # re-ran identical commands on unchanged files again and again (analysis 2026-10-16, live job 50784df5)
         # keyed without the timeout: a command that finished is not changed by another timeout (BUG-211)
         self._ran: dict[tuple[str, str], tuple[int, int, str]] = {}
+        # the same runs keyed by their core (``core_command``): one re-run with another slice of its output (tail, head,
+        # grep, -v) is allowed per file-change count, the next is refused like an identical command (BUG-344)
+        self._ran_core: dict[tuple[str, str], tuple[int, int, str]] = {}
+        self._sliced: dict[tuple[str, str], int] = {}
         self._hinted: set[tuple[str, str]] = set()  # (tool, error code) whose knowledge this attempt was given (D-019)
         self._followed: dict[str, int] = {}  # read_range spans answered with the lines after them (BUG-342), by write count
         self._code_entries: list[tuple[MemoryHit, list[re.Pattern[str]]]] | None = None  # D-027, loaded at the first write
@@ -1561,7 +1566,16 @@ class ToolEngine:
                 data={"timeout_seconds": effective_timeout, "repeated": True},
             )
         ran_key = (cwd, command.strip())
+        core_key = (cwd, core_command(command))
         previous = self._ran.get(ran_key) if not egress else None
+        sliced = False
+        if (previous is None or previous[0] != self._writes) and not egress and core_key != ran_key:
+            core_previous = self._ran_core.get(core_key)
+            if core_previous is not None and core_previous[0] == self._writes:
+                if self._sliced.get(core_key) == self._writes:
+                    previous, sliced = core_previous, True
+                else:
+                    self._sliced[core_key] = self._writes
         if previous is not None and previous[0] == self._writes:
             passed = previous[2] == "exit code 0"
             follow_up = (
@@ -1569,11 +1583,16 @@ class ToolEngine:
                 "change now; otherwise call complete_step."
                 if passed
                 else "Fix the code or the tests its output names, then run it again. Its output was:\n"
-                + self._ran_output.get(ran_key, "(not kept)")
+                + self._ran_output.get(core_key, "(not kept)")
+            )
+            same = (
+                "the same command with only another slice of its output (tail, head, grep, labels, -v) already ran twice"
+                if sliced
+                else "it already ran"
             )
             raise ToolError(
                 E.COMMAND_REPEATED,
-                f"command refused: it already ran in turn {previous[1]} and no file changed since ({previous[2]}); running it "
+                f"command refused: {same} in turn {previous[1]} and no file changed since ({previous[2]}); running it "
                 f"again gives the same result. {follow_up}",
                 data={"previous_turn": previous[1], "repeated": True, "passed": passed, "command": command.strip()},
             )
@@ -1624,6 +1643,7 @@ class ToolEngine:
         elif result is not None and error is None:
             outcome = f"exit code {exit_code}" + (f", {failed_tests} failed test(s) in the output" if failed_tests else "")
             self._ran[ran_key] = (self._writes, ctx.turn, outcome)
+            self._ran_core[core_key] = (self._writes, ctx.turn, outcome)
         await self.recorder.command_run(
             ctx,
             command=command,
@@ -1664,9 +1684,9 @@ class ToolEngine:
         if recorded is not None and recorded[1] == ctx.turn and (exit_code != 0 or failed_tests):
             # the refusal of a repeat carries this output itself: LATEST FAILURE may have been replaced since by another
             # command that succeeded, and the coder re-proposed the refused check five times (live G1, BUG-246)
-            self._ran_output[ran_key] = self._render_run(command, run, budget=self.output_limit // 2, head_ratio=0.2)[0]
+            self._ran_output[core_key] = self._render_run(command, run, budget=self.output_limit // 2, head_ratio=0.2)[0]
         else:
-            self._ran_output.pop(ran_key, None)
+            self._ran_output.pop(core_key, None)
         return run
 
     def _render_run(self, command: str, run: _RunOutcome, *, budget: int, head_ratio: float) -> tuple[str, bool]:
@@ -1788,7 +1808,35 @@ class ToolEngine:
             return None
         return name
 
+    async def _check_shell_read(self, command: str, cwd: str, turn: int) -> None:
+        """Refuse a command that only prints lines of a file a fully visible read of this attempt shows unchanged: after
+        READ_REPEATED the coder printed the same file with 'sed -n' and 'cat -n' instead (live G1, BUG-344)."""
+        read: ShellRead | None = shell_read(command)
+        if read is None:
+            return
+        raw = read.path if cwd in ("", ".") or read.path.startswith("/") else f"{cwd.rstrip('/')}/{read.path}"
+        try:
+            path = self.fs.resolve(raw)[0]
+            rel, _, total = await asyncio.to_thread(self.fs.read_lines, raw, 1, 1)
+        except (ToolError, OSError, ValueError):
+            return  # the command reports a missing or unreadable file itself
+        start = max(1, total + read.start + 1) if read.start < 0 else read.start
+        end = total if read.end is None else min(read.end, total)
+        if total == 0 or start > end:
+            return
+        covering = self._covering_read(path, start, end, turn)
+        if covering is None:
+            return
+        raise ToolError(
+            E.READ_REPEATED,
+            f"command refused: it only prints lines {start}-{end} of {rel}, which are part of what you read in turn "
+            f"{covering[1]} ({covering[0]}), and no file changed since; that content is shown above among the files you "
+            "read. Act on it now: edit the code or the test, run a different check, or call complete_step/block_step.",
+            data={"previous_turn": covering[1], "repeated": True},
+        )
+
     async def _run_command(self, args: RunCommandArgs, ctx: CallContext, events: list[PendingEvent]) -> ToolResult:
+        await self._check_shell_read(args.command, args.cwd, ctx.turn)
         run = await self._sandbox_run(
             ToolName.run_command,
             command=args.command,
@@ -1940,6 +1988,7 @@ class ToolEngine:
             self._installed[(args.ecosystem, manifest)] = digest
             # new packages change what commands can do although no workspace file changed: earlier results are stale
             self._ran.clear()
+            self._ran_core.clear()
             self._ran_output.clear()
             self._timed_out.clear()
             text += f"\n[dependencies] {len(installed)} package(s) available to later commands and tests of this job"
@@ -2300,7 +2349,7 @@ class ToolEngine:
                 previous = self._ran.get((".", command.strip()))
                 missing_tool = previous is not None and previous[2] in ("exit code 126", "exit code 127")
                 if exc.code == E.COMMAND_REPEATED and not exc.data.get("passed") and not missing_tool:
-                    return command, self._ran_output.get((".", command), "(output not kept)")
+                    return command, self._ran_output.get((".", core_command(command)), "(output not kept)")
                 continue
             if run.sandbox_failed or run.result is None or run.result.timed_out or run.result.exit_code in (0, 126, 127):
                 continue  # 126/127: the tool is not in the image, the verifier skips it too

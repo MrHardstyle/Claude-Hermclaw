@@ -99,6 +99,7 @@ report = await verifier.verify(...)  # same, report only
 | `syntax` / `syntax:<path>` | file parses | skip with reason: TS/JSX (compile), templated YAML, binary, symlink, > 2 MB, missing tool (exit 126/127) |
 | `compile` / `compile:<lang>` | toolchain command exits 0 | skip: no marker, no relevant change, no `node_modules`, missing tool |
 | `start` / `start:<module>` | `python -m <module>` still runs after `start_seconds` or exits without a traceback | run from a temporary directory with the repository (and `src/`) on `PYTHONPATH`, stdin closed; variables the package reads are set when the name tells their meaning (`*PORT*` free port, `*HOST*` 127.0.0.1, `*_DIR`/`*_DB`/`*_FILE`/`*_PATH` temporary paths, `*TOKEN*`/`*SECRET*`/`*_KEY`/`*PASSWORD*` a placeholder), all others keep the program's default. A traceback ending in `ImportError`, `ModuleNotFoundError`, `NameError`, `UnboundLocalError`, `SyntaxError`, `AttributeError` fails the step (non-blocking when no criterion names the interpreter, BUG-194); any other traceback is reported without blocking. Skip: no changed package with `__main__.py`, `start_seconds = 0` |
+| `serve` / `serve:<script>` | a Python program of the project that starts an HTTP server under `if __name__ == "__main__"` serves `/`, every local script/stylesheet/image of the page (200), every route the page's scripts name (not 404/405/501) and every HTML page of the project outside tests/docs/templates | started from the workspace root the way the job's acceptance commands run it (one-shot options such as `--once` dropped), else with the project's interpreter; port from `/proc` of the process group, `*PORT*`/`*HOST*` variables set; blocking only at job level (review step, regression rerun), a note on a single step (BUG-346). Skip: no such program, the change touches neither it nor web files (single step), it does not listen within `serve_seconds`, `serve_seconds = 0` |
 | `lint` / `lint:<lang>` | lint command exits 0 | missing configured linter = error |
 | `unit`/`integration`/`contract` / `acceptance[i]:test…` | exit 0, no failures/errors, `passed ≥ min_passed` (when counts are parseable) | category from the evidence wording |
 | `test_evidence` / `test_evidence` | implement step in a repo with tests: ≥ 1 test criterion executed and passed | skip for other kinds / repos without tests |
@@ -131,7 +132,7 @@ findings. Findings carry path, line, rule and a masked preview only.
 
 ## Configuration
 
-`policies.verifier`: `max_changed_files` (40), `allow_deletions` (true), `generated_file_globs`, `lint_commands` (default: python → ruff with defect rules F/E9 only, skipped where the image has no ruff; BUG-215), `start_seconds` (5; 0 disables the start check)
+`policies.verifier`: `max_changed_files` (40), `allow_deletions` (true), `generated_file_globs`, `lint_commands` (default: python → ruff with defect rules F/E9 only, skipped where the image has no ruff; BUG-215), `start_seconds` (5; 0 disables the start check), `serve_seconds` (15; 0 disables the serve check, BUG-346)
 (`{language: command}`; languages: `python`, `javascript`, `typescript`, `json`, `yaml`, `toml`, `shell`, `php`,
 `go`, `rust`, … see `languages.LANGUAGE_BY_EXTENSION`). `policies.scope` (forbidden globs), `policies.sandbox.
 default_timeout_seconds` (compile/lint timeout). Evidence timeouts come from the criteria.

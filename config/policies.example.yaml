@@ -77,6 +77,7 @@ verifier:
   # after this many seconds (a server) or exited without a traceback passes; an ImportError, NameError,
   # UnboundLocalError … on start fails the step (BUG-309); 0 disables
   start_seconds: 5
+  serve_seconds: 15
 review:
   required_for_kinds: [implement, database, docker, deploy, ssh]
   timeout_seconds: 1500

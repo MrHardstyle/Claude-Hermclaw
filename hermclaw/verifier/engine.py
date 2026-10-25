@@ -307,6 +307,7 @@ class Verifier:
         out.extend(await self._guarded(ctx, "compile", "compile", lambda: generic.compile_checks(ctx)))
         out.extend(await self._guarded(ctx, "imports", "imports:python", lambda: generic.import_checks(ctx, added)))
         out.extend(await self._guarded(ctx, "start", "start:python", lambda: generic.start_checks(ctx)))
+        out.extend(await self._guarded(ctx, "serve", "serve", lambda: generic.serve_checks(ctx)))
         out.extend(await self._guarded(ctx, "lint", "lint", lambda: generic.lint_checks(ctx)))
         for index, item in enumerate(ctx.step.acceptance):
             if isinstance(item, CommandEvidence):

@@ -4,6 +4,15 @@ Format: [Keep a Changelog](https://keepachangelog.com/de/1.1.0/), Versionen nach
 
 ## [Unreleased]
 
+## [0.1.0rc88] – Release Candidate (2026-10-25)
+
+### Behoben
+- **Lesekreisläufe über die Shell (BUG-344):** `cat`/`sed -n`/`head`/`tail` auf eine unverändert sichtbare Datei werden wie ein wiederholter Lesezugriff abgelehnt; ein Befehl, der sich nur in der Ausgabe-Schnittmenge unterscheidet (`| tail -N`, `grep`, `echo`-Labels, `-v`), läuft je Schreibstand nur noch einmal erneut.
+- **Recherche-Fakten verbindlich (BUG-345):** Recherche-Schritte speichern ihre konkreten Fakten; Coder (Zeile für Zeile, gekürzt statt weggelassen), Review (eigener Abschnitt RESEARCH FACTS, auch im Job-Review) und Neuplaner bekommen sie; Widersprüche und Fixtures nach dem eigenen Code statt nach der Doku sind `major`.
+
+### Neu
+- **Verifier-Prüfung `serve` (BUG-346):** Ein Python-HTTP-Server des Projekts wird gestartet und wie vom Nutzer geladen (Seite, ihre Dateien, die Routen ihrer Skripte, alle HTML-Seiten des Projekts); blockierend im Job-Review. `policies.verifier.serve_seconds` (15).
+
 ## [0.1.0rc87] – Release Candidate (2026-10-23)
 
 ### Behoben

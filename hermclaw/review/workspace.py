@@ -33,6 +33,7 @@ from hermclaw.core.logging import get_logger
 from hermclaw.memory.store import MemoryStore
 from hermclaw.models.gateway import MODEL_LOAD_FAILED, MODEL_UNAVAILABLE
 from hermclaw.persistence.models import CommandRun, Job, ToolCallRow
+from hermclaw.research.findings import research_findings
 from hermclaw.review.reviewer import HeavyReviewer
 from hermclaw.review.text import clip, one_line, redact
 from hermclaw.review.types import REVIEW_CONTEXT_ERROR, CodeSnippet, ReviewInput, ReviewOutcome
@@ -170,6 +171,7 @@ class WorkspaceReviewer:
         snippets = await self._snippets(step, workspace, changed)
         docs = await asyncio.to_thread(self._requirement_docs, step, workspace, goal)
         conventions = await self._conventions(diff, workspace)
+        research = await self._research(step_id)
         return ReviewInput(
             job_id=job_id,
             step_id=step_id,
@@ -184,7 +186,16 @@ class WorkspaceReviewer:
             earlier_findings=tuple(earlier),
             requirement_docs=docs,
             conventions=conventions,
+            research=research,
         )
+
+    async def _research(self, step_id: uuid.UUID) -> list[str]:
+        """The facts of the research steps ``step_id`` depends on (BUG-345); never fails the review."""
+        try:
+            return await research_findings(self.reviewer.sessionmaker, step_id)
+        except Exception as exc:
+            log.warning("research facts for the review unavailable", extra={"error_type": type(exc).__name__})
+            return []
 
     async def _conventions(self, diff: str, workspace: WorkspaceHandle) -> list[str]:
         """Active lessons and conventions whose code patterns match a line the diff adds (D-027); never fails the

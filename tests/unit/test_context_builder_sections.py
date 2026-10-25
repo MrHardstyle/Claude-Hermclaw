@@ -537,3 +537,18 @@ def test_research_findings_reach_the_coder_with_their_facts() -> None:
     finding = f"Research S002 (use these cited findings): {summary}"
     sec = render_constraints(["Keep the public API stable.", finding], 5800)  # 8 % of a 32k window
     assert "x-api-key" in sec.body and len(sec.body) > 1500
+
+
+def test_research_facts_keep_their_lines_and_shrink_before_one_is_dropped() -> None:
+    """BUG-345: flattened into one line the facts ran together; two research steps of 3600 chars each did not fit the
+    constraints budget, so the second one would have been left out whole."""
+    from hermclaw.context_builder.render import render_constraints
+
+    def block(key: str, word: str) -> str:
+        facts = [f"- The {word} field '{word}_{i}' is documented. (S1)" for i in range(60)]
+        return "\n".join([f"Research {key} ({word} API) – binding facts:", *facts])
+
+    sec = render_constraints(["Keep the public API stable.", block("S001", "proxmox"), block("S002", "unraid")], 5800)
+    assert "\n  - The proxmox field 'proxmox_0' is documented. (S1)\n" in sec.body, "one fact per line"
+    assert "Research S002" in sec.body and "unraid_0" in sec.body, "both research steps are shown"
+    assert "more lines not shown" in sec.body and len(sec.body) <= 5800 and sec.truncated

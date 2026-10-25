@@ -16,7 +16,7 @@ from typing import Any
 from sqlalchemy import or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from hermclaw.contracts.common import StepStatus
+from hermclaw.contracts.common import StepKind, StepStatus
 from hermclaw.core.redaction import DEFAULT_REDACTOR
 from hermclaw.persistence.models import (
     CommandRun,
@@ -278,14 +278,19 @@ async def research_evidence(session: AsyncSession, job_id: uuid.UUID) -> list[di
             .limit(MAX_RESEARCH_RUNS)
         )
     ).scalars()
+    runs = list(rows)
+    # the concrete facts the research step kept (BUG-345): the replanner wrote new steps from the synthesis alone
+    steps = (await session.execute(select(Step).where(Step.job_id == job_id, Step.kind == StepKind.research.value))).scalars()
+    facts = {str((st.result or {}).get("research_run_id")): list((st.result or {}).get("facts") or [])[:8] for st in steps}
     return [
         {
             "question": _text(r.question, 400),
             "status": r.status,
             "synthesis": _text(r.synthesis, 1500),
+            "facts": [_text(str(f), 300) for f in facts.get(str(r.id), [])],
             "contradictions": _obj(list(r.contradictions or []), 600),
         }
-        for r in rows
+        for r in runs
     ]
 
 

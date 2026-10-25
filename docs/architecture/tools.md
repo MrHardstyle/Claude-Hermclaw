@@ -102,6 +102,11 @@ execute(action)
   pre-checks: finished? tool allowed? turn <= max_turns (terminal tools always allowed)? args valid?
   handler (may emit test.started in its own tx, write command_runs/test_runs rows + events)
   output redacted, clipped to policies.coder.tool_output_chars (truncated flag), terminal flag set
+  shell reads and sliced re-runs (BUG-344): a run_command that only prints lines of one file (`cat`, `nl`, `less`, `head`,
+    `tail`, `sed -n 'A,Bp'`, optionally `| head`) is refused as READ_REPEATED while a fully visible read shows them
+    unchanged; commands are also compared by their core (`shellread.core_command`: without trailing output filters,
+    `echo`/`true` labels, redirections, `-v`/`-q`/`--tb=`) – one re-run with another slice per write count, then
+    COMMAND_REPEATED with the earlier output
   files that do not parse (BUG-343): a read of such a file (also a refused re-read), a write of another file and a failed
     run_command/run_test get the in-process parser's message (Python, JSON, YAML, TOML) with the line it names appended
   update tool_calls(status=succeeded|refused|failed, result_summary, error_code, duration_ms)

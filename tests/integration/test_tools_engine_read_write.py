@@ -97,6 +97,29 @@ async def test_identical_read_of_an_unchanged_file_is_refused_within_the_context
     assert (await h.call("read_file", path="src/calc.py")).ok, "outside the window the file may have left the context"
 
 
+async def test_printing_a_file_a_visible_read_shows_is_refused(sessionmaker: SM, repo: Path) -> None:
+    """Live G1 on Strata (BUG-344): after READ_REPEATED the coder printed the file it had just read with 'sed -n' and
+    'cat -n' through run_command. A command that only prints lines a fully visible read shows unchanged is refused
+    like the read; other commands, other files and the same file after a change still run."""
+    h = await make_harness(sessionmaker, repo, contract=scope(target_paths=["src/calc.py"]))
+    assert (await h.call("read_file", path="src/calc.py")).ok
+    for command in (
+        "cat -n src/calc.py",
+        "sed -n '2,4p' src/calc.py",
+        "head -n 3 src/calc.py",
+        "tail -2 src/calc.py",
+        "cat src/calc.py | head -1",
+    ):
+        refused = await h.call("run_command", command=command)
+        assert refused.error_code == E.READ_REPEATED and refused.data["repeated"] is True, command
+        assert "only prints lines" in refused.output and "turn 1" in refused.output
+    assert (await h.call("run_command", command="cat calc.py", cwd="src")).error_code == E.READ_REPEATED, "relative to cwd"
+    assert (await h.call("run_command", command="cat -n src/util.py")).ok, "a file not read yet"
+    assert (await h.call("run_command", command="grep -n mul src/calc.py")).ok, "a search is no read"
+    assert (await h.call("replace_text", path="src/calc.py", old="a * b", new="b * a")).ok
+    assert (await h.call("run_command", command="cat -n src/calc.py")).ok, "a file changed"
+
+
 async def test_a_read_the_context_cannot_show_in_full_may_be_repeated(sessionmaker: SM, repo: Path) -> None:
     """Live G1 (BUG-229): the guard refused re-reads of a clipped 624-line file as 'shown above' although the context
     showed only part of it; the coder circled on refused reads until the step stagnated."""
