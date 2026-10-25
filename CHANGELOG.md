@@ -4,6 +4,9 @@ Format: [Keep a Changelog](https://keepachangelog.com/de/1.1.0/), Versionen nach
 
 ## [Unreleased]
 
+### Behoben
+- **Recherche-Fakten nach Thema (BUG-354):** Jeder Schritt bekommt die Fakten zu seinem Thema zuerst.
+
 ### Neu
 - **Thinking-Budget je Profil:** `thinking_budget_tokens` (nur `llamacpp`) begrenzt das Nachdenken jeder Antwort des Profils (`extra_body.thinking_budget_tokens`, gelesen von llama-server und Strata); ohne Wert ändert sich nichts.
 

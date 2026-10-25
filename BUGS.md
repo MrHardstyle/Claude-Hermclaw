@@ -46,6 +46,12 @@ Noch keine.
 
 ## Behobene Bugs
 
+### BUG-354 – Recherche-Fakten erreichen einen Schritt ohne Bezug zu seinem Thema
+- Phase: G1 auf Strata IQ3_XXS mit 0.1.0rc90, 2026-10-25 (Job 2ac3ab2f) · Komponente: research (`findings.py`) · Severity: P2 · blockierend: nein · Status: **behoben im Repository** (`tests/unit/test_research_relevance.py`)
+- Reproduktion: S003 („Implement Proxmox collector parser“) bekommt den Faktenblock von S001 mit `LOG_LEVEL=trace unraid-api start` und den SSO-Befehlen der Unraid-CLI vor dem Proxmox-Header `PVEAPIToken=USER@REALM!TOKENID=UUID`; bei knappem Platz fiele der Header weg.
+- Ursache: Die Fakten waren nur nach Konkretheit sortiert (Literale, Pfade), nicht nach dem Thema des Schritts, der sie bekommt.
+- Fix: `research_findings` sortiert die Fakten je Schritt nach gemeinsamen Wörtern mit Titel und Ziel des Schritts (bis drei zählen), sonst in der gespeicherten Reihenfolge; das gilt für Coder und Review.
+
 ### BUG-353 – Erfundene Hints und im Ziel genannte Dateien kosten den Planer jede Reparaturrunde
 - Phase: G1 auf Strata IQ3_XXS mit 0.1.0rc89, 2026-10-25 (Job 3515e0c6) · Komponente: planner (`validation.py`) · Severity: P1 · blockierend: ja (Job scheitert in der Planung) · Status: **behoben im Repository** (`tests/unit/test_planner_validation.py::test_goal_files_and_ungrounded_hints_are_repaired_without_a_repair_turn`)
 - Reproduktion: Drei Planantworten (je ~6 min, ~10.000 Tokens): Die erste nennt `src/collector` und das Symbol `web` als Hints, die zweite nennt `docs/api.md` im Ziel von S007, ohne die Datei zu listen, die dritte dasselbe mit `config.example.toml` in S009. `PLANNER_INVALID_OUTPUT` nach 20 Minuten. Über alle bisherigen Jobs ist „repo_hint … does not exist“ mit 75 Meldungen die mit Abstand häufigste Reparaturursache.

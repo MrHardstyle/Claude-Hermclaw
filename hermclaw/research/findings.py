@@ -45,6 +45,28 @@ def concrete_facts(contract: ResearchContract, *, limit: int = MAX_FACTS) -> lis
     return [text for _, _, text in sorted(scored)[:limit]]
 
 
+_WORD = re.compile(r"[A-Za-z][A-Za-z0-9]{3,}")
+_COMMON = frozenset(
+    {"implement", "implementation", "create", "write", "with", "from", "that", "this", "into", "their", "must", "should",
+     "each", "using", "uses", "used", "step", "file", "files", "tests", "test", "code", "data", "support", "only", "other"}
+)  # fmt: skip
+
+
+def _words(text: str) -> set[str]:
+    return {w.lower() for w in _WORD.findall(text)} - _COMMON
+
+
+def relevant_first(facts: Sequence[str], step_text: str) -> list[str]:
+    """``facts`` with those sharing the most words with the step's title and goal first (up to three count), otherwise in
+    their stored order (concrete first). Live G1 on rc90: the Proxmox parser step got the Unraid CLI's log options before
+    the Proxmox token header, and a short budget would have cut the header (BUG-354)."""
+    words = _words(step_text)
+    if not words:
+        return list(facts)
+    ranked = sorted(enumerate(facts), key=lambda f: (-min(len(words & _words(f[1])), 3), f[0]))
+    return [fact for _, fact in ranked]
+
+
 def fact_sources(contract: ResearchContract) -> list[str]:
     """``S<n> <url>`` of the research sources, numbered as in ``concrete_facts``."""
     return [f"S{n} {src.url}" for n, src in enumerate(contract.sources, start=1)]
@@ -82,9 +104,11 @@ async def research_findings(
         if job_id is None:
             return []
         rows = (await s.execute(select(Step).where(Step.job_id == job_id, Step.superseded.is_(False)))).scalars().all()
+        own = await s.get(Step, step_id)
         ids = [r.id for r in rows]
         edges = (await s.execute(select(StepDependency).where(StepDependency.step_id.in_(ids)))).scalars().all()
     by_id = {r.id: r for r in rows}
+    step_text = f"{own.title or ''}\n{own.goal or ''}" if own is not None else ""
     deps: dict[uuid.UUID, list[uuid.UUID]] = {}
     for e in edges:
         deps.setdefault(e.step_id, []).append(e.depends_on_step_id)
@@ -107,7 +131,7 @@ async def research_findings(
                 summary = str((row.result or {}).get("worker_summary") or "").strip()
                 if facts:
                     sources = [str(s) for s in (row.result or {}).get("fact_sources") or []]
-                    out.append(facts_block(row.step_key, row.title or "", facts, max_chars, sources))
+                    out.append(facts_block(row.step_key, row.title or "", relevant_first(facts, step_text), max_chars, sources))
                     if len(out) >= limit:
                         break
                 elif summary:
@@ -120,4 +144,13 @@ async def research_findings(
     return out
 
 
-__all__ = ["MAX_FACTS", "RESEARCH_KIND", "RESEARCH_PREFIX", "concrete_facts", "fact_sources", "facts_block", "research_findings"]
+__all__ = [
+    "MAX_FACTS",
+    "RESEARCH_KIND",
+    "RESEARCH_PREFIX",
+    "concrete_facts",
+    "fact_sources",
+    "facts_block",
+    "relevant_first",
+    "research_findings",
+]
