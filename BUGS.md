@@ -46,6 +46,12 @@ Noch keine.
 
 ## Behobene Bugs
 
+### BUG-353 – Erfundene Hints und im Ziel genannte Dateien kosten den Planer jede Reparaturrunde
+- Phase: G1 auf Strata IQ3_XXS mit 0.1.0rc89, 2026-10-25 (Job 3515e0c6) · Komponente: planner (`validation.py`) · Severity: P1 · blockierend: ja (Job scheitert in der Planung) · Status: **behoben im Repository** (`tests/unit/test_planner_validation.py::test_goal_files_and_ungrounded_hints_are_repaired_without_a_repair_turn`)
+- Reproduktion: Drei Planantworten (je ~6 min, ~10.000 Tokens): Die erste nennt `src/collector` und das Symbol `web` als Hints, die zweite nennt `docs/api.md` im Ziel von S007, ohne die Datei zu listen, die dritte dasselbe mit `config.example.toml` in S009. `PLANNER_INVALID_OUTPUT` nach 20 Minuten. Über alle bisherigen Jobs ist „repo_hint … does not exist“ mit 75 Meldungen die mit Abstand häufigste Reparaturursache.
+- Ursache: Jede Reparatur ist eine vollständig neue Planantwort; sie behebt die genannten Fehler und bringt andere mit. Die Abhilfen dieser Fehlerklassen sind mechanisch und stehen in der Meldung selbst.
+- Fix: Die Normalisierung vor der Prüfung listet die im Ziel genannten Dateien als `repo_hints`, entfernt Symbol-Hints, die der Kontext nicht enthält, ordnet einen Schritt hinter den, der seinen Hint erst anlegt, und verschiebt einen Pfad, den es weder gibt noch ein Schritt anlegt, bei einem schreibenden Schritt nach `allowed_new_paths` (bei einem lesenden fällt er weg, wenn andere Hints bleiben). Jede Änderung steht als Notiz im Plan.
+
 ### BUG-352 – Der Planer ordnet in jeder Reparatur andere Schritte und scheitert an fehlenden Abhängigkeiten
 - Phase: G1 auf Strata IQ3_XXS mit 0.1.0rc88, 2026-10-25 (Job 818d8524) · Komponente: planner (`validation.py`) · Severity: P1 · blockierend: ja (Job scheitert in der Planung) · Status: **behoben im Repository** (`tests/unit/test_planner_validation.py::test_the_dependency_a_named_component_needs_is_added_without_a_repair_turn`)
 - Reproduktion: Drei Planantworten (je ~6 min): Die erste lässt S006 Tests für Code zweier Schritte schreiben, die zweite lässt S003 Proxmox und Unraid ohne Abhängigkeit nennen, die dritte S005 und S008 dasselbe. Nach zwei Reparaturen endet der Job mit `PLANNER_INVALID_OUTPUT`.

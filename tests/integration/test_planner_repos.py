@@ -210,7 +210,7 @@ async def test_semantic_repair_loop_repairs_invalid_first_answer(sessionmaker: o
     sm = _sm(sessionmaker)
     job_id = await create_job(sm, FASTAPI)
     bad = FASTAPI.answer()
-    bad["steps"][0]["repo_hints"] = ["app/routers/orders.py"]  # invented path
+    bad["steps"][0]["repo_hints"] = ["../orders.py"]  # outside the repository (an invented path is repaired, BUG-353)
     bad["steps"][1]["capability"] = "python"  # unknown capability
     bad["steps"][2]["depends_on"] = []  # review without dependency
     chat = ScriptedChat([Answer(content="Here is the plan:\n```json\n" + __import__("json").dumps(bad) + "\n```"), FASTAPI.answer()])
@@ -219,7 +219,7 @@ async def test_semantic_repair_loop_repairs_invalid_first_answer(sessionmaker: o
     assert result.repair_attempts == 1 and len(chat.calls) == 2
     errors = result.validation_errors[0]["errors"]
     assert result.validation_errors[0]["phase"] == "semantic"
-    assert any("repo_hint 'app/routers/orders.py' does not exist" in e for e in errors)
+    assert any("repo_hint '../orders.py' must be repository-relative" in e for e in errors)
     assert any("unknown capability 'python'" in e for e in errors)
     assert any("step S003: review step must depend on" in e for e in errors)
 

@@ -701,6 +701,27 @@ def test_the_dependency_a_named_component_needs_is_added_without_a_repair_turn()
     assert kept.steps[1].depends_on == []
 
 
+def test_goal_files_and_ungrounded_hints_are_repaired_without_a_repair_turn() -> None:
+    """Live G1 on rc89 (BUG-353): three planner answers each fixed the errors named and brought new ones – an invented
+    hint 'src/collector', a symbol 'web' the context lacks, docs/api.md named in a goal but not listed. The remedies
+    are mechanical: list the goal's file, drop the unknown symbol, move a path to be created to allowed_new_paths,
+    order a step after the one creating its hint."""
+    creator = _impl("S001", allowed_new_paths=["docs/api.md"])
+    reader = _impl("S002", goal="Implement the client exactly as docs/api.md describes it.", repo_hints=["app/routers/users.py"])
+    invented = _impl("S003", repo_hints=["app/routers/users.py", "src/collector", "web"])
+    hinted = _impl("S004", repo_hints=["app/routers/users.py", "docs/api.md"])
+    data = plan("goal", [creator, reader, invented, hinted])
+    assert any("its goal names docs/api.md" in e for e in _errors(data))
+    fixed, notes = prune_unreachable_must_change(PlanContract.model_validate(data), _ctx())
+    s1, s2, s3, s4 = fixed.steps
+    assert "docs/api.md" in s2.repo_hints and "S001" in s2.depends_on
+    assert s3.repo_hints == ["app/routers/users.py"] and "src/collector" in s3.allowed_new_paths
+    assert s4.depends_on == ["S001"]
+    assert any("dropped repo_hint symbol 'web'" in n for n in notes)
+    errors = semantic_errors(fixed, _ctx())
+    assert not any("goal names" in e or "does not exist" in e or "symbol" in e or "created by step" in e for e in errors), errors
+
+
 def test_an_acronym_names_a_short_component() -> None:
     """Live G1 on rc56 (BUG-273): the frontend "fetches data from the local API" that the core step writes in
     collector/api.py; the three-letter stem was ignored, the frontend ran without a dependency and three reviews in a
@@ -806,7 +827,8 @@ def test_must_change_on_an_existing_file_the_goal_does_not_name_is_dropped() -> 
     # named by its file name in the goal, or by the job: the change is asked for
     named = _impl("S001", goal="Update README.md with the new filter.", acceptance=[{"type": "diff", "must_change": ["README.md"]}])
     kept, none = prune_unreachable_must_change(PlanContract.model_validate(plan("goal", [named])), _ctx())
-    assert none == [] and [c.must_change for c in kept.steps[0].acceptance if c.type == "diff"] == [["README.md"]]
+    assert none == ["step S001: file(s) its goal names added to repo_hints: README.md"], "listed, BUG-353"
+    assert [c.must_change for c in kept.steps[0].acceptance if c.type == "diff"] == [["README.md"]]
     job = ValidationContext.build(get_config(), FASTAPI.inputs, PlannerSettings(), job_text="Document the filter in README.md.")
     unnamed = _impl("S001", acceptance=[{"type": "diff", "must_change": ["README.md"]}])
     assert prune_unreachable_must_change(PlanContract.model_validate(plan("goal", [unnamed])), job)[1] == []

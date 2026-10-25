@@ -4,6 +4,11 @@ Format: [Keep a Changelog](https://keepachangelog.com/de/1.1.0/), Versionen nach
 
 ## [Unreleased]
 
+## [0.1.0rc90] – Release Candidate (2026-10-25)
+
+### Behoben
+- **Planung scheitert an Hints und Ziel-Dateien (BUG-353):** Im Ziel genannte Dateien werden als `repo_hints` gelistet, unbekannte Symbol-Hints entfernt, ein Schritt wird hinter den gestellt, der seinen Hint anlegt, und ein Pfad, der noch nicht existiert, wandert bei schreibenden Schritten nach `allowed_new_paths` – ohne Reparaturrunde des Planers.
+
 ## [0.1.0rc89] – Release Candidate (2026-10-25)
 
 ### Behoben

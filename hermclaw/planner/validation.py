@@ -993,15 +993,9 @@ def _order_unordered_references(plan: PlanContract, ctx: ValidationContext, pres
 _GOAL_FILE_RE = re.compile(r"(?<![\w./-])((?:[\w-]+/)*[\w-]+(?:\.[\w-]+)*\.[A-Za-z][A-Za-z0-9]{0,7})(?![\w/-])")
 
 
-def _goal_file_errors(step: PlanStep, plan: PlanContract, ctx: ValidationContext) -> list[str]:
-    """A step whose goal names a repository file – one that exists or another step creates – must list it among its
-    files (repo_hints or allowed_new_paths). Unlisted, the scope leaves it out: the replanned config step of G1 was to
-    "implement the data models in collector.py" with only README/config/docs in scope, worked on collector.py as an
-    adopted leftover and was measured on the 28 failing collector tests of later steps until it stagnated (BUG-268).
-
-    A file the step protects with ``must_not_change`` may be named without being listed: "the input data
-    data/buchungen.csv stays unchanged" names it to protect it. Listed as a hint it counted as the step's own file and
-    lost the protection (BUG-292), so a goal could never name the data it must not touch (BUG-297)."""
+def _unlisted_goal_files(step: PlanStep, plan: PlanContract, ctx: ValidationContext) -> list[str]:
+    """The repository files – existing or created by another step – the goal of ``step`` names without listing them
+    among its files or protecting them with ``must_not_change``."""
     if step.kind.value not in WORKSPACE_MUTATING_KINDS:
         return []
     own = _step_paths(step, ctx)
@@ -1013,7 +1007,7 @@ def _goal_file_errors(step: PlanStep, plan: PlanContract, ctx: ValidationContext
     by_name: dict[str, list[str]] = {}
     for f in files:
         by_name.setdefault(PurePosixPath(f).name, []).append(f)
-    errors: list[str] = []
+    out: list[str] = []
     for m in _GOAL_FILE_RE.finditer(step.goal):
         token = m.group(1)
         named = [token] if token in files else (by_name.get(token, []) if "/" not in token else [])
@@ -1024,12 +1018,89 @@ def _goal_file_errors(step: PlanStep, plan: PlanContract, ctx: ValidationContext
             continue
         if any(acceptance_glob_matches(path, g) for g in protected):
             continue
-        errors.append(
-            f"step {step.id}: its goal names {path}, which is not among the step's files: add it to repo_hints (or "
-            "allowed_new_paths when the step creates it), or leave it out of the goal if another step changes it; a file the "
-            "step only reads and must keep as it is: protect it with must_not_change"
-        )
-    return errors
+        if path not in out:
+            out.append(path)
+    return out
+
+
+def _goal_file_errors(step: PlanStep, plan: PlanContract, ctx: ValidationContext) -> list[str]:
+    """A step whose goal names a repository file – one that exists or another step creates – must list it among its
+    files (repo_hints or allowed_new_paths). Unlisted, the scope leaves it out: the replanned config step of G1 was to
+    "implement the data models in collector.py" with only README/config/docs in scope, worked on collector.py as an
+    adopted leftover and was measured on the 28 failing collector tests of later steps until it stagnated (BUG-268).
+
+    A file the step protects with ``must_not_change`` may be named without being listed: "the input data
+    data/buchungen.csv stays unchanged" names it to protect it. Listed as a hint it counted as the step's own file and
+    lost the protection (BUG-292), so a goal could never name the data it must not touch (BUG-297).
+    ``_list_goal_files`` lists them before the check (BUG-353)."""
+    return [
+        f"step {step.id}: its goal names {path}, which is not among the step's files: add it to repo_hints (or "
+        "allowed_new_paths when the step creates it), or leave it out of the goal if another step changes it; a file the "
+        "step only reads and must keep as it is: protect it with must_not_change"
+        for path in _unlisted_goal_files(step, plan, ctx)
+    ]
+
+
+def _list_goal_files(plan: PlanContract, ctx: ValidationContext, preserved: frozenset[str]) -> tuple[PlanContract, list[str]]:
+    """Add the files a step's goal names to its repo_hints – the first remedy ``_goal_file_errors`` names, and one that
+    forbids nothing. Live G1 on rc89: two of three planner answers failed on one such file each (docs/api.md,
+    config.example.toml) while the repair turns fixed one class of errors and brought another (BUG-353)."""
+    notes: list[str] = []
+    steps: list[PlanStep] = []
+    for step in plan.steps:
+        named = [] if step.id in preserved else _unlisted_goal_files(step, plan, ctx)
+        if named:
+            notes.append(f"step {step.id}: file(s) its goal names added to repo_hints: {', '.join(named)}")
+        steps.append(step.model_copy(update={"repo_hints": [*step.repo_hints, *named]}) if named else step)
+    return (plan.model_copy(update={"steps": steps}), notes) if notes else (plan, [])
+
+
+def _ground_hints(plan: PlanContract, ctx: ValidationContext, preserved: frozenset[str]) -> tuple[PlanContract, list[str]]:
+    """Repair the repo_hints ``_hint_errors`` rejects where the remedy is mechanical (BUG-353): a symbol the context does
+    not contain is dropped (symbols only steer retrieval); a file another step creates makes this step depend on that
+    one unless the order is the reverse; a path that neither exists nor is created moves to allowed_new_paths of a
+    workspace-mutating step ("files to be created belong in allowed_new_paths") and is dropped from another step that
+    keeps other hints. Live G1 on rc89: an answer named 'src/collector' and the symbol 'web' in two steps."""
+    if not ctx.known_paths:
+        return plan, []
+    notes: list[str] = []
+    for sid in [s.id for s in plan.steps if s.id not in preserved]:
+        step = next(s for s in plan.steps if s.id == sid)
+        hints, new_paths, depends = list(step.repo_hints), list(step.allowed_new_paths), list(step.depends_on)
+        mutating = step.kind.value in WORKSPACE_MUTATING_KINDS
+        for hint in step.repo_hints:
+            kind = ctx.classify_hint(hint)
+            if kind == "symbol":
+                if not ctx.symbol_known(hint):
+                    hints.remove(hint)
+                    notes.append(f"step {sid}: dropped repo_hint symbol '{hint}', which the repository context does not contain")
+                continue
+            if kind != "path":
+                continue
+            try:
+                path = normalise_path(hint)
+            except ValueError:
+                continue
+            if is_catch_all(path) or ctx.path_exists(path) or any_match(path, list(ctx.always_forbidden)):
+                continue
+            concrete = not any(c in GLOB_CHARS for c in path)
+            made_by = [o.id for o in plan.steps if o.id != sid and concrete and any_match(path, list(o.allowed_new_paths))]
+            if made_by:
+                if not any(m in depends or m in _reachable(plan, sid) for m in made_by) and sid not in _reachable(plan, made_by[0]):
+                    depends.append(made_by[0])
+                    notes.append(f"step {sid}: depends on {made_by[0]} now, which creates its repo_hint {path}")
+                continue
+            if mutating:
+                hints.remove(hint)
+                new_paths.append(hint)
+                notes.append(f"step {sid}: repo_hint {path} does not exist yet; moved to allowed_new_paths")
+            elif len(hints) > 1:
+                hints.remove(hint)
+                notes.append(f"step {sid}: dropped repo_hint {path}, which does not exist")
+        if (hints, new_paths, depends) != (list(step.repo_hints), list(step.allowed_new_paths), list(step.depends_on)):
+            updated = step.model_copy(update={"repo_hints": hints, "allowed_new_paths": new_paths, "depends_on": depends})
+            plan = plan.model_copy(update={"steps": [updated if s.id == sid else s for s in plan.steps]})
+    return plan, notes
 
 
 def _step_size_errors(step: PlanStep, ctx: ValidationContext) -> list[str]:
@@ -1083,6 +1154,10 @@ def prune_unreachable_must_change(
     notes += contradicting
     plan, moved = _move_foreign_tests(plan, ctx, preserved)
     notes += moved
+    plan, listed = _list_goal_files(plan, ctx, preserved)
+    notes += listed
+    plan, grounded = _ground_hints(plan, ctx, preserved)
+    notes += grounded
     plan, ordered = _order_unordered_references(plan, ctx, preserved)
     notes += ordered
     plan, unnamed = _drop_unnamed_existing_must_change(plan, ctx, preserved)
