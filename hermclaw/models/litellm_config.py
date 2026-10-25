@@ -43,6 +43,8 @@ def _llamacpp_deployment(profile: ModelProfileConfig, api_base: str) -> dict[str
         "timeout": profile.timeout_seconds,
         "extra_body": {"chat_template_kwargs": {"enable_thinking": profile.think, **profile.chat_template_kwargs}},
     }
+    if profile.thinking_budget_tokens is not None:
+        params["extra_body"]["thinking_budget_tokens"] = profile.thinking_budget_tokens
     info: dict[str, Any] = {"mode": "chat", "max_input_tokens": profile.context_tokens, "max_output_tokens": profile.max_output_tokens}
     return {"model_name": profile.alias, "litellm_params": params, "model_info": info}
 

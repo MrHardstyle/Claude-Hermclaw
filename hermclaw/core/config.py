@@ -134,6 +134,10 @@ class ModelProfileConfig(_Strict):
     # ``enable_thinking`` (Research R-035: gpt-oss-20b reasons at ``reasoning_effort: low``). JSON scalars keep their
     # type; ``enable_thinking`` itself stays the job of ``think``.
     chat_template_kwargs: dict[str, StrictBool | StrictInt | StrictFloat | StrictStr] = Field(default_factory=dict, max_length=16)
+    # llamacpp only: the most tokens one answer may think (``thinking_budget_tokens`` of the request, read by llama-server
+    # and Strata); unset = the server's own default. A coder turn on Strata thought ~2,200 of its median 2,333 tokens
+    # (G1 on rc87), so the budget is the lever on the time of a turn.
+    thinking_budget_tokens: int | None = Field(default=None, ge=0, le=65536)
 
     @model_validator(mode="after")
     def _template_kwargs(self) -> ModelProfileConfig:

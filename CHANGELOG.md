@@ -4,6 +4,9 @@ Format: [Keep a Changelog](https://keepachangelog.com/de/1.1.0/), Versionen nach
 
 ## [Unreleased]
 
+### Neu
+- **Thinking-Budget je Profil:** `thinking_budget_tokens` (nur `llamacpp`) begrenzt das Nachdenken jeder Antwort des Profils (`extra_body.thinking_budget_tokens`, gelesen von llama-server und Strata); ohne Wert ändert sich nichts.
+
 ## [0.1.0rc90] – Release Candidate (2026-10-25)
 
 ### Behoben

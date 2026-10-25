@@ -268,6 +268,25 @@ def test_llamacpp_profiles_route_to_the_resident_llama_server() -> None:
     assert any("chat profiles only" in i.message for i in check_architecture(emb))
 
 
+def test_a_profile_caps_the_thinking_of_its_answers() -> None:
+    """A coder turn on Strata thought ~2,200 of its median 2,333 tokens (G1 on rc87): ``thinking_budget_tokens`` sends
+    the cap with every request of a llamacpp profile and survives the DB round trip; unset, nothing changes."""
+    cfg = models_config()
+    for alias in [p.alias for p in cfg.profiles if p.kind == "chat"]:
+        cfg = replace_profile(cfg, alias, model="qwen3.6:35b", backend="llamacpp", deviation="D-015", gpu_layers=None)
+    capped = replace_profile(cfg, "coder-main", thinking_budget_tokens=2048)
+    assert [i for i in check_architecture(capped) if i.severity == "error"] == []
+    urls = {"ollama_urls_by_host": {"model-224": "http://10.0.0.5:11434"}, "llamacpp_urls_by_host": {"model-224": "http://10.0.0.5:18080"}}
+    by_name = {m["model_name"]: m["litellm_params"] for m in build_litellm_config(capped, **urls)["model_list"]}
+    assert by_name["coder-main"]["extra_body"]["thinking_budget_tokens"] == 2048
+    assert "thinking_budget_tokens" not in by_name["planner-gemma"]["extra_body"]
+    back = profile_from_row(type("Row", (), _row_values(capped.by_alias("coder-main")))())
+    assert back.thinking_budget_tokens == 2048
+    assert "thinking_budget_tokens" not in _row_values(cfg.by_alias("coder-main"))["metadata_"]
+    ollama = replace_profile(models_config(), "coder-main", thinking_budget_tokens=1024)
+    assert any("thinking_budget_tokens needs backend llamacpp" in i.message for i in check_architecture(ollama))
+
+
 def test_a_profile_sends_further_chat_template_variables_with_their_type() -> None:
     """Research R-035: gpt-oss-20b passes the screening only with ``reasoning_effort: low``, which no profile could set.
     The template variables go next to ``enable_thinking``; profiles without them keep their config and DB metadata."""

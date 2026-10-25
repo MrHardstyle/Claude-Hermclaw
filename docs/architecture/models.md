@@ -237,12 +237,16 @@ tokens, reasoning chars, avg/p50/p95/p99/max latency (PostgreSQL `percentile_con
 - `models.model_host_capacity_gb` – capacity warning threshold for resident models.
 - `models.profiles[]`: `alias, role, model, kind, host, context_tokens, max_output_tokens, temperature, think,
   timeout_seconds, priority, resource_group, exclusive, memory_gb, fallback_for, embedding_dimensions, gpu_layers, enabled,
-  backend, host, deviation, chat_template_kwargs`.
+  backend, host, deviation, chat_template_kwargs, thinking_budget_tokens`.
   `chat_template_kwargs` (backend `llamacpp` only, else an architecture error) adds variables for the model's chat
   template to the deployment's `extra_body.chat_template_kwargs`, next to `enable_thinking` from `think`, which it may not
   set itself. Keys `[a-z][a-z0-9_]*`, at most 16, values JSON scalars that keep their type (strings ≤ 200 characters).
   Research R-035: gpt-oss-20b needs `{reasoning_effort: low}`; thinking cannot be switched off there. The DB metadata
   carries it only when set, so existing profiles sync unchanged.
+  `thinking_budget_tokens` (backend `llamacpp` only, 0–65536) goes to the deployment's `extra_body.thinking_budget_tokens`:
+  llama-server and Strata end the thinking of an answer after that many tokens. Unset = the server's default; like
+  `chat_template_kwargs` it reaches the DB metadata only when set. A coder turn on Strata thought ~2,200 of its median
+  2,333 tokens (G1 on rc87), so the budget is the lever on the time of a turn.
   `gpu_layers` (optional, ≥ 0) becomes Ollama `options.num_gpu` – per request (top-level `num_gpu`, passed through by
   LiteLLM 1.104.2, `tests/integration/test_models_litellm_proxy.py::test_gpu_layers_reach_ollama_as_num_gpu`) and as
   the proxy deployment default. Unset = Ollama's own layer estimate. The example sets 30 for `planner-gemma-fallback`:
