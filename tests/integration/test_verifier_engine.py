@@ -1020,7 +1020,7 @@ async def test_the_delivered_web_server_is_loaded_like_its_user_loads_it(session
     """Live G1 on Strata (BUG-346): every step passed, but the collector served a page built into it instead of the
     frontend/ folder, and the frontend called /api/token, which a later step had removed. The server is started and
     its page, the files and routes the page uses and every HTML page of the project are loaded: blocking on the whole
-    job, a note on a single step."""
+    job and on a step that wrote the server or the failing page/script, a note on other steps."""
     repo = py_repo(tmp_path)
     write(repo, "server.py", WEB_SERVER)
     write(repo, "frontend/index.html", "<!doctype html><html><body>designed page</body></html>\n")
@@ -1036,8 +1036,15 @@ async def test_the_delivered_web_server_is_loaded_like_its_user_loads_it(session
     assert "frontend/index.html is part of the project, but the running server does not serve it" in check.message
     assert "/api/state" not in check.message and "/static/app.css" not in check.message, "what exists passes"
     assert ["GET", "/static/app.js", 200] in check.evidence["probes"]
+    # BUG-361: a single step that wrote the server (or the page/script a problem comes from) answers for it ...
     single, *_ = await run(sessionmaker, repo, st)
-    note = by_name(single.report)["serve:server.py"]
+    own = by_name(single.report)["serve:server.py"]
+    assert own.status == "fail" and own.blocking and not single.report.passed and "this change wrote that server" in own.message
+    # ... a step that changed another web file gets a note
+    commit_all(repo, "server and page")
+    write(repo, "frontend/extra.css", "p {}\n")
+    other, *_ = await run(sessionmaker, repo, st)
+    note = by_name(other.report)["serve:server.py"]
     assert note.status == "fail" and not note.blocking and "a later step may still connect" in note.message
     # routes and pages that exist pass; a server that never listens is skipped
     write(

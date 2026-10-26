@@ -46,6 +46,12 @@ Noch keine.
 
 ## Behobene Bugs
 
+### BUG-361 – Ein Integrationsfehler bleibt bis zum Schluss-Review stehen, weil die Server-Prüfung je Schritt nur notiert
+- Phase: G1 auf Strata IQ3_XXS mit 0.1.0rc90, 2026-10-26 (Job 2ac3ab2f) · Komponente: verifier (`serve.py`, `checks.py`) · Severity: P1 · blockierend: nein (kostete einen Replan und ~4 h) · Status: **behoben im Repository** (`tests/unit/test_verifier_serve.py`, `tests/integration/test_verifier_engine.py::test_the_delivered_web_server_is_loaded_like_its_user_loads_it`)
+- Reproduktion: S006 schrieb `static/app.js` gegen den fertigen `collector.py` aus S005 und rief `POST /api/test` auf; der Server kennt nur `/api/test/<id>`. Die Prüfung `serve` meldete es um 11:23, 12:30, 13:21 und 15:13, jedes Mal nicht blockierend; erst das Schluss-Review S010 verlangte den Fix und löste den zweiten Replan aus.
+- Ursache: Auf einem einzelnen Schritt war jedes `serve`-Problem nur ein Hinweis („ein späterer Schritt kann die Teile noch verbinden“), auch wenn der Schritt die Seite oder das Skript selbst geschrieben hatte, das die fehlende Route aufruft.
+- Fix: Der Treiber nennt je Problem die Seite/das Skript, aus dem es kommt. Ein Schritt, der den Server oder diese Datei geändert hat, wird blockiert (Meldung: vorhandene Routen aufrufen oder die Route ergänzen); andere Probleme bleiben ein Hinweis.
+
 ### BUG-360 – Ein abgeschnittenes Suchergebnis lädt zu immer größerem `max_results` ein
 - Phase: G1 auf Strata IQ3_XXS mit 0.1.0rc90, 2026-10-26 (Job 2ac3ab2f) · Komponente: tools (`engine.py`) · Severity: P3 · blockierend: nein · Status: **behoben im Repository** (`tests/integration/test_tools_engine_read_write.py::test_find_text_literal_regex_and_secrets`)
 - Reproduktion: S005 Versuch 2: `find_text` mit `^(def |class |async def )` über alle `*.py`, erst `max_results=200`, dann 250; mit `^(def |class )` 200, dann 300. Jede Wiederholung zeigt dieselben Zeilen und kostet einen Zug.

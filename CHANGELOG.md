@@ -10,6 +10,7 @@ Format: [Keep a Changelog](https://keepachangelog.com/de/1.1.0/), Versionen nach
 - **Recherche-Fakten nach Thema (BUG-354):** Jeder Schritt bekommt die Fakten zu seinem Thema zuerst.
 - **Maskierter Code (BUG-355):** Aufrufe und Indizes, die ein Secret berechnen (`bool(self.api_key)`, `str(getattr(server, "password", ""))`), bleiben sichtbar; `write_file` gibt unverändert übernommenen maskierten Zeilen ihren echten Inhalt zurück, statt abzulehnen.
 - **Grenzen ohne Zugverlust (BUG-356):** Zahlen jenseits ihrer Grenze werden begrenzt (`recall(k=15)` → 10); `run_command` nimmt bis 32.000 Zeichen.
+- **Integrationsfehler früh (BUG-361):** Die Server-Prüfung blockiert einen Schritt, der den Server oder die Seite/das Skript geschrieben hat, das eine fehlende Route aufruft – statt bis zum Schluss-Review nur zu notieren.
 - **Abgeschnittene Suche (BUG-360):** `find_text` nennt die nicht gezeigten Trefferzeilen und wie man sie sieht (enger suchen, nicht `max_results` erhöhen).
 - **Platz zum Denken (BUG-359):** Ein festes Antwortlimit bekommt bei einem Thinking-Profil dessen Thinking-Budget obendrauf (bis `max_output_tokens`); die Abdeckungsprüfung endete auf Strata in jedem Aufruf abgeschnitten.
 - **Server-Prüfung ohne Fehlalarm (BUG-358):** Eine Methode als Argument (`requestJson('/api/test', 'POST')`) wird erkannt; eine Route, die in der Sandbox nicht rechtzeitig antwortet, gilt nicht als fehlend.

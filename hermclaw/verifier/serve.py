@@ -16,7 +16,8 @@ once in the sandbox the way the job's own acceptance commands run it (one-shot o
 * checks that every HTML page of the project (outside tests, docs and templates) is served by it.
 
 Programs that do not listen within ``policies.verifier.serve_seconds`` are skipped (they may need settings the sandbox
-does not have). A problem fails a job-level review (the whole change must work together); on a single step it is
+does not have). A problem fails a job-level review (the whole change must work together), and a single step that
+changed the server program or the page/script the problem comes from (BUG-361); other problems of a single step are
 reported without blocking, since a later step may still connect the parts. Parse-only on the verifier host; the
 program runs only in the sandbox.
 """
@@ -132,7 +133,7 @@ def local(ref):
 
 ROUTE = re.compile(r"(['" + '"' + r"`])(/[A-Za-z_][\w\-./]*)\1")
 ASSET = re.compile(r"\.(?:js|mjs|css|png|jpe?g|gif|svg|ico|woff2?|ttf|map|html?)$", re.I)
-result = {"serve": True, "listening": False, "port": None, "problems": [], "probes": []}
+result = {"serve": True, "listening": False, "port": None, "problems": [], "sources": [], "probes": []}
 deadline = time.monotonic() + spec["seconds"]
 ports = []
 while time.monotonic() < deadline and proc.poll() is None:
@@ -148,8 +149,12 @@ try:
             result.update(listening=True, port=port)
             break
     if base is not None:
-        problems, probes = result["problems"], result["probes"]
+        problems, sources, probes = result["problems"], result["sources"], result["probes"]
         checked, routes = set(), set()
+
+        def problem(text, *where):
+            problems.append(text)
+            sources.append([w for w in where if w])
 
         def check_page(page, body, ctype):
             if page in checked or not ("html" in ctype.lower() or body.lstrip()[:15].lower().startswith(("<!doctype html", "<html"))):
@@ -157,17 +162,17 @@ try:
             checked.add(page)
             parser = Refs()
             parser.feed(body)
-            code = [(f"the page {page}", "\n".join(parser.inline))]
+            code = [(f"the page {page}", page, "\n".join(parser.inline))]
             for ref in dict.fromkeys(r for r in parser.refs if local(r)):
                 url = urllib.parse.urljoin(base + page, ref)
                 path = urllib.parse.urlparse(url).path
                 st, ct, text = fetch("GET", url)
                 probes.append(["GET", path, st])
                 if st != 200:
-                    problems.append(f"the page {page} loads {ref}, but GET {path} answered {st}")
+                    problem(f"the page {page} loads {ref}, but GET {path} answered {st}", page, path)
                 elif ref.split("?")[0].endswith((".js", ".mjs")) or "javascript" in ct:
-                    code.append((path, text))
-            for source, text in code:
+                    code.append((path, path, text))
+            for source, where, text in code:
                 for m in ROUTE.finditer(text):
                     route = m.group(2)
                     if route in routes or ASSET.search(route) or len(routes) >= 20:
@@ -182,14 +187,14 @@ try:
                     st, _, err = fetch(method, base + route, b"{}" if method != "GET" else None)
                     probes.append([method, route, st])
                     if st in (404, 405, 501):
-                        problems.append(f"{source} calls {method} {route}, but the server answered {st}: the route does not exist")
+                        problem(f"{source} calls {method} {route}, but the server answered {st}: the route does not exist", where)
                     elif st is None and "timed out" not in err.lower():
-                        problems.append(f"{source} calls {method} {route}, but the server gave no answer ({err[:160]})")
+                        problem(f"{source} calls {method} {route}, but the server gave no answer ({err[:160]})", where)
 
         status, ctype, body = fetch("GET", base + spec["path"])
         probes.append(["GET", spec["path"], status])
         if status != 200:
-            problems.append(f"GET {spec['path']} answered {status}: the page the user opens does not load")
+            problem(f"GET {spec['path']} answered {status}: the page the user opens does not load")
         else:
             check_page(spec["path"], body, ctype)
         for rel in spec["pages"]:
@@ -212,7 +217,7 @@ try:
                     break
             probes.append(["PAGE", rel, served])
             if served is None:
-                problems.append(f"{rel} is part of the project, but the running server does not serve it (tried {', '.join(tries)})")
+                problem(f"{rel} is part of the project, but the running server does not serve it (tried {', '.join(tries)})", rel)
 finally:
     try:
         os.killpg(proc.pid, signal.SIGTERM)
@@ -296,6 +301,30 @@ class ServeResult:
     probes: list[list[object]]
     exit_code: int | None
     stderr: str
+    #: per problem, the page/script URL paths (``/app.js``) or project files that the problem comes from
+    sources: list[list[str]] = field(default_factory=list)
+
+    def caused_by(self, server: str, changed: Iterable[str]) -> list[str]:
+        """The problems the change caused or must answer for: all of them when it changed the server program, else
+        those whose page or script it changed (``/app.js`` is ``static/app.js``, ``/`` an ``index.html``)."""
+        changed = set(changed)
+        if server in changed:
+            return list(self.problems)
+        out = []
+        for i, text in enumerate(self.problems):
+            where = self.sources[i] if i < len(self.sources) else []
+            if any(_serves(url, path) for url in where for path in changed):
+                out.append(text)
+        return out
+
+
+def _serves(url: str, path: str) -> bool:
+    """Whether the URL path (or project file) ``url`` of a problem is the project file ``path``."""
+    if not url.startswith("/"):
+        return url == path
+    if url.endswith("/"):
+        url += "index.html"
+    return f"/{path}".endswith(url) or (url == "/index.html" and path.rsplit("/", 1)[-1] in ("index.html", "index.htm"))
 
 
 def parse_serve_output(output: str) -> ServeResult | None:
@@ -313,6 +342,7 @@ def parse_serve_output(output: str) -> ServeResult | None:
                 [list(p) for p in data.get("probes") or [] if isinstance(p, list)],
                 data.get("exit_code"),
                 str(data.get("stderr") or ""),
+                [[str(w) for w in ws] for ws in data.get("sources") or [] if isinstance(ws, list)],
             )
     return None
 

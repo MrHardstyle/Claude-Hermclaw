@@ -446,7 +446,8 @@ _WEB_SUFFIXES = (".html", ".htm", ".js", ".mjs", ".css")
 
 async def serve_checks(ctx: VerifyContext) -> list[VerificationCheck]:
     """Start the project's HTTP server like its user and load its page, the files and routes the page uses and every
-    HTML page of the project (``hermclaw.verifier.serve``): blocking on the whole job, a note on a single step."""
+    HTML page of the project (``hermclaw.verifier.serve``): blocking on the whole job, and on a single step for the
+    problems of the server, pages or scripts it changed (BUG-361); others are a note."""
     seconds = ctx.policies.verifier.serve_seconds
     if not seconds:
         return [ctx.check("serve", "serve", "skip", "disabled (policies.verifier.serve_seconds = 0)")]
@@ -494,10 +495,17 @@ async def serve_checks(ctx: VerifyContext) -> list[VerificationCheck]:
                 "Serve the project's pages and the files they load from this program (or remove pages nothing serves), "
                 "and keep every route the pages call"
             )
-            if not ctx.step.job_level:
+            # live G1 rc90: S006 wrote app.js against the finished collector and called POST /api/test, a route it
+            # does not have; reported as a note on every step since, the bug reached the final review 4 h later
+            # (BUG-361). A problem of a page or script this change wrote, or of a server it changed, is its own.
+            caused = result.problems if ctx.step.job_level else result.caused_by(server.path, touched)
+            if caused and not ctx.step.job_level:
+                why += " – this change wrote that server, page or script: call routes the server has, or add the missing route"
+            elif not caused:
                 why += " – not blocking on a single step, a later step may still connect the parts"
-            message = f"started {command} ({how}) and loaded it like its user: " + "; ".join(result.problems[:8]) + f". {why}"
-            out.append(ctx.check("serve", name, "fail", message, evidence, blocking=ctx.step.job_level))
+            listed = caused or result.problems
+            message = f"started {command} ({how}) and loaded it like its user: " + "; ".join(listed[:8]) + f". {why}"
+            out.append(ctx.check("serve", name, "fail", message, evidence, blocking=bool(caused)))
     return out
 
 
