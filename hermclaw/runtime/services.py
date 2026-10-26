@@ -309,7 +309,7 @@ def build_services(
             base = await ov.executor_factory(ws, step)  # type: ignore[arg-type]
         else:
             base = await execution.executor(ws, step)
-        return ImageDefaultingExecutor(base, await images.image_for(ws), images.image_for)
+        return ImageDefaultingExecutor(base, await images.image_for(ws), images.image_for, config.policies.sandbox.images)
 
     async def executor_factory(ws: WorkspaceHandle, step: StepContract) -> CommandExecutor:
         return await executor_for(ws, step)

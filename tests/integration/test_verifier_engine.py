@@ -971,7 +971,10 @@ import os
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 PAGE = '<!doctype html><html><head><link rel="stylesheet" href="/static/app.css"></head><body><script src="/static/app.js"></script></body></html>'
-FILES = {"/static/app.css": ("text/css", "body{}"), "/static/app.js": ("text/javascript", 'api("/api/state"); api("/api/token");')}
+FILES = {
+    "/static/app.css": ("text/css", "body{}"),
+    "/static/app.js": ("text/javascript", 'api("/api/state"); api("/api/token"); requestJson("/api/save", "POST", {}); api("/api/drop");'),
+}
 
 
 class Handler(BaseHTTPRequestHandler):
@@ -985,9 +988,21 @@ class Handler(BaseHTTPRequestHandler):
             ctype, body = FILES[self.path]
         elif self.path == "/api/state":
             body, ctype = json.dumps({"ok": True}), "application/json"
+        elif self.path == "/api/drop":
+            self.close_connection = True
+            return
         else:
             self.send_error(404)
             return
+        self._send(body, ctype)
+
+    def do_POST(self):
+        if self.path != "/api/save":
+            self.send_error(404)
+            return
+        self._send("{}", "application/json")
+
+    def _send(self, body, ctype):
         data = body.encode()
         self.send_response(200)
         self.send_header("Content-Type", ctype)
@@ -1015,6 +1030,9 @@ async def test_the_delivered_web_server_is_loaded_like_its_user_loads_it(session
     check = by_name(outcome.report)["serve:server.py"]
     assert check.status == "fail" and check.blocking and not outcome.report.passed, check.message
     assert "calls GET /api/token, but the server answered 404" in check.message
+    # BUG-358: a method passed as an argument is used, and a dropped connection is no missing route
+    assert "/api/save" not in check.message and ["POST", "/api/save", 200] in check.evidence["probes"]
+    assert "calls GET /api/drop, but the server gave no answer (" in check.message
     assert "frontend/index.html is part of the project, but the running server does not serve it" in check.message
     assert "/api/state" not in check.message and "/static/app.css" not in check.message, "what exists passes"
     assert ["GET", "/static/app.js", 200] in check.evidence["probes"]
@@ -1025,9 +1043,9 @@ async def test_the_delivered_web_server_is_loaded_like_its_user_loads_it(session
     write(
         repo,
         "server.py",
-        WEB_SERVER.replace(' api("/api/token");', "").replace(
-            '"/static/app.css": (', '"/frontend/index.html": ("text/html", open("frontend/index.html").read()), "/static/app.css": ('
-        ),
+        WEB_SERVER.replace(' api("/api/token");', "")
+        .replace(' api("/api/drop");', "")
+        .replace('"/static/app.css": (', '"/frontend/index.html": ("text/html", open("frontend/index.html").read()), "/static/app.css": ('),
     )
     fixed, *_ = await run(sessionmaker, repo, job, kind="review")
     assert by_name(fixed.report)["serve:server.py"].status == "pass", by_name(fixed.report)["serve:server.py"].message

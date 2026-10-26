@@ -309,6 +309,25 @@ async def test_a_masked_line_left_unchanged_keeps_its_content(sessionmaker: SM, 
     assert bad.error_code == E.REDACTED_PLACEHOLDER and "qwzrtvkplm" in (repo / "tests" / "test_client.py").read_text()
 
 
+async def test_a_rewrite_keeps_the_real_value_of_masked_lines_copied_unchanged(sessionmaker: SM, repo: Path) -> None:
+    """Live G1 rc90 (BUG-355): the coder rewrote whole files from what it had read; each line a read showed masked came
+    back with the marker, and four writes were refused. A line that is the masked view of a line of the file keeps
+    that line's content, also re-indented; a marker on any other line is still refused."""
+    body = "class Client:\n    def __init__(self):\n        self.token = 'qwzrtvkplm1'\n"
+    (repo / "src" / "client.py").write_text(body)
+    h = await make_harness(sessionmaker, repo, contract=scope(target_paths=["src/client.py"]))
+    shown = (await h.call("read_file", path="src/client.py")).output
+    assert "qwzrtvkplm1" not in shown and REDACTED in shown
+    rewrite = "def make():\n    token = 1\n    self.token = '" + REDACTED + "'\n    return token\n"
+    res = await h.call("write_file", path="src/client.py", content=rewrite)
+    assert res.ok and "1 masked line(s) you copied unchanged keep their real value" in res.output
+    assert (repo / "src" / "client.py").read_text() == rewrite.replace(REDACTED, "qwzrtvkplm1")
+    bad = await h.call("write_file", path="src/client.py", content="api_key = '" + REDACTED + "'\n")
+    assert bad.error_code == E.REDACTED_PLACEHOLDER
+    cmd = await h.call("run_command", command="cat > src/client.py <<'EOF'\nself.token = '" + REDACTED + "'\nEOF")
+    assert cmd.error_code == E.REDACTED_PLACEHOLDER and "write_file" in cmd.output
+
+
 async def test_an_identical_replace_says_whether_the_change_is_already_made(sessionmaker: SM, repo: Path) -> None:
     """Live G1 (BUG-272): the coder sent the same 2 KB replace_text with old == new four times; its fix was already in
     the file from an earlier write, and the bare "identical" refusal never said so until stagnation stopped the step."""
@@ -379,6 +398,10 @@ async def test_find_text_literal_regex_and_secrets(sessionmaker: SM, repo: Path)
     assert (await h.call("find_text", pattern="([", regex=True)).error_code == E.PATTERN_INVALID
     res = await h.call("find_text", pattern="X = 1", max_results=1)
     assert res.truncated and "result limit" in res.output
+    # BUG-360: matches cut by the output limit are counted, and a larger max_results is no way to see them
+    (repo / "src" / "many.py").write_text("".join(f"value_{i:04d} = {'x' * 60}\n" for i in range(600)))
+    res = await h.call("find_text", pattern="value_", path="src/many.py", max_results=1000)
+    assert res.truncated and "more matching line(s) not shown" in res.output and "a larger max_results shows no more" in res.output
 
 
 async def test_search_repo_and_symbol_filter_hidden_paths(sessionmaker: SM, repo: Path) -> None:

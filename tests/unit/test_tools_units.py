@@ -60,6 +60,20 @@ def test_arguments_split_over_a_nested_args_object_are_taken_as_one_set() -> Non
         validate_args(spec, {"args": "path=t.py", "content": "x"})  # not an object: still invalid
 
 
+def test_numbers_beyond_their_bound_are_clamped_and_long_commands_get_a_way_out() -> None:
+    """Live G1 rc90 (BUG-356): recall(k=15) was refused four times for k <= 10 and run_command nine times for 8000
+    characters; each refusal cost a turn of about four minutes."""
+    assert validate_args(get_spec(ToolName.recall), {"query": "x", "k": 15}).k == 10  # type: ignore[attr-defined]
+    assert validate_args(get_spec(ToolName.run_command), {"command": "ls", "timeout_seconds": 0}).timeout_seconds == 1  # type: ignore[attr-defined]
+    assert validate_args(get_spec(ToolName.run_command), {"command": "x" * 20_000}).command  # type: ignore[attr-defined]
+    with pytest.raises(ToolError) as exc:
+        validate_args(get_spec(ToolName.recall), {"query": "", "k": 15})  # another error remains: no clamping
+    assert "k:" in exc.value.message
+    with pytest.raises(ToolError) as exc:
+        validate_args(get_spec(ToolName.run_test), {"command": "x" * 9000})
+    assert "write_file" in exc.value.message
+
+
 def test_validate_args_errors_are_value_free() -> None:
     spec = get_spec("write_file")
     with pytest.raises(ToolError) as exc:

@@ -9,8 +9,10 @@ once in the sandbox the way the job's own acceptance commands run it (one-shot o
 * waits until it listens (the port is read from ``/proc`` for the process group; ``*PORT*`` variables it reads get a
   free port, ``*HOST*`` 127.0.0.1);
 * loads ``/`` and every local script, stylesheet and image the page references – each must answer 200;
-* calls every route the page's scripts name (``"/api/…"`` string literals, with the ``method`` written next to them) –
-  404, 405 and 501 mean the route does not exist; 401/403/400 are fine, the probe has no token or body;
+* calls every route the page's scripts name (``"/api/…"`` string literals, with the ``method`` written next to them or
+  passed as an argument, ``requestJson('/api/test', 'POST')``) – 404, 405 and 501 mean the route does not exist;
+  401/403/400 are fine, the probe has no token or body; a route that does not answer within the probe's time waits on
+  something the sandbox lacks (BUG-358);
 * checks that every HTML page of the project (outside tests, docs and templates) is served by it.
 
 Programs that do not listen within ``policies.verifier.serve_seconds`` are skipped (they may need settings the sandbox
@@ -172,11 +174,17 @@ try:
                         continue
                     routes.add(route)
                     near = re.search(r"method\s*:\s*['\"](\w+)", text[m.end(): m.end() + 300])
-                    method = near.group(1).upper() if near else "GET"
-                    st = fetch(method, base + route, b"{}" if method != "GET" else None)[0]
+                    # requestJson('/api/test', 'POST', body) / request('POST', '/api/test'): the method as an argument
+                    after = re.match(r"\s*,\s*['\"`](GET|POST|PUT|PATCH|DELETE)['\"`]", text[m.end(): m.end() + 40], re.I)
+                    before = re.search(r"['\"`](GET|POST|PUT|PATCH|DELETE)['\"`]\s*,\s*$", text[max(m.start() - 40, 0): m.start()], re.I)
+                    found = after or before or near
+                    method = found.group(1).upper() if found else "GET"
+                    st, _, err = fetch(method, base + route, b"{}" if method != "GET" else None)
                     probes.append([method, route, st])
-                    if st is None or st in (404, 405, 501):
+                    if st in (404, 405, 501):
                         problems.append(f"{source} calls {method} {route}, but the server answered {st}: the route does not exist")
+                    elif st is None and "timed out" not in err.lower():
+                        problems.append(f"{source} calls {method} {route}, but the server gave no answer ({err[:160]})")
 
         status, ctype, body = fetch("GET", base + spec["path"])
         probes.append(["GET", spec["path"], status])

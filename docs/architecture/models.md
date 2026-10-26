@@ -247,6 +247,9 @@ tokens, reasoning chars, avg/p50/p95/p99/max latency (PostgreSQL `percentile_con
   llama-server and Strata end the thinking of an answer after that many tokens. Unset = the server's default; like
   `chat_template_kwargs` it reaches the DB metadata only when set. A coder turn on Strata thought ~2,200 of its median
   2,333 tokens (G1 on rc87), so the budget is the lever on the time of a turn.
+  A caller's explicit answer limit (`max_tokens`) gets the thinking allowance of a `think: true` profile on top
+  (`thinking_budget_tokens`, else 4096), up to `max_output_tokens` (`models/tokens.py::output_tokens`): the coverage
+  check asked for 4096 and Strata thought for all of them (BUG-359).
   `gpu_layers` (optional, ≥ 0) becomes Ollama `options.num_gpu` – per request (top-level `num_gpu`, passed through by
   LiteLLM 1.104.2, `tests/integration/test_models_litellm_proxy.py::test_gpu_layers_reach_ollama_as_num_gpu`) and as
   the proxy deployment default. Unset = Ollama's own layer estimate. The example sets 30 for `planner-gemma-fallback`:

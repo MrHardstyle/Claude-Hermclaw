@@ -174,3 +174,18 @@ def test_a_variable_named_like_a_secret_stays_visible() -> None:
         assert Redactor().text(text) == text, text
     for text in ("PASSWORD=hunter2realpw", "password: hunter2", "TOKEN=hX9q2LmP4tR8", "secret = s3cr3t_value"):
         assert REDACTED in Redactor().text(text), text
+
+
+def test_code_that_computes_a_secret_stays_readable() -> None:
+    """Live G1 rc90 (BUG-355): calls and subscripts that compute a secret showed as the marker, the coder copied the
+    broken lines into its rewrites, and each write was refused. Unquoted values starting with a capital stay masked."""
+    for text in (
+        'password=_secret_value(entry, old_server, "password"),',
+        '"has_api_key": bool(self.api_key),',
+        "self.config_token = secrets.token_urlsafe(32)",
+        'body = urlencode({"username": server.username, "password": server.password}).encode("utf-8")',
+        'api_key=str(getattr(server, "api_key", "")),',
+    ):
+        assert Redactor().text(text) == text, text
+    for text in ("TOKEN=Ab3x(9kz)", "password=Pa55(word)", "secret = s3cr3t_value"):
+        assert REDACTED in Redactor().text(text), text

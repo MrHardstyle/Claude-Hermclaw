@@ -20,7 +20,7 @@ from hermclaw.contracts.worker import CommandResult
 from hermclaw.core.config import SandboxPolicy
 from hermclaw.core.interfaces import ExecutionRequest, WorkspaceHandle
 from hermclaw.persistence.models import Job, Repository, Workspace
-from hermclaw.runtime.images import ImageDefaultingExecutor, SandboxImageSelector
+from hermclaw.runtime.images import ImageDefaultingExecutor, SandboxImageSelector, command_toolchain
 from hermclaw.tools.executors import LocalSandboxExecutor
 
 pytestmark = pytest.mark.integration
@@ -159,6 +159,24 @@ async def test_defaulting_executor_sets_image_only_when_unset(tmp_path: Path) ->
     assert [r.image for r in inner.requests] == ["python", "node", None]
     await ex.drop(ws)  # other executor methods are delegated
     assert inner.dropped
+
+
+async def test_a_command_of_another_toolchain_gets_its_image(tmp_path: Path) -> None:
+    """Live G1 rc90 (BUG-357): the Python widget project's ``node --test`` ran in the Python image, failed with exit
+    code 127, and the frontend step was blocked into a replan. A command that runs only another configured toolchain's
+    programs gets that image; mixed commands, unconfigured toolchains and project images keep the job's image."""
+    inner = RecordingExecutor()
+    ws = WorkspaceHandle(
+        id=uuid.uuid4(), job_id=uuid.uuid4(), path=tmp_path, branch="b", base_branch="main", base_sha="0" * 40, repository_key="x"
+    )
+    ex = ImageDefaultingExecutor(inner, "python", toolchains=("python", "node"))
+    for command in ("node --test", "python -m unittest", "node --test && python -m unittest", "pwsh -File a.ps1", "grep node a.txt"):
+        await ex.run(ws, ExecutionRequest(command=command))
+    await ImageDefaultingExecutor(inner, "localhost/project:1", toolchains=("node",)).run(ws, ExecutionRequest(command="node -v"))
+    await ImageDefaultingExecutor(inner, None, toolchains=("node",)).run(ws, ExecutionRequest(command="cd web && npm test"))
+    assert [r.image for r in inner.requests] == ["node", "python", "python", "python", "python", "localhost/project:1", "node"]
+    assert command_toolchain("HC_SYNTAX_PATH=./a.ps1 pwsh -NoLogo -Command 'x'") == "powershell"
+    assert command_toolchain("printf 'B'; node --check './a.js' 2>&1; rc=$?; printf 'E'; exit 0") == "node"
 
 
 async def test_manifest_identifies_a_new_project_and_the_executor_asks_again(sessionmaker: Any, tmp_path: Path) -> None:

@@ -56,7 +56,7 @@ from hermclaw.core.redaction import DEFAULT_REDACTOR, Redactor
 from hermclaw.events.store import append_event
 from hermclaw.models.profiles import ProfileRegistry, assert_architecture, resolve_api_key, validate_http_url
 from hermclaw.models.protocols import CallContext, ChatMessage, ChatResult, StructuredResult
-from hermclaw.models.tokens import ContextBudget, context_budget, estimate_tokens, validate_context
+from hermclaw.models.tokens import ContextBudget, context_budget, estimate_tokens, output_tokens, validate_context
 from hermclaw.persistence.models import ModelInvocation
 
 log = get_logger(__name__)
@@ -673,7 +673,7 @@ class LiteLLMGateway:
     ) -> _Attempt:
         if profile.kind != "chat":
             raise ConfigError(f"'{profile.alias}' is not a chat profile", code=MODEL_KIND_MISMATCH)
-        out_tokens = profile.max_output_tokens if max_tokens is None else max_tokens
+        out_tokens = output_tokens(profile, max_tokens)
         if out_tokens <= 0:
             raise ConfigError(f"max_tokens for '{profile.alias}' must be > 0", code="INVALID_TOKEN_BUDGET")
         budget: ContextBudget | None = None

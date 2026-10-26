@@ -223,6 +223,29 @@ async def test_llamacpp_profiles_get_no_ollama_options(script: Script) -> None:
     assert body["response_format"]["type"] == "json_schema" and body["max_tokens"] == 6144
 
 
+async def test_an_answer_limit_leaves_a_thinking_profile_room_to_think(script: Script) -> None:
+    """Live G1 rc90 (BUG-359): the coverage check asked Strata for 4096 tokens, the model thought for all of them, and
+    each of the four calls ended cut off. A thinking profile gets its thinking allowance on top of an explicit answer
+    limit (its ``thinking_budget_tokens``, else 4096), up to its ``max_output_tokens``; other profiles keep the limit."""
+    cfg = models_config()
+    cfg = cfg.model_copy(
+        update={
+            "profiles": [
+                p.model_copy(update={"think": True, "max_output_tokens": 12288}) if p.alias == "coder-main" else p for p in cfg.profiles
+            ]
+        }
+    )
+    for _ in range(4):
+        script.add("coder-main", completion("ok"))
+    script.add("fast-router", completion("ok"))
+    client = httpx.AsyncClient(transport=httpx.MockTransport(script.handler))
+    async with LiteLLMGateway(cfg, api_key=MASTER_KEY, http_client=client) as gw:
+        for limit in (4096, 10_000, None, 20_000):
+            await gw.chat("coder-main", [ChatMessage("user", "x")], ctx=CTX, max_tokens=limit)
+        await gw.chat("fast-router", [ChatMessage("user", "x")], ctx=CTX, max_tokens=400)
+    assert [r["max_tokens"] for r in script.requests] == [8192, 12288, 12288, 20_000, 400]
+
+
 async def test_context_overflow_rejected_before_http(script: Script) -> None:
     async with make(script) as gw:
         with pytest.raises(ValidationFailed) as exc:

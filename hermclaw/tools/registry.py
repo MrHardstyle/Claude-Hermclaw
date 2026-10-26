@@ -106,8 +106,12 @@ class ApplyPatchArgs(ToolArgs):
 _TIMEOUT_DOC = "the default is a few minutes; set it higher only for a test suite known to run longer"
 
 
+# a generator script for several files is long: the coder lost 9 turns of G1 rc90 to an 8000-character limit (BUG-356)
+MAX_COMMAND_CHARS = 32_000
+
+
 class RunCommandArgs(ToolArgs):
-    command: str = Field(min_length=1, max_length=8000)
+    command: str = Field(min_length=1, max_length=MAX_COMMAND_CHARS)
     cwd: str = Field(default=".", max_length=1000, description="working directory relative to the repository root")
     timeout_seconds: int | None = Field(default=None, ge=1, le=7200, description=_TIMEOUT_DOC)
 
@@ -415,6 +419,22 @@ def format_validation_error(exc: ValidationError) -> str:
     return "; ".join(parts[:10])
 
 
+_BOUNDS = {"less_than_equal": "le", "greater_than_equal": "ge"}
+
+
+def _clamped(data: dict[str, Any], exc: ValidationError) -> dict[str, Any] | None:
+    """``data`` with every top-level number beyond its bound set to the bound, or ``None`` when another error remains.
+    ``recall(k=15)`` was refused four times in one job for k <= 10, and each refusal cost a turn (live G1 rc90, BUG-356)."""
+    fixed = dict(data)
+    for err in exc.errors(include_url=False):
+        loc, bound = err.get("loc", ()), _BOUNDS.get(err.get("type", ""))
+        limit = (err.get("ctx") or {}).get(bound or "")
+        if bound is None or len(loc) != 1 or loc[0] not in fixed or not isinstance(limit, int | float):
+            return None
+        fixed[loc[0]] = limit
+    return fixed
+
+
 def validate_args(spec: ToolSpec, args: Mapping[str, Any]) -> BaseModel:
     data = dict(args)
     nested = data.get("args")
@@ -425,9 +445,15 @@ def validate_args(spec: ToolSpec, args: Mapping[str, Any]) -> BaseModel:
     try:
         return spec.args_model.model_validate(data)
     except ValidationError as exc:
+        fixed = _clamped(data, exc)
+        if fixed is not None:
+            return spec.args_model.model_validate(fixed)
+        hint = ""
+        if any(e.get("type") == "string_too_long" and e.get("loc") == ("command",) for e in exc.errors(include_url=False)):
+            hint = " – write file contents with write_file (append=true adds further parts) and keep the command short"
         raise ToolError(
             E.ARGS_INVALID,
-            f"invalid arguments for {spec.name.value}: {format_validation_error(exc)}",
+            f"invalid arguments for {spec.name.value}: {format_validation_error(exc)}{hint}",
             data={"schema": spec.json_schema()},
         ) from exc
 

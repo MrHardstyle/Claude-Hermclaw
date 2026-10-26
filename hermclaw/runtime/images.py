@@ -17,8 +17,9 @@ Only aliases/images allowed by ``policies.sandbox`` are ever used; the sandbox r
 from __future__ import annotations
 
 import dataclasses
+import re
 import uuid
-from collections.abc import Awaitable, Callable
+from collections.abc import Awaitable, Callable, Collection
 from pathlib import Path
 from typing import Any
 
@@ -50,6 +51,40 @@ LANGUAGE_IMAGE_ALIASES: dict[str, str] = {
     "php": "php",
     "powershell": "powershell",
 }
+
+
+#: programs that only a toolchain image ships (BUG-357)
+TOOL_IMAGE_ALIASES: dict[str, str] = {
+    "node": "node",
+    "npm": "node",
+    "npx": "node",
+    "tsc": "node",
+    "pwsh": "powershell",
+    "php": "php",
+    "composer": "php",
+    "python": "python",
+    "python3": "python",
+    "pytest": "python",
+    "pip": "python",
+    "ruff": "python",
+    "mypy": "python",
+}
+_ASSIGNMENT = re.compile(r"^[A-Za-z_]\w*=")
+_STATEMENT_SPLIT = re.compile(r"&&|\|\||[;|&\n(){}]")
+
+
+def command_toolchain(command: str) -> str | None:
+    """The toolchain alias whose programs ``command`` runs, or ``None`` when it runs none or those of several.
+
+    Only the program of each simple command counts (after ``VAR=value`` assignments), never its arguments."""
+    aliases: set[str] = set()
+    for statement in _STATEMENT_SPLIT.split(command):
+        words = [w for w in statement.split() if not _ASSIGNMENT.match(w)]
+        if words:
+            alias = TOOL_IMAGE_ALIASES.get(words[0].rsplit("/", 1)[-1])
+            if alias is not None:
+                aliases.add(alias)
+    return aliases.pop() if len(aliases) == 1 else None
 
 
 class SandboxImageSelector:
@@ -115,22 +150,38 @@ class ImageDefaultingExecutor:
     """Executor wrapper: requests without an explicit image run with the job's selected image.
 
     With a ``resolve`` callback and no selection yet, every command asks again (a step that creates the project's
-    first ``requirements.txt`` gets the Python toolchain for its next command, BUG-155)."""
+    first ``requirements.txt`` gets the Python toolchain for its next command, BUG-155).
+
+    A command that runs only another toolchain's programs gets that toolchain's image (``toolchains``: the configured
+    aliases), unless the job runs in a project image: the Python widget project's ``node --test`` failed with exit
+    code 127 in the Python image, and the step was blocked into a replan (live G1 rc90, BUG-357)."""
 
     def __init__(
-        self, inner: CommandExecutor, image: str | None, resolve: Callable[[WorkspaceHandle], Awaitable[str | None]] | None = None
+        self,
+        inner: CommandExecutor,
+        image: str | None,
+        resolve: Callable[[WorkspaceHandle], Awaitable[str | None]] | None = None,
+        toolchains: Collection[str] = (),
     ) -> None:
-        self.inner, self.image, self.resolve = inner, image, resolve
+        self.inner, self.image, self.resolve, self.toolchains = inner, image, resolve, frozenset(toolchains)
+
+    def _image(self, command: str) -> str | None:
+        if self.image is not None and self.image not in self.toolchains:
+            return self.image  # a project image carries the project's dependencies
+        alias = command_toolchain(command)
+        return alias if alias is not None and alias in self.toolchains else self.image
 
     async def run(self, workspace: WorkspaceHandle, req: ExecutionRequest) -> CommandResult:
         if self.image is None and self.resolve is not None:
             self.image = await self.resolve(workspace)
-        if req.image is None and self.image is not None:
-            req = dataclasses.replace(req, image=self.image)
+        if req.image is None:
+            image = self._image(req.command)
+            if image is not None:
+                req = dataclasses.replace(req, image=image)
         return await self.inner.run(workspace, req)
 
     def __getattr__(self, name: str) -> Any:  # sync_up/sync_down/drop/client of the wrapped executor
         return getattr(self.inner, name)
 
 
-__all__ = ["LANGUAGE_IMAGE_ALIASES", "ImageDefaultingExecutor", "SandboxImageSelector"]
+__all__ = ["LANGUAGE_IMAGE_ALIASES", "TOOL_IMAGE_ALIASES", "ImageDefaultingExecutor", "SandboxImageSelector", "command_toolchain"]

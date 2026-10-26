@@ -85,6 +85,24 @@ class ContextBudget:
         }
 
 
+#: what a thinking profile without ``thinking_budget_tokens`` may think per answer (llama-server/Strata default)
+DEFAULT_THINKING_TOKENS = 4096
+
+
+def output_tokens(profile: ModelProfileConfig, answer_tokens: int | None) -> int:
+    """The output limit of a request whose caller allows ``answer_tokens`` for the answer itself.
+
+    A thinking profile thinks inside the same limit: the coverage check asked Strata for 4096 tokens, the model thought
+    for all of them, and each of the four calls of G1 ended cut off without an answer (live G1 rc90, BUG-359). Such a
+    profile gets its thinking allowance on top, up to its ``max_output_tokens``; ``None`` means the profile's limit."""
+    if answer_tokens is None:
+        return profile.max_output_tokens
+    if not profile.think or answer_tokens <= 0 or answer_tokens >= profile.max_output_tokens:
+        return answer_tokens
+    thinking = profile.thinking_budget_tokens if profile.thinking_budget_tokens is not None else DEFAULT_THINKING_TOKENS
+    return min(profile.max_output_tokens, answer_tokens + thinking)
+
+
 def context_budget(
     profile: ModelProfileConfig,
     messages: Iterable[ChatMessage],

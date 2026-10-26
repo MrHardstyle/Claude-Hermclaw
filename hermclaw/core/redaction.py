@@ -31,6 +31,10 @@ _KEY_VALUE = _PATTERNS[2]
 # it showed the coder broken code (``api_key = ***REDACTED***"x"]``), which it copied into new files (BUG-225).
 _CODE_REFERENCE = re.compile(r"^[A-Za-z_]\w*(?:\.[A-Za-z_]\w*)*(?:\(\)?|\[)?[)\]}]*$")
 _CODE_SIGNS = frozenset(".([)]}")
+# ``password=_secret_value(entry, …)``, ``"has_api_key": bool(self.api_key)``, ``token = secrets.token_urlsafe(32)``,
+# ``{"password": server.password}).encode(…)``: a call or a subscript is code that computes a value. Masked, the coder saw
+# broken lines, copied them into its rewrite, and every such write was refused (live G1 rc90, 4x, BUG-355).
+_CODE_EXPRESSION = re.compile(r"^[a-z_]\w*(?:\.[A-Za-z_]\w*)*[(\[)\]}][\w.()\[\]{}]*$")
 _PLACEHOLDER_START = ("<", "${", "$", "{{", "%")
 _PLACEHOLDER_PARTS = ("your-", "your_", "example", "placeholder", "changeme", "change-me", "change_me", "dummy", "-here", "_here")
 
@@ -93,7 +97,11 @@ def is_benign_value(value: str, *, quoted: bool) -> bool:
     # ``{"NOTES_API_TOKEN": token}`` showed as the marker exactly on the line whose bug the coder had to find (BUG-318)
     if is_role_value(value):
         return True
-    return not quoted and len(value) <= 60 and bool(_CODE_SIGNS & set(value)) and bool(_CODE_REFERENCE.match(value))
+    if quoted:
+        return False
+    if len(value) <= 80 and _CODE_EXPRESSION.match(value):
+        return True
+    return len(value) <= 60 and bool(_CODE_SIGNS & set(value)) and bool(_CODE_REFERENCE.match(value))
 
 
 _SENSITIVE_KEYS = re.compile(r"(?i)(password|passwd|secret|token|api[_-]?key|authorization|private[_-]?key|credential)")

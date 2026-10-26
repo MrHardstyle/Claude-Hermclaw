@@ -732,6 +732,32 @@ class ToolEngine:
                 "'new' the line with a placeholder value instead.",
             )
 
+    def _restore_masked(self, new_text: str, existing: str | None) -> tuple[str, int]:
+        """``new_text`` with each line that is the masked view of a line of ``existing`` (indentation aside) given that
+        line's real content back, and the number of such lines. The coder rewrote whole files from what it had read;
+        every line a read showed masked came back with the marker, and each write was refused (live G1 rc90, BUG-355).
+        A view that two different lines share stays masked."""
+        if REDACTED not in new_text or not existing or REDACTED in existing:
+            return new_text, 0
+        views: dict[str, str | None] = {}
+        for line in existing.splitlines():
+            view = self.redactor.text(line).strip()
+            if REDACTED in view:
+                real = line.strip()
+                views[view] = real if views.get(view, real) == real else None
+        out: list[str] = []
+        restored = 0
+        for line in new_text.splitlines(keepends=True):
+            body = line.rstrip("\r\n")
+            original = views.get(body.strip()) if REDACTED in body else None
+            if original is None:
+                out.append(line)
+                continue
+            indent = body[: len(body) - len(body.lstrip())]
+            out.append(indent + original + line[len(body) :])
+            restored += 1
+        return "".join(out), restored
+
     def _check_patch_placeholder(self, modified: list[str]) -> None:
         """Added patch lines may carry the redaction marker only if a modified file already contains it literally."""
         for rel in modified:
@@ -916,6 +942,14 @@ class ToolEngine:
         )
         body = "\n".join(outcome.lines) if outcome.lines else f"no matches in {outcome.files_searched} files"
         text, clipped = clip_head(body, self.output_limit)
+        if clipped:
+            # the coder raised max_results from 200 to 250 and 300 for the same pattern; the output limit had cut the
+            # matches, so each repeat showed the same lines (live G1 rc90, BUG-360)
+            shown = text.rsplit("\n…[truncated:", 1)[0].count("\n") + 1
+            text = text.rsplit("\n…[truncated:", 1)[0] + (
+                f"\n…[{len(outcome.lines) - shown} more matching line(s) not shown: the output limit is reached, a larger "
+                "max_results shows no more – narrow 'path', 'glob' or the pattern]"
+            )
         if outcome.limit_hit:
             text += f"\n…[result limit {args.max_results} reached; refine the pattern]"
         if outcome.time_budget_hit:
@@ -1206,13 +1240,14 @@ class ToolEngine:
             raise ToolError(E.ARGS_INVALID, f"content is not valid UTF-8 text: {exc.reason}") from exc
         old = await asyncio.to_thread(target.read_bytes) if exists else None
         old_text = old.decode("utf-8", errors="replace") if old is not None and not is_binary(old) else None
-        self._check_placeholder(args.content, old_text)
-        content = args.content
+        content, restored = self._restore_masked(args.content, old_text)
+        self._check_placeholder(content, old_text)
+        data = content.encode("utf-8")
         if args.append and old is not None:
             # large files are written in parts: one answer has an output token limit (BUG-223)
             if old_text is None:
                 raise ToolError(E.ARGS_INVALID, f"'{rel}' is a binary file; append works on text files only")
-            content = old_text + ("" if not old_text or old_text.endswith("\n") else "\n") + args.content
+            content = old_text + ("" if not old_text or old_text.endswith("\n") else "\n") + content
             data = content.encode("utf-8")
         lines = content.count("\n") + (1 if content and not content.endswith("\n") else 0)
         if old == data:
@@ -1238,6 +1273,8 @@ class ToolEngine:
             if lost
             else ""
         )
+        if restored:
+            note += f"\nnote: {restored} masked line(s) you copied unchanged keep their real value"
         return self._ok(
             ToolName.write_file,
             f"{verb} {rel} ({len(data)} bytes, {lines} lines){note}",
@@ -1848,6 +1885,13 @@ class ToolEngine:
         )
 
     async def _run_command(self, args: RunCommandArgs, ctx: CallContext, events: list[PendingEvent]) -> ToolResult:
+        if REDACTED in args.command:
+            # a here-document of a file the coder had read wrote the masked lines back literally (live G1 rc90, BUG-355)
+            raise ToolError(
+                E.REDACTED_PLACEHOLDER,
+                f"command refused: it contains the redaction marker {REDACTED}, which a command would write literally. "
+                "Write file contents with write_file or replace_text: a masked line copied unchanged keeps its real value there.",
+            )
         await self._check_shell_read(args.command, args.cwd, ctx.turn)
         run = await self._sandbox_run(
             ToolName.run_command,

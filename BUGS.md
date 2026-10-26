@@ -46,6 +46,42 @@ Noch keine.
 
 ## Behobene Bugs
 
+### BUG-360 – Ein abgeschnittenes Suchergebnis lädt zu immer größerem `max_results` ein
+- Phase: G1 auf Strata IQ3_XXS mit 0.1.0rc90, 2026-10-26 (Job 2ac3ab2f) · Komponente: tools (`engine.py`) · Severity: P3 · blockierend: nein · Status: **behoben im Repository** (`tests/integration/test_tools_engine_read_write.py::test_find_text_literal_regex_and_secrets`)
+- Reproduktion: S005 Versuch 2: `find_text` mit `^(def |class |async def )` über alle `*.py`, erst `max_results=200`, dann 250; mit `^(def |class )` 200, dann 300. Jede Wiederholung zeigt dieselben Zeilen und kostet einen Zug.
+- Ursache: Das Ausgabelimit schnitt die Treffer ab („…[truncated: N more chars]“); die Meldung sagte nicht, dass ein größeres `max_results` nichts ändert.
+- Fix: Ein abgeschnittenes Ergebnis nennt die Zahl der nicht gezeigten Trefferzeilen und dass nur ein engerer `path`, `glob` oder ein engeres Muster sie zeigt.
+
+### BUG-359 – Ein Thinking-Modell denkt das ganze Antwortlimit aus und antwortet nicht
+- Phase: G1 auf Strata IQ3_XXS mit 0.1.0rc90, 2026-10-26 (Job 2ac3ab2f) · Komponente: models (`tokens.py`, `gateway.py`) · Severity: P1 · blockierend: nein (die Abdeckungsprüfung fiel aus) · Status: **behoben im Repository** (`tests/unit/test_models_gateway.py::test_an_answer_limit_leaves_a_thinking_profile_room_to_think`)
+- Reproduktion: Alle vier `coverage`-Aufrufe des Jobs enden mit `finish_reason=length` bei 4096 Tokens (Median 157 s); die Abdeckungsprüfung der Tests lief in keinem Schritt, 11 Minuten Modellzeit ohne Ergebnis.
+- Ursache: Der Handler begrenzt die Antwort auf `min(max_output_tokens, 4096)`; Strata denkt bis zu 4096 Tokens innerhalb desselben Limits. Dasselbe gilt für jedes feste Antwortlimit (Lernen 1024, Recherche, Medien) bei einem Thinking-Profil.
+- Fix: Das Gateway gibt einem Profil mit `think: true` bei einem ausdrücklichen Antwortlimit sein Thinking-Budget obendrauf (`thinking_budget_tokens`, sonst 4096), höchstens bis `max_output_tokens`; ohne Limit gilt wie bisher das Profil-Limit, andere Profile behalten das Limit.
+
+### BUG-358 – Die Server-Prüfung meldet vorhandene Routen als fehlend
+- Phase: G1 auf Strata IQ3_XXS mit 0.1.0rc90, 2026-10-26 (Job 2ac3ab2f) · Komponente: verifier (`serve.py`) · Severity: P2 · blockierend: nein (auf Job-Ebene ja) · Status: **behoben im Repository** (`tests/integration/test_verifier_engine.py::test_the_delivered_web_server_is_loaded_like_its_user_loads_it`)
+- Reproduktion: S006: `serve:collector.py` meldet „/app.js calls GET /api/test, but the server answered 404: the route does not exist“ und dasselbe mit „answered None“ für `/api/status` und `/api/config`. `app.js` ruft `requestJson('/api/test', 'POST', body)`; die anderen beiden Routen gibt es, sie antworten in der Sandbox ohne Netz nicht innerhalb der Probezeit.
+- Ursache: Die Methode wurde nur aus `method: '…'` gelesen, nicht aus einem Argument neben der Route; jede Probe ohne Antwort galt als fehlende Route, auch eine Zeitüberschreitung.
+- Fix: Die Methode wird auch als Argument direkt nach oder vor der Route erkannt. Eine Zeitüberschreitung ist kein Befund; eine andere Probe ohne Antwort wird mit ihrem Fehler gemeldet („gave no answer (RemoteDisconnected: …)“), nicht als fehlende Route.
+
+### BUG-357 – Ein Befehl einer anderen Werkzeugkette läuft im Image des Projekts
+- Phase: G1 auf Strata IQ3_XXS mit 0.1.0rc90, 2026-10-26 (Job 2ac3ab2f) · Komponente: runtime (`images.py`) · Severity: P1 · blockierend: ja (Schritt in den Replan) · Status: **behoben im Repository** (`tests/integration/test_sandbox_images.py::test_a_command_of_another_toolchain_gets_its_image`)
+- Reproduktion: S006 (Frontend des Python-Widgets) bekommt das erzeugte Testkriterium `node --test`. Der Job läuft im Python-Image, der Verifier meldet „test command failed with exit code 127“, die Syntaxprüfung von `static/app.js` „node is not available in the sandbox image“. Versuch 2 sucht elf Züge lang nach `node` und fordert einen Replan an; das Node-Image liegt auf dem Worker bereit.
+- Ursache: Das Image wird je Job gewählt (Hauptsprache des Repositorys); ein gemischtes Projekt bekam für die Befehle der zweiten Sprache keine Werkzeugkette.
+- Fix: `ImageDefaultingExecutor` gibt einem Befehl, der nur Programme einer anderen konfigurierten Werkzeugkette ausführt (`node`/`npm`/`npx`/`tsc`, `pwsh`, `php`/`composer`, `python`/`pytest`/`pip` …), deren Image; gemischte Befehle, nicht konfigurierte Werkzeugketten und Projekt-Images (`sandbox_image`) behalten das Image des Jobs. Das gilt für Coder, Tests und Verifier.
+
+### BUG-356 – Zu große Zahlen und lange Befehle kosten je einen Zug
+- Phase: G1 auf Strata IQ3_XXS mit 0.1.0rc90, 2026-10-26 (Job 2ac3ab2f) · Komponente: tools (`registry.py`) · Severity: P2 · blockierend: nein · Status: **behoben im Repository** (`tests/unit/test_tools_units.py::test_numbers_beyond_their_bound_are_clamped_and_long_commands_get_a_way_out`)
+- Reproduktion: 13 `ARGS_INVALID` in einem Job: viermal `recall(k=15)` („less than or equal to 10“), neunmal `run_command` mit einem Python-Here-Document über 8000 Zeichen, das mehrere Dateien schreibt (in S003 Versuch 2 viermal hintereinander). Jeder Zug dauert auf Strata drei bis fünf Minuten.
+- Ursache: Die Schema-Grenzen lehnen ab, statt den Wert zu begrenzen; die Ablehnung des langen Befehls sagte nicht, wie es anders geht.
+- Fix: Eine Zahl jenseits ihrer Grenze wird auf die Grenze gesetzt, wenn sonst kein Fehler bleibt. `run_command` nimmt bis 32.000 Zeichen; die Ablehnung eines zu langen Befehls nennt `write_file` (mit `append` für weitere Teile).
+
+### BUG-355 – Code, der ein Secret berechnet, erscheint maskiert, und das Zurückschreiben wird abgelehnt
+- Phase: G1 auf Strata IQ3_XXS mit 0.1.0rc90, 2026-10-26 (Job 2ac3ab2f) · Komponente: core (`redaction.py`), tools (`engine.py`) · Severity: P1 · blockierend: nein · Status: **behoben im Repository** (`tests/unit/test_config_and_redaction.py::test_code_that_computes_a_secret_stays_readable`, `tests/integration/test_tools_engine_read_write.py::test_a_rewrite_keeps_the_real_value_of_masked_lines_copied_unchanged`)
+- Reproduktion: Der Coder liest `proxmox.py` und sieht `password=***REDACTED***, "password", "")),` statt `password=str(getattr(server, "password", "")),`; ebenso `bool(self.api_key)`, `secrets.token_urlsafe(32)`, `server.password}).encode(…)`. Er schreibt die Datei aus dem Gelesenen neu, und `write_file` lehnt viermal mit `REDACTED_PLACEHOLDER` ab (S003 zweimal, S004 einmal, …); danach weicht er auf Here-Documents über die Shell aus.
+- Ursache: Die Regel für Code-Verweise (BUG-225) kannte nur Namen und Zugriffe ohne Argumente; ein Aufruf mit Argumenten galt als Wert. Ein Neuschreiben konnte eine maskierte Zeile nicht unverändert übernehmen (nur `replace_text` konnte das, BUG-270).
+- Fix: Ein Wert ohne Anführungszeichen, der mit einem kleingeschriebenen Namen beginnt und einen Aufruf oder Index enthält, ist Code und bleibt sichtbar. `write_file` gibt jeder Zeile, die die maskierte Ansicht einer Zeile der Datei ist (auch neu eingerückt), deren echten Inhalt zurück und sagt das; eine Ansicht, die zwei verschiedene Zeilen teilen, bleibt abgelehnt. `run_command` lehnt einen Befehl mit der Markierung ab und verweist auf `write_file`.
+
 ### BUG-354 – Recherche-Fakten erreichen einen Schritt ohne Bezug zu seinem Thema
 - Phase: G1 auf Strata IQ3_XXS mit 0.1.0rc90, 2026-10-25 (Job 2ac3ab2f) · Komponente: research (`findings.py`) · Severity: P2 · blockierend: nein · Status: **behoben im Repository** (`tests/unit/test_research_relevance.py`)
 - Reproduktion: S003 („Implement Proxmox collector parser“) bekommt den Faktenblock von S001 mit `LOG_LEVEL=trace unraid-api start` und den SSO-Befehlen der Unraid-CLI vor dem Proxmox-Header `PVEAPIToken=USER@REALM!TOKENID=UUID`; bei knappem Platz fiele der Header weg.
