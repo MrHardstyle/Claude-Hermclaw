@@ -1,0 +1,11 @@
+# Hermclaw sandbox toolchain: Rust stable with cargo, clippy and rustfmt (2026-10-27).
+# Runs read-only and network-less: CARGO_HOME moves to /tmp (cargo takes its package-cache lock there even with
+# --offline) and so do the build artefacts (no target/ in the workspace, which the verifier keeps unchanged); the
+# toolchain stays in /usr/local/rustup and /usr/local/cargo/bin (on PATH). Crates from crates.io need a project image
+# or egress; a project with only the standard library builds and tests offline.
+FROM docker.io/library/rust:1-slim-bookworm
+RUN rustup component add clippy rustfmt \
+ && apt-get update && apt-get install -y --no-install-recommends git ripgrep jq file procps && rm -rf /var/lib/apt/lists/* \
+ && cargo --version && rustc --version && cargo clippy --version && rustfmt --version
+ENV HOME=/tmp CARGO_HOME=/tmp/cargo CARGO_TARGET_DIR=/tmp/cargo-target CARGO_TERM_COLOR=never
+LABEL org.hermclaw.sandbox="rust"

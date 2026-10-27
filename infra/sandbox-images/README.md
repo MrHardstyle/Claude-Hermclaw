@@ -11,6 +11,7 @@ such as `pytest -q` would fail. These Containerfiles add the toolchains; project
 | `php` | `localhost/hermclaw-sandbox-php:2` | PHP 8.3 CLI, Composer |
 | `generic` | `localhost/hermclaw-sandbox-generic:2` | bash, make, gcc, jq, shellcheck, yamllint, sqlite3, psql, python3 (also as `python`), unzip, xz |
 | `powershell` | `localhost/hermclaw-sandbox-powershell:2` | PowerShell 7 LTS (`pwsh`), Pester 5, PSScriptAnalyzer |
+| `rust` | `localhost/hermclaw-sandbox-rust:2` | Rust stable, cargo, clippy, rustfmt (`CARGO_HOME`/`CARGO_TARGET_DIR` in `/tmp`; crates need a project image or egress) |
 
 Since image 2 (2026-10-27) every image also has the shell basics `git`, `rg` (ripgrep), `jq`, `file` and `ps`/`pgrep`
 (procps). Runtime libraries (`requests`, …) stay out on purpose: a project's dependencies come from its project image,

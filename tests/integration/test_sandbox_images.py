@@ -195,6 +195,21 @@ async def test_manifest_identifies_a_new_project_and_the_executor_asks_again(ses
     assert await sel.image_for(ws) == "python"
 
 
+async def test_a_rust_project_runs_in_the_rust_toolchain(sessionmaker: Any, tmp_path: Path) -> None:
+    """Rust toolchain (image 2, 2026-10-27): a repository whose language is Rust, a new project's Cargo.toml and a
+    cargo/rustc command each select the ``rust`` image."""
+    ws = await _workspace(sessionmaker, tmp_path)
+    pol = policy(python=PYTHON_IMAGE, rust="localhost/hermclaw-sandbox-rust:2")
+    assert await SandboxImageSelector(sessionmaker, pol, FakeRepo(["rust"])).image_for(ws) == "rust"
+    sel = SandboxImageSelector(sessionmaker, pol, FakeRepo([]))
+    assert await sel.image_for(ws) is None
+    (tmp_path / "Cargo.toml").write_text('[package]\nname = "demo"\nversion = "0.1.0"\n', encoding="utf-8")
+    assert await sel.image_for(ws) == "rust"
+    for command in ("cargo test --offline", "cd core && cargo clippy --offline", "rustc --version", "rustfmt --check src/main.rs"):
+        assert command_toolchain(command) == "rust", command
+    assert command_toolchain("cargo test && python -m pytest") is None
+
+
 # ------------------------------------------------------------------------------------------------ real podman
 
 

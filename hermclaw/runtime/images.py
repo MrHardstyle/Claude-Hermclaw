@@ -6,7 +6,7 @@ Order of precedence for a workspace:
    the project's dependencies baked in (``scripts/ops/hermclaw-build-sandbox-images --project …``), so tests run
    offline in the network-less sandbox;
 2. the repository's primary language mapped to a toolchain alias of ``policies.sandbox.images``
-   (python → ``python``, typescript/javascript → ``node``, php → ``php``), when that alias is configured;
+   (python → ``python``, typescript/javascript → ``node``, php → ``php``, rust → ``rust``), when that alias is configured;
    a new repository without recognised code is recognised by its dependency manifest (``requirements.txt`` …);
 3. ``None`` – the sandbox default image (``policies.sandbox.image``); asked again on the next command, because a
    step may create the project's first files (BUG-155).
@@ -41,6 +41,7 @@ MANIFEST_IMAGE_ALIASES: tuple[tuple[str, str], ...] = (
     ("setup.py", "python"),
     ("package.json", "node"),
     ("composer.json", "php"),
+    ("Cargo.toml", "rust"),
 )
 
 LANGUAGE_IMAGE_ALIASES: dict[str, str] = {
@@ -50,6 +51,7 @@ LANGUAGE_IMAGE_ALIASES: dict[str, str] = {
     "tsx": "node",
     "php": "php",
     "powershell": "powershell",
+    "rust": "rust",
 }
 
 
@@ -68,6 +70,9 @@ TOOL_IMAGE_ALIASES: dict[str, str] = {
     "pip": "python",
     "ruff": "python",
     "mypy": "python",
+    "cargo": "rust",
+    "rustc": "rust",
+    "rustfmt": "rust",
 }
 _ASSIGNMENT = re.compile(r"^[A-Za-z_]\w*=")
 _STATEMENT_SPLIT = re.compile(r"&&|\|\||[;|&\n(){}]")

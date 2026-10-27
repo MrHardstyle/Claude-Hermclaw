@@ -404,7 +404,7 @@ VALIDATION_CASES: list[tuple[str, str, str, dict[str, Any], str]] = [
     ("release-venv-elsewhere", "hermclaw_release", "validate.yml", {"hermclaw_venv": "/srv/venv"}, "FAIL"),
     ("release-ui-releases-is-webroot", "hermclaw_release", "validate.yml", {"hermclaw_ui_releases_dir": "/var/www/hermclaw-next"}, "FAIL"),
     ("release-toolchain-bad", "hermclaw_release", "validate.yml", {"hermclaw_sandbox_toolchains": ["python", "Bad Name"]}, "FAIL"),
-    ("release-default-toolchain", "hermclaw_release", "validate.yml", {"hermclaw_sandbox_default_toolchain": "rust"}, "FAIL"),
+    ("release-default-toolchain", "hermclaw_release", "validate.yml", {"hermclaw_sandbox_default_toolchain": "cobol"}, "FAIL"),
     ("release-image-version", "hermclaw_release", "validate.yml", {"hermclaw_sandbox_image_version": "1;rm"}, "FAIL"),
     ("release-gate-newline", "hermclaw_release", "validate.yml", {"hermclaw_release_ssh_gate_allowlist": ["^ls$\n^.*$"]}, "FAIL"),
     ("release-gate-string", "hermclaw_release", "validate.yml", {"hermclaw_release_ssh_gate_allowlist": "^ls$"}, "FAIL"),
@@ -599,7 +599,7 @@ def test_configuration_from_examples_inventory_and_overrides(tmp_path: Path) -> 
     assert policies["coder"]["tool_output_chars"] == 12000, "deep merge keeps the other keys"
     assert policies["sandbox"]["image"] == "localhost/hermclaw-sandbox-generic:7"
     assert policies["sandbox"]["images"] == {
-        t: f"localhost/hermclaw-sandbox-{t}:7" for t in ("python", "node", "php", "generic", "powershell")
+        t: f"localhost/hermclaw-sandbox-{t}:7" for t in ("python", "node", "php", "generic", "powershell", "rust")
     }
     assert (
         policies["commands"]["forbidden_patterns"]
