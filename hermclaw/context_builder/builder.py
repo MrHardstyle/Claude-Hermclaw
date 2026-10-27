@@ -138,6 +138,8 @@ class TurnContextInput:
     completion_contract: str = ""
     history: Sequence[TurnRecord] = ()
     latest_failure: str | None = None  # exact text of the latest failing tool result / test output
+    # the latest successful output the files message does not show: "<what>\n<output>" (BUG-363)
+    latest_output: str | None = None
     correction: Sequence[CorrectionItem] = ()  # verifier failures / review findings of the previous attempt
 
     def __post_init__(self) -> None:
@@ -378,7 +380,11 @@ class ContextBuilder:
             diff if isinstance(diff, str) else "", cost[SectionName.CURRENT_DIFF], progress=[self._red(x) for x in progress]
         )
         rendered[SectionName.LATEST_FAILURE] = render_failure(
-            failure, correction, cost[SectionName.LATEST_FAILURE], item_chars=cfg.correction_item_chars
+            failure,
+            correction,
+            cost[SectionName.LATEST_FAILURE],
+            item_chars=cfg.correction_item_chars,
+            latest_output=self._red(inp.latest_output or ""),
         )
         tools = [t if isinstance(t, ToolPromptSpec) else ToolPromptSpec.from_mapping(t) for t in inp.tools]
         rendered[SectionName.AVAILABLE_TOOLS] = render_tools(tools, cost[SectionName.AVAILABLE_TOOLS])

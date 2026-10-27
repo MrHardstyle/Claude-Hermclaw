@@ -4,6 +4,11 @@ Format: [Keep a Changelog](https://keepachangelog.com/de/1.1.0/), Versionen nach
 
 ## [Unreleased]
 
+## [0.1.0rc93] – Release Candidate (2026-10-27)
+
+### Behoben
+- **Ganze Ausgaben statt Kopf (BUG-363):** Die letzte erfolgreiche Ausgabe, die der Kontext sonst nirgends zeigt (`recall`, `request_research`, `run_command`, `git_diff`, Suchen), steht in den nächsten Zügen ganz in LATEST FAILURE – der Verlauf behielt nur 320 Zeichen davon. Eine Dateiänderung beendet sie, Wissen aus `recall`/`request_research` bleibt.
+
 ## [0.1.0rc92] – Release Candidate (2026-10-27)
 
 ### Behoben

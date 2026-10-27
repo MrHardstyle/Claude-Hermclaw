@@ -16,6 +16,7 @@ from sqlalchemy import select
 from hermclaw.coder import CoderLoop, CoderSettings, StagnationDirective, TurnObservation, history_from_checkpoint
 from hermclaw.context_builder import ContextBuilder, ContextBuilderConfig, CorrectionItem, StepBrief
 from hermclaw.contracts.scope import ScopeContract
+from hermclaw.contracts.tools import CoderAction, ToolName, ToolResult
 from hermclaw.core.config import get_config
 from hermclaw.core.errors import ModelOutputInvalid, ModelOutputTruncated, ModelTimeout
 from hermclaw.models.protocols import CallContext, ChatMessage, ChatResult, StructuredResult
@@ -226,6 +227,47 @@ async def test_reads_are_withheld_after_a_refused_re_read_until_a_file_changes(s
         assert chat.prompts[turn - 1][0].content == chat.prompts[0][0].content, "the system message stays the same"
         assert "- run_test(" in prompt(turn) and "- write_file(" in prompt(turn)
     assert "- read_file(" in prompt(5) and "withheld" not in prompt(5), "the edit in turn 4 brings the reads back"
+
+
+async def test_the_latest_successful_output_is_shown_in_full_until_a_file_changes(sessionmaker: Any, tmp_repo: Path) -> None:
+    """Live G1 on rc91 (BUG-363): the history keeps 320 characters of a successful output, so the coder recalled the
+    same knowledge twelve times and printed the same lines with sed, awk and inspect turn after turn. The next turns
+    show the latest successful output in full – a read changes nothing, a write makes printed lines stale."""
+    cmd = PY + " -c \"[print(f'zeile {i:02d} marker') for i in range(60)]\""
+    actions = [
+        act("run_command", "ausgeben", command=cmd),
+        act("list_files", path="."),
+        act("write_file", "Fix", path="app.py", content='"""Adds."""\n\n\ndef add(a, b):\n    return a + b\n'),
+        act("list_files", path="."),
+    ]
+    h, loop, chat = await _setup(sessionmaker, tmp_repo, actions, max_turns=4)
+    await _run(h, loop)
+
+    def prompt(turn: int) -> str:
+        return "\n".join(m.content for m in chat.prompts[turn - 1])
+
+    for turn in (2, 3):
+        assert "Full output of your latest successful run_command (turn 1)" in prompt(turn)
+        assert "zeile 59 marker" in prompt(turn), "the whole output, not the head the history keeps"
+    assert "zeile 59 marker" not in prompt(4), "the write in turn 3 made the printed lines stale"
+
+
+async def test_knowledge_outlives_a_file_change() -> None:
+    """A recall answer stays true when a file changes; only a newer output replaces it (BUG-363)."""
+    loop = CoderLoop.__new__(CoderLoop)
+    loop.settings = CoderSettings()
+    hits = "1. [research] Unraid GraphQL: POST /graphql with the x-api-key header. " * 10
+    recall = CoderAction.model_validate(act("recall", query="unraid graphql"))
+    write = CoderAction.model_validate(act("write_file", path="app.py", content="x = 1\n"))
+    found = ToolResult(tool=ToolName.recall, ok=True, output=hits)
+    kept = loop._latest_output(None, 3, recall, found)
+    assert kept == ("recall (turn 3)", found.output)
+    wrote = ToolResult(tool=ToolName.write_file, ok=True, output="ok: created app.py", mutated_paths=["app.py"])
+    assert loop._latest_output(kept, 4, write, wrote) == kept
+    short = ToolResult(tool=ToolName.recall, ok=True, output="no knowledge entry matches this query")
+    assert loop._latest_output(kept, 5, recall, short) == kept, "a short output is in the history in full"
+    failed = ToolResult(tool=ToolName.recall, ok=False, output=hits, error_code="MEMORY_UNAVAILABLE")
+    assert loop._latest_output(kept, 6, recall, failed) == kept, "a failure is LATEST FAILURE"
 
 
 async def test_a_passing_check_proposed_again_after_the_refusal_completes_the_step(sessionmaker: Any, tmp_repo: Path) -> None:

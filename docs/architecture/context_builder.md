@@ -174,6 +174,12 @@ than the whole budget is clipped (marked with `…`). Correction evidence (verif
 sorted blocker → major → minor, with suggested fixes) shares the LATEST FAILURE budget (≤ 35 % reserved for it
 when a failure text exists).
 
+The latest successful output the files message does not show comes last in LATEST FAILURE, head first and titled
+as a success (BUG-363): `recall`, `request_research`, `run_command`, `git_diff`, `find_text` and the like, when it is
+longer than the history digest. Reads (shown in RELEVANT CODE/TESTS), writes and `complete_step` never count. It
+lasts until a newer one replaces it; a file change ends it, except for knowledge (`recall`, `request_research`).
+With a failure text it gets at most 35 % of the budget, after the failure and the correction evidence.
+
 ## Tool summary (16.6)
 
 The last `history.full_turns` (6) turns are one line each: tool, args digest, `ok`/`FAILED [error_code]`, result

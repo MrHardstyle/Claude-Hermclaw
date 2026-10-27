@@ -57,6 +57,10 @@ _READ_ONLY = frozenset(
         ToolName.git_diff,
     }
 )
+# their output is shown elsewhere: read lines in RELEVANT CODE/TESTS, a write's in the diff (BUG-363)
+_OUTPUT_SHOWN = frozenset({ToolName.read_file, ToolName.read_range, ToolName.write_file, ToolName.apply_patch, ToolName.replace_text})
+# what they return stays true when a file changes (BUG-363)
+_KNOWLEDGE = frozenset({ToolName.recall, ToolName.request_research})
 # withheld after a refused repeat until something changes (BUG-181)
 _RUNNERS = frozenset({ToolName.run_test.value, ToolName.run_command.value})
 # withheld after a refused re-read until a file changes: the content is shown among the files read (BUG-271)
@@ -242,6 +246,17 @@ class CoderLoop:
             mutated_paths=tuple(result.mutated_paths),
         )
 
+    def _latest_output(self, current: tuple[str, str] | None, turn: int, action: CoderAction, result: ToolResult) -> tuple[str, str] | None:
+        """What the next turns show in full of a successful output (BUG-363): the history keeps only its head, and the
+        coder recalled the same knowledge twelve times and printed the same lines with sed, awk and inspect in turn
+        after turn (live G1 on rc91). It lasts until a newer one replaces it or – not for knowledge – a file changes."""
+        shown = action.tool in _OUTPUT_SHOWN or result.terminal or bool(result.mutated_paths)
+        if result.ok and not shown and len(result.output) > self.settings.result_digest_chars:
+            return (f"{action.tool.value} (turn {turn})", result.output)
+        if result.mutated_paths and current is not None and not current[0].startswith(tuple(t.value for t in _KNOWLEDGE)):
+            return None
+        return current
+
     async def _runtime_completion(
         self, repeated: CoderAction, refusal: ToolResult, *, job_id: uuid.UUID, step_id: uuid.UUID, attempt_id: uuid.UUID, turn: int
     ) -> tuple[CoderAction, ToolResult]:
@@ -372,6 +387,7 @@ class CoderLoop:
         readers_withheld = False
         probed: set[str] = set()
         invalid_streak = 0
+        latest_output: tuple[str, str] | None = None
         turn = start_turn - 1
         # the engine may grant turns once when complete_step in the last turn finds a failing check (BUG-349)
         while turn < s.max_turns + self.engine.granted_turns:
@@ -381,6 +397,7 @@ class CoderLoop:
             if token.checkpoint_requested:
                 return CoderResult("checkpointed", turn - 1, records, last_failure=last_failure, detail=token.reason)
             failure_text = "\n\n".join(x for x in (notice, last_failure) if x) or None
+            output_text = f"{latest_output[0]}\n{latest_output[1]}" if latest_output else None
             # the catalogue stays the same in every turn: it is part of the system message, which llama.cpp reuses
             # from its cache only while it is unchanged; withheld checks and reads are named in the turn notice and a
             # repeat is refused by the engine (D-026, ladder A10 #4: three catalogue versions in 15 of 47 turns)
@@ -395,6 +412,7 @@ class CoderLoop:
                     completion_contract=completion_contract,
                     history=records,
                     latest_failure=failure_text,
+                    latest_output=output_text,
                     correction=correction,
                 )
             )
@@ -463,6 +481,7 @@ class CoderLoop:
             if not repeated and not (result.ok and action.tool in _READ_ONLY):
                 last_failure = None if result.ok else result.output
             notice = result.output if repeated else None
+            latest_output = self._latest_output(latest_output, turn, action, result)
             # after a refused repeat the coder re-proposed the same check up to four times (live battery J1 on
             # 0.1.0rc14): the checks leave the catalogue until a file or the environment changes (BUG-181)
             if repeated and action.tool.value in _RUNNERS and runners_withheld and result.data.get("passed"):

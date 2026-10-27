@@ -449,19 +449,47 @@ def _correction_line(item: CorrectionItem, limit: int) -> str:
     return f"- [{item.source}:{clip_line(item.label, 80)}]{where}: " + rendered.rstrip("\n").replace("\n", "\n  ")
 
 
-def render_failure(latest_failure: str | None, correction: Sequence[CorrectionItem], budget: int, *, item_chars: int) -> RenderedSection:
+OUTPUT_TITLE = "Full output of your latest successful {what} (SHORT STEP HISTORY shows only its head):\n"
+
+
+def _output_block(output: str, room: int) -> tuple[str, bool]:
+    """The latest successful output, head first (recall hits, research answers and printed lines start at the top)."""
+    head, _, body = output.partition("\n")
+    title = OUTPUT_TITLE.format(what=head.strip() or "tool call")
+    fence = fence_for(body)
+    text = clip_to_cost(body, max(0, room - char_cost(title) - 2 * (len(fence) + 1) - char_cost("\n…") - 2))
+    cut = len(text) < len(body)
+    if cut:
+        text = text.rstrip() + "\n…"
+    return f"{title}{fence}\n{text.rstrip(chr(10))}\n{fence}", cut
+
+
+def render_failure(
+    latest_failure: str | None,
+    correction: Sequence[CorrectionItem],
+    budget: int,
+    *,
+    item_chars: int,
+    latest_output: str | None = None,
+) -> RenderedSection:
+    """The latest failure, the correction evidence and – BUG-363 – the full output of the latest successful call the
+    files message does not show: the history keeps 320 characters of it, and the coder repeated a recall twelve times
+    and printed the same lines with sed, awk and inspect in turn after turn (live G1 on rc91, S005/S006)."""
     sec = RenderedSection(SectionName.LATEST_FAILURE)
     failure = (latest_failure or "").strip("\n")
-    if not failure.strip() and not correction:
+    output = (latest_output or "").strip("\n")
+    if not failure.strip() and not correction and not output.partition("\n")[2].strip():
         sec.omitted_reason = "empty"
         return sec
     corr_lines = [_correction_line(c, item_chars) for c in correction]
     corr_title = "Correction evidence (must be fixed in this attempt):"
     corr_cost = char_cost("\n".join([corr_title, *corr_lines])) if corr_lines else 0
+    out_cost = char_cost(output) + char_cost(OUTPUT_TITLE) + 12 if output.partition("\n")[2].strip() else 0
     parts: list[str] = []
     if failure.strip():
         title = "Exact output of the latest failure (verbatim):\n"
         reserve = min(corr_cost + 2, int(budget * 0.35)) if corr_lines else 0
+        reserve += min(out_cost + 2, int(budget * 0.35)) if out_cost else 0
         fence = fence_for(failure)  # fenced: tool output can never pose as a section heading
         wrap = char_cost(title) + 2 * (len(fence) + 1)
         room = budget - reserve - wrap
@@ -483,7 +511,18 @@ def render_failure(latest_failure: str | None, correction: Sequence[CorrectionIt
         sec.items_dropped += corr.items_dropped
         sec.dropped.extend(corr.dropped)
         sec.truncated = sec.truncated or corr.truncated
+    if out_cost:
+        room = budget - char_cost("\n\n".join(parts)) - (2 if parts else 0)
+        if room >= 200:
+            block, cut = _output_block(output, room)
+            parts.append(block)
+            sec.items_included += 1
+            sec.truncated = sec.truncated or cut
+        else:
+            sec.drop("latest successful output", "budget")
     sec.body = "\n\n".join(parts)
+    if not sec.body:
+        sec.omitted_reason = "budget"
     return sec
 
 
