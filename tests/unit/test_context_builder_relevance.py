@@ -269,10 +269,10 @@ async def test_huge_inputs_respect_every_budget() -> None:
     )
     history = [TurnRecord(i, "run_test", "x" * 5000, i % 2 == 0, "y" * 5000, None if i % 2 == 0 else "test_failed") for i in range(1, 400)]
     failure = "E   first error line\n" + "noise\n" * 200_000 + "=== 3 failed, 1 passed in 9.0s ===\n"
-    # 4096/995: the smallest window the system contract still fits since the turn count moved into the closing line
+    # 4096/920: the smallest window the system contract still fits since the turn count moved into the closing line
     # of the user message (framing, D-021); 995 instead of 1000 since the closing line says that leftover work is
-    # continued (BUG-340)
-    for ctx, out in ((32768, 6144), (8192, 2048), (4096, 995)):
+    # continued (BUG-340), 920 since the contract names the file size the context shows (BUG-367)
+    for ctx, out in ((32768, 6144), (8192, 2048), (4096, 920)):
         builder, _, _ = make_builder(repo=repo, git=git, context_tokens=ctx, max_output_tokens=out, safety_margin_tokens=128)
         built = await builder.build(make_input(step=step, history=history, latest_failure=failure))
         plan = builder.plan
@@ -435,3 +435,26 @@ async def test_files_delivered_by_dependency_steps_are_shown() -> None:
     assert "Files earlier steps delivered" in section(user, "STEP GOAL") and "pkg/collector.py" in section(user, "STEP GOAL")
     code = section(user, "RELEVANT CODE")
     assert "### pkg/collector.py" in code and "[dependency]" in code and '"usage": 0.5' in code
+
+
+async def test_the_latest_read_is_shown_before_the_targets_fill_the_budget() -> None:
+    """Live G1 on rc95 (BUG-367): an 817-line target and the acceptance tests filled RELEVANT CODE/TESTS, and the
+    217-line fixture the coder read was left out for the budget in every turn – it read the file five times in nine
+    turns, never wrote a line and the step stagnated three times. The latest read ranks first (clipped if it must be),
+    so the coder sees what it asked for."""
+    from hermclaw.context_builder.history import TurnRecord
+
+    repo = default_repo()
+    repo.files["app.py"] = numbered(817, "app " + "x" * 50)
+    repo.files["tests/test_app.py"] = numbered(400, "test " + "y" * 50)
+    repo.files["tests/fixtures/sample.json"] = numbered(217, '"fixture": "' + "z" * 40 + '"')
+    builder, _, _ = make_builder(repo=repo, context_tokens=16384, max_output_tokens=4096)
+    history = [
+        TurnRecord(1, "read_file", '{"path": "app.py"}', True, "[app.py: lines 1-400 of 817]"),
+        TurnRecord(2, "read_range", '{"end": 700, "path": "app.py", "start": 400}', True, "301 lines"),
+        TurnRecord(3, "read_file", '{"path": "tests/fixtures/sample.json"}', True, "217 lines"),
+    ]
+    built = await builder.build(make_input(history=history, turn=4))
+    tests = section(user_text(built), "RELEVANT TESTS")
+    assert "### tests/fixtures/sample.json lines 1-" in tests and '"fixture": "' + "z" * 40 + '" 1\n' in tests
+    assert not any(d.item.startswith("tests/fixtures/sample.json") and d.reason == "budget" for d in built.report.dropped)

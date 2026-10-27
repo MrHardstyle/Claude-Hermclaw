@@ -4,6 +4,11 @@ Format: [Keep a Changelog](https://keepachangelog.com/de/1.1.0/), Versionen nach
 
 ## [Unreleased]
 
+## [0.1.0rc96] – Release Candidate (2026-10-28)
+
+### Behoben
+- **Was der Coder liest, sieht er auch (BUG-367):** Der zuletzt gelesene Bereich steht in RELEVANT CODE/TESTS an erster Stelle und wird notfalls gekürzt statt verworfen; eine große Zieldatei verdrängte ihn, und der Coder las dieselbe Datei Zug um Zug neu. Quelldateien bleiben unter etwa 400 Zeilen – so viel zeigt der Kontext von einer Datei –, `write_file` empfiehlt bei längeren Quelldateien die Aufteilung in Module.
+
 ## [0.1.0rc95] – Release Candidate (2026-10-27)
 
 ### Behoben

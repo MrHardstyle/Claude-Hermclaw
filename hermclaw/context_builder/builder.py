@@ -155,6 +155,10 @@ class _FileRef:
     line: int | None
 
 
+#: above the targets (2.0) and the code named by a failure (3.0): what the coder asked for in its last read
+LATEST_READ_SCORE = 3.5
+
+
 # ---------------------------------------------------------------------------------------------- builder
 def _span_shown(span: tuple[str, int, int], text: str | None, selected: Sequence[Snippet]) -> bool:
     """Whether a packed snippet shows every line a read returned (``text`` is what the read range holds now)."""
@@ -303,13 +307,18 @@ class ContextBuilder:
                 continue
             start = 1 if ref.line is None else max(1, ref.line - cfg.failure_region_lines)
             (candidates if i < len(refs) else fail_cands).append(make_snippet(ref.path, start, text, 3.0 - i * 0.001, "failure"))
-        for i, (p, start, _) in enumerate(file_heads):
+        latest_read = spans[0] if spans else None
+        for i, (p, start, end) in enumerate(file_heads):
             text = head_texts[i]
             if not isinstance(text, str) or not text.strip():
                 dropped.append(DroppedItem(_section_for(p).value, p, "read_failed"))
                 continue
             origin = "target" if p in targets else "acceptance" if p in acc_tests else "read" if p in read_paths else "dependency"
-            candidates.append(make_snippet(p, start, text, 2.0 - i * 0.001, origin))
+            # the lines the coder read last rank first – clipped to the budget rather than left out: ranked after the
+            # target heads, a 217-line fixture never fitted, the coder never saw what it read and read it again in turn
+            # after turn (live G1 on rc95, BUG-367)
+            score = LATEST_READ_SCORE if (p, start, end) == latest_read else 2.0 - i * 0.001
+            candidates.append(make_snippet(p, start, text, score, origin))
         target_set = set(targets)
         hit_cands, hit_drops = await self._hit_snippets(
             sem, ws, _as_hits(hits), "context", base=0.0, boost=target_set, warnings=warnings, tests_only=False

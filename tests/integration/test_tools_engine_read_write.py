@@ -506,6 +506,19 @@ async def test_write_file_append_writes_large_files_in_parts(sessionmaker: SM, r
     assert not res.ok and res.error_code == E.SCOPE_VIOLATION
 
 
+async def test_a_source_file_longer_than_the_context_shows_gets_the_split_hint(sessionmaker: SM, repo: Path) -> None:
+    """Live G1 on rc95 (BUG-367): an 850-line collector.py written in one go was paged through in 13 reads; the coder
+    learns at the write that the context shows 400 lines of a file at once. Data and documentation keep their size."""
+    h = await make_harness(sessionmaker, repo, contract=scope(**IMPLEMENT_SCOPE))
+    big = "".join(f"V{i} = {i}\n" for i in range(450))
+    res = await h.call("write_file", path="src/new_feature.py", content=big)
+    assert res.ok and "src/new_feature.py has 450 lines, more than the 400" in res.output and "split it into modules" in res.output
+    res = await h.call("write_file", path="src/new_feature.py", content="A = 1\n")
+    assert res.ok and "split it" not in res.output
+    res = await h.call("write_file", path="docs/guide/long.md", content="line\n" * 450)
+    assert res.ok and "split it" not in res.output
+
+
 async def test_write_tools_require_a_scope_contract(sessionmaker: SM, repo: Path) -> None:
     h = await make_harness(sessionmaker, repo, contract=None)
     for tool, args in (

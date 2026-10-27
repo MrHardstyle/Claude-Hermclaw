@@ -144,7 +144,7 @@ Candidates (score → rank):
 | literal scope target files: head (`target_head_lines`, tests `test_head_lines`) | 2.0 | code or tests |
 | files the completed dependency steps committed (`StepBrief.dependency_files`, transitive, nearest first, then the job's other completed steps newest first; origin `dependency`; also named in STEP GOAL, BUG-242/BUG-250) | 2.0 | code or tests |
 | test files named in acceptance `test`/`command` evidence: head | 2.0 | tests |
-| files read in this attempt (origin `read`, most recent first, up to 6): a `read_range` with its range (a repeated one as the lines it brought, from its span header, BUG-342), a `read_file` as the page it showed (the span header `[path: lines X-Y of N…]` of a clipped read, BUG-266), otherwise from line 1; each up to `max_snippet_lines` | 2.0 | code or tests |
+| files read in this attempt (origin `read`, most recent first, up to 6): a `read_range` with its range (a repeated one as the lines it brought, from its span header, BUG-342), a `read_file` as the page it showed (the span header `[path: lines X-Y of N…]` of a clipped read, BUG-266), otherwise from line 1; each up to `max_snippet_lines` | 2.0; the latest read 3.5 – first in its section, clipped rather than left out (BUG-367) | code or tests |
 | `search(stem)` for each literal non-test target (`__init__`/`index` → package name) and code-like identifiers of the goal (`snake_case`, `camelCase`, `name(`), test paths only | 1.0 + normalised score | tests |
 | `context_for(title + goal + first error line)` | normalised score (+1.0 inside a target file) | code or tests |
 

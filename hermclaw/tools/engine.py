@@ -126,6 +126,8 @@ PIPEFAIL = "(set -o pipefail) 2>/dev/null && set -o pipefail"
 READ_REPEAT_WINDOW = 6  # turns; the context shows the files of the last 6 reads (context_builder ``_read_spans``)
 READ_VISIBLE_LINES = 400  # the context shows at most this many lines of one read (context_builder ``max_snippet_lines``)
 READ_FOLLOW_MIN_LINES = 60  # lines after a repeated read that the coder is given instead of a refusal (BUG-342)
+#: files whose size is not a design choice: data, documentation, lock files – everything else gets the split hint
+_NOT_SPLIT = (".md", ".txt", ".rst", ".json", ".jsonl", ".csv", ".tsv", ".lock", ".toml", ".yaml", ".yml", ".xml", ".svg", ".ini", ".cfg")
 PARSE_FAILURES_SHOWN = 3  # files that do not parse, named after a write or a failed command (BUG-343)
 IMAGE_CONSTRAINTS = "/tmp/hermclaw-image-constraints.txt"  # noqa: S108 - path inside the sandbox
 PYTHON_DEPS_DIR = "/deps/python"
@@ -1298,6 +1300,13 @@ class ToolEngine:
         )
         if restored:
             note += f"\nnote: {restored} masked line(s) you copied unchanged keep their real value"
+        if lines > READ_VISIBLE_LINES and not rel.lower().endswith(_NOT_SPLIT):
+            # live G1 on rc95 (BUG-367): an 850-line collector.py written in one go was paged through in 13 reads,
+            # each pushing an earlier part out of view, and three attempts ended without the config, docs and tests
+            note += (
+                f"\nnote: {rel} has {lines} lines, more than the {READ_VISIBLE_LINES} the context shows of a file at once – "
+                "split it into modules by concern (API client, parsing, server, configuration) before you build on it"
+            )
         return self._ok(
             ToolName.write_file,
             f"{verb} {rel} ({len(data)} bytes, {lines} lines){note}",
