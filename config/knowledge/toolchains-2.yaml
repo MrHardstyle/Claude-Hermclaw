@@ -22,7 +22,9 @@
     Create projects with `dotnet new`, connect them with `dotnet add <tests> reference <lib>.csproj`, test with
     `dotnet test <test project>`; any other package or another version fails to restore. bin/ and obj/ are build output,
     never part of the change. A VB.NET module function is called as `Module.Function(...)`; a VB test class uses
-    `<Fact>` (xUnit) on a `Public Sub`.
+    `<Fact>` (xUnit) on a `Public Sub`. A VB project puts everything into its root namespace (the project name), so
+    `Namespace Roemisch` inside Roemisch.vbproj yields `Roemisch.Roemisch`; write no `Namespace` block for the root
+    namespace. C# has no root namespace: declare `namespace Roemisch;` in each file.
     Checked: image hermclaw-sandbox-dotnet:2.
 
 - kind: convention
@@ -70,7 +72,8 @@
   tags: [bash, shell, bats, shellcheck, test, 'code:#!/usr/bin/env bash', 'code:@test ']
   content: |
     The generic image has bats and shellcheck. A testable script defines its functions and runs `main "$@"` only when
-    executed (`[[ "${BASH_SOURCE[0]}" == "$0" ]] && main "$@"`), so a bats test can `source` it in `setup()`. Tests are
+    executed: `if [[ "${BASH_SOURCE[0]}" == "$0" ]]; then main "$@"; fi` – the short form `[[ … ]] && main "$@"` makes
+    `source script.sh` return 1, so `source script.sh && …` fails. A bats test can then `source` it in `setup()`. Tests are
     tests/*.bats with `@test "name" { ... }`, `run <command>` and checks on `$status` and `$output`; run them with
     `bats tests`. `shellcheck script.sh` must report nothing.
     Checked: image hermclaw-sandbox-generic:2.

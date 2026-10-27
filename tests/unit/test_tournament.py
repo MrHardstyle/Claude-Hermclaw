@@ -165,6 +165,17 @@ def test_spec_loads_plans_hidden_dirs_and_weights(tmp_path: Path) -> None:
         load_spec(path)
 
 
+@pytest.mark.parametrize("name", ["coder-tournament.yaml", "languages.yaml"])
+def test_the_shipped_specs_load_and_name_deployed_sandbox_images(name: str) -> None:
+    """A typo in a shipped spec or a hidden check on an image the workers do not build would only surface hours into a
+    run on the model host."""
+    root = Path(__file__).resolve().parents[2]
+    toolchains = yaml.safe_load((root / "infra/ansible/playbooks/group_vars/all.yml").read_text())["hermclaw_sandbox_toolchains"]
+    spec = load_spec(root / "tests/live/tournament" / name)
+    assert {t.hidden.image for t in spec.tasks if t.hidden.image} <= set(toolchains)
+    assert len({t.id for t in spec.tasks}) == len(spec.tasks)
+
+
 async def test_the_ladder_stops_at_the_first_failure_and_retries_that_level_next_time(tmp_path: Path) -> None:
     """Agreed 2026-10-21: a solved task leads to a harder one until one fails; after the fix the same task is run
     again, and only when it succeeds the climb goes on. System runs plan for themselves (no prescribed plan)."""

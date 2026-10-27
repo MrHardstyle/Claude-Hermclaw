@@ -1,0 +1,149 @@
+# Language learning ladder (2026-10-27): can the whole system (planner, coder, review, replans) deliver a small,
+# exactly specified program in each sandbox language? Stage R1 is the same task everywhere: roman numerals
+# 1..3999 in both directions, canonical input only, with the language's own tests. All tasks are system runs (no
+# prescribed plan); run one language at a time and never next to a tournament on the model host:
+#
+#   sudo -u hermclaw hermclaw coder-tournament /var/lib/hermclaw/tournament/languages.yaml \
+#        --model system --task R1-rust --reps 1 --out /var/lib/hermclaw/tournament/ladder-rust
+#
+# Failures feed knowledge entries (config/knowledge/toolchains-*.yaml) or bug fixes before the next language.
+repository: hermclaw-test
+hidden_root: hidden
+models: [system]
+defaults: {reps: 1, limit_minutes: 60}
+tasks:
+  - id: R1-rust
+    title: Rust – roman numerals library
+    base_branch: acceptance/empty
+    prompt: |-
+      Schreibe in Rust die Bibliothek `roemisch` (Cargo-Paket `roemisch` im Wurzelverzeichnis, Code in `src/lib.rs`,
+      keine externen Crates) für römische Zahlen:
+      - `pub fn to_roman(n: u32) -> Result<String, String>` wandelt 1 bis 3999 in die kanonische Schreibweise
+        (z. B. 1994 → `MCMXCIV`); 0 und Zahlen über 3999 ergeben `Err` mit einer Meldung.
+      - `pub fn from_roman(s: &str) -> Result<u32, String>` liest nur kanonische Großbuchstaben-Zahlen; alles andere
+        (leer, Kleinbuchstaben, Leerzeichen, `IIII`, `IC`, `VV`, `MMMM` …) ergibt `Err`.
+      Sichere das Verhalten mit Tests ab (`cargo test`) und beschreibe die API kurz im `README.md`.
+    expected_changes: [Cargo.toml, Cargo.lock, "src/*", "tests/*", README.md, .gitignore]
+    hidden:
+      dir: R1-rust
+      image: rust
+      command: "mkdir -p tests && cp _hidden/hidden_roman.rs tests/ && cargo test --offline --test hidden_roman"
+
+  - id: R1-go
+    title: Go – roman numerals package
+    base_branch: acceptance/empty
+    prompt: |-
+      Schreibe in Go das Paket `roemisch` (Modul `roemisch` in `go.mod` im Wurzelverzeichnis, Paketdateien im
+      Wurzelverzeichnis, nur die Standardbibliothek) für römische Zahlen:
+      - `func ToRoman(n int) (string, error)` wandelt 1 bis 3999 in die kanonische Schreibweise (z. B. 1994 →
+        `MCMXCIV`); andere Zahlen ergeben einen Fehler.
+      - `func FromRoman(s string) (int, error)` liest nur kanonische Großbuchstaben-Zahlen; alles andere (leer,
+        Kleinbuchstaben, Leerzeichen, `IIII`, `IC`, `VV`, `MMMM` …) ergibt einen Fehler.
+      Sichere das Verhalten mit Tests ab (`go test ./...`) und beschreibe die API kurz im `README.md`.
+    expected_changes: [go.mod, "*.go", README.md]
+    hidden:
+      dir: R1-go
+      image: go
+      command: "cp _hidden/hidden_test.go ./zz_hidden_test.go && go test -count=1 -v -run '^TestHidden' ."
+
+  - id: R1-cpp
+    title: C++ – roman numerals library with CMake
+    base_branch: acceptance/empty
+    prompt: |-
+      Schreibe in C++20 eine Bibliothek für römische Zahlen im Namespace `roemisch`, deklariert in
+      `include/roemisch.h` und vollständig implementiert in `src/roemisch.cpp` (nur die Standardbibliothek):
+      - `std::string to_roman(int n)` wandelt 1 bis 3999 in die kanonische Schreibweise (z. B. 1994 → `MCMXCIV`);
+        andere Zahlen werfen `std::invalid_argument`.
+      - `int from_roman(const std::string& s)` liest nur kanonische Großbuchstaben-Zahlen; alles andere (leer,
+        Kleinbuchstaben, Leerzeichen, `IIII`, `IC`, `VV`, `MMMM` …) wirft `std::invalid_argument`.
+      Baue alles mit CMake (`CMakeLists.txt` im Wurzelverzeichnis), sichere das Verhalten mit GoogleTest-Tests unter
+      `tests/` ab, die über `ctest` laufen, und beschreibe Build und API kurz im `README.md`.
+    expected_changes: [CMakeLists.txt, "include/*", "src/*", "tests/*", README.md, .gitignore]
+    hidden:
+      dir: R1-cpp
+      image: cpp
+      command: "cmake -S _hidden -B /tmp/hidden-build -G Ninja >/dev/null && cmake --build /tmp/hidden-build >/dev/null && /tmp/hidden-build/hidden_tests"
+
+  - id: R1-java
+    title: Java – roman numerals class
+    base_branch: acceptance/empty
+    prompt: |-
+      Schreibe in Java 21 die Klasse `roemisch.Roemisch` (Datei `src/main/java/roemisch/Roemisch.java`, nur das JDK,
+      kein Maven oder Gradle) für römische Zahlen:
+      - `public static String toRoman(int n)` wandelt 1 bis 3999 in die kanonische Schreibweise (z. B. 1994 →
+        `MCMXCIV`); andere Zahlen werfen `IllegalArgumentException`.
+      - `public static int fromRoman(String s)` liest nur kanonische Großbuchstaben-Zahlen; alles andere (null, leer,
+        Kleinbuchstaben, Leerzeichen, `IIII`, `IC`, `VV`, `MMMM` …) wirft `IllegalArgumentException`.
+      Sichere das Verhalten mit JUnit-5-Tests unter `src/test/java/roemisch/` ab und beschreibe die API kurz im
+      `README.md`.
+    expected_changes: ["src/*", README.md, .gitignore]
+    hidden:
+      dir: R1-java
+      image: java
+      command: >-
+        find . -name '*.java' -not -path '*/.*' -not -path './_hidden/_base/*' > /tmp/hs &&
+        javac -encoding UTF-8 -d /tmp/hc -cp "$JUNIT_JAR" @/tmp/hs &&
+        java -jar "$JUNIT_JAR" execute --disable-banner --disable-ansi-colors -cp /tmp/hc --select-package hiddencheck
+
+  - id: R1-cs
+    title: C# – roman numerals class library
+    base_branch: acceptance/empty
+    prompt: |-
+      Schreibe in C# (.NET 8) die Klassenbibliothek `src/Roemisch/Roemisch.csproj` mit der statischen Klasse
+      `Roemisch.RoemischeZahlen` für römische Zahlen (keine zusätzlichen NuGet-Pakete):
+      - `public static string ToRoman(int n)` wandelt 1 bis 3999 in die kanonische Schreibweise (z. B. 1994 →
+        `MCMXCIV`); andere Zahlen werfen eine `ArgumentException` (oder eine Unterklasse davon).
+      - `public static int FromRoman(string s)` liest nur kanonische Großbuchstaben-Zahlen; alles andere (null, leer,
+        Kleinbuchstaben, Leerzeichen, `IIII`, `IC`, `VV`, `MMMM` …) wirft eine `ArgumentException` (oder eine
+        Unterklasse davon).
+      Sichere das Verhalten mit einem xUnit-Testprojekt unter `tests/` ab (`dotnet test`) und beschreibe die API kurz
+      im `README.md`.
+    expected_changes: ["src/*", "tests/*", "*.sln", README.md, .gitignore]
+    hidden: {dir: R1-cs, image: dotnet, command: "dotnet test _hidden/HiddenTests"}
+
+  - id: R1-vb
+    title: VB.NET – roman numerals class library
+    base_branch: acceptance/empty
+    prompt: |-
+      Schreibe in Visual Basic .NET (.NET 8) die Klassenbibliothek `src/Roemisch/Roemisch.vbproj` mit
+      `Roemisch.RoemischeZahlen` (Modul oder Klasse mit `Shared`-Methoden) für römische Zahlen (keine zusätzlichen
+      NuGet-Pakete):
+      - `ToRoman(n As Integer) As String` wandelt 1 bis 3999 in die kanonische Schreibweise (z. B. 1994 →
+        `MCMXCIV`); andere Zahlen werfen eine `ArgumentException` (oder eine Unterklasse davon).
+      - `FromRoman(s As String) As Integer` liest nur kanonische Großbuchstaben-Zahlen; alles andere (Nothing, leer,
+        Kleinbuchstaben, Leerzeichen, `IIII`, `IC`, `VV`, `MMMM` …) wirft eine `ArgumentException` (oder eine
+        Unterklasse davon).
+      Sichere das Verhalten mit einem xUnit-Testprojekt unter `tests/` ab (`dotnet test`) und beschreibe die API kurz
+      im `README.md`.
+    expected_changes: ["src/*", "tests/*", "*.sln", README.md, .gitignore]
+    hidden: {dir: R1-vb, image: dotnet, command: "dotnet test _hidden/HiddenTests"}
+
+  - id: R1-lua
+    title: Lua – roman numerals module
+    base_branch: acceptance/empty
+    prompt: |-
+      Schreibe in Lua 5.4 das Modul `roemisch` (Datei `roemisch.lua` im Wurzelverzeichnis, gibt eine Tabelle zurück,
+      keine externen Rocks) für römische Zahlen:
+      - `to_roman(n)` wandelt die ganzen Zahlen 1 bis 3999 in die kanonische Schreibweise (z. B. 1994 →
+        `MCMXCIV`); andere Werte (auch 2.5) ergeben `nil` und eine Fehlermeldung als zweiten Rückgabewert.
+      - `from_roman(s)` liest nur kanonische Großbuchstaben-Zahlen; alles andere (leer, Kleinbuchstaben,
+        Leerzeichen, `IIII`, `IC`, `VV`, `MMMM` …) ergibt `nil` und eine Fehlermeldung.
+      Sichere das Verhalten mit busted-Tests unter `spec/` ab und beschreibe die API kurz im `README.md`.
+    expected_changes: [roemisch.lua, "spec/*", README.md, .busted]
+    hidden: {dir: R1-lua, image: lua, command: "busted _hidden"}
+
+  - id: R1-bash
+    title: Bash – roman numerals command line tool
+    base_branch: acceptance/empty
+    prompt: |-
+      Schreibe das Bash-Skript `roemisch.sh` (im Wurzelverzeichnis) für römische Zahlen:
+      - `./roemisch.sh to N` gibt die kanonische Schreibweise von N (1 bis 3999) aus, z. B. `to 1994` → `MCMXCIV`.
+      - `./roemisch.sh from S` gibt den Wert einer kanonischen Großbuchstaben-Zahl aus.
+      - Ungültige Eingaben (Zahlen außerhalb 1–3999, keine Zahl, nicht kanonische oder kleingeschriebene römische
+        Zahlen, Leerzeichen) beenden das Skript mit Exit-Code 1 und einer Meldung auf stderr, ohne Ausgabe auf stdout.
+        Falsche Aufrufe (fehlende oder unbekannte Aktion, falsche Argumentzahl) enden mit Exit-Code 2.
+      - Die Funktionen `to_roman` und `from_roman` lassen sich mit `source ./roemisch.sh` laden, ohne dass das
+        Skript dabei etwas ausführt.
+      Sichere das Verhalten mit bats-Tests unter `tests/` ab und beschreibe den Aufruf kurz im `README.md`.
+    expected_changes: [roemisch.sh, "tests/*", README.md]
+    hidden: {dir: R1-bash, image: generic, command: "bats _hidden"}
