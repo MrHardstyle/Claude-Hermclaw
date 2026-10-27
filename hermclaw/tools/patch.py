@@ -9,6 +9,7 @@ commit). Symlink entries (mode 120000) and git-internal paths are refused.
 from __future__ import annotations
 
 import re
+from collections.abc import Callable
 from dataclasses import dataclass, field
 
 from hermclaw.contracts.scope import Operation
@@ -179,6 +180,65 @@ def parse_patch(text: str) -> ParsedPatch:
         if "120000" in f.modes:
             raise ToolError(E.PATCH_SYMLINK_REFUSED, "patches that create or modify symlinks are not allowed")
     return ParsedPatch(files, _strip_level(files))
+
+
+def rebuild_new_files(text: str, is_new: Callable[[str], bool]) -> tuple[str, list[str]]:
+    """Rebuild the sections of a plain unified diff that create a file as a clean new-file patch (BUG-364).
+
+    Live G1 on rc91, S007: the coder created ``collector.py`` with a bare ``@@`` under ``--- a/collector.py`` and
+    ``api.py`` under ``--- /dev/null`` with blank lines lacking their ``+``; git refused both ("No valid patches in
+    input", "new file api.py depends on old contents") and the coder fell back to shell writes, which are refused too.
+    A section is rebuilt only when ``is_new`` says its file does not exist and its body holds nothing but hunk
+    headers, ``+`` lines and blank lines – a ``-`` or context line keeps the patch as it is. Returns the patch and the
+    rebuilt paths."""
+    if any(_DIFF_GIT.match(line) for line in text.splitlines()):
+        return text, []
+    lines = text.splitlines()
+    starts = [i for i in range(len(lines) - 1) if lines[i].startswith("--- ") and lines[i + 1].startswith("+++ ")]
+    if not starts:
+        return text, []
+    out = lines[: starts[0]]
+    rebuilt: list[str] = []
+    for n, start in enumerate(starts):
+        end = starts[n + 1] if n + 1 < len(starts) else len(lines)
+        section = lines[start:end]
+        new = _header_path(section[1])
+        body = section[2:]
+        path = strip_prefix(new, 1 if new.startswith("b/") else 0)
+        content = _created_lines(body)
+        if path is None or content is None or not _safe_is_new(is_new, path):
+            out += section
+            continue
+        out += ["--- /dev/null", section[1], f"@@ -0,0 +1,{len(content)} @@", *(f"+{c}" for c in content)]
+        rebuilt.append(path)
+    return ("\n".join(out) + "\n", rebuilt) if rebuilt else (text, [])
+
+
+def _created_lines(body: list[str]) -> list[str] | None:
+    """The file content of a creation hunk body, ``None`` if the body changes or keeps existing lines. A blank line
+    is an empty line of the file unless it trails the last ``+`` line."""
+    if not any(line.startswith("@@") for line in body):
+        return None
+    content: list[str] = []
+    blanks = 0
+    for line in body:
+        if line.startswith(("@@", "\\")):
+            continue
+        if line.startswith("+"):
+            content += [""] * blanks + [line[1:]]
+            blanks = 0
+        elif not line.strip():
+            blanks += 1
+        else:
+            return None
+    return content or None
+
+
+def _safe_is_new(is_new: Callable[[str], bool], path: str) -> bool:
+    try:
+        return is_new(path)
+    except (ToolError, OSError, ValueError):
+        return False
 
 
 def _strip_level(files: list[PatchFile]) -> int:

@@ -6,11 +6,15 @@ such as `pytest -q` would fail. These Containerfiles add the toolchains; project
 
 | Alias (`policies.sandbox.images`) | Image | Contents |
 |---|---|---|
-| `python` | `localhost/hermclaw-sandbox-python:1` | Python 3.12, pytest, pytest-asyncio, pytest-cov, ruff, mypy |
-| `node` | `localhost/hermclaw-sandbox-node:1` | Node 22, npm, TypeScript |
-| `php` | `localhost/hermclaw-sandbox-php:1` | PHP 8.3 CLI, Composer |
-| `generic` | `localhost/hermclaw-sandbox-generic:1` | bash, make, gcc, jq, shellcheck, yamllint, sqlite3, psql, python3 |
-| `powershell` | `localhost/hermclaw-sandbox-powershell:1` | PowerShell 7 LTS (`pwsh`), Pester 5 |
+| `python` | `localhost/hermclaw-sandbox-python:2` | Python 3.12, pytest, pytest-asyncio, pytest-cov, pytest-mock, pytest-timeout, hypothesis, ruff, mypy |
+| `node` | `localhost/hermclaw-sandbox-node:2` | Node 22, npm, TypeScript |
+| `php` | `localhost/hermclaw-sandbox-php:2` | PHP 8.3 CLI, Composer |
+| `generic` | `localhost/hermclaw-sandbox-generic:2` | bash, make, gcc, jq, shellcheck, yamllint, sqlite3, psql, python3 (also as `python`), unzip, xz |
+| `powershell` | `localhost/hermclaw-sandbox-powershell:2` | PowerShell 7 LTS (`pwsh`), Pester 5, PSScriptAnalyzer |
+
+Since image 2 (2026-10-27) every image also has the shell basics `git`, `rg` (ripgrep), `jq`, `file` and `ps`/`pgrep`
+(procps). Runtime libraries (`requests`, …) stay out on purpose: a project's dependencies come from its project image,
+so code that needs an undeclared library still fails in the sandbox instead of only on the user's machine.
 
 Build on `.222` as the worker user (rootless podman):
 

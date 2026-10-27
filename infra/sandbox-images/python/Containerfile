@@ -2,6 +2,10 @@
 # Runs read-only, network-less, as the worker uid (--userns=keep-id): everything is installed system-wide.
 FROM docker.io/library/python:3.12-slim
 ENV PYTHONDONTWRITEBYTECODE=1 PIP_NO_CACHE_DIR=1 PIP_DISABLE_PIP_VERSION_CHECK=1 HOME=/tmp
+# image 2 (2026-10-27): the shell basics every image has (git, ripgrep, jq, file, procps) and test helpers – no
+# runtime libraries: a project's own dependencies come from its project image, so a missing one still shows
+RUN apt-get update && apt-get install -y --no-install-recommends git ripgrep jq file procps && rm -rf /var/lib/apt/lists/*
 RUN pip install "pytest>=8,<10" "pytest-asyncio>=0.24" "pytest-cov>=5" "ruff>=0.6" "mypy>=1.11" \
- && python -m pytest --version
+      "pytest-mock>=3.14" "pytest-timeout>=2.3" "hypothesis>=6.100" \
+ && python -m pytest --version && rg --version && git --version
 LABEL org.hermclaw.sandbox="python"

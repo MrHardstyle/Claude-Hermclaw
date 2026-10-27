@@ -69,7 +69,7 @@ from hermclaw.tools.gitlocal import LocalGit
 from hermclaw.tools.locations import source_locations
 from hermclaw.tools.ops import OpsCall, OpsResult, OpsToolProvider
 from hermclaw.tools.output import clip_head, clip_middle, missing_modules, strip_ansi
-from hermclaw.tools.patch import diff_section_path, parse_numstat, parse_patch
+from hermclaw.tools.patch import diff_section_path, parse_numstat, parse_patch, rebuild_new_files
 from hermclaw.tools.recorder import PendingEvent, ToolRecorder
 from hermclaw.tools.registry import (
     ApplyPatchArgs,
@@ -1500,7 +1500,8 @@ class ToolEngine:
     # ============================================================================================ 17.4 patch
     async def _apply_patch(self, args: ApplyPatchArgs, ctx: CallContext, events: list[PendingEvent]) -> ToolResult:
         guard = self._guard_for_write()
-        parsed = parse_patch(args.patch)
+        text, rebuilt = rebuild_new_files(args.patch, self._is_new_file)
+        parsed = parse_patch(text)
         if any(f.binary for f in parsed.files):
             raise ToolError(E.PATCH_INVALID, "binary patches are not supported; use write_file for text files")
         targets: list[tuple[str, Operation]] = []
@@ -1514,7 +1515,7 @@ class ToolEngine:
         added = [ln[1:] for ln in args.patch.splitlines() if ln.startswith("+") and not ln.startswith("+++")]
         if any(REDACTED in ln for ln in added):
             await asyncio.to_thread(self._check_patch_placeholder, [p for p, op in targets if op == "modify"])
-        patch = args.patch if args.patch.endswith("\n") else args.patch + "\n"
+        patch = text if text.endswith("\n") else text + "\n"
         data = patch.encode("utf-8")
         numstat = await self.lgit.apply_numstat(data, parsed.strip)
         if not numstat.ok:
@@ -1555,7 +1556,13 @@ class ToolEngine:
         self._file_changed(ToolName.apply_patch, changes, events)
         mutated = sorted(declared)
         summary = ", ".join(f"{op} {p}" for p, op in sorted(targets))
+        if rebuilt:
+            summary += f" (header rebuilt as a new file: {', '.join(rebuilt)}; write_file creates a file more simply)"
         return self._ok(ToolName.apply_patch, f"patch applied: {summary}", mutated_paths=mutated, data={"changes": changes})
+
+    def _is_new_file(self, raw: str) -> bool:
+        _, target = self.fs.resolve_for_write(canonical_path(raw))
+        return not target.exists()
 
     # ============================================================================================ 17.5/17.6 commands
     def _scope_violation_event(self, tool: ToolName, audit: AuditOutcome, events: list[PendingEvent]) -> None:

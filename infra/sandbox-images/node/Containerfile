@@ -1,5 +1,7 @@
 # Hermclaw sandbox toolchain: Node.js / TypeScript (R-022).
 FROM docker.io/library/node:22-bookworm-slim
 ENV HOME=/tmp NPM_CONFIG_UPDATE_NOTIFIER=false NPM_CONFIG_FUND=false NPM_CONFIG_AUDIT=false
+# image 2 (2026-10-27): the shell basics every image has (git, ripgrep, jq, file, procps)
+RUN apt-get update && apt-get install -y --no-install-recommends git ripgrep jq file procps && rm -rf /var/lib/apt/lists/*
 RUN npm install -g "typescript@>=5.9 <7" && npm cache clean --force && tsc --version && node --version
 LABEL org.hermclaw.sandbox="node"

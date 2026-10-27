@@ -4,6 +4,14 @@ Format: [Keep a Changelog](https://keepachangelog.com/de/1.1.0/), Versionen nach
 
 ## [Unreleased]
 
+## [0.1.0rc94] – Release Candidate (2026-10-27)
+
+### Behoben
+- **Neue Datei per Patch (BUG-364):** Ein Patch, der eine noch nicht vorhandene Datei nur mit `+`- und Leerzeilen anlegt, wird als sauberer Neu-Datei-Patch angewendet – auch mit nacktem `@@`, falscher Zeilenzahl oder Leerzeilen ohne `+`; git lehnte beides ab, und der Coder wich auf verweigerte Shell-Schreibzugriffe aus.
+
+### Neu
+- **Grundausstattung der Sandbox (Image 2):** Alle Toolchain-Images haben `git`, `rg`, `jq`, `file` und `ps`; Python dazu `pytest-mock`, `pytest-timeout`, `hypothesis`; das allgemeine Image `python` als Alias, `unzip`, `xz`; PowerShell `PSScriptAnalyzer` (Pester bleibt 5.x). Laufzeit-Bibliotheken bleiben bewusst draußen. Aktiv mit `hermclaw_sandbox_image_version: "2"`.
+
 ## [0.1.0rc93] – Release Candidate (2026-10-27)
 
 ### Behoben

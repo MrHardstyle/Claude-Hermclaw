@@ -46,6 +46,12 @@ Noch keine.
 
 ## Behobene Bugs
 
+### BUG-364 – Ein Patch, der eine neue Datei anlegt, scheitert an Kleinigkeiten im Hunk-Kopf
+- Phase: G1 auf Strata IQ3_XXS mit 0.1.0rc91, 2026-10-27 (Job 51e409aa) · Komponente: tools (`patch.py`, `engine.py`) · Severity: P2 · blockierend: nein (kostete je Versuch bis zu 4 Züge) · Status: **behoben im Repository** (`tests/integration/test_tools_engine_read_write.py::test_apply_patch_creates_a_file_from_a_sloppy_creation_patch`)
+- Reproduktion: S007 Versuch 1: `collector.py` per `--- a/collector.py` und nacktem `@@` angelegt („No valid patches in input“); Versuch 2: `api.py` unter `--- /dev/null` mit `@@ -0,0 +1,118 @@` und Leerzeilen ohne `+` („new file api.py depends on old contents“), zweimal. Dazwischen versuchte der Coder dieselben Dateien per `python - <<'PY' … write_text` zu schreiben (`SANDBOX_ERROR`, `COMMAND_FORBIDDEN`); erst `write_file` im letzten Zug legte sie an.
+- Ursache: git verlangt für eine neue Datei `--- /dev/null`, einen Hunk-Kopf mit Zahlen und `+` vor jeder Zeile; `--recount` hilft nur bei falschen Zahlen, nicht bei Leerzeilen ohne Präfix oder einem Kopf ohne Zahlen.
+- Fix: `rebuild_new_files` baut einen Abschnitt eines einfachen Diffs neu auf, wenn seine Datei nicht existiert und er nur Hunk-Köpfe, `+`- und Leerzeilen enthält (Leerzeilen am Ende fallen weg); ein `-`- oder Kontextzeilen-Abschnitt bleibt unverändert und wird wie bisher von git beurteilt. Das Ergebnis nennt die neu aufgebauten Dateien und empfiehlt `write_file`.
+
 ### BUG-363 – Der Coder sieht von einer erfolgreichen Ausgabe nur 320 Zeichen und ruft sie immer wieder ab
 - Phase: G1 auf Strata IQ3_XXS mit 0.1.0rc91, 2026-10-27 (Job 51e409aa) · Komponente: coder (`loop.py`), context_builder (`render.py`, `builder.py`) · Severity: P1 · blockierend: nein (kostete je Versuch bis zu 14 Züge) · Status: **behoben im Repository** (`tests/unit/test_context_builder_latest_output.py`, `tests/integration/test_coder_loop.py::test_the_latest_successful_output_is_shown_in_full_until_a_file_changes`, `::test_knowledge_outlives_a_file_change`)
 - Reproduktion: S005 Versuch 1: zwölf `recall`-Aufrufe zur Unraid-GraphQL-API mit fast gleicher Frage in den Zügen 1–12 und 14–15, dann `request_research` – erst in Zug 16 die erste Zeile Code. S006 Versuche 2/3: dieselben Zeilen von `metrics.py` und `tests/test_metrics.py` per `sed -n`, `awk` und `inspect.getsource` in sieben Zügen ausgegeben; nach jedem Testlauf mit `tail`/`grep` erneut, bis das Zugbudget leer war.

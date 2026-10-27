@@ -2,6 +2,8 @@
 # script or tests at all (live K3: the delivered script was never executed), and the coder tournament could not grade A9.
 FROM mcr.microsoft.com/powershell:lts-debian-12
 ENV HOME=/tmp POWERSHELL_TELEMETRY_OPTOUT=1 POWERSHELL_UPDATECHECK=Off DOTNET_CLI_TELEMETRY_OPTOUT=1
-RUN pwsh -NoLogo -NoProfile -Command "Set-PSRepository PSGallery -InstallationPolicy Trusted; Install-Module Pester -MinimumVersion 5.5 -Scope AllUsers -Force; Import-Module Pester; (Get-Module Pester).Version.ToString()" \
+RUN pwsh -NoLogo -NoProfile -Command "Set-PSRepository PSGallery -InstallationPolicy Trusted; Install-Module Pester -MinimumVersion 5.5 -MaximumVersion 5.99.99 -Scope AllUsers -Force; Install-Module PSScriptAnalyzer -MinimumVersion 1.22 -Scope AllUsers -Force; Import-Module Pester; (Get-Module Pester).Version.ToString()" \
  && pwsh -NoLogo -NoProfile -Command '$PSVersionTable.PSVersion.ToString()'
+# image 2 (2026-10-27): PSScriptAnalyzer for lint and the shell basics every image has
+RUN apt-get update && apt-get install -y --no-install-recommends git ripgrep jq file procps && rm -rf /var/lib/apt/lists/*
 LABEL org.hermclaw.sandbox="powershell"

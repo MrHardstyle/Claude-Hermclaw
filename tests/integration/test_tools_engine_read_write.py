@@ -680,6 +680,28 @@ async def test_apply_patch_plain_unified_diff_p0(sessionmaker: SM, repo: Path) -
     assert "a + b + 0" in (repo / "app.py").read_text()
 
 
+async def test_apply_patch_creates_a_file_from_a_sloppy_creation_patch(sessionmaker: SM, repo: Path) -> None:
+    """Live G1 on rc91, S007 (BUG-364): a bare ``@@`` under ``--- a/collector.py`` and a ``--- /dev/null`` hunk with a
+    wrong count and blank lines lacking their ``+`` – git refused both, the coder fell back to refused shell writes."""
+    h = await make_harness(sessionmaker, repo, contract=scope(**IMPLEMENT_SCOPE))
+    bare = '--- a/src/new_collector.py\n+++ b/src/new_collector.py\n@@\n+"""Collector."""\n\n+import json\n+\n+X = 1\n\n'
+    res = await h.call("apply_patch", patch=bare)
+    assert res.ok, res.output
+    assert (repo / "src" / "new_collector.py").read_text() == '"""Collector."""\n\nimport json\n\nX = 1\n'
+    assert "header rebuilt as a new file: src/new_collector.py" in res.output
+    counted = "--- /dev/null\n+++ b/src/new_api.py\n@@ -0,0 +1,118 @@\n+def status():\n\n+    return {}\n"
+    res = await h.call("apply_patch", patch=counted)
+    assert res.ok, res.output
+    assert (repo / "src" / "new_api.py").read_text() == "def status():\n\n    return {}\n"
+    ev = await events_for(sessionmaker, h.step.id, EventType.FILE_CHANGED)
+    assert ev[-1].payload["changes"] == [{"path": "src/new_api.py", "operation": "create"}]
+    # an existing file or a hunk with context lines is never rebuilt: git judges it as written
+    res = await h.call("apply_patch", patch="--- a/app.py\n+++ b/app.py\n@@\n+X = 1\n")
+    assert res.error_code == E.PATCH_INVALID and (repo / "app.py").read_text().startswith("def add")
+    res = await h.call("apply_patch", patch="--- /dev/null\n+++ b/src/new_ctx.py\n@@ -0,0 +1,2 @@\n+A = 1\n kept\n")
+    assert not res.ok and not (repo / "src" / "new_ctx.py").exists()
+
+
 async def test_apply_patch_scope_is_checked_for_every_file_before_applying(sessionmaker: SM, repo: Path) -> None:
     h = await make_harness(sessionmaker, repo, contract=scope(**IMPLEMENT_SCOPE))
     patch = PATCH_OK + (
