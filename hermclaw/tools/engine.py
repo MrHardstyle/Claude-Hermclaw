@@ -355,6 +355,8 @@ class ToolEngine:
         # identical reads: (file-change count, turn). The context of every turn already shows the files read in this
         # attempt; the coder still re-read the same unchanged file turn after turn instead of acting (BUG-179)
         self._reads: dict[tuple[str, str], tuple[int, int, bool]] = {}  # (writes, turn, fully visible)
+        # the file lines this turn's context shows, by path ([(start, end)]); ``None``: no context told (engine alone)
+        self._context: dict[str, list[tuple[int, int]]] | None = None
         # a clipped read_file: (file-change count, turn, next line). Reading the same unchanged file again continues
         # there – the coder re-read the first 300 lines of an 845-line file four times until the stagnation stop
         # (live G1, BUG-264)
@@ -799,6 +801,8 @@ class ToolEngine:
     def _covering_read(self, path: str, start: int, end: int, turn: int) -> tuple[str, int] | None:
         """A fully visible read of ``path`` in the repeat window, with no file changed since, that already contains lines
         ``start``-``end`` – re-reading a part of it only costs a turn (live G1: 100-160, then 110-160, then 110-145, BUG-244)."""
+        if not self._in_context(path, start, end):
+            return None
         for (tool, key), (writes, at, visible) in self._reads.items():
             if writes != self._writes or turn - at > READ_REPEAT_WINDOW or not visible:
                 continue
@@ -811,13 +815,32 @@ class ToolEngine:
                 return f"lines {lo}-{hi}", at
         return None
 
-    def _check_read_repeat(self, tool: ToolName, key: str, turn: int) -> None:
+    def context_shows(self, spans: Iterable[tuple[str, int, int]]) -> None:
+        """The file parts the context of the coming turn shows in full (the loop sets them every turn). A read the
+        context clipped is no repeat: the guards refused lines 247-338 of proxmox.py as "shown above" while RELEVANT
+        CODE showed the file's head only, and the coder spent nine turns rebuilding its own signatures (live G1 rc91,
+        BUG-362)."""
+        shown: dict[str, list[tuple[int, int]]] = {}
+        for path, start, end in spans:
+            shown.setdefault(path, []).append((start, end))
+        self._context = shown
+
+    def _in_context(self, path: str, start: int, end: int) -> bool:
+        if self._context is None:
+            return True
+        return any(lo <= start and end <= hi for lo, hi in self._context.get(path, ()))
+
+    def _check_read_repeat(self, tool: ToolName, key: str, turn: int, end: int | None = None) -> None:
         """Refuse a read identical to one of the last ``READ_REPEAT_WINDOW`` turns while no file changed: its content is
         already in this turn's context (files read in this attempt), so reading again only costs a turn. A read that was
         clipped or longer than the context shows is allowed again: refusing it claimed content the coder never saw, and
         the coder circled on refused reads of a 624-line file (live G1, BUG-229)."""
         previous = self._reads.get((tool.value, key))
         if previous is None or previous[0] != self._writes or turn - previous[1] > READ_REPEAT_WINDOW or not previous[2]:
+            return
+        path, _, span = key.rpartition(":") if tool == ToolName.read_range else (key, "", f"1-{end or 1}")
+        lo, _, hi = span.partition("-")
+        if lo.isdigit() and hi.isdigit() and not self._in_context(path, int(lo), int(hi)):
             return
         raise ToolError(
             E.READ_REPEATED,
@@ -829,9 +852,9 @@ class ToolEngine:
 
     async def _read_file(self, args: ReadFileArgs, ctx: CallContext, events: list[PendingEvent]) -> ToolResult:
         key = self.fs.resolve(args.path)[0]
-        self._check_read_repeat(ToolName.read_file, key, ctx.turn)
         tf = await asyncio.to_thread(self.fs.read_text, args.path, max_bytes=self.max_read_bytes)
         lines = tf.text.count("\n") + (1 if tf.text and not tf.text.endswith("\n") else 0)
+        self._check_read_repeat(ToolName.read_file, key, ctx.turn, end=lines)
         page = self._read_pages.pop(key, None)
         first = page[2] if page is not None and page[0] == self._writes and page[2] <= lines else 1
         body = "".join(tf.text.splitlines(keepends=True)[first - 1 :]) if first > 1 else tf.text

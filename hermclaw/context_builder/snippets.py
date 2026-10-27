@@ -206,22 +206,26 @@ def pack_snippets(snippets: Sequence[Snippet], budget: int, *, min_cost: int, ma
         if remaining >= min_cost and s.exact:
             clipped = _clip_snippet(s, remaining - 1)
             if clipped is not None:
-                selected.append((s, clipped))
-                used += char_cost(clipped) + 1
+                # the selected snippet is what the block shows: a clipped snippet kept its full range, and the history
+                # and the read guards called lines the context had cut "shown above" (live G1 rc91, BUG-362)
+                selected.append(clipped)
+                used += char_cost(clipped[1]) + 1
                 truncated = True
                 continue
         dropped.append((s.label, "budget"))
     return PackResult(selected=selected, cost=used, dropped=dropped, truncated=truncated or bool(dropped))
 
 
-def _clip_snippet(s: Snippet, budget: int) -> str | None:
+def _clip_snippet(s: Snippet, budget: int) -> tuple[Snippet, str] | None:
+    """The head of ``s`` whose rendering fits ``budget``, as (the shown part, its block)."""
     lines = s.text.splitlines()
     lo, hi, best = 1, len(lines) - 1, None
     while lo <= hi:  # largest number of head lines whose rendering fits
         mid = (lo + hi) // 2
-        block = render_snippet(s, shown_end=s.start + mid - 1, text="\n".join(lines[:mid]))
+        text = "\n".join(lines[:mid])
+        block = render_snippet(s, shown_end=s.start + mid - 1, text=text)
         if char_cost(block) <= budget:
-            best, lo = block, mid + 1
+            best, lo = (replace(s, end=s.start + mid - 1, text=text), block), mid + 1
         else:
             hi = mid - 1
     return best

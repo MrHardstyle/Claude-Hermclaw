@@ -504,7 +504,7 @@ class ContextBuilder:
         if warnings:
             log.info("context built with provider warnings", extra={"warnings": warnings[:5], "turn": inp.turn})
         messages = [ChatMessage("system", system_msg), ChatMessage("user", stable_msg), ChatMessage("user", turn_msg)]
-        return BuiltContext(messages=messages, report=report)
+        return BuiltContext(messages=messages, report=report, shown=tuple(snip.key for snip in selected))
 
     # ------------------------------------------------------------------ relevance helpers
     @staticmethod

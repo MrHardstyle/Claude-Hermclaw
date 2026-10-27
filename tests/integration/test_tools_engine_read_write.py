@@ -134,6 +134,26 @@ async def test_a_read_the_context_cannot_show_in_full_may_be_repeated(sessionmak
     assert (await h.call("read_range", path="long.py", start=10, end=40)).error_code == E.READ_REPEATED
 
 
+async def test_a_read_the_context_clipped_is_no_repeat(sessionmaker: SM, repo: Path) -> None:
+    """Live G1 rc91 (BUG-362): the coder read lines 247-338 of the proxmox.py it had written; RELEVANT CODE showed only
+    the file's head, yet the guards refused the read and a 'sed -n' of it as "shown above", and the coder spent nine
+    turns rebuilding its own signatures. A read counts as shown only where the turn's context shows it."""
+    (repo / "big.py").write_text("".join(f"b{i} = {i}\n" for i in range(1, 339)))
+    h = await make_harness(sessionmaker, repo, contract=scope(target_paths=["big.py"]))
+    assert (await h.call("read_range", path="big.py", start=247, end=338)).ok
+    h.engine.context_shows([("big.py", 1, 200), ("src/calc.py", 1, 6)])  # the head only: the packer cut the rest
+    again = await h.call("read_range", path="big.py", start=247, end=338)
+    assert again.ok and again.output.startswith("247| b247 = 247"), again.output[:200]
+    assert (await h.call("run_command", command="sed -n '250,300p' big.py")).ok
+    h.engine.context_shows([("big.py", 1, 338), ("src/calc.py", 1, 6)])  # now the context shows the whole file
+    assert (await h.call("read_range", path="big.py", start=247, end=338)).error_code == E.READ_REPEATED
+    assert (await h.call("run_command", command="sed -n '250,300p' big.py")).error_code == E.READ_REPEATED
+    assert (await h.call("read_file", path="src/calc.py")).ok
+    assert (await h.call("read_file", path="src/calc.py")).error_code == E.READ_REPEATED, "the context shows it"
+    h.engine.context_shows([])
+    assert (await h.call("read_file", path="src/calc.py")).ok, "the context no longer shows it"
+
+
 async def test_a_repeated_read_brings_the_lines_after_it_once(sessionmaker: SM, repo: Path) -> None:
     """Ladder A10 #8 (BUG-342): the context showed app.py lines 1-160, the method the coder looked for ran to line 190;
     it asked for lines 100-160 six times across two attempts, each refused, until both attempts stagnated. A repeated

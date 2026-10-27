@@ -187,8 +187,10 @@ def test_pack_clips_and_skips_deterministically() -> None:
     big = make_snippet("a.py", 1, numbered(200), 2.0, "target")
     small = make_snippet("b.py", 1, "tiny\n", 1.0, "context")
     res = pack_snippets([small, big], 1200, min_cost=300, max_items=10)
-    labels = [s.label for s, _ in res.selected]
-    assert labels == ["a.py:1-200"]  # the higher-ranked snippet gets the room (clipped), rank beats count
+    (shown, block), *rest = res.selected
+    assert not rest and shown.path == "a.py" and shown.start == 1  # the higher-ranked snippet gets the room, rank beats count
+    # the selected snippet is the part the block shows: lines the clip cut are never called shown (BUG-362)
+    assert 1 < shown.end < 200 and f"### a.py lines 1-{shown.end} " in block and shown.text.count("\n") == shown.end - 1
     assert ("b.py:1-1", "budget") in res.dropped
     assert res.truncated and res.cost <= 1200
     res_room = pack_snippets([small, make_snippet("c.py", 1, numbered(5), 3.0, "target")], 1200, min_cost=300, max_items=10)

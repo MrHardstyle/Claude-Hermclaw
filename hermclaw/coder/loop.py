@@ -13,7 +13,7 @@ import asyncio
 import contextlib
 import json
 import uuid
-from collections.abc import Awaitable, Sequence
+from collections.abc import Awaitable, Iterable, Sequence
 from dataclasses import dataclass, field
 from typing import Any, Literal, Protocol
 
@@ -119,6 +119,8 @@ class ToolExecutor(Protocol):
     ) -> ToolResult: ...
 
     def tool_catalog(self) -> list[dict[str, Any]]: ...
+
+    def context_shows(self, spans: Iterable[tuple[str, int, int]]) -> None: ...
 
     @property
     def granted_turns(self) -> int: ...
@@ -397,6 +399,7 @@ class CoderLoop:
                 )
             )
             await self._report(built, job_id, step_id, attempt_id)
+            self.engine.context_shows(built.shown)
             try:
                 # a cancel interrupts the model call itself: a turn with repairs ran up to ~15 min before the cancel
                 # of live job J6 on 0.1.0rc14 took effect (BUG-184)

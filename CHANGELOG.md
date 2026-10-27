@@ -4,6 +4,11 @@ Format: [Keep a Changelog](https://keepachangelog.com/de/1.1.0/), Versionen nach
 
 ## [Unreleased]
 
+## [0.1.0rc92] – Release Candidate (2026-10-27)
+
+### Behoben
+- **Gelesen heißt gezeigt (BUG-362):** Ein Ausschnitt, den der Kontext kürzt, zählt nur noch mit den gezeigten Zeilen; der Verlauf und die Lese-Sperren nennen gekürzte Zeilen nicht mehr „oben gezeigt“, und der Coder darf sie erneut lesen.
+
 ## [0.1.0rc91] – Release Candidate (2026-10-26)
 
 ### Behoben

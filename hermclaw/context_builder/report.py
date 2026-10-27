@@ -124,6 +124,8 @@ class ContextReport:
 class BuiltContext:
     messages: list[ChatMessage]
     report: ContextReport
+    #: (path, start, end) of every file part RELEVANT CODE/TESTS show in full – what the read guards may call "shown"
+    shown: tuple[tuple[str, int, int], ...] = ()
 
 
 async def record_context_report(

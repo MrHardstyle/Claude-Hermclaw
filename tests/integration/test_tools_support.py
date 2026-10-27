@@ -124,7 +124,13 @@ class ScriptedRepo:
         return [h for h in self.symbols if name in h.snippet][:k]
 
     async def read(self, workspace: WorkspaceHandle, path: str, start: int = 1, end: int | None = None, *, max_chars: int = 12_000) -> str:
-        return ""
+        """The lines of the workspace file, as the real provider reads them: the read guards trust only what the context
+        shows (BUG-362)."""
+        try:
+            lines = (workspace.path / path).read_text(encoding="utf-8").splitlines()
+        except (OSError, UnicodeDecodeError):
+            return ""
+        return "\n".join(lines[start - 1 : end])[:max_chars]
 
     async def context_for(self, workspace: WorkspaceHandle, goal: str, *, budget_chars: int = 24_000) -> list[RepoHit]:
         return []

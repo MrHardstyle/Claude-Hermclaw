@@ -181,7 +181,7 @@ digest, changed paths. Older turns become `turns a-b (summary): tool xN (k ok, m
 failure per tool and all files changed so far. On budget pressure fewer turns are shown in full, then digests are
 shortened. The history is rendered after RELEVANT CODE/TESTS are packed: a successful read whose lines a packed
 snippet shows in full reads `ok: the lines read are shown in full in RELEVANT CODE/RELEVANT TESTS above` instead of
-its clipped head, which looked like a cut-off output and was read again (BUG-338). `TurnRecord` has no reasoning field; `strip_reasoning` removes `<think>`/`<thinking>`/`<reasoning>`/
+its clipped head, which looked like a cut-off output and was read again (BUG-338). A snippet the packer clips is kept as the part it shows (its range ends where the clip ends), and `BuiltContext.shown` lists these parts; the loop hands them to the tool engine every turn, whose read guards refuse a re-read only where the context shows it (BUG-362). `TurnRecord` has no reasoning field; `strip_reasoning` removes `<think>`/`<thinking>`/`<reasoning>`/
 analysis-channel markup from every digest and review text.
 
 ## Current diff (16.7)

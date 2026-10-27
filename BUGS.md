@@ -46,6 +46,12 @@ Noch keine.
 
 ## Behobene Bugs
 
+### BUG-362 – Die Lese-Sperre verweigert Zeilen, die der Kontext abgeschnitten hat
+- Phase: G1 auf Strata IQ3_XXS mit 0.1.0rc91, 2026-10-27 (Job 51e409aa) · Komponente: context_builder (`snippets.py`, `builder.py`), tools (`engine.py`), coder (`loop.py`) · Severity: P1 · blockierend: nein (kostete je Versuch bis zu 9 Züge) · Status: **behoben im Repository** (`tests/unit/test_context_builder_relevance.py::test_pack_clips_and_skips_deterministically`, `tests/integration/test_tools_engine_read_write.py::test_a_read_the_context_clipped_is_no_repeat`)
+- Reproduktion: S004 Versuch 1: Der Coder schrieb `proxmox.py` (338 Zeilen) und las die Zeilen 247–338. In den folgenden Zügen wurden das erneute Lesen und ein `sed -n` darauf als „oben gezeigt“ verweigert; RELEVANT CODE zeigte aber nur den Kopf der Datei. Der Coder rekonstruierte neun Züge lang seine eigenen Signaturen per `find_text`, `git_diff` und `search_symbol`, bis das Zugbudget leer war – ohne Tests geschrieben zu haben.
+- Ursache: `pack_snippets` kürzte einen zu großen Ausschnitt auf seine Kopfzeilen, gab aber den ungekürzten Ausschnitt als „ausgewählt“ zurück. Der Verlauf (BUG-338) hielt deshalb die gelesenen Zeilen für gezeigt; die Lese-Sperren des Tool-Engines (BUG-179/244/344) wussten gar nicht, was der Kontext zeigt.
+- Fix: Ein gekürzter Ausschnitt wird mit den gezeigten Zeilen ausgewählt; `BuiltContext.shown` nennt alle gezeigten Teile, die Schleife gibt sie dem Tool-Engine jeden Zug (`context_shows`), und die Sperren verweigern nur, was der Kontext tatsächlich zeigt.
+
 ### BUG-361 – Ein Integrationsfehler bleibt bis zum Schluss-Review stehen, weil die Server-Prüfung je Schritt nur notiert
 - Phase: G1 auf Strata IQ3_XXS mit 0.1.0rc90, 2026-10-26 (Job 2ac3ab2f) · Komponente: verifier (`serve.py`, `checks.py`) · Severity: P1 · blockierend: nein (kostete einen Replan und ~4 h) · Status: **behoben im Repository** (`tests/unit/test_verifier_serve.py`, `tests/integration/test_verifier_engine.py::test_the_delivered_web_server_is_loaded_like_its_user_loads_it`)
 - Reproduktion: S006 schrieb `static/app.js` gegen den fertigen `collector.py` aus S005 und rief `POST /api/test` auf; der Server kennt nur `/api/test/<id>`. Die Prüfung `serve` meldete es um 11:23, 12:30, 13:21 und 15:13, jedes Mal nicht blockierend; erst das Schluss-Review S010 verlangte den Fix und löste den zweiten Replan aus.
