@@ -430,6 +430,12 @@ def _base_rules(kind_capability: dict[str, str], capability_names: Sequence[str]
         "writes it to a small file (e.g. docs/api.md: every endpoint with method, path and an example request and "
         "JSON response, or every record with its fields) in its allowed_new_paths; the consuming step depends on that "
         "step and names the file in its goal and repo_hints. Both sides follow the file, never their own guess.",
+        "A web page that calls a local HTTP API is served by the same program as that API (same origin – a page opened "
+        "from disk cannot call it): the step building the server also serves the page and the files it loads (the page "
+        "at /, its scripts and styles from one folder such as static/) and gives the program one start command "
+        '(`python server.py` with an `if __name__ == "__main__":` block, or `python -m <package>`). When the page is '
+        "built in a later step, that step writes into the served folder; a launcher script only runs the start command "
+        "and opens the URL.",
         "Every file, name in backticks and HTTP status code the job names is a requirement: write it into the goal and "
         "an acceptance criterion of the step that delivers it (the runtime rejects a plan that leaves one out).",
         'When the job points to rules in a repository document ("the rules in the README"), the implementing step '

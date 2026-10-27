@@ -245,6 +245,8 @@ def test_replanner_system_prompt_adds_rerun_rules() -> None:
     assert "A step creates at most about 8 new files" in system and "split a larger" in system  # BUG-226
     # G1 quality review (BUG-234): app.js read metrics.ram, the backend sent metrics.mem.usage – no shared interface
     assert "need one written interface" in system and "never their own guess" in system
+    # G1 rc91 (BUG-365): api.py answered only /api/status, nothing served the page that called it
+    assert "is served by the same program as that API (same origin" in system and "only runs the start command" in system
     # K1 on rc60 (BUG-285): the replanned goal was "remove the unused header variable (line 39)"
     assert "Never copy line numbers, lint codes or single-line edits" in system and "everything the failed step" in system
     assert "Review findings the job text does not demand" in system  # v3 turned a review wish into "German labels"

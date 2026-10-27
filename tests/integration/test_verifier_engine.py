@@ -1092,3 +1092,56 @@ async def test_the_delivered_web_server_is_loaded_like_its_user_loads_it(session
     assert by_name(quiet.report)["serve:server.py"].status == "skip"
     off, *_ = await run(sessionmaker, repo, job, verifier=make_verifier(sessionmaker, serve_seconds=0), kind="review")
     assert by_name(off.report)["serve"].status == "skip"
+
+
+API_MODULE = """\
+import json
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+
+
+class Handler(BaseHTTPRequestHandler):
+    def log_message(self, *args):
+        pass
+
+    def do_GET(self):
+        if self.path != "/api/status":
+            self.send_error(404)
+            return
+        data = json.dumps({"servers": []}).encode()
+        self.send_response(200)
+        self.send_header("Content-Type", "application/json")
+        self.send_header("Content-Length", str(len(data)))
+        self.end_headers()
+        self.wfile.write(data)
+
+
+def create_server(host="127.0.0.1", port=8780):
+    return ThreadingHTTPServer((host, port), Handler)
+
+
+def serve(host="127.0.0.1", port=8780):
+    create_server(host, port).serve_forever()
+"""
+
+
+async def test_a_server_module_without_main_block_is_started_through_its_start_function(sessionmaker: Any, tmp_path: Path) -> None:
+    """Live G1 rc91 (BUG-365): api.py answered only /api/status through serve() and had no __main__ block, the
+    frontend step wrote index.html and app.js calling /api/status – nothing served the page, and the serve check
+    skipped with 'no Python program that serves HTTP'. A JSON API without pages has no start page to fail on."""
+    repo = py_repo(tmp_path)
+    write(repo, "api.py", API_MODULE)
+    commit_all(repo, "api")
+    write(repo, "index.html", '<!doctype html><html><body><script src="app.js"></script></body></html>\n')
+    write(repo, "app.js", 'fetch("/api/status").then((r) => r.json());\n')
+    st = step(scope_contract=scope(allowed_new_paths=["index.html", "app.js"], target_paths=["calc.py"]))
+    outcome, *_ = await run(sessionmaker, repo, st)
+    check = by_name(outcome.report)["serve:api.py"]
+    assert check.evidence["started"] == "through its start function serve(), the module has no __main__ block"
+    assert check.status == "fail" and check.blocking, check.message
+    assert "index.html is part of the project, but the running server does not serve it" in check.message
+    # the same API without pages passes: no start page is required of it
+    (repo / "index.html").unlink()
+    (repo / "app.js").unlink()
+    write(repo, "api.py", API_MODULE + "\n# touched\n")
+    api_only, *_ = await run(sessionmaker, repo, dataclasses.replace(st, job_level=True), kind="review")
+    assert by_name(api_only.report)["serve:api.py"].status == "pass", by_name(api_only.report)["serve:api.py"].message

@@ -8,6 +8,7 @@ Format: [Keep a Changelog](https://keepachangelog.com/de/1.1.0/), Versionen nach
 
 ### Behoben
 - **Neue Datei per Patch (BUG-364):** Ein Patch, der eine noch nicht vorhandene Datei nur mit `+`- und Leerzeilen anlegt, wird als sauberer Neu-Datei-Patch angewendet – auch mit nacktem `@@`, falscher Zeilenzahl oder Leerzeilen ohne `+`; git lehnte beides ab, und der Coder wich auf verweigerte Shell-Schreibzugriffe aus.
+- **Seite und API vom selben Programm (BUG-365):** Die Server-Prüfung startet auch ein Modul ohne `__main__`-Block über seine Startfunktion ohne Pflichtargumente (`serve()`, `main()`), wenn kein Skript den Server startet; die Startseite `/` wird nur verlangt, wenn das Projekt HTML-Seiten hat (eine reine JSON-API hat keine). Der Planer lässt eine Seite, die eine lokale API aufruft, vom selben Programm ausliefern wie die API, mit einem Startbefehl.
 
 ### Neu
 - **Grundausstattung der Sandbox (Image 2):** Alle Toolchain-Images haben `git`, `rg`, `jq`, `file` und `ps`; Python dazu `pytest-mock`, `pytest-timeout`, `hypothesis`; das allgemeine Image `python` als Alias, `unzip`, `xz`; PowerShell `PSScriptAnalyzer` (Pester bleibt 5.x). Laufzeit-Bibliotheken bleiben bewusst draußen. Aktiv mit `hermclaw_sandbox_image_version: "2"`.

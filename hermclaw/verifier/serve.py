@@ -3,12 +3,15 @@
 Every step of a job can pass its own checks while the delivered program does not work as a whole: in live G1 on Strata
 the collector served a page built into ``collector.py`` instead of the ``frontend/`` folder another step built, and the
 frontend called ``/api/token``, a route a later hardening step had removed – unit tests, review and acceptance passed.
-For a Python program in the project that runs an HTTP server under ``if __name__ == "__main__"``, the verifier starts it
-once in the sandbox the way the job's own acceptance commands run it (one-shot options such as ``--once`` dropped) and
+For a Python program in the project that runs an HTTP server under ``if __name__ == "__main__"`` – or, when there is
+none, a module whose public start function (``serve()``, ``main()``) runs one without arguments (BUG-365) – the
+verifier starts it once in the sandbox the way the job's own acceptance commands run it (one-shot options such as
+``--once`` dropped) and
 
 * waits until it listens (the port is read from ``/proc`` for the process group; ``*PORT*`` variables it reads get a
   free port, ``*HOST*`` 127.0.0.1);
-* loads ``/`` and every local script, stylesheet and image the page references – each must answer 200;
+* loads ``/`` (when the project has HTML pages; a JSON API has no start page) and every local script, stylesheet and
+  image the page references – each must answer 200;
 * calls every route the page's scripts name (``"/api/…"`` string literals, with the ``method`` written next to them or
   passed as an argument, ``requestJson('/api/test', 'POST')``) – 404, 405 and 501 mean the route does not exist;
   401/403/400 are fine, the probe has no token or body; a route that does not answer within the probe's time waits on
@@ -24,6 +27,7 @@ program runs only in the sandbox.
 
 from __future__ import annotations
 
+import ast
 import json
 import re
 import shlex
@@ -47,6 +51,10 @@ MAIN_GUARD = re.compile(r"""^if\s+__name__\s*==\s*['"]__main__['"]\s*:""", re.M)
 ONE_SHOT = frozenset({"--once", "--help", "-h", "--version", "--check", "--dry-run", "--list", "--print-config", "--validate", "--test"})
 _SKIPPED_DIRS = ("docs/", "doc/", "node_modules/", ".git/", ".venv/", "venv/", "templates/", "__pycache__/")
 _PYTHON = re.compile(r"(?:^|/)python(?:3(?:\.\d+)?)?$")
+#: calls that serve until the program is stopped (``server.serve_forever()``, aiohttp ``web.run_app``, werkzeug)
+_RUN_CALLS = frozenset({"serve_forever", "run_app", "run_simple"})
+#: start functions in the order a user would look for them
+_START_NAMES = ("main", "serve", "run", "start", "run_server", "serve_forever")
 
 #: runs in the sandbox from the workspace root: ``<spec json>`` → one JSON line
 SERVE_SCRIPT = r"""
@@ -193,10 +201,10 @@ try:
 
         status, ctype, body = fetch("GET", base + spec["path"])
         probes.append(["GET", spec["path"], status])
-        if status != 200:
-            problem(f"GET {spec['path']} answered {status}: the page the user opens does not load")
-        else:
+        if status == 200:
             check_page(spec["path"], body, ctype)
+        elif spec["pages"]:  # a JSON API without pages has no start page (BUG-365)
+            problem(f"GET {spec['path']} answered {status}: the page the user opens does not load")
         for rel in spec["pages"]:
             try:
                 want = " ".join(open(rel, encoding="utf-8", errors="replace").read().split())
@@ -238,6 +246,31 @@ print(json.dumps(result))
 class Server:
     path: str  # repository-relative script
     env: dict[str, str] = field(default_factory=dict)  # {variable: kind} it reads
+    call: str | None = None  # a module without ``__main__`` guard: its start function, called without arguments
+
+
+def _runs_server(func: ast.expr) -> bool:
+    if not isinstance(func, ast.Attribute):
+        return False
+    return func.attr in _RUN_CALLS or (func.attr == "run" and isinstance(func.value, ast.Name) and func.value.id in ("uvicorn", "app"))
+
+
+def start_function(source: str) -> str | None:
+    """The public module-level function that runs a server and needs no argument (``serve()``, ``main()``)."""
+    try:
+        tree = ast.parse(source)
+    except (SyntaxError, ValueError):
+        return None
+    found: list[str] = []
+    for node in tree.body:
+        if not isinstance(node, ast.FunctionDef) or node.name.startswith("_"):
+            continue
+        args = node.args
+        if len(args.posonlyargs) + len(args.args) > len(args.defaults) or any(d is None for d in args.kw_defaults):
+            continue
+        if any(isinstance(n, ast.Call) and _runs_server(n.func) for n in ast.walk(node)):
+            found.append(node.name)
+    return min(found, key=lambda n: _START_NAMES.index(n) if n in _START_NAMES else len(_START_NAMES), default=None)
 
 
 def _skipped(path: str) -> bool:
@@ -245,8 +278,11 @@ def _skipped(path: str) -> bool:
 
 
 def servers(root: Path, files: Iterable[str]) -> list[Server]:
-    """Python scripts that run an HTTP server when started (``__main__`` guard and a server construct)."""
-    out: list[Server] = []
+    """Python scripts that run an HTTP server when started (``__main__`` guard and a server construct); without such a
+    script, modules whose public start function runs one (BUG-365: live G1 rc91, ``api.py`` had ``serve()`` and no
+    ``__main__`` block, so nothing was checked while the page it was meant to serve was never served)."""
+    scripts: list[Server] = []
+    modules: list[Server] = []
     for path in sorted(f for f in files if f.endswith(".py") and not _skipped(f))[:MAX_SCAN_PY]:
         try:
             target = root / path
@@ -255,12 +291,18 @@ def servers(root: Path, files: Iterable[str]) -> list[Server]:
             source = target.read_text(encoding="utf-8")
         except (OSError, UnicodeDecodeError):
             continue
-        if MAIN_GUARD.search(source) and SERVER_MARKERS.search(source):
-            env = {n: k for n in sorted(_env_reads(source)) if (k := _kind(n)) is not None}
-            out.append(Server(path, env))
-            if len(out) >= MAX_SERVERS:
+        if not SERVER_MARKERS.search(source):
+            continue
+        env = {n: k for n in sorted(_env_reads(source)) if (k := _kind(n)) is not None}
+        if MAIN_GUARD.search(source):
+            scripts.append(Server(path, env))
+            if len(scripts) >= MAX_SERVERS:
                 break
-    return out
+        elif not path.endswith("__init__.py") and all(p.isidentifier() for p in path[:-3].split("/")):
+            if (call := start_function(source)) is not None:
+                modules.append(Server(path, env, call))
+    # a script that starts the program wins: a module's helper next to it is not what the user runs
+    return scripts or modules[:MAX_SERVERS]
 
 
 def pages(files: Iterable[str]) -> list[str]:
@@ -283,6 +325,11 @@ def serve_command(server: Server, interpreter: Sequence[str], hints: Iterable[st
             continue
         kept = [w for w in words if w not in ONE_SHOT]
         return " ".join(shlex.quote(w) for w in kept), f"as the job's command '{hint.strip()[:120]}' runs it"
+    if server.call is not None:
+        module = server.path[:-3].replace("/", ".")
+        launcher = [*interpreter, "-c", f"import {module}; {module}.{server.call}()"]
+        how = f"through its start function {server.call}(), the module has no __main__ block"
+        return " ".join(shlex.quote(w) for w in launcher), how
     launcher = [*interpreter, server.path]
     return " ".join(shlex.quote(w) for w in launcher), "with the project's interpreter"
 
@@ -347,4 +394,14 @@ def parse_serve_output(output: str) -> ServeResult | None:
     return None
 
 
-__all__ = ["SERVE_SCRIPT", "ServeResult", "Server", "pages", "parse_serve_output", "serve_command", "serve_driver", "servers"]
+__all__ = [
+    "SERVE_SCRIPT",
+    "ServeResult",
+    "Server",
+    "pages",
+    "parse_serve_output",
+    "serve_command",
+    "serve_driver",
+    "servers",
+    "start_function",
+]
