@@ -52,6 +52,10 @@ class WorkerHeartbeat(Contract):
     sent_at: datetime
 
 
+#: longest command a sandbox request carries (the serve check's driver must fit, BUG-366)
+MAX_COMMAND_CHARS = 8000
+
+
 class CommandRequest(Contract):
     """Execution worker: run a command inside the sandbox for a workspace."""
 
@@ -63,7 +67,7 @@ class CommandRequest(Contract):
     workspace: str = Field(
         pattern=r"^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$", max_length=128, description="workspace id on the execution worker"
     )
-    command: str = Field(min_length=1, max_length=8000)
+    command: str = Field(min_length=1, max_length=MAX_COMMAND_CHARS)
     image: str | None = None
     timeout_seconds: int = Field(default=600, ge=1, le=7200)
     network: bool = False

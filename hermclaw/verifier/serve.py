@@ -28,13 +28,16 @@ program runs only in the sandbox.
 from __future__ import annotations
 
 import ast
+import base64
 import json
 import re
 import shlex
+import zlib
 from collections.abc import Iterable, Sequence
 from dataclasses import dataclass, field
 from pathlib import Path
 
+from hermclaw.contracts.worker import MAX_COMMAND_CHARS
 from hermclaw.repo_intelligence.paths import is_test_path
 from hermclaw.tools.shellread import core_command
 from hermclaw.verifier.entrypoints import MAX_SCAN_BYTES, _env_reads, _kind
@@ -240,6 +243,10 @@ finally:
     result["stderr"] = err.read()[-3000:].decode("utf-8", "replace")
 print(json.dumps(result))
 """
+#: what ``python -c`` runs in the sandbox: the script compressed, since as plain text it is longer than a sandbox command
+#: may be (BUG-366)
+_PACKED = base64.b64encode(zlib.compress(SERVE_SCRIPT.encode(), 9)).decode()
+_DRIVER = f"import base64, zlib; exec(zlib.decompress(base64.b64decode('{_PACKED}')))"
 
 
 @dataclass(frozen=True)
@@ -335,9 +342,14 @@ def serve_command(server: Server, interpreter: Sequence[str], hints: Iterable[st
 
 
 def serve_driver(interpreter: Sequence[str], command: str, server: Server, page_paths: Sequence[str], seconds: float) -> str:
+    """The sandbox command that runs :data:`SERVE_SCRIPT` on the spec; ``ValueError`` when it would still be longer than
+    a sandbox command may be (:data:`MAX_COMMAND_CHARS`)."""
     spec = {"command": command, "path": "/", "env": server.env, "pages": list(page_paths), "seconds": seconds}
     launcher = " ".join(shlex.quote(w) for w in interpreter)
-    return f"{launcher} -c {shlex.quote(SERVE_SCRIPT)} {shlex.quote(json.dumps(spec))}"
+    out = f"{launcher} -c {shlex.quote(_DRIVER)} {shlex.quote(json.dumps(spec))}"
+    if len(out) > MAX_COMMAND_CHARS:
+        raise ValueError(f"serve driver is {len(out)} characters, a sandbox command at most {MAX_COMMAND_CHARS}")
+    return out
 
 
 @dataclass(frozen=True)

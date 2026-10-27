@@ -510,8 +510,13 @@ async def serve_checks(ctx: VerifyContext) -> list[VerificationCheck]:
     for server in found:
         name = f"serve:{server.path}"
         command, how = serve_command(server, interpreter, hints)
+        try:
+            driver = serve_driver(interpreter, command, server, page_paths, seconds)
+        except ValueError as exc:
+            out.append(ctx.check("serve", name, "skip", f"serve check not run: {exc}", {"command": command}))
+            continue
         res = await ctx.runner.run(
-            serve_driver(interpreter, command, server, page_paths, seconds),
+            driver,
             purpose="verifier",
             timeout_seconds=int(seconds) + 120,
             network=False,

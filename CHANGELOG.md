@@ -4,6 +4,11 @@ Format: [Keep a Changelog](https://keepachangelog.com/de/1.1.0/), Versionen nach
 
 ## [Unreleased]
 
+## [0.1.0rc95] – Release Candidate (2026-10-27)
+
+### Behoben
+- **Server-Prüfung passt in die Sandbox (BUG-366):** Der Treiber der `serve`-Prüfung geht komprimiert in die Sandbox; als Klartext war er seit rc91 länger als ein Sandbox-Befehl sein darf (8000 Zeichen), die Prüfung lief live nie und ließ Schritte mit VERIFIER_UNAVAILABLE wiederholen. Ein zu langer Treiber überspringt die Prüfung mit Grund; die Verifier-Tests lehnen zu lange Befehle wie die Sandbox ab.
+
 ## [0.1.0rc94] – Release Candidate (2026-10-27)
 
 ### Behoben

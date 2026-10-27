@@ -24,7 +24,7 @@ from typing import Any
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from hermclaw.contracts.scope import ScopeContract
-from hermclaw.contracts.worker import CommandResult
+from hermclaw.contracts.worker import MAX_COMMAND_CHARS, CommandResult
 from hermclaw.core.config import PoliciesConfig
 from hermclaw.core.interfaces import ExecutionRequest, GitStatusEntry, WorkspaceHandle
 from hermclaw.persistence.models import Job, Step
@@ -139,6 +139,8 @@ class WorkspaceShellExecutor:
 
     async def run(self, workspace: WorkspaceHandle, req: ExecutionRequest) -> CommandResult:
         self.requests.append(req)
+        # the sandbox refuses longer commands (CommandRequest); a verifier command that only runs here is a bug (BUG-366)
+        assert len(req.command) <= MAX_COMMAND_CHARS, f"command of {len(req.command)} characters: {req.command[:200]}"
         self.active += 1
         self.max_active = max(self.max_active, self.active)
         try:

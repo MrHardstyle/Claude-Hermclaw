@@ -3,9 +3,22 @@
 from __future__ import annotations
 
 import json
+import shlex
+import subprocess
+import sys
 from pathlib import Path
 
-from hermclaw.verifier.serve import Server, parse_serve_output, serve_command, servers, start_function
+from hermclaw.contracts.worker import MAX_COMMAND_CHARS
+from hermclaw.verifier.serve import (
+    MAX_PAGES,
+    SERVE_SCRIPT,
+    Server,
+    parse_serve_output,
+    serve_command,
+    serve_driver,
+    servers,
+    start_function,
+)
 
 G1_RC90 = {
     "serve": True,
@@ -62,3 +75,24 @@ def test_a_script_with_main_block_wins_over_a_module_helper(tmp_path: Path) -> N
     assert servers(tmp_path, ["app.py", "pkg/api.py"]) == [Server("app.py", {})]
     (tmp_path / "my-api.py").write_text(SERVE.format(sig="serve()"))
     assert servers(tmp_path, ["my-api.py"]) == [], "not importable as a module"
+
+
+def test_the_serve_driver_fits_into_one_sandbox_command() -> None:
+    # BUG-366: as plain text the script alone was longer than CommandRequest allows; every live serve check since rc91
+    # ended in "could not run" and failed the step with VERIFIER_UNAVAILABLE
+    assert len(SERVE_SCRIPT) > MAX_COMMAND_CHARS // 2
+    pages = [f"frontend/very/long/folder/name/for/page-number-{i:02d}/index.html" for i in range(MAX_PAGES)]
+    env = {f"HOMELAB_DASHBOARD_SETTING_{i}": "placeholder" for i in range(12)}
+    command = "python homelab_dashboard/collector_server_with_a_long_name.py --config config.example.toml --port 8765"
+    driver = serve_driver(["python3"], command, Server("collector.py", env), pages, 15.0)
+    assert len(driver) <= MAX_COMMAND_CHARS
+
+
+def test_the_compressed_driver_runs_the_serve_script(tmp_path: Path) -> None:
+    driver = serve_driver([sys.executable], "exit 0", Server("collector.py"), [], 1.0)
+    words = shlex.split(driver)
+    assert words[1] == "-c" and "SERVE_SCRIPT" not in words[2] and len(words[2]) < len(SERVE_SCRIPT)
+    out = subprocess.run(words, cwd=tmp_path, capture_output=True, text=True, timeout=60, check=False)
+    result = parse_serve_output(out.stdout)
+    assert result is not None, out.stderr
+    assert not result.listening
