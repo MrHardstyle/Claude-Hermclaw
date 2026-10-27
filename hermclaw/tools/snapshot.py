@@ -64,6 +64,18 @@ DEFAULT_GENERATED_GLOBS: tuple[str, ...] = (
     "**/.coverage.*",
     "**/htmlcov/**",
     "**/TestResults/**",
+    # build output of the compiled toolchains (2026-10-27): .NET obj/ and bin/Debug|Release/, CMake build trees,
+    # object files and Java classes – a test run writes them next to the sources
+    "**/obj/**",
+    "**/bin/Debug/**",
+    "**/bin/Release/**",
+    "**/CMakeFiles/**",
+    "**/CMakeCache.txt",
+    "**/cmake_install.cmake",
+    "**/CTestTestfile.cmake",
+    "**/Testing/Temporary/**",
+    "**/*.o",
+    "**/*.class",
 )
 GIT_META_FILES = ("HEAD", "config", "packed-refs", "shallow", "commondir")
 GIT_META_DIRS = ("refs", "info", "hooks")

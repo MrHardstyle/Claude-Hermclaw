@@ -2,7 +2,7 @@
 FROM docker.io/library/debian:trixie-slim
 RUN apt-get update && apt-get install -y --no-install-recommends \
       bash ca-certificates make gcc g++ file jq shellcheck yamllint sqlite3 postgresql-client python3 \
-      python-is-python3 git ripgrep procps unzip xz-utils \
- && rm -rf /var/lib/apt/lists/* && shellcheck --version && yamllint --version && python --version && rg --version
+      python-is-python3 git ripgrep procps unzip xz-utils bats \
+ && rm -rf /var/lib/apt/lists/* && shellcheck --version && yamllint --version && python --version && rg --version && bats --version
 ENV HOME=/tmp
 LABEL org.hermclaw.sandbox="generic"

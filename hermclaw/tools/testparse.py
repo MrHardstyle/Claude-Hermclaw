@@ -1,7 +1,8 @@
 """Parse test-runner output into counts (P17 17.6).
 
 Supported: pytest, unittest, jest, vitest, mocha, node:test (TAP and spec reporter), phpunit, go test, cargo test,
-Pester (PowerShell);
+Pester (PowerShell), the JUnit 5 console launcher, ``dotnet test`` (xUnit/NUnit/MSTest, C# and VB.NET), CTest,
+GoogleTest, busted (Lua) and TAP producers such as bats;
 everything else falls back to ``generic`` (exit code only).
 Parsers only read the runner's own summary lines – no project-specific knowledge.
 """
@@ -15,9 +16,45 @@ from typing import Literal
 
 from hermclaw.tools.output import strip_ansi
 
-Framework = Literal["pytest", "unittest", "jest", "vitest", "mocha", "node", "phpunit", "go", "cargo", "pester", "generic"]
+Framework = Literal[
+    "pytest",
+    "unittest",
+    "jest",
+    "vitest",
+    "mocha",
+    "node",
+    "phpunit",
+    "go",
+    "cargo",
+    "pester",
+    "junit",
+    "dotnet",
+    "ctest",
+    "gtest",
+    "busted",
+    "tap",
+    "generic",
+]
 TestStatus = Literal["passed", "failed", "error"]
-FRAMEWORKS: tuple[Framework, ...] = ("pytest", "unittest", "jest", "vitest", "mocha", "node", "phpunit", "go", "cargo", "pester", "generic")
+FRAMEWORKS: tuple[Framework, ...] = (
+    "pytest",
+    "unittest",
+    "jest",
+    "vitest",
+    "mocha",
+    "node",
+    "phpunit",
+    "go",
+    "cargo",
+    "pester",
+    "junit",
+    "dotnet",
+    "ctest",
+    "gtest",
+    "busted",
+    "tap",
+    "generic",
+)
 
 
 @dataclass(frozen=True)
@@ -265,6 +302,95 @@ def parse_cargo(out: str) -> TestCounts | None:
     return TestCounts("cargo", passed=passed, failed=failed, skipped=ignored, errors=errors)
 
 
+# ---------------------------------------------------------------------------------------------- JUnit 5 console
+_JUNIT_LINE = re.compile(r"^\[\s*(\d+) tests (successful|failed|skipped|aborted)\s*\]", re.M)
+
+
+def parse_junit(out: str) -> TestCounts | None:
+    """The console launcher's summary box (``[ 1 tests failed ]``); aborted tests (failed assumptions) count as skipped."""
+    found = {kind: int(n) for n, kind in _JUNIT_LINE.findall(out)}
+    if "successful" not in found and "failed" not in found:
+        return None
+    skipped = found.get("skipped", 0) + found.get("aborted", 0)
+    return TestCounts("junit", passed=found.get("successful", 0), failed=found.get("failed", 0), skipped=skipped)
+
+
+# ---------------------------------------------------------------------------------------------- dotnet test
+_DOTNET_SUMMARY = re.compile(r"^\s*(?:Passed|Failed)!\s+-\s+Failed:\s+(\d+),\s+Passed:\s+(\d+),\s+Skipped:\s+(\d+),\s+Total:\s+\d+", re.M)
+# MSBuild's error line: "/w/Calc/Class1.cs(2,70): error CS0103: … [/w/Calc/Calc.csproj]" (BC… for VB.NET)
+_DOTNET_BUILD_ERROR = re.compile(r"^.*\(\d+,\d+\): error [A-Z]+\d+: .*\[[^\]]+\.(?:cs|vb|fs)proj\]\s*$", re.M)
+
+
+def parse_dotnet(out: str) -> TestCounts | None:
+    """One ``Passed!``/``Failed!`` line per test assembly; a compile error (``error CS0103:``, ``error BC30451:``) is
+    an error even when no assembly ran."""
+    rows = _DOTNET_SUMMARY.findall(out)
+    errors = 1 if _DOTNET_BUILD_ERROR.search(out) else 0
+    if not rows:
+        return TestCounts("dotnet", errors=1) if errors else None
+    failed = sum(int(r[0]) for r in rows)
+    passed = sum(int(r[1]) for r in rows)
+    skipped = sum(int(r[2]) for r in rows)
+    return TestCounts("dotnet", passed=passed, failed=failed, skipped=skipped, errors=errors)
+
+
+# ---------------------------------------------------------------------------------------------- CTest / GoogleTest
+_CTEST_SUMMARY = re.compile(r"^\d+% tests passed, (\d+) tests? failed out of (\d+)", re.M)
+_CTEST_NONE = re.compile(r"^No tests were found!!!", re.M)
+_GTEST_PASSED = re.compile(r"^\[  PASSED  \] (\d+) tests?\.", re.M)
+_GTEST_FAILED = re.compile(r"^\[  FAILED  \] (\d+) tests?, listed below:", re.M)
+_GTEST_SKIPPED = re.compile(r"^\[  SKIPPED \] (\d+) tests?, listed below:", re.M)
+
+
+def parse_ctest(out: str) -> TestCounts | None:
+    """CTest's own summary – it also prints each test's GoogleTest output, whose counts would double up."""
+    m = _CTEST_SUMMARY.search(out)
+    if m is None:
+        return TestCounts("ctest") if _CTEST_NONE.search(out) else None
+    failed, total = int(m.group(1)), int(m.group(2))
+    return TestCounts("ctest", passed=total - failed, failed=failed)
+
+
+def parse_gtest(out: str) -> TestCounts | None:
+    passed = [int(n) for n in _GTEST_PASSED.findall(out)]
+    failed = [int(n) for n in _GTEST_FAILED.findall(out)]
+    if not passed and not failed:
+        return None
+    skipped = sum(int(n) for n in _GTEST_SKIPPED.findall(out))
+    return TestCounts("gtest", passed=sum(passed), failed=sum(failed), skipped=skipped)
+
+
+# ---------------------------------------------------------------------------------------------- busted (Lua)
+_BUSTED_SUMMARY = re.compile(r"^(\d+) success(?:es)? / (\d+) failures? / (\d+) errors? / (\d+) pending : [\d.]+ seconds", re.M)
+
+
+def parse_busted(out: str) -> TestCounts | None:
+    m = _BUSTED_SUMMARY.search(out)
+    if m is None:
+        return None
+    return TestCounts("busted", passed=int(m.group(1)), failed=int(m.group(2)), errors=int(m.group(3)), skipped=int(m.group(4)))
+
+
+# ---------------------------------------------------------------------------------------------- TAP (bats, prove)
+_TAP_PLAN = re.compile(r"^1\.\.(\d+)\s*$", re.M)
+_TAP_RESULT = re.compile(r"^(ok|not ok) \d+\b(.*)$", re.M)
+_TAP_SKIP = re.compile(r"#\s*(?:skip|todo)\b", re.I)
+
+
+def parse_tap(out: str) -> TestCounts | None:
+    """A TAP stream: the plan ``1..N`` and its ``ok``/``not ok`` lines; a planned test that never reported (the run
+    died) is an error."""
+    plan = _TAP_PLAN.search(out)
+    results = _TAP_RESULT.findall(out)
+    if plan is None or not results:
+        return None
+    skipped = sum(1 for _, rest in results if _TAP_SKIP.search(rest))
+    failed = sum(1 for status, rest in results if status == "not ok" and not _TAP_SKIP.search(rest))
+    passed = len(results) - failed - skipped
+    missing = max(0, int(plan.group(1)) - len(results))
+    return TestCounts("tap", passed=passed, failed=failed, skipped=skipped, errors=missing)
+
+
 PARSERS: dict[Framework, Callable[[str], TestCounts | None]] = {
     "cargo": parse_cargo,
     "go": parse_go,
@@ -276,6 +402,12 @@ PARSERS: dict[Framework, Callable[[str], TestCounts | None]] = {
     "mocha": parse_mocha,
     "node": parse_node,
     "pester": parse_pester,
+    "junit": parse_junit,
+    "dotnet": parse_dotnet,
+    "ctest": parse_ctest,  # before gtest: CTest repeats the output of every GoogleTest binary it runs
+    "gtest": parse_gtest,
+    "busted": parse_busted,
+    "tap": parse_tap,  # last: the plan line and ok/not ok lines are the most generic summary
 }
 
 

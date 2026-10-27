@@ -6,8 +6,9 @@ Order of precedence for a workspace:
    the project's dependencies baked in (``scripts/ops/hermclaw-build-sandbox-images --project …``), so tests run
    offline in the network-less sandbox;
 2. the repository's primary language mapped to a toolchain alias of ``policies.sandbox.images``
-   (python → ``python``, typescript/javascript → ``node``, php → ``php``, rust → ``rust``), when that alias is configured;
-   a new repository without recognised code is recognised by its dependency manifest (``requirements.txt`` …);
+   (python → ``python``, typescript/javascript → ``node``, php → ``php``, rust → ``rust``, go → ``go``, c/cpp → ``cpp``,
+   java → ``java``, csharp/vbnet → ``dotnet``, lua → ``lua``), when that alias is configured; a new repository without
+   recognised code is recognised by its dependency manifest (``requirements.txt``, ``*.csproj`` …);
 3. ``None`` – the sandbox default image (``policies.sandbox.image``); asked again on the next command, because a
    step may create the project's first files (BUG-155).
 
@@ -42,6 +43,15 @@ MANIFEST_IMAGE_ALIASES: tuple[tuple[str, str], ...] = (
     ("package.json", "node"),
     ("composer.json", "php"),
     ("Cargo.toml", "rust"),
+    ("go.mod", "go"),
+    ("CMakeLists.txt", "cpp"),
+    ("pom.xml", "java"),
+    ("build.gradle", "java"),
+    ("build.gradle.kts", "java"),
+    ("*.sln", "dotnet"),
+    ("*.csproj", "dotnet"),
+    ("*.vbproj", "dotnet"),
+    ("*.rockspec", "lua"),
 )
 
 LANGUAGE_IMAGE_ALIASES: dict[str, str] = {
@@ -52,6 +62,13 @@ LANGUAGE_IMAGE_ALIASES: dict[str, str] = {
     "php": "php",
     "powershell": "powershell",
     "rust": "rust",
+    "go": "go",
+    "c": "cpp",
+    "cpp": "cpp",
+    "java": "java",
+    "csharp": "dotnet",
+    "vbnet": "dotnet",
+    "lua": "lua",
 }
 
 
@@ -73,6 +90,24 @@ TOOL_IMAGE_ALIASES: dict[str, str] = {
     "cargo": "rust",
     "rustc": "rust",
     "rustfmt": "rust",
+    "go": "go",
+    "gofmt": "go",
+    "cmake": "cpp",
+    "ctest": "cpp",
+    "ninja": "cpp",
+    "clang-format": "cpp",
+    "javac": "java",
+    "java": "java",
+    "jar": "java",
+    "junit-run": "java",
+    "dotnet": "dotnet",
+    "lua": "lua",
+    "lua5.4": "lua",
+    "luac": "lua",
+    "luac5.4": "lua",
+    "luarocks": "lua",
+    "busted": "lua",
+    "luacheck": "lua",
 }
 _ASSIGNMENT = re.compile(r"^[A-Za-z_]\w*=")
 _STATEMENT_SPLIT = re.compile(r"&&|\|\||[;|&\n(){}]")
@@ -129,7 +164,9 @@ class SandboxImageSelector:
     def _manifest_alias(self, handle: WorkspaceHandle) -> str | None:
         root = Path(handle.path)
         for name, alias in MANIFEST_IMAGE_ALIASES:
-            if alias in self.policy.images and (root / name).is_file():
+            if alias not in self.policy.images:
+                continue
+            if any(p.is_file() for p in root.glob(name)) if "*" in name else (root / name).is_file():
                 return alias
         return None
 

@@ -1,0 +1,9 @@
+# Hermclaw sandbox toolchain: C and C++ (2026-10-27): gcc/g++, clang-format, make, CMake + Ninja and GoogleTest/GoogleMock
+# (find_package(GTest) works offline). Build in /tmp (cmake -B /tmp/build) to keep the workspace clean.
+FROM docker.io/library/debian:trixie-slim
+RUN apt-get update && apt-get install -y --no-install-recommends \
+      build-essential cmake ninja-build pkg-config libgtest-dev libgmock-dev clang-format \
+      git ripgrep jq file procps ca-certificates \
+ && rm -rf /var/lib/apt/lists/* && g++ --version | head -1 && cmake --version | head -1
+ENV HOME=/tmp
+LABEL org.hermclaw.sandbox="cpp"

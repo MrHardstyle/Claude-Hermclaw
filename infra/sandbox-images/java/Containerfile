@@ -1,0 +1,20 @@
+# Hermclaw sandbox toolchain: Java 21 (Temurin JDK) with the JUnit 5 console launcher (2026-10-27). Maven/Gradle builds
+# need their repositories and do not work network-less; plain javac + JUnit does: `junit-run` compiles every .java
+# file of the workspace into /tmp and runs all tests (the classpath has JUnit Jupiter and the AssertJ-free API only).
+FROM docker.io/library/eclipse-temurin:21-jdk
+ARG JUNIT_VERSION=1.11.4
+RUN apt-get update && apt-get install -y --no-install-recommends git ripgrep jq file procps curl && rm -rf /var/lib/apt/lists/* \
+ && mkdir -p /opt/junit \
+ && curl -fsSL -o /opt/junit/junit-platform-console-standalone.jar \
+      "https://repo1.maven.org/maven2/org/junit/platform/junit-platform-console-standalone/${JUNIT_VERSION}/junit-platform-console-standalone-${JUNIT_VERSION}.jar" \
+ && apt-get purge -y curl && apt-get autoremove -y \
+ && printf '%s\n' '#!/bin/sh' \
+      '# junit-run [dir]: compile all .java files below dir (default .) into /tmp/junit-classes and run every JUnit test' \
+      'set -e' 'root="${1:-.}"' 'out=/tmp/junit-classes' 'rm -rf "$out" && mkdir -p "$out"' \
+      'find "$root" -name "*.java" -not -path "*/.*" > /tmp/junit-sources.txt' \
+      'javac -encoding UTF-8 -d "$out" -cp "$JUNIT_JAR" @/tmp/junit-sources.txt' \
+      'exec java -jar "$JUNIT_JAR" execute --disable-banner --disable-ansi-colors --details=tree -cp "$out" --scan-class-path "$out"' \
+      > /usr/local/bin/junit-run && chmod 755 /usr/local/bin/junit-run \
+ && java -version 2>&1 | head -1 && javac -version
+ENV HOME=/tmp JUNIT_JAR=/opt/junit/junit-platform-console-standalone.jar
+LABEL org.hermclaw.sandbox="java"

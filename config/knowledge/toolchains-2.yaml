@@ -1,0 +1,76 @@
+# Operator knowledge for the sandbox toolchain images 2 (2026-10-27): how each language builds and tests in the
+# network-less sandbox. Import: hermclaw memory-import config/knowledge/toolchains-2.yaml (existing titles only gain new
+# tags). Every entry was checked in the image it describes; edit or retire it on the page "Wissen".
+
+- kind: convention
+  title: "Java in the sandbox: JUnit 5 with junit-run – Maven and Gradle cannot download anything"
+  tags: [java, junit, test, maven, gradle, 'code:org\.junit', 'code:@Test']
+  content: |
+    The java image has the Temurin JDK 21 and the JUnit 5 console launcher (`$JUNIT_JAR`), no network. Maven and Gradle
+    builds fail because they download plugins. `junit-run` compiles every .java file of the workspace into /tmp and runs
+    all tests (exit code 1 when one fails); `junit-run src` limits it to a directory. Tests use JUnit Jupiter only:
+    `import org.junit.jupiter.api.Test;` and `import static org.junit.jupiter.api.Assertions.*;` – no AssertJ, Mockito or
+    Hamcrest. Keep classes in the default package or in packages whose directories match the package name.
+    Checked: image hermclaw-sandbox-java:2.
+
+- kind: convention
+  title: "C# and VB.NET in the sandbox: dotnet new + dotnet test, only the template package versions restore offline"
+  tags: [csharp, vbnet, dotnet, xunit, nunit, mstest, test, 'code:using Xunit', 'code:Imports Xunit', 'code:PackageReference']
+  content: |
+    The dotnet image (.NET 8 SDK) restores only from packages baked in at build time: the ones `dotnet new console|classlib|
+    xunit|nunit|mstest` use for C# (`-lang C#`) and VB.NET (`-lang VB`); their versions are in /opt/nuget/versions.txt.
+    Create projects with `dotnet new`, connect them with `dotnet add <tests> reference <lib>.csproj`, test with
+    `dotnet test <test project>`; any other package or another version fails to restore. bin/ and obj/ are build output,
+    never part of the change. A VB.NET module function is called as `Module.Function(...)`; a VB test class uses
+    `<Fact>` (xUnit) on a `Public Sub`.
+    Checked: image hermclaw-sandbox-dotnet:2.
+
+- kind: convention
+  title: "C and C++ in the sandbox: CMake with GoogleTest, build directory in /tmp"
+  tags: [c, cpp, cmake, gtest, googletest, ctest, test, 'code:gtest/gtest\.h', 'code:find_package\(GTest']
+  content: |
+    The cpp image has gcc/g++, CMake, Ninja and GoogleTest/GoogleMock as system packages, no network: use
+    `find_package(GTest REQUIRED)`, link `GTest::gtest_main`, `include(GoogleTest)` and `gtest_discover_tests(<target>)`
+    – never FetchContent. Build outside the repository so no build tree lands in the change:
+    `cmake -S . -B /tmp/build -G Ninja && cmake --build /tmp/build && ctest --test-dir /tmp/build --output-on-failure`.
+    Set `CMAKE_CXX_STANDARD` (20 works). A plain Makefile project builds with `make` as well.
+    Checked: image hermclaw-sandbox-cpp:2.
+
+- kind: convention
+  title: "Go in the sandbox: standard library only, go test ./..."
+  tags: [go, golang, test, 'code:"testing"']
+  content: |
+    The go image has no module proxy (GOPROXY=off) and no network: only the standard library is available. `go.mod`
+    needs a module name and a `go` line (`go 1.22`). Test with `go test ./...`; `go vet ./...` catches common mistakes,
+    `gofmt -l .` lists unformatted files. Caches live in /tmp, nothing is written to the workspace.
+    Checked: image hermclaw-sandbox-go:2.
+
+- kind: convention
+  title: "Rust in the sandbox: cargo test --offline, standard library only"
+  tags: [rust, cargo, test, 'code:#\[test\]', 'code:#\[cfg\(test\)\]']
+  content: |
+    The rust image (stable with clippy and rustfmt) has no network: dependencies from crates.io cannot be fetched, so
+    `[dependencies]` stays empty. Build artefacts go to /tmp (CARGO_TARGET_DIR), only Cargo.lock appears in the
+    workspace. Use `cargo test --offline`, `cargo clippy --offline` and `cargo fmt --check`. Unit tests sit in a
+    `#[cfg(test)] mod tests` of the module; integration tests in tests/*.rs use the crate as a library (src/lib.rs).
+    Checked: image hermclaw-sandbox-rust:2.
+
+- kind: convention
+  title: "Lua in the sandbox: Lua 5.4 with busted specs and luacheck"
+  tags: [lua, busted, luacheck, test, 'code:describe\(', 'code:require\(']
+  content: |
+    The lua image has Lua 5.4, LuaRocks, busted and luacheck, no network. A module returns a table
+    (`local M = {} ... return M`). Specs are spec/*_spec.lua with `describe`/`it` and `assert.are.equal(expected,
+    actual)`; `busted` runs them from the repository root (modules are found via `require("name")` relative to it).
+    `luacheck .` lints, `luac5.4 -p file.lua` checks the syntax.
+    Checked: image hermclaw-sandbox-lua:2.
+
+- kind: convention
+  title: "Bash scripts: bats tests and shellcheck"
+  tags: [bash, shell, bats, shellcheck, test, 'code:#!/usr/bin/env bash', 'code:@test ']
+  content: |
+    The generic image has bats and shellcheck. A testable script defines its functions and runs `main "$@"` only when
+    executed (`[[ "${BASH_SOURCE[0]}" == "$0" ]] && main "$@"`), so a bats test can `source` it in `setup()`. Tests are
+    tests/*.bats with `@test "name" { ... }`, `run <command>` and checks on `$status` and `$output`; run them with
+    `bats tests`. `shellcheck script.sh` must report nothing.
+    Checked: image hermclaw-sandbox-generic:2.

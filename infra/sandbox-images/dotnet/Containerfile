@@ -1,0 +1,19 @@
+# Hermclaw sandbox toolchain: .NET SDK for C# and VB.NET (2026-10-27). Network-less restore works from the package
+# folder baked in here: the xUnit, NUnit and MSTest templates of both languages were restored at build time, so a
+# project that uses the template package versions (see /opt/nuget/versions.txt) builds and tests offline.
+FROM mcr.microsoft.com/dotnet/sdk:8.0
+ENV DOTNET_NOLOGO=1 DOTNET_CLI_TELEMETRY_OPTOUT=1 DOTNET_SKIP_FIRST_TIME_EXPERIENCE=1 DOTNET_GENERATE_ASPNET_CERTIFICATE=false \
+    NUGET_PACKAGES=/opt/nuget/packages
+RUN apt-get update && apt-get install -y --no-install-recommends git ripgrep jq file procps && rm -rf /var/lib/apt/lists/* \
+ && mkdir -p /tmp/seed && cd /tmp/seed \
+ && for lang in "C#" "VB"; do for t in console classlib xunit nunit mstest; do \
+      d="$(echo "$lang-$t" | tr -d '#')"; dotnet new "$t" -lang "$lang" -o "$d" >/dev/null && dotnet restore "$d" >/dev/null && dotnet build "$d" --no-restore -v q >/dev/null; \
+    done; done \
+ && grep -rhoE 'PackageReference Include="[^"]+" Version="[^"]+"' --include=*.csproj --include=*.vbproj . | sort -u > /opt/nuget/versions.txt \
+ && cd / && rm -rf /tmp/seed /tmp/.nuget /root/.nuget/NuGet /root/.local && chmod -R a+rX /opt/nuget \
+ && dotnet --version
+# restore reads only the baked-in folder (a valid local feed) and skips the online vulnerability audit: in the
+# network-less sandbox nuget.org cost ~6 s and a warning per restore
+ENV HOME=/tmp DOTNET_CLI_HOME=/tmp RestoreSources=/opt/nuget/packages NuGetAudit=false \
+    DOTNET_CLI_WORKLOAD_UPDATE_NOTIFY_DISABLE=true DOTNET_SKIP_WORKLOAD_INTEGRITY_CHECK=true
+LABEL org.hermclaw.sandbox="dotnet"

@@ -1,4 +1,5 @@
-"""P17 17.6: test-runner output parsing from recorded outputs (pytest, unittest, jest, vitest, mocha, node:test, phpunit, go, cargo)."""
+"""P17 17.6: test-runner output parsing from recorded outputs (pytest, unittest, jest, vitest, mocha, node:test, phpunit, go,
+cargo, JUnit, dotnet test, CTest, GoogleTest, busted, TAP)."""
 
 from __future__ import annotations
 
@@ -186,3 +187,99 @@ def test_pester_summary_is_counted() -> None:
     pester5 = "Tests completed in 1.2s\nTests Passed: 4, Failed: 0, Skipped: 1 NotRun: 0\n"
     summary = summarise(pester5, 0, framework=None)
     assert (summary.framework, summary.status, summary.passed, summary.skipped) == ("pester", "passed", 4, 1)
+
+
+# recorded 2026-10-27 in the sandbox images 2 (one passing and one failing test each)
+JUNIT_RUN = """\
+Failures (1):
+  JUnit Jupiter:CalcTest:bad()
+    => org.opentest4j.AssertionFailedError: expected: <3> but was: <2>
+
+Test run finished after 100 ms
+[         4 containers found      ]
+[         4 containers successful ]
+[         0 containers failed     ]
+[         2 tests found           ]
+[         0 tests skipped         ]
+[         2 tests started         ]
+[         0 tests aborted         ]
+[         1 tests successful      ]
+[         1 tests failed          ]
+"""
+DOTNET_RUN = """\
+[xUnit.net 00:00:00.22]     Calc.Tests.OpsTests.Bad [FAIL]
+  Failed Calc.Tests.OpsTests.Bad [7 ms]
+  Error Message:
+   Assert.Equal() Failure: Values differ
+
+Failed!  - Failed:     1, Passed:     1, Skipped:     0, Total:     2, Duration: 5 ms - Calc.Tests.dll (net8.0)
+"""
+DOTNET_COMPILE_ERROR = """\
+  Restored /workspace/Calc.Tests/Calc.Tests.csproj (in 198 ms).
+/workspace/Calc/Class1.cs(2,70): error CS0103: The name 'c' does not exist in the current context [/workspace/Calc/Calc.csproj]
+"""
+CTEST_RUN = """\
+1/2 Test #1: Calc.Adds ........................   Passed    0.00 sec
+2/2 Test #2: Calc.Bad .........................***Failed    0.00 sec
+[==========] 1 test from 1 test suite ran. (0 ms total)
+[  PASSED  ] 0 tests.
+[  FAILED  ] 1 test, listed below:
+[  FAILED  ] Calc.Bad
+
+50% tests passed, 1 tests failed out of 2
+
+The following tests FAILED:
+\t  2 - Calc.Bad (Failed)
+"""
+GTEST_RUN = """\
+[==========] 2 tests from 1 test suite ran. (0 ms total)
+[  PASSED  ] 1 test.
+[  FAILED  ] 1 test, listed below:
+[  FAILED  ] Calc.Bad
+
+ 1 FAILED TEST
+"""
+BUSTED_RUN = """\
++-
+1 success / 1 failure / 0 errors / 0 pending : 0.002871 seconds
+
+Failure -> spec/calc_spec.lua @ 4
+calc bad
+spec/calc_spec.lua:4: Expected objects to be equal.
+"""
+BATS_RUN = """\
+1..3
+ok 1 adds
+not ok 2 bad
+# (in test file calc.bats, line 4)
+#   `@test "bad" { [ "$(add 1 1)" = 3 ]; }' failed
+ok 3 later # skip not on Linux
+"""
+
+
+@pytest.mark.parametrize(
+    ("output", "exit_code", "line"),
+    [
+        (JUNIT_RUN, 1, "junit: failed – 1 passed, 1 failed, 0 errors, 0 skipped"),
+        (DOTNET_RUN, 1, "dotnet: failed – 1 passed, 1 failed, 0 errors, 0 skipped"),
+        (DOTNET_COMPILE_ERROR, 1, "dotnet: failed – 0 passed, 0 failed, 1 errors, 0 skipped"),
+        (CTEST_RUN, 8, "ctest: failed – 1 passed, 1 failed, 0 errors, 0 skipped"),
+        (GTEST_RUN, 1, "gtest: failed – 1 passed, 1 failed, 0 errors, 0 skipped"),
+        (BUSTED_RUN, 1, "busted: failed – 1 passed, 1 failed, 0 errors, 0 skipped"),
+        (BATS_RUN, 1, "tap: failed – 1 passed, 1 failed, 0 errors, 1 skipped"),
+        ("[  PASSED  ] 3 tests.\n", 0, "gtest: passed – 3 passed, 0 failed, 0 errors, 0 skipped"),
+        ("100% tests passed, 0 tests failed out of 4\n", 0, "ctest: passed – 4 passed, 0 failed, 0 errors, 0 skipped"),
+        (
+            "Passed!  - Failed:     0, Passed:     5, Skipped:     1, Total:     6\n",
+            0,
+            "dotnet: passed – 5 passed, 0 failed, 0 errors, 1 skipped",
+        ),
+        ("3 successes / 0 failures / 0 errors / 1 pending : 0.01 seconds\n", 0, "busted: passed – 3 passed, 0 failed, 0 errors, 1 skipped"),
+        ("1..3\nok 1 a\nok 2 b\n", 1, "tap: failed – 2 passed, 0 failed, 1 errors, 0 skipped"),
+    ],
+)
+def test_the_runners_of_the_new_toolchains_are_recognised(output: str, exit_code: int, line: str) -> None:
+    """Java (JUnit console launcher), C#/VB.NET (dotnet test), C/C++ (CTest before GoogleTest, whose output CTest
+    repeats), Lua (busted) and Bash (bats, TAP) – each detected without naming the framework."""
+    assert summarise(output, exit_code).line() == line
+    assert parse_counts(output, summarise(output, exit_code).framework) is not None

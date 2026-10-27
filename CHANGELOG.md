@@ -11,6 +11,7 @@ Format: [Keep a Changelog](https://keepachangelog.com/de/1.1.0/), Versionen nach
 
 ### Neu
 - **Grundausstattung der Sandbox (Image 2):** Alle Toolchain-Images haben `git`, `rg`, `jq`, `file` und `ps`; Python dazu `pytest-mock`, `pytest-timeout`, `hypothesis`; das allgemeine Image `python` als Alias, `unzip`, `xz`; PowerShell `PSScriptAnalyzer` (Pester bleibt 5.x). Laufzeit-Bibliotheken bleiben bewusst draußen. Aktiv mit `hermclaw_sandbox_image_version: "2"`.
+- **Weitere Sprachen:** Sandbox-Images `go`, `cpp` (CMake, GoogleTest), `java` (JDK 21, JUnit 5, `junit-run`), `dotnet` (C# und VB.NET, Testpakete offline), `lua` (busted, luacheck); bats im allgemeinen Image. Testauswertung für JUnit, `dotnet test`, CTest, GoogleTest, busted und TAP; Compile-Prüfung für CMake, .NET und Java; Syntaxprüfung nach jedem Schreiben für Lua und Go; Build-Ausgaben (`obj/`, `bin/Debug`, `CMakeFiles`, `*.o`, `*.class`) gelten als erzeugt. Der Planer kennt die Testbefehle, die ohne Netz laufen.
 - **Rust-Toolchain:** neues Sandbox-Image `rust` (stable, cargo, clippy, rustfmt; `CARGO_HOME`/`CARGO_TARGET_DIR` in `/tmp`, damit der Workspace sauber bleibt). Ein Repository mit Rust oder `Cargo.toml` und jeder `cargo`-/`rustc`-Befehl bekommen es; Verifier (`cargo check --offline`) und Testauswertung (`cargo test`) gab es schon.
 
 ## [0.1.0rc93] – Release Candidate (2026-10-27)

@@ -20,7 +20,7 @@ from hermclaw.contracts.worker import CommandResult
 from hermclaw.core.config import SandboxPolicy
 from hermclaw.core.interfaces import ExecutionRequest, WorkspaceHandle
 from hermclaw.persistence.models import Job, Repository, Workspace
-from hermclaw.runtime.images import ImageDefaultingExecutor, SandboxImageSelector, command_toolchain
+from hermclaw.runtime.images import LANGUAGE_IMAGE_ALIASES, ImageDefaultingExecutor, SandboxImageSelector, command_toolchain
 from hermclaw.tools.executors import LocalSandboxExecutor
 
 pytestmark = pytest.mark.integration
@@ -208,6 +208,41 @@ async def test_a_rust_project_runs_in_the_rust_toolchain(sessionmaker: Any, tmp_
     for command in ("cargo test --offline", "cd core && cargo clippy --offline", "rustc --version", "rustfmt --check src/main.rs"):
         assert command_toolchain(command) == "rust", command
     assert command_toolchain("cargo test && python -m pytest") is None
+
+
+@pytest.mark.parametrize(
+    ("manifest", "alias"),
+    [
+        ("go.mod", "go"),
+        ("CMakeLists.txt", "cpp"),
+        ("pom.xml", "java"),
+        ("Calc.Tests.vbproj", "dotnet"),
+        ("App.csproj", "dotnet"),
+        ("demo-1.0-1.rockspec", "lua"),
+    ],
+)
+async def test_the_manifest_of_a_new_project_selects_its_toolchain(sessionmaker: Any, tmp_path: Path, manifest: str, alias: str) -> None:
+    """Toolchains of images 2 (2026-10-27): Go, C/C++, Java, .NET (C# and VB.NET) and Lua, project files by glob."""
+    ws = await _workspace(sessionmaker, tmp_path)
+    pol = policy(python=PYTHON_IMAGE, **{alias: f"localhost/hermclaw-sandbox-{alias}:2"})
+    (tmp_path / manifest).write_text("x\n", encoding="utf-8")
+    assert await SandboxImageSelector(sessionmaker, pol, FakeRepo([])).image_for(ws) == alias
+
+
+async def test_the_programs_of_the_new_toolchains_select_their_image() -> None:
+    expected = {
+        "go test ./...": "go",
+        "cmake -B /tmp/b && cmake --build /tmp/b && ctest --test-dir /tmp/b": "cpp",
+        "junit-run": "java",
+        "javac -d /tmp/out Main.java && java -cp /tmp/out Main": "java",
+        "dotnet test Calc.Tests": "dotnet",
+        "busted && luacheck .": "lua",
+        "printf 'B'; luac5.4 -p './a.lua' 2>&1; rc=$?; printf 'E'; exit 0": "lua",
+    }
+    for command, alias in expected.items():
+        assert command_toolchain(command) == alias, command
+    for lang, alias in (("csharp", "dotnet"), ("vbnet", "dotnet"), ("c", "cpp"), ("cpp", "cpp"), ("java", "java"), ("lua", "lua")):
+        assert LANGUAGE_IMAGE_ALIASES[lang] == alias
 
 
 # ------------------------------------------------------------------------------------------------ real podman

@@ -1,0 +1,8 @@
+# Hermclaw sandbox toolchain: Go (2026-10-27). Read-only and network-less: build and module caches live in /tmp, no
+# toolchain or module downloads (GOTOOLCHAIN=local, GOPROXY=off); a project with only the standard library builds and
+# tests offline, modules need a project image or egress.
+FROM docker.io/library/golang:1-bookworm
+RUN apt-get update && apt-get install -y --no-install-recommends git ripgrep jq file procps && rm -rf /var/lib/apt/lists/* \
+ && go version && gofmt -h 2>&1 | head -1
+ENV HOME=/tmp GOPATH=/tmp/go GOCACHE=/tmp/go-cache GOTOOLCHAIN=local GOPROXY=off GOFLAGS=-mod=mod CGO_ENABLED=0
+LABEL org.hermclaw.sandbox="go"

@@ -340,6 +340,37 @@ async def test_compile_cargo_offline(sessionmaker: Any, tmp_path: Path) -> None:
     assert check.status == "fail" and "mismatched types" in check.evidence["output"]
 
 
+async def test_compile_checks_of_cmake_dotnet_and_java(sessionmaker: Any, tmp_path: Path) -> None:
+    """Toolchains of images 2 (2026-10-27): CMake builds into /tmp, .NET builds the one project at the root, Java
+    compiles every .java file into /tmp – and is skipped for a Maven/Gradle build the network-less sandbox cannot
+    resolve. Without the toolchain on this host the command exits 127 and the check says so."""
+    files = {
+        "CMakeLists.txt": "cmake_minimum_required(VERSION 3.20)\nproject(d CXX)\nadd_executable(d main.cpp)\n",
+        "main.cpp": "int main() { return 0; }\n",
+        "App.vbproj": '<Project Sdk="Microsoft.NET.Sdk"></Project>\n',
+        "Program.vb": "Module Program\nEnd Module\n",
+        "src/Main.java": "class Main {}\n",
+    }
+    repo = init_repo(tmp_path / "repo", files)
+    for rel, text in files.items():
+        if rel != "CMakeLists.txt" and not rel.endswith("proj"):
+            write(repo, rel, text + "\n")
+    executor = WorkspaceShellExecutor()
+    st = step("documentation", scope_contract=scope(target_paths=["main.cpp", "Program.vb", "src/Main.java"]))
+    outcome, *_ = await run(sessionmaker, repo, st, verifier=make_verifier(sessionmaker, executor), kind="documentation")
+    names = by_name(outcome.report)
+    assert names["compile:cpp"].evidence["command"].startswith("cmake -S . -B /tmp/hc-cmake-check -G Ninja")
+    assert names["compile:dotnet"].evidence["command"] == "dotnet build 'App.vbproj' -nologo -v q"
+    assert "javac -encoding UTF-8 -d /tmp/hc-javac-check" in names["compile:java"].evidence["command"]
+    for name in ("compile:cpp", "compile:dotnet", "compile:java"):
+        if names[name].status == "skip":
+            assert "toolchain is not available in the sandbox image" in names[name].message
+    write(repo, "pom.xml", "<project/>\n")
+    outcome, *_ = await run(sessionmaker, repo, st, verifier=make_verifier(sessionmaker, executor), kind="documentation")
+    java = by_name(outcome.report)["compile:java"]
+    assert java.status == "skip" and "pom.xml builds need their repositories" in java.message
+
+
 async def test_compile_typescript_skips_without_node_modules_and_irrelevant_changes(sessionmaker: Any, tmp_path: Path) -> None:
     repo = init_repo(tmp_path / "repo", {"tsconfig.json": "{}\n", "src/a.ts": "export const a = 1;\n", "go.mod": "module x\n\ngo 1.21\n"})
     write(repo, "src/a.ts", "export const a: number = 2;\n")

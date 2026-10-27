@@ -293,7 +293,46 @@ def _toolchains(root: Path, changed: Sequence[str], *, network: bool) -> list[tu
     if os.path.isfile(root / "Cargo.toml"):
         cmd = "cargo check" if network else "cargo check --offline"
         toolchains.append(("rust", cmd, _relevant(changed, (".rs",), ("Cargo.toml", "Cargo.lock")), None))
+    if os.path.isfile(root / "CMakeLists.txt"):
+        relevant = _relevant(changed, _CPP_RELEVANT, ("CMakeLists.txt",))
+        toolchains.append(("cpp", "cmake -S . -B /tmp/hc-cmake-check -G Ninja && cmake --build /tmp/hc-cmake-check", relevant, None))
+    dotnet = _dotnet_build(root)
+    if dotnet is not None:
+        relevant = _relevant(changed, (".cs", ".vb", ".csproj", ".vbproj", ".sln", ".props", ".targets"), ())
+        toolchains.append(("dotnet", dotnet, relevant, None))
+    java = _relevant(changed, (".java",), ())
+    if java:
+        build = next((n for n in ("pom.xml", "build.gradle", "build.gradle.kts") if os.path.isfile(root / n)), None)
+        reason = f"{build} builds need their repositories, which the network-less sandbox has not" if build and not network else None
+        toolchains.append(("java", _JAVAC_CHECK, java, reason))
     return toolchains
+
+
+_CPP_RELEVANT = (".c", ".h", ".cc", ".cpp", ".cxx", ".hpp", ".hh", ".hxx", ".cmake")
+# every .java file of the workspace, compiled into /tmp with JUnit on the classpath (the java image's JUNIT_JAR)
+_JAVAC_CHECK = (
+    "find . -name '*.java' -not -path '*/.*' > /tmp/hc-javac-sources.txt && "
+    'javac -encoding UTF-8 -d /tmp/hc-javac-check -cp "${JUNIT_JAR:-.}" @/tmp/hc-javac-sources.txt'
+)
+
+
+def _dotnet_build(root: Path) -> str | None:
+    """``dotnet build`` for the solution at the root, else the one project file at the root, else every project file
+    (two levels deep at most); ``None`` without a .NET project. Restore runs offline from the image's package folder."""
+    for pattern in ("*.sln", "*.csproj", "*.vbproj"):
+        found = sorted(root.glob(pattern))
+        if len(found) == 1:
+            return f"dotnet build '{found[0].name}' -nologo -v q"
+    projects = sorted(
+        p.relative_to(root).as_posix()
+        for depth in ("*/", "*/*/")
+        for ext in ("csproj", "vbproj")
+        for p in root.glob(f"{depth}*.{ext}")
+        if not any(part.startswith(".") for part in p.relative_to(root).parts)
+    )
+    if not projects:
+        return None
+    return " && ".join(f"dotnet build '{p}' -nologo -v q" for p in projects[:20])
 
 
 async def compile_checks(ctx: VerifyContext) -> list[VerificationCheck]:
@@ -321,12 +360,17 @@ async def compile_checks(ctx: VerifyContext) -> list[VerificationCheck]:
         elif res.exit_code == 0:
             out.append(ctx.check("compile", name, "pass", f"{command} succeeded", evidence))
         elif res.exit_code in (126, 127):
-            out.append(ctx.check("compile", name, "skip", f"{command.split()[0]} is not available in the sandbox image", evidence))
+            out.append(ctx.check("compile", name, "skip", f"the {language} toolchain is not available in the sandbox image", evidence))
         else:
             out.append(ctx.check("compile", name, "fail", f"{command} failed with exit code {res.exit_code}", evidence))
     if not out:
         out.append(
-            ctx.check("compile", "compile", "skip", "repository has no compile toolchain marker (tsconfig.json, go.mod, Cargo.toml)")
+            ctx.check(
+                "compile",
+                "compile",
+                "skip",
+                "repository has no compile toolchain marker (tsconfig.json, go.mod, Cargo.toml, CMakeLists.txt, .NET project, .java file)",
+            )
         )
     return out
 

@@ -485,6 +485,14 @@ def _base_rules(kind_capability: dict[str, str], capability_names: Sequence[str]
         "(requirements.txt or package.json, listed in repo_hints or allowed_new_paths of the step that adds them); "
         "the coder installs them from the allow-listed package registries when the runtime allows dependency "
         "installs. Prefer the standard library and dependencies the repository already declares.",
+        # the toolchain images 2 (2026-10-27): commands that work network-less; Maven, Gradle and NuGet downloads do not
+        "Test commands that work in the sandbox: Python `python -m pytest` or `python -m unittest`; Node `node --test` "
+        "or the npm test script; Rust `cargo test --offline`; Go `go test ./...`; C/C++ CMake with GoogleTest, built "
+        "outside the repository (`cmake -S . -B /tmp/build && cmake --build /tmp/build && ctest --test-dir /tmp/build "
+        "--output-on-failure`); Java JUnit 5 without Maven or Gradle (`junit-run` compiles every .java file and runs "
+        "the tests); C# and VB.NET `dotnet test <test project>` with an xUnit, NUnit or MSTest project from `dotnet "
+        "new`; Lua `busted` (spec/*_spec.lua); Bash `bats tests`; PowerShell `Invoke-Pester`. Test evidence of a "
+        "runner outside the framework list uses framework generic.",
         "risk is low|medium|high. Deployments, SSH/server administration and database changes are at least medium.",
         "Respect every entry of constraints. Never plan git commits, pushes, merges or branch operations; "
         "the runtime performs all git mutations.",

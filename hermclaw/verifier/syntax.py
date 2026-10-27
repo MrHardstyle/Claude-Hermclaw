@@ -208,6 +208,8 @@ SANDBOX_TOOLS: dict[str, tuple[str, str]] = {
     "php": ("php", "php -l {path}"),
     "javascript": ("node", "node --check {path}"),
     "shell": ("bash", "bash -n {path}"),
+    "lua": ("luac5.4", "luac5.4 -p {path}"),  # the lua image (2026-10-27)
+    "go": ("gofmt", "gofmt -e {path} >/dev/null"),  # the go image: parse errors with line and column, no rewrite
     # the PowerShell parser without running the script: every parse error with its line (BUG-326 – a missing "}" in a
     # function survived two attempts of A9 because the verifier skipped .ps1 files and the coder never ran the script)
     "powershell": ("pwsh", "HC_SYNTAX_PATH={path} pwsh -NoLogo -NoProfile -NonInteractive -Command '" + PWSH_PARSE + "'"),
