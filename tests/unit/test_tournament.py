@@ -1,7 +1,9 @@
 from __future__ import annotations
 
 import json
+import os
 import subprocess
+import sys
 from pathlib import Path
 from typing import Any
 
@@ -165,7 +167,7 @@ def test_spec_loads_plans_hidden_dirs_and_weights(tmp_path: Path) -> None:
         load_spec(path)
 
 
-@pytest.mark.parametrize("name", ["coder-tournament.yaml", "languages.yaml"])
+@pytest.mark.parametrize("name", ["coder-tournament.yaml", "languages.yaml", "languages-r2.yaml"])
 def test_the_shipped_specs_load_and_name_deployed_sandbox_images(name: str) -> None:
     """A typo in a shipped spec or a hidden check on an image the workers do not build would only surface hours into a
     run on the model host."""
@@ -174,6 +176,27 @@ def test_the_shipped_specs_load_and_name_deployed_sandbox_images(name: str) -> N
     spec = load_spec(root / "tests/live/tournament" / name)
     assert {t.hidden.image for t in spec.tasks if t.hidden.image} <= set(toolchains)
     assert len({t.id for t in spec.tasks}) == len(spec.tasks)
+
+
+def test_the_r2_hidden_checks_pass_the_reference_and_fail_a_missing_program() -> None:
+    """Ladder stage R2 grades every language with one shell script; it must agree with the specification (checked
+    against a Python reference implementation) and fail every check when the build left no program."""
+    root = Path(__file__).resolve().parents[2] / "tests/live/tournament"
+    scripts = {p.read_bytes() for p in (root / "hidden").glob("R2-*/check.sh")}
+    assert len(scripts) == 1
+    check = next((root / "hidden").glob("R2-*/check.sh"))
+    reference = f"{sys.executable} {root / 'r2_reference_kassenbuch.py'}"
+    for kb_cmd, passed, failed in ((reference, 16, 0), ("", 0, 16)):
+        res = subprocess.run(
+            ["bash", str(check)],
+            check=False,
+            env={"PATH": os.environ["PATH"], "KB_CMD": kb_cmd},
+            capture_output=True,
+            text=True,
+            timeout=120,
+        )
+        grade = grade_output(res.stdout, res.returncode, timed_out=False)
+        assert (grade.passed, grade.failed) == (passed, failed), res.stdout
 
 
 async def test_the_ladder_stops_at_the_first_failure_and_retries_that_level_next_time(tmp_path: Path) -> None:

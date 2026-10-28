@@ -4,6 +4,14 @@ Format: [Keep a Changelog](https://keepachangelog.com/de/1.1.0/), Versionen nach
 
 ## [Unreleased]
 
+## [0.1.0rc102] – Release Candidate (2026-10-28)
+
+### Behoben
+- **Lua 5.4 und ein leeres `/tmp` in den Sandbox-Images (BUG-375):** Im Lua-Image war `lua` Lua 5.1.5 (luarocks zieht lua5.1 mit höherer Priorität nach), obwohl busted und die Aufgaben Lua 5.4 nutzen; `lua`/`luac` sind jetzt auf 5.4 festgelegt. Das .NET-Image hinterließ 98 MSBuild-/NuGet-Temp-Ordner in `/tmp`, die podman bei jedem Sandbox-Start ins tmpfs kopierte. Die Images bekommen Version 3 (`hermclaw_sandbox_image_version`).
+
+### Hinzugefügt
+- **Sprach-Leiter Stufe R2** (`tests/live/tournament/languages-r2.yaml`): dasselbe Kommandozeilenprogramm `kassenbuch` (CSV, centgenau, Kalenderdaten, CRLF, ordinale Sortierung, Monatsfilter, Exit-Codes) in allen acht Sandbox-Sprachen, bewertet mit einem sprachneutralen Prüfskript gegen das gebaute Programm; das Skript wird gegen eine Referenzimplementierung getestet.
+
 ## [0.1.0rc101] – Release Candidate (2026-10-28)
 
 ### Behoben

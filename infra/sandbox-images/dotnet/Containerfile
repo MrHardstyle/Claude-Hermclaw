@@ -1,6 +1,8 @@
 # Hermclaw sandbox toolchain: .NET SDK for C# and VB.NET (2026-10-27). Network-less restore works from the package
 # folder baked in here: the xUnit, NUnit and MSTest templates of both languages were restored at build time, so a
 # project that uses the template package versions (see /opt/nuget/versions.txt) builds and tests offline.
+# /tmp is emptied last: podman copies an image's /tmp into the sandbox tmpfs on every start (image 2 left 98
+# MSBuild/NuGet temp folders there, BUG-375).
 FROM mcr.microsoft.com/dotnet/sdk:8.0
 ENV DOTNET_NOLOGO=1 DOTNET_CLI_TELEMETRY_OPTOUT=1 DOTNET_SKIP_FIRST_TIME_EXPERIENCE=1 DOTNET_GENERATE_ASPNET_CERTIFICATE=false \
     NUGET_PACKAGES=/opt/nuget/packages
@@ -11,7 +13,8 @@ RUN apt-get update && apt-get install -y --no-install-recommends git ripgrep jq 
     done; done \
  && grep -rhoE 'PackageReference Include="[^"]+" Version="[^"]+"' --include=*.csproj --include=*.vbproj . | sort -u > /opt/nuget/versions.txt \
  && cd / && rm -rf /tmp/seed /tmp/.nuget /root/.nuget/NuGet /root/.local && chmod -R a+rX /opt/nuget \
- && dotnet --version
+ && dotnet --version && dotnet build-server shutdown >/dev/null \
+ && rm -rf /tmp/* /tmp/.[!.]*
 # restore reads only the baked-in folder (a valid local feed) and skips the online vulnerability audit: in the
 # network-less sandbox nuget.org cost ~6 s and a warning per restore
 ENV HOME=/tmp DOTNET_CLI_HOME=/tmp RestoreSources=/opt/nuget/packages NuGetAudit=false \

@@ -1,10 +1,14 @@
-# Hermclaw sandbox toolchain: Lua 5.4 with LuaRocks, busted (tests) and luacheck (lint) (2026-10-27).
+# Hermclaw sandbox toolchain: Lua 5.4 with LuaRocks, busted (tests) and luacheck (lint) (2026-10-27). luarocks pulls
+# in lua5.1, whose alternative has the higher priority: `lua` is pinned to 5.4 (image 2 ran Lua 5.1.5, BUG-375).
 FROM docker.io/library/debian:trixie-slim
 RUN apt-get update && apt-get install -y --no-install-recommends \
       lua5.4 liblua5.4-dev luarocks build-essential unzip git ripgrep jq file procps ca-certificates \
  && luarocks --lua-version 5.4 install busted && luarocks --lua-version 5.4 install luacheck \
  && apt-get purge -y build-essential && apt-get autoremove -y && rm -rf /var/lib/apt/lists/* /root/.cache \
  && update-alternatives --install /usr/bin/lua lua-interpreter /usr/bin/lua5.4 100 \
+ && update-alternatives --install /usr/bin/luac lua-compiler /usr/bin/luac5.4 100 \
+ && update-alternatives --set lua-interpreter /usr/bin/lua5.4 && update-alternatives --set lua-compiler /usr/bin/luac5.4 \
+ && lua -v 2>&1 | grep -q '^Lua 5\.4' \
  && lua -v && busted --version && luacheck --version
 ENV HOME=/tmp
 LABEL org.hermclaw.sandbox="lua"

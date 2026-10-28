@@ -46,6 +46,12 @@ Noch keine.
 
 ## Behobene Bugs
 
+### BUG-375 – Das Lua-Image startet Lua 5.1, das .NET-Image kopiert bei jedem Start 98 Temp-Ordner
+- Phase: Vorbereitung der Sprach-Leiter R2, 2026-10-28 · Komponente: infra (`sandbox-images/lua`, `sandbox-images/dotnet`) · Severity: P2 · blockierend: nein · Status: **behoben im Repository** (Images Version 3; lokal gebaut und geprüft: `lua -v` → 5.4.7, `/tmp` im .NET-Image leer, `dotnet test` offline grün)
+- Reproduktion: `podman run --entrypoint=sh localhost/hermclaw-sandbox-lua:2 -c 'lua -v'` → „Lua 5.1.5“, während `busted` mit `/usr/bin/lua5.4` läuft und die Aufgaben Lua 5.4 verlangen (Ganzzahl-Division `//`, `math.type` fehlen unter `lua`). `ls -A /tmp` im .NET-Image zeigt 98 root-eigene `MSBuildTemp*`-/GUID-Ordner.
+- Ursache: luarocks zieht `lua5.1` nach, dessen Alternative eine höhere Priorität hat als die mit 100 registrierte 5.4; die Template-Builds im .NET-Image legen Temp-Ordner unter `/tmp` ab, und podman kopiert den `/tmp`-Inhalt eines Images in das tmpfs jedes Containers.
+- Fix: `update-alternatives --set` für `lua-interpreter` und `lua-compiler` auf 5.4 mit Prüfung im Build; das .NET-Image beendet den Build-Server und leert `/tmp` zum Schluss.
+
 ### BUG-374 – Präsenzkriterien verlangen eine Definitionsform statt eines Namens
 - Phase: Sprach-Leiter R1-lua mit 0.1.0rc99, 2026-10-28 (Job 127ea8af, bestanden in 59,5 min) · Komponente: planner (`prompt.py`) · Severity: P2 · blockierend: nein · Status: **behoben im Repository** (Planer-Regel; Wirkung wird mit der nächsten Leiter geprüft)
 - Reproduktion: Das Akzeptanzkriterium verlangt `function to_roman` in `roemisch.lua`; der Coder schreibt ein funktionierendes Modul mit `M.to_roman = function(n)`, alle busted-Tests bestehen, der Verifier meldet „0 match(es)“. Im zweiten Versuch schreibt der Coder `local function to_roman(n) -- function to_roman(n)`.

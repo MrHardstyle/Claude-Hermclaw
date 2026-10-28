@@ -1,0 +1,295 @@
+# Language learning ladder, stage R2 (2026-10-28): the same small command line program in every sandbox language –
+# a cash book CSV summary with exact cents, calendar dates, CRLF, ordinal sorting, a month filter and exit codes.
+# Graded by one language-neutral hidden script (hidden/R2-*/check.sh, TAP) against the built program. System runs
+# only; one language at a time and never next to a tournament on the model host:
+#
+#   sudo -u hermclaw hermclaw coder-tournament /var/lib/hermclaw/tournament/languages-r2.yaml \
+#        --model system --task R2-rust --reps 1 --out /var/lib/hermclaw/tournament/ladder-r2-rust
+repository: hermclaw-test
+hidden_root: hidden
+models:
+- system
+defaults:
+  reps: 1
+  limit_minutes: 120
+tasks:
+- id: R2-rust
+  title: Rust – kassenbuch command line program
+  base_branch: acceptance/empty
+  limit_minutes: 120
+  prompt: |-
+    Schreibe in Rust das Kommandozeilenprogramm `kassenbuch` (Cargo-Paket `kassenbuch` im Wurzelverzeichnis, Binärprogramm `kassenbuch`, keine externen Crates).
+    Das Programm liest ein Kassenbuch als CSV-Datei (UTF-8) und gibt die Summen je Kategorie aus.
+    - Aufruf: `kassenbuch DATEI [--monat JJJJ-MM]`.
+    - Die erste Zeile ist genau `datum;kategorie;betrag`. Jede weitere Zeile hat genau drei Felder, getrennt durch
+      `;`: ein gültiges Kalenderdatum `JJJJ-MM-TT` (Schaltjahre beachten), eine Kategorie (Leerzeichen am Rand werden
+      entfernt, danach nicht leer) und einen Betrag in Euro mit Dezimalkomma: optional `-`, Ziffern, optional `,` und
+      genau zwei Ziffern (`12,50`, `-3`, `1234567,89`; kein Tausenderpunkt). Leere Zeilen werden übersprungen,
+      Zeilenenden sind LF oder CRLF, die letzte Zeile darf ohne Zeilenende enden.
+    - Ausgabe auf stdout (UTF-8): eine Zeile `Kategorie: Summe` je Kategorie, sortiert ordinal nach dem Namen
+      (Codepunkt-Reihenfolge, nicht nach Sprache), danach `GESAMT: Summe`. Summen sind centgenau (keine
+      Gleitkomma-Rundungsfehler), mit genau zwei Nachkommastellen, Dezimalkomma und `-` vor negativen Werten, Null
+      als `0,00`, z. B. `Miete: -850,00`.
+    - `--monat JJJJ-MM` zählt nur Buchungen dieses Monats; passt keine, ist die Ausgabe nur `GESAMT: 0,00`. Geprüft
+      werden trotzdem alle Zeilen.
+    - Fehler: Datei fehlt oder ist nicht lesbar → Exit-Code 1 und eine Meldung mit dem Dateipfad. Falsche Kopfzeile
+      oder ungültige Zeile → Exit-Code 2 und eine Meldung mit `Zeile N` (N ist die Zeilennummer in der Datei, die Kopfzeile ist Zeile 1). Falscher Aufruf
+      (keine Datei, unbekannte Option, ungültiger Monat wie `2024-13`) → Exit-Code 3. Fehler gehen nur auf stderr,
+      stdout bleibt dann leer.
+    Sichere das Verhalten mit Tests ab (`cargo test`) und beschreibe Aufruf und Format kurz im `README.md`.
+  expected_changes:
+  - Cargo.toml
+  - Cargo.lock
+  - src/*
+  - tests/*
+  - README.md
+  - .gitignore
+  hidden:
+    dir: R2-rust
+    image: rust
+    command: cargo build --offline --release -q >&2; KB_CMD=./target/release/kassenbuch bash _hidden/check.sh
+    timeout_seconds: 900
+- id: R2-go
+  title: Go – kassenbuch command line program
+  base_branch: acceptance/empty
+  limit_minutes: 120
+  prompt: |-
+    Schreibe in Go das Kommandozeilenprogramm `kassenbuch` (Modul `kassenbuch` in `go.mod` im Wurzelverzeichnis, Paket `main` im Wurzelverzeichnis, nur die Standardbibliothek).
+    Das Programm liest ein Kassenbuch als CSV-Datei (UTF-8) und gibt die Summen je Kategorie aus.
+    - Aufruf: `kassenbuch DATEI [--monat JJJJ-MM]`.
+    - Die erste Zeile ist genau `datum;kategorie;betrag`. Jede weitere Zeile hat genau drei Felder, getrennt durch
+      `;`: ein gültiges Kalenderdatum `JJJJ-MM-TT` (Schaltjahre beachten), eine Kategorie (Leerzeichen am Rand werden
+      entfernt, danach nicht leer) und einen Betrag in Euro mit Dezimalkomma: optional `-`, Ziffern, optional `,` und
+      genau zwei Ziffern (`12,50`, `-3`, `1234567,89`; kein Tausenderpunkt). Leere Zeilen werden übersprungen,
+      Zeilenenden sind LF oder CRLF, die letzte Zeile darf ohne Zeilenende enden.
+    - Ausgabe auf stdout (UTF-8): eine Zeile `Kategorie: Summe` je Kategorie, sortiert ordinal nach dem Namen
+      (Codepunkt-Reihenfolge, nicht nach Sprache), danach `GESAMT: Summe`. Summen sind centgenau (keine
+      Gleitkomma-Rundungsfehler), mit genau zwei Nachkommastellen, Dezimalkomma und `-` vor negativen Werten, Null
+      als `0,00`, z. B. `Miete: -850,00`.
+    - `--monat JJJJ-MM` zählt nur Buchungen dieses Monats; passt keine, ist die Ausgabe nur `GESAMT: 0,00`. Geprüft
+      werden trotzdem alle Zeilen.
+    - Fehler: Datei fehlt oder ist nicht lesbar → Exit-Code 1 und eine Meldung mit dem Dateipfad. Falsche Kopfzeile
+      oder ungültige Zeile → Exit-Code 2 und eine Meldung mit `Zeile N` (N ist die Zeilennummer in der Datei, die Kopfzeile ist Zeile 1). Falscher Aufruf
+      (keine Datei, unbekannte Option, ungültiger Monat wie `2024-13`) → Exit-Code 3. Fehler gehen nur auf stderr,
+      stdout bleibt dann leer.
+    Sichere das Verhalten mit Tests ab (`go test ./...`) und beschreibe Aufruf und Format kurz im `README.md`.
+  expected_changes:
+  - go.mod
+  - '*.go'
+  - README.md
+  - .gitignore
+  hidden:
+    dir: R2-go
+    image: go
+    command: go build -o /tmp/kb . >&2; KB_CMD=/tmp/kb bash _hidden/check.sh
+    timeout_seconds: 900
+- id: R2-cpp
+  title: C++ – kassenbuch command line program with CMake
+  base_branch: acceptance/empty
+  limit_minutes: 120
+  prompt: |-
+    Schreibe in C++20 das Kommandozeilenprogramm `kassenbuch` (CMake-Ziel `kassenbuch`, eine ausführbare Datei; `CMakeLists.txt` im Wurzelverzeichnis, Quellen unter `src/`, nur die Standardbibliothek).
+    Das Programm liest ein Kassenbuch als CSV-Datei (UTF-8) und gibt die Summen je Kategorie aus.
+    - Aufruf: `kassenbuch DATEI [--monat JJJJ-MM]`.
+    - Die erste Zeile ist genau `datum;kategorie;betrag`. Jede weitere Zeile hat genau drei Felder, getrennt durch
+      `;`: ein gültiges Kalenderdatum `JJJJ-MM-TT` (Schaltjahre beachten), eine Kategorie (Leerzeichen am Rand werden
+      entfernt, danach nicht leer) und einen Betrag in Euro mit Dezimalkomma: optional `-`, Ziffern, optional `,` und
+      genau zwei Ziffern (`12,50`, `-3`, `1234567,89`; kein Tausenderpunkt). Leere Zeilen werden übersprungen,
+      Zeilenenden sind LF oder CRLF, die letzte Zeile darf ohne Zeilenende enden.
+    - Ausgabe auf stdout (UTF-8): eine Zeile `Kategorie: Summe` je Kategorie, sortiert ordinal nach dem Namen
+      (Codepunkt-Reihenfolge, nicht nach Sprache), danach `GESAMT: Summe`. Summen sind centgenau (keine
+      Gleitkomma-Rundungsfehler), mit genau zwei Nachkommastellen, Dezimalkomma und `-` vor negativen Werten, Null
+      als `0,00`, z. B. `Miete: -850,00`.
+    - `--monat JJJJ-MM` zählt nur Buchungen dieses Monats; passt keine, ist die Ausgabe nur `GESAMT: 0,00`. Geprüft
+      werden trotzdem alle Zeilen.
+    - Fehler: Datei fehlt oder ist nicht lesbar → Exit-Code 1 und eine Meldung mit dem Dateipfad. Falsche Kopfzeile
+      oder ungültige Zeile → Exit-Code 2 und eine Meldung mit `Zeile N` (N ist die Zeilennummer in der Datei, die Kopfzeile ist Zeile 1). Falscher Aufruf
+      (keine Datei, unbekannte Option, ungültiger Monat wie `2024-13`) → Exit-Code 3. Fehler gehen nur auf stderr,
+      stdout bleibt dann leer.
+    Sichere das Verhalten mit GoogleTest-Tests unter `tests/` ab, die über `ctest` laufen und beschreibe Aufruf und Format kurz im `README.md`.
+  expected_changes:
+  - CMakeLists.txt
+  - include/*
+  - src/*
+  - tests/*
+  - README.md
+  - .gitignore
+  hidden:
+    dir: R2-cpp
+    image: cpp
+    command: cmake -S . -B /tmp/kbb -G Ninja >&2 && cmake --build /tmp/kbb --target kassenbuch >&2; KB_CMD="$(find /tmp/kbb
+      -type f -name kassenbuch -perm -u+x | head -1)" bash _hidden/check.sh
+    timeout_seconds: 900
+- id: R2-java
+  title: Java – kassenbuch command line program
+  base_branch: acceptance/empty
+  limit_minutes: 120
+  prompt: |-
+    Schreibe in Java 21 das Kommandozeilenprogramm `kassenbuch` mit der Hauptklasse `kassenbuch.Main` (Quellen unter `src/main/java/kassenbuch/`, nur das JDK, kein Maven oder Gradle).
+    Das Programm liest ein Kassenbuch als CSV-Datei (UTF-8) und gibt die Summen je Kategorie aus.
+    - Aufruf: `java -cp <Klassen> kassenbuch.Main DATEI [--monat JJJJ-MM]`.
+    - Die erste Zeile ist genau `datum;kategorie;betrag`. Jede weitere Zeile hat genau drei Felder, getrennt durch
+      `;`: ein gültiges Kalenderdatum `JJJJ-MM-TT` (Schaltjahre beachten), eine Kategorie (Leerzeichen am Rand werden
+      entfernt, danach nicht leer) und einen Betrag in Euro mit Dezimalkomma: optional `-`, Ziffern, optional `,` und
+      genau zwei Ziffern (`12,50`, `-3`, `1234567,89`; kein Tausenderpunkt). Leere Zeilen werden übersprungen,
+      Zeilenenden sind LF oder CRLF, die letzte Zeile darf ohne Zeilenende enden.
+    - Ausgabe auf stdout (UTF-8): eine Zeile `Kategorie: Summe` je Kategorie, sortiert ordinal nach dem Namen
+      (Codepunkt-Reihenfolge, nicht nach Sprache), danach `GESAMT: Summe`. Summen sind centgenau (keine
+      Gleitkomma-Rundungsfehler), mit genau zwei Nachkommastellen, Dezimalkomma und `-` vor negativen Werten, Null
+      als `0,00`, z. B. `Miete: -850,00`.
+    - `--monat JJJJ-MM` zählt nur Buchungen dieses Monats; passt keine, ist die Ausgabe nur `GESAMT: 0,00`. Geprüft
+      werden trotzdem alle Zeilen.
+    - Fehler: Datei fehlt oder ist nicht lesbar → Exit-Code 1 und eine Meldung mit dem Dateipfad. Falsche Kopfzeile
+      oder ungültige Zeile → Exit-Code 2 und eine Meldung mit `Zeile N` (N ist die Zeilennummer in der Datei, die Kopfzeile ist Zeile 1). Falscher Aufruf
+      (keine Datei, unbekannte Option, ungültiger Monat wie `2024-13`) → Exit-Code 3. Fehler gehen nur auf stderr,
+      stdout bleibt dann leer.
+    Sichere das Verhalten mit JUnit-5-Tests unter `src/test/java/kassenbuch/` ab und beschreibe Aufruf und Format kurz im `README.md`.
+  expected_changes:
+  - src/*
+  - README.md
+  - .gitignore
+  hidden:
+    dir: R2-java
+    image: java
+    command: find src/main/java -name '*.java' > /tmp/kbs && javac -encoding UTF-8 -d /tmp/kbc @/tmp/kbs >&2; KB_CMD="java
+      -cp /tmp/kbc kassenbuch.Main" bash _hidden/check.sh
+    timeout_seconds: 900
+- id: R2-cs
+  title: C# – kassenbuch console application
+  base_branch: acceptance/empty
+  limit_minutes: 120
+  prompt: |-
+    Schreibe in C# (.NET 8) die Konsolenanwendung `src/Kassenbuch/Kassenbuch.csproj` (Programm `Kassenbuch.dll`, keine zusätzlichen NuGet-Pakete).
+    Das Programm liest ein Kassenbuch als CSV-Datei (UTF-8) und gibt die Summen je Kategorie aus.
+    - Aufruf: `dotnet Kassenbuch.dll DATEI [--monat JJJJ-MM]`.
+    - Die erste Zeile ist genau `datum;kategorie;betrag`. Jede weitere Zeile hat genau drei Felder, getrennt durch
+      `;`: ein gültiges Kalenderdatum `JJJJ-MM-TT` (Schaltjahre beachten), eine Kategorie (Leerzeichen am Rand werden
+      entfernt, danach nicht leer) und einen Betrag in Euro mit Dezimalkomma: optional `-`, Ziffern, optional `,` und
+      genau zwei Ziffern (`12,50`, `-3`, `1234567,89`; kein Tausenderpunkt). Leere Zeilen werden übersprungen,
+      Zeilenenden sind LF oder CRLF, die letzte Zeile darf ohne Zeilenende enden.
+    - Ausgabe auf stdout (UTF-8): eine Zeile `Kategorie: Summe` je Kategorie, sortiert ordinal nach dem Namen
+      (Codepunkt-Reihenfolge, nicht nach Sprache), danach `GESAMT: Summe`. Summen sind centgenau (keine
+      Gleitkomma-Rundungsfehler), mit genau zwei Nachkommastellen, Dezimalkomma und `-` vor negativen Werten, Null
+      als `0,00`, z. B. `Miete: -850,00`.
+    - `--monat JJJJ-MM` zählt nur Buchungen dieses Monats; passt keine, ist die Ausgabe nur `GESAMT: 0,00`. Geprüft
+      werden trotzdem alle Zeilen.
+    - Fehler: Datei fehlt oder ist nicht lesbar → Exit-Code 1 und eine Meldung mit dem Dateipfad. Falsche Kopfzeile
+      oder ungültige Zeile → Exit-Code 2 und eine Meldung mit `Zeile N` (N ist die Zeilennummer in der Datei, die Kopfzeile ist Zeile 1). Falscher Aufruf
+      (keine Datei, unbekannte Option, ungültiger Monat wie `2024-13`) → Exit-Code 3. Fehler gehen nur auf stderr,
+      stdout bleibt dann leer.
+    Sichere das Verhalten mit einem xUnit-Testprojekt unter `tests/` ab (`dotnet test`) und beschreibe Aufruf und Format kurz im `README.md`.
+  expected_changes:
+  - src/*
+  - tests/*
+  - '*.sln'
+  - README.md
+  - .gitignore
+  hidden:
+    dir: R2-cs
+    image: dotnet
+    command: dotnet build src/Kassenbuch/Kassenbuch.csproj -o /tmp/kb -nologo -v q >&2; KB_CMD="dotnet /tmp/kb/Kassenbuch.dll"
+      bash _hidden/check.sh
+    timeout_seconds: 900
+- id: R2-vb
+  title: VB.NET – kassenbuch console application
+  base_branch: acceptance/empty
+  limit_minutes: 120
+  prompt: |-
+    Schreibe in Visual Basic .NET (.NET 8) die Konsolenanwendung `src/Kassenbuch/Kassenbuch.vbproj` (Programm `Kassenbuch.dll`, keine zusätzlichen NuGet-Pakete).
+    Das Programm liest ein Kassenbuch als CSV-Datei (UTF-8) und gibt die Summen je Kategorie aus.
+    - Aufruf: `dotnet Kassenbuch.dll DATEI [--monat JJJJ-MM]`.
+    - Die erste Zeile ist genau `datum;kategorie;betrag`. Jede weitere Zeile hat genau drei Felder, getrennt durch
+      `;`: ein gültiges Kalenderdatum `JJJJ-MM-TT` (Schaltjahre beachten), eine Kategorie (Leerzeichen am Rand werden
+      entfernt, danach nicht leer) und einen Betrag in Euro mit Dezimalkomma: optional `-`, Ziffern, optional `,` und
+      genau zwei Ziffern (`12,50`, `-3`, `1234567,89`; kein Tausenderpunkt). Leere Zeilen werden übersprungen,
+      Zeilenenden sind LF oder CRLF, die letzte Zeile darf ohne Zeilenende enden.
+    - Ausgabe auf stdout (UTF-8): eine Zeile `Kategorie: Summe` je Kategorie, sortiert ordinal nach dem Namen
+      (Codepunkt-Reihenfolge, nicht nach Sprache), danach `GESAMT: Summe`. Summen sind centgenau (keine
+      Gleitkomma-Rundungsfehler), mit genau zwei Nachkommastellen, Dezimalkomma und `-` vor negativen Werten, Null
+      als `0,00`, z. B. `Miete: -850,00`.
+    - `--monat JJJJ-MM` zählt nur Buchungen dieses Monats; passt keine, ist die Ausgabe nur `GESAMT: 0,00`. Geprüft
+      werden trotzdem alle Zeilen.
+    - Fehler: Datei fehlt oder ist nicht lesbar → Exit-Code 1 und eine Meldung mit dem Dateipfad. Falsche Kopfzeile
+      oder ungültige Zeile → Exit-Code 2 und eine Meldung mit `Zeile N` (N ist die Zeilennummer in der Datei, die Kopfzeile ist Zeile 1). Falscher Aufruf
+      (keine Datei, unbekannte Option, ungültiger Monat wie `2024-13`) → Exit-Code 3. Fehler gehen nur auf stderr,
+      stdout bleibt dann leer.
+    Sichere das Verhalten mit einem xUnit-Testprojekt unter `tests/` ab (`dotnet test`) und beschreibe Aufruf und Format kurz im `README.md`.
+  expected_changes:
+  - src/*
+  - tests/*
+  - '*.sln'
+  - README.md
+  - .gitignore
+  hidden:
+    dir: R2-vb
+    image: dotnet
+    command: dotnet build src/Kassenbuch/Kassenbuch.vbproj -o /tmp/kb -nologo -v q >&2; KB_CMD="dotnet /tmp/kb/Kassenbuch.dll"
+      bash _hidden/check.sh
+    timeout_seconds: 900
+- id: R2-lua
+  title: Lua – kassenbuch command line program
+  base_branch: acceptance/empty
+  limit_minutes: 120
+  prompt: |-
+    Schreibe in Lua 5.4 das Kommandozeilenprogramm `kassenbuch.lua` (im Wurzelverzeichnis, keine externen Rocks).
+    Das Programm liest ein Kassenbuch als CSV-Datei (UTF-8) und gibt die Summen je Kategorie aus.
+    - Aufruf: `lua kassenbuch.lua DATEI [--monat JJJJ-MM]`.
+    - Die erste Zeile ist genau `datum;kategorie;betrag`. Jede weitere Zeile hat genau drei Felder, getrennt durch
+      `;`: ein gültiges Kalenderdatum `JJJJ-MM-TT` (Schaltjahre beachten), eine Kategorie (Leerzeichen am Rand werden
+      entfernt, danach nicht leer) und einen Betrag in Euro mit Dezimalkomma: optional `-`, Ziffern, optional `,` und
+      genau zwei Ziffern (`12,50`, `-3`, `1234567,89`; kein Tausenderpunkt). Leere Zeilen werden übersprungen,
+      Zeilenenden sind LF oder CRLF, die letzte Zeile darf ohne Zeilenende enden.
+    - Ausgabe auf stdout (UTF-8): eine Zeile `Kategorie: Summe` je Kategorie, sortiert ordinal nach dem Namen
+      (Codepunkt-Reihenfolge, nicht nach Sprache), danach `GESAMT: Summe`. Summen sind centgenau (keine
+      Gleitkomma-Rundungsfehler), mit genau zwei Nachkommastellen, Dezimalkomma und `-` vor negativen Werten, Null
+      als `0,00`, z. B. `Miete: -850,00`.
+    - `--monat JJJJ-MM` zählt nur Buchungen dieses Monats; passt keine, ist die Ausgabe nur `GESAMT: 0,00`. Geprüft
+      werden trotzdem alle Zeilen.
+    - Fehler: Datei fehlt oder ist nicht lesbar → Exit-Code 1 und eine Meldung mit dem Dateipfad. Falsche Kopfzeile
+      oder ungültige Zeile → Exit-Code 2 und eine Meldung mit `Zeile N` (N ist die Zeilennummer in der Datei, die Kopfzeile ist Zeile 1). Falscher Aufruf
+      (keine Datei, unbekannte Option, ungültiger Monat wie `2024-13`) → Exit-Code 3. Fehler gehen nur auf stderr,
+      stdout bleibt dann leer.
+    Sichere das Verhalten mit busted-Tests unter `spec/` ab und beschreibe Aufruf und Format kurz im `README.md`.
+  expected_changes:
+  - '*.lua'
+  - spec/*
+  - README.md
+  - .busted
+  hidden:
+    dir: R2-lua
+    image: lua
+    command: KB_CMD="lua kassenbuch.lua" bash _hidden/check.sh
+    timeout_seconds: 900
+- id: R2-bash
+  title: Bash – kassenbuch command line tool
+  base_branch: acceptance/empty
+  limit_minutes: 120
+  prompt: |-
+    Schreibe das Bash-Skript `kassenbuch.sh` (im Wurzelverzeichnis, ausführbar).
+    Das Programm liest ein Kassenbuch als CSV-Datei (UTF-8) und gibt die Summen je Kategorie aus.
+    - Aufruf: `./kassenbuch.sh DATEI [--monat JJJJ-MM]`.
+    - Die erste Zeile ist genau `datum;kategorie;betrag`. Jede weitere Zeile hat genau drei Felder, getrennt durch
+      `;`: ein gültiges Kalenderdatum `JJJJ-MM-TT` (Schaltjahre beachten), eine Kategorie (Leerzeichen am Rand werden
+      entfernt, danach nicht leer) und einen Betrag in Euro mit Dezimalkomma: optional `-`, Ziffern, optional `,` und
+      genau zwei Ziffern (`12,50`, `-3`, `1234567,89`; kein Tausenderpunkt). Leere Zeilen werden übersprungen,
+      Zeilenenden sind LF oder CRLF, die letzte Zeile darf ohne Zeilenende enden.
+    - Ausgabe auf stdout (UTF-8): eine Zeile `Kategorie: Summe` je Kategorie, sortiert ordinal nach dem Namen
+      (Codepunkt-Reihenfolge, nicht nach Sprache), danach `GESAMT: Summe`. Summen sind centgenau (keine
+      Gleitkomma-Rundungsfehler), mit genau zwei Nachkommastellen, Dezimalkomma und `-` vor negativen Werten, Null
+      als `0,00`, z. B. `Miete: -850,00`.
+    - `--monat JJJJ-MM` zählt nur Buchungen dieses Monats; passt keine, ist die Ausgabe nur `GESAMT: 0,00`. Geprüft
+      werden trotzdem alle Zeilen.
+    - Fehler: Datei fehlt oder ist nicht lesbar → Exit-Code 1 und eine Meldung mit dem Dateipfad. Falsche Kopfzeile
+      oder ungültige Zeile → Exit-Code 2 und eine Meldung mit `Zeile N` (N ist die Zeilennummer in der Datei, die Kopfzeile ist Zeile 1). Falscher Aufruf
+      (keine Datei, unbekannte Option, ungültiger Monat wie `2024-13`) → Exit-Code 3. Fehler gehen nur auf stderr,
+      stdout bleibt dann leer.
+    Sichere das Verhalten mit bats-Tests unter `tests/` ab und beschreibe Aufruf und Format kurz im `README.md`.
+  expected_changes:
+  - kassenbuch.sh
+  - tests/*
+  - README.md
+  hidden:
+    dir: R2-bash
+    image: generic
+    command: KB_CMD="bash kassenbuch.sh" bash _hidden/check.sh
+    timeout_seconds: 900
