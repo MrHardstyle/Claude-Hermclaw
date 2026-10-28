@@ -115,3 +115,17 @@ async def test_scheduler_wake_controller_uses_the_policy(tmp_path: Path) -> None
         await wake.aclose()
     finally:
         await engine.dispose()
+
+
+def test_the_shipped_lint_commands_cover_rust_and_go_and_skip_without_their_project(tmp_path: Path) -> None:
+    """Rust ladder on rc98 (BUG-371): the verifier had a lint command for Python only. The shipped example (what the
+    deployment installs) and the defaults agree, and a command for a crate or module exits 0 where there is none."""
+    import subprocess
+
+    from hermclaw.core.config import DEFAULT_LINT_COMMANDS
+
+    shipped = load_config(ROOT / "config").policies.verifier.lint_commands
+    assert shipped == DEFAULT_LINT_COMMANDS and {"python", "rust", "go"} <= set(shipped)
+    assert "-D warnings" in shipped["rust"] and "go vet ./..." in shipped["go"]
+    for language in ("rust", "go"):
+        assert subprocess.run(["sh", "-c", shipped[language]], cwd=tmp_path, check=False).returncode == 0, language

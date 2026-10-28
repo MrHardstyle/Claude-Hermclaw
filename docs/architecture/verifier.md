@@ -80,7 +80,7 @@ report = await verifier.verify(...)  # same, report only
    `javac` of every `.java` file into `/tmp` with JUnit on the classpath – skipped beside `pom.xml`/`build.gradle`
    without network; only when changed files are relevant to the toolchain), new imports,
    start (`python -m <package>` once for every changed package with a `__main__.py`, BUG-309), lint
-   (`policies.verifier.lint_commands[language]`, `{files}` = shell-quoted changed files of that language), command
+   (`policies.verifier.lint_commands[language]`, `{files}` = shell-quoted changed files of that language; defaults: ruff `F,E9` for Python, `cargo clippy` with the compiler warnings and clippy's correctness/suspicious groups for Rust, `go vet ./...` for Go – the last two for the crate/module, BUG-371), command
    and test criteria in declaration order. Afterwards `workspace_integrity`: side effects reverted (non-blocking info)
    or not restorable / snapshot impossible (blocking error).
 6. Derived: mirrored `scope`/`security` criteria, `test_evidence` (21.12).

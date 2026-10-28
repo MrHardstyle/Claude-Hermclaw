@@ -46,6 +46,12 @@ Noch keine.
 
 ## Behobene Bugs
 
+### BUG-371 – Rust und Go laufen ohne Lint: ungenutzter Code und falsche Formatstrings fallen niemandem auf
+- Phase: Sprach-Leiter R1-rust mit 0.1.0rc98, 2026-10-28 (Job b386b9c6, bestanden) · Komponente: core (`config.py`: `DEFAULT_LINT_COMMANDS`), config (`policies.example.yaml`) · Severity: P2 · blockierend: nein · Status: **behoben im Repository** (`tests/unit/test_config_wake_retention_policies.py::test_the_shipped_lint_commands_cover_rust_and_go_and_skip_without_their_project`)
+- Reproduktion: Der Verifier meldet bei der Rust-Aufgabe „no changed files in a language with a configured lint command“; `policies.verifier.lint_commands` kennt nur Python. Eine ungenutzte Variable in `src/lib.rs` oder `fmt.Sprintf("%d", s)` mit einem String in Go bestehen jede Prüfung.
+- Ursache: Lint (BUG-215, defektorientiert) wurde nur für Python eingerichtet; die Toolchain-Images für Rust (clippy) und Go (vet) kamen später.
+- Fix: Standard- und ausgelieferte Lint-Befehle für Rust (`cargo clippy` mit den Compiler-Warnungen als Fehler und den clippy-Gruppen correctness/suspicious, ohne Stil-Lints) und Go (`go vet ./...`), jeweils für Crate/Modul und mit Ausstieg 0, wenn Toolchain oder `Cargo.toml`/`go.mod` fehlen. Sie laufen wie bei Python auch nach jedem Schreiben.
+
 ### BUG-370 – Rust, Go und Java finden ihre eigene Toolchain in der Sandbox nicht
 - Phase: Sprach-Leiter R1-rust mit 0.1.0rc96, 2026-10-28 (Job ff7d7763, abgebrochen) · Komponente: worker (`execution/sandbox.py`) · Severity: P0 · blockierend: ja (jede Rust-, Go- und Java-Aufgabe) · Status: **behoben im Repository** (`tests/unit/test_sandbox_command_line.py`)
 - Reproduktion: Der Coder schreibt eine kleine Rust-Bibliothek; `cargo test` endet mit Exit-Code 127, der Verifier meldet „the rust toolchain is not available in the sandbox image“. Der Coder findet `/usr/local/rustup/toolchains/…` und versucht 15 Züge lang, `PATH` selbst zu setzen (Scope-Verletzungen, abgelehnte Erweiterung). `podman run --entrypoint=sh hermclaw-sandbox-rust -lc 'command -v cargo'` findet nichts, mit `-c` `/usr/local/cargo/bin/cargo`.

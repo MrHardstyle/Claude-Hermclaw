@@ -74,6 +74,10 @@ verifier:
   # style rules; skipped where the sandbox image has no ruff (BUG-215)
   lint_commands:
     python: 'command -v ruff >/dev/null 2>&1 || exit 0; ruff check --no-cache --quiet --output-format concise --select F,E9 --ignore F403,F405 --per-file-ignores "__init__.py:F401" {files}'
+    # compiler warnings (unused, dead code) + clippy correctness/suspicious, no style lints; for the crate (BUG-371)
+    rust: 'command -v cargo >/dev/null 2>&1 && [ -f Cargo.toml ] || exit 0; cargo clippy --offline --quiet --all-targets -- -D warnings -A clippy::all -D clippy::correctness -D clippy::suspicious'
+    # go vet for the module (BUG-371)
+    go: 'command -v go >/dev/null 2>&1 && [ -f go.mod ] || exit 0; go vet ./...'
   # a changed Python package with a __main__.py is started once (python -m <package>) in the sandbox: still running
   # after this many seconds (a server) or exited without a traceback passes; an ImportError, NameError,
   # UnboundLocalError … on start fails the step (BUG-309); 0 disables

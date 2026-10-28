@@ -4,6 +4,11 @@ Format: [Keep a Changelog](https://keepachangelog.com/de/1.1.0/), Versionen nach
 
 ## [Unreleased]
 
+## [0.1.0rc99] – Release Candidate (2026-10-28)
+
+### Behoben
+- **Lint für Rust und Go (BUG-371):** `cargo clippy` (Compiler-Warnungen wie ungenutzte Variablen und toter Code, clippy correctness/suspicious, keine Stil-Lints) und `go vet` laufen im Verifier und nach jedem Schreiben, wie `ruff` für Python.
+
 ## [0.1.0rc98] – Release Candidate (2026-10-28)
 
 ### Behoben

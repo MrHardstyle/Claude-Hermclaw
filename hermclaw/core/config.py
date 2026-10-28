@@ -335,6 +335,14 @@ DEFAULT_LINT_COMMANDS: dict[str, str] = {
         "command -v ruff >/dev/null 2>&1 || exit 0; ruff check --no-cache --quiet --output-format concise "
         '--select F,E9 --ignore F403,F405 --per-file-ignores "__init__.py:F401" {files}'
     ),
+    # the compiler's own warnings (unused variables and imports, dead code) and clippy's correctness and suspicious
+    # groups, no style lints; the crate, not the files – the Rust ladder on rc98 had no lint at all (BUG-371)
+    "rust": (
+        "command -v cargo >/dev/null 2>&1 && [ -f Cargo.toml ] || exit 0; cargo clippy --offline --quiet --all-targets -- "
+        "-D warnings -A clippy::all -D clippy::correctness -D clippy::suspicious"
+    ),
+    # go vet: format strings, unreachable code, copied locks … for the module (BUG-371)
+    "go": "command -v go >/dev/null 2>&1 && [ -f go.mod ] || exit 0; go vet ./...",
 }
 
 
