@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from dataclasses import replace
+
 from hermclaw.context_builder import SectionName, char_cost, estimate_tokens
 from hermclaw.context_builder.snippets import Snippet, dedupe_snippets, make_snippet, pack_snippets
 from hermclaw.contracts.acceptance import CommandEvidence, TestEvidence
@@ -202,6 +204,29 @@ def test_pack_clips_and_skips_deterministically() -> None:
     assert [s.label for s, _ in res2.selected] == ["b.py:1-1"] and ("a.py:1-200", "budget") in res2.dropped
     res3 = pack_snippets([small, big], 100_000, min_cost=300, max_items=1)
     assert [s.label for s, _ in res3.selected] == ["a.py:1-200"] and ("b.py:1-1", "limit") in res3.dropped
+
+
+async def test_a_read_merged_into_a_file_head_is_clipped_from_where_it_starts() -> None:
+    """Live G1 on rc96 (BUG-368): a read of collector.py lines 134-388 merged into the target head 1-400 and was clipped
+    from line 1 – the context showed lines 1-329, and the coder read the same lines again and again."""
+
+    async def reader(path: str, start: int, end: int) -> str | None:
+        return None
+
+    lines = numbered(400).splitlines()
+    head = make_snippet("a.py", 1, "\n".join(lines), 2.0, "target")
+    read = make_snippet("a.py", 134, "\n".join(lines[133:388]), 3.5, "read")
+    (merged,) = (await dedupe_snippets([head, read], merge_gap=3, reader=reader, max_lines=400)).snippets
+    assert (merged.start, merged.end, merged.focus, merged.score) == (1, 400, 134, 3.5)
+    res = pack_snippets([merged], char_cost(merged.text) * 3 // 4, min_cost=300, max_items=10)
+    ((shown, block),) = res.selected
+    assert shown.start == 134 and shown.end >= 388 and f"### a.py lines 134-{shown.end} " in block
+    # with room for all of it, the merged snippet is shown whole
+    ((whole, _),) = pack_snippets([merged], 100_000, min_cost=300, max_items=10).selected
+    assert (whole.start, whole.end) == (1, 400)
+    # a head that ranks as high as the read keeps no focus: nothing ranks above the rest
+    (plain,) = (await dedupe_snippets([head, replace(read, score=2.0)], merge_gap=3, reader=reader, max_lines=400)).snippets
+    assert plain.focus is None
 
 
 def test_code_fences_are_never_broken_by_content() -> None:
@@ -458,3 +483,25 @@ async def test_the_latest_read_is_shown_before_the_targets_fill_the_budget() -> 
     tests = section(user_text(built), "RELEVANT TESTS")
     assert "### tests/fixtures/sample.json lines 1-" in tests and '"fixture": "' + "z" * 40 + '" 1\n' in tests
     assert not any(d.item.startswith("tests/fixtures/sample.json") and d.reason == "budget" for d in built.report.dropped)
+
+
+async def test_the_read_of_the_other_file_stays_while_the_coder_compares_two_files() -> None:
+    """Live G1 on rc96 (BUG-368): the coder compared docs/api.md with a range of collector.py and read them in turn –
+    the latest read ranked first, the read before it fell back behind the targets and out of the budget, so each read
+    pushed out the other file and the step stagnated after twelve turns. The latest read of another file ranks first
+    too."""
+    from hermclaw.context_builder.history import TurnRecord
+
+    repo = default_repo()
+    repo.files["app.py"] = numbered(817, "app " + "x" * 50)
+    repo.files["docs/api.md"] = numbered(120, "api " + "w" * 50)
+    builder, _, _ = make_builder(repo=repo, context_tokens=16384, max_output_tokens=4096)
+    history = [
+        TurnRecord(1, "read_file", '{"path": "docs/api.md"}', True, "120 lines"),
+        TurnRecord(2, "read_range", '{"end": 388, "path": "app.py", "start": 134}', True, "255 lines"),
+    ]
+    built = await builder.build(make_input(history=history, turn=3))
+    code = section(user_text(built), "RELEVANT CODE")
+    assert "### docs/api.md lines 1-" in code and "api " + "w" * 50 + " 1\n" in code
+    assert "### app.py lines 134-" in code
+    assert not any(d.item.startswith("docs/api.md") and d.reason == "budget" for d in built.report.dropped)

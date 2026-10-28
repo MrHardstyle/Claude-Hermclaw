@@ -4,6 +4,11 @@ Format: [Keep a Changelog](https://keepachangelog.com/de/1.1.0/), Versionen nach
 
 ## [Unreleased]
 
+## [0.1.0rc97] – Release Candidate (2026-10-28)
+
+### Behoben
+- **Zwei Dateien vergleichen, ohne eine zu verlieren (BUG-368):** Neben dem zuletzt gelesenen Bereich bleibt der letzte Lesezugriff auf eine andere Datei vor den Zieldateien im Kontext; bisher verdrängte jedes Lesen die andere Datei, und der Schritt stagnierte. Ein gelesener Bereich, der mit dem Kopf seiner Datei verschmilzt, wird beim Kürzen ab seinem Anfang gezeigt statt ab Zeile 1.
+
 ## [0.1.0rc96] – Release Candidate (2026-10-28)
 
 ### Behoben

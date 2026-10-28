@@ -157,6 +157,8 @@ class _FileRef:
 
 #: above the targets (2.0) and the code named by a failure (3.0): what the coder asked for in its last read
 LATEST_READ_SCORE = 3.5
+#: right after it: the last read of another file, which the coder compares with the latest read (BUG-368)
+OTHER_READ_SCORE = 3.4
 
 
 # ---------------------------------------------------------------------------------------------- builder
@@ -307,7 +309,12 @@ class ContextBuilder:
                 continue
             start = 1 if ref.line is None else max(1, ref.line - cfg.failure_region_lines)
             (candidates if i < len(refs) else fail_cands).append(make_snippet(ref.path, start, text, 3.0 - i * 0.001, "failure"))
-        latest_read = spans[0] if spans else None
+        recent_reads: dict[tuple[str, int, int], float] = {}
+        if spans:
+            recent_reads[spans[0]] = LATEST_READ_SCORE
+            other = next((sp for sp in spans[1:] if sp[0] != spans[0][0]), None)
+            if other is not None:
+                recent_reads[other] = OTHER_READ_SCORE
         for i, (p, start, end) in enumerate(file_heads):
             text = head_texts[i]
             if not isinstance(text, str) or not text.strip():
@@ -316,8 +323,10 @@ class ContextBuilder:
             origin = "target" if p in targets else "acceptance" if p in acc_tests else "read" if p in read_paths else "dependency"
             # the lines the coder read last rank first – clipped to the budget rather than left out: ranked after the
             # target heads, a 217-line fixture never fitted, the coder never saw what it read and read it again in turn
-            # after turn (live G1 on rc95, BUG-367)
-            score = LATEST_READ_SCORE if (p, start, end) == latest_read else 2.0 - i * 0.001
+            # after turn (live G1 on rc95, BUG-367); the read of another file before it ranks right after it: a coder
+            # comparing docs/api.md with collector.py lost the one file with every read of the other (live G1 on rc96,
+            # BUG-368)
+            score = recent_reads.get((p, start, end), 2.0 - i * 0.001)
             candidates.append(make_snippet(p, start, text, score, origin))
         target_set = set(targets)
         hit_cands, hit_drops = await self._hit_snippets(

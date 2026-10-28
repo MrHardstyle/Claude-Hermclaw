@@ -25,6 +25,8 @@ class Snippet:
     score: float
     origins: tuple[str, ...]
     exact: bool = True
+    #: first line of the part of a merged snippet that ranked above the rest: clipping shows from there (BUG-368)
+    focus: int | None = None
 
     @property
     def key(self) -> tuple[str, int, int]:
@@ -146,14 +148,17 @@ async def _merge_group(group: list[Snippet], reader: Reader, result: DedupResult
     score = max(g.score for g in group)
     origins = _origins(*(g.origins for g in group))
     path = group[0].path
+    best = min(group, key=rank_key)
+    focus = best.start if best.start > lo and all(g.score < best.score for g in group if g is not best) else None
     if all(i in lines for i in range(lo, hi + 1)):
         result.merged += len(group) - 1
         text = "\n".join(lines[i] for i in range(lo, hi + 1))
-        return [Snippet(path, lo, hi, text, score, origins, exact=True)]
+        return [Snippet(path, lo, hi, text, score, origins, exact=True, focus=focus)]
     fresh = await reader(path, lo, hi)
     if fresh is not None and fresh.strip():
         result.merged += len(group) - 1
-        return [replace(make_snippet(path, lo, fresh, score, origins[0]), origins=origins)]
+        merged = make_snippet(path, lo, fresh, score, origins[0])
+        return [replace(merged, origins=origins, focus=focus if merged.exact and merged.end >= best.end else None)]
     # the gap could not be read: keep the parts (still deduplicated by key/content)
     return group
 
@@ -217,8 +222,14 @@ def pack_snippets(snippets: Sequence[Snippet], budget: int, *, min_cost: int, ma
 
 
 def _clip_snippet(s: Snippet, budget: int) -> tuple[Snippet, str] | None:
-    """The head of ``s`` whose rendering fits ``budget``, as (the shown part, its block)."""
+    """The head of ``s`` whose rendering fits ``budget``, as (the shown part, its block). A merged snippet is shown from
+    its focus: clipped from line 1, a read of lines 134-388 merged into the target head 1-400 showed lines 1-329, and
+    the coder read the same lines again and again (live G1 on rc96, BUG-368)."""
     lines = s.text.splitlines()
+    if s.focus is not None and s.focus > s.start:
+        tail = replace(s, start=s.focus, text="\n".join(lines[s.focus - s.start :]), focus=None)
+        block = render_snippet(tail)
+        return (tail, block) if char_cost(block) <= budget else _clip_snippet(tail, budget)
     lo, hi, best = 1, len(lines) - 1, None
     while lo <= hi:  # largest number of head lines whose rendering fits
         mid = (lo + hi) // 2
