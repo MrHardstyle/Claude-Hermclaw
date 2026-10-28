@@ -46,6 +46,18 @@ Noch keine.
 
 ## Behobene Bugs
 
+### BUG-374 – Präsenzkriterien verlangen eine Definitionsform statt eines Namens
+- Phase: Sprach-Leiter R1-lua mit 0.1.0rc99, 2026-10-28 (Job 127ea8af, bestanden in 59,5 min) · Komponente: planner (`prompt.py`) · Severity: P2 · blockierend: nein · Status: **behoben im Repository** (Planer-Regel; Wirkung wird mit der nächsten Leiter geprüft)
+- Reproduktion: Das Akzeptanzkriterium verlangt `function to_roman` in `roemisch.lua`; der Coder schreibt ein funktionierendes Modul mit `M.to_roman = function(n)`, alle busted-Tests bestehen, der Verifier meldet „0 match(es)“. Im zweiten Versuch schreibt der Coder `local function to_roman(n) -- function to_roman(n)`.
+- Ursache: Der Planer formuliert Präsenzmuster als Syntax der Definition; viele Sprachen kennen mehrere gleichwertige Formen, und das Muster prüft die Schreibweise statt der Existenz.
+- Fix: Planer-Regel: Ein Präsenzmuster prüft den Namen (`to_roman\b`, `\bToRoman\(`), keine Definitionsform; Verhalten prüfen die Tests.
+
+### BUG-373 – .NET schreibt bei jedem Build in den Arbeitsordner, Build-Ausgaben landen im Änderungssatz
+- Phase: Sprach-Leitern R1-cs und R1-vb mit 0.1.0rc99, 2026-10-28 (Jobs a16e347b und 2f05398c, versteckte Tests 6/6, beide im Zeitlimit von 60 min abgebrochen) · Komponente: worker (`execution/sandbox.py`), gitops (`engine.py`) · Severity: P1 · blockierend: ja (jede C#-/VB.NET-Aufgabe) · Status: **behoben im Repository** (`tests/unit/test_sandbox_command_line.py`, `tests/integration/test_sandbox_podman.py::test_the_passwd_home_is_tmp_not_the_workspace`, `tests/integration/test_gitops_engine.py::test_create_workspace_isolated_clone_on_job_branch`)
+- Reproduktion: Jeder `dotnet test`/`dotnet build` endet mit COMMAND_SCOPE_VIOLATION für `.dotnet/corefx/Runtime/SharedMemory/.dotnet/shm/global/….server`, obwohl 54 Tests bestehen; der Coder probiert 18 Züge lang `HOME=/tmp`, `DOTNET_CLI_HOME=/tmp` und stagniert. Der Neuplan erlaubt `bin/**` und `obj/**`; danach stehen 133 Build-Dateien im Diff, und der Secret-Scan meldet die sha512-Hashes in `obj/project.assets.json` als „high_entropy“-Secrets. `rm -rf bin obj` ist als destruktiv gesperrt, `.gitignore` liegt außerhalb des Scopes.
+- Ursache: `--userns=keep-id` schreibt `/workspace` als Home des Nutzers nach `/etc/passwd`; die .NET-Laufzeit nimmt ihr Shared-Memory-Verzeichnis ohne `XDG_RUNTIME_DIR` aus dem passwd-Home, nicht aus `$HOME`. Build-Ausgaben waren nur als „generiert“ markiert (aufgeräumt, wenn der Scope sie nicht erlaubt); erlaubt der Scope sie, gehören sie zum Änderungssatz.
+- Fix: Podman bekommt `--passwd-entry` mit Home `/tmp`. Jeder Arbeitsordner bekommt `$GIT_DIR/info/exclude` mit den Build-Ausgaben der Toolchains (`BUILD_OUTPUT_EXCLUDES`); git status, Scope-Auflösung, Änderungssatz und Secret-Scan sehen sie nicht mehr, inkrementelle Builds bleiben erhalten, versionierte Dateien sind nicht betroffen.
+
 ### BUG-372 – `go test` ohne `-v` zählt Pakete als Tests, eine Mindestzahl an Tests scheitert fälschlich
 - Phase: Sprach-Leiter R1-go mit 0.1.0rc98, 2026-10-28 (Job f80ec877, bestanden) · Komponente: tools (`testparse.py`), verifier (`evidence.py`) · Severity: P2 · blockierend: nein (hier kein `min_passed`) · Status: **behoben im Repository** (`tests/unit/test_tools_testparse.py::test_go_without_verbose_output_counts_packages`, `tests/integration/test_verifier_engine.py::test_a_go_package_count_does_not_fail_a_minimum_of_tests`)
 - Reproduktion: Fünf Testfunktionen bestehen, der Verifier meldet „go: passed – 1 passed, 0 failed“. Mit `min_passed: 5` im Akzeptanzkriterium wäre der Schritt gescheitert.

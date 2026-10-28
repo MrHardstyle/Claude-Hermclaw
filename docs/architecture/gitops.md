@@ -176,6 +176,9 @@ event and the state change in **one** transaction.
   (`ops.ALLOWED_LOCAL_CONFIG`). Otherwise `WORKSPACE_TAMPERED` (refused + event); cleanup then removes the
   directory without running git status. `$GIT_DIR/info/attributes` marks `always_forbidden` files `-diff`
   (content never in diffs); the engine rewrites it if it differs, the reader refuses if it is missing lines.
+  `$GIT_DIR/info/exclude` hides the toolchains' build output (`BUILD_OUTPUT_EXCLUDES`: `obj/`, `bin/Debug|Release/`,
+  CMake trees, `*.o`, `*.class`, `target/debug|release/` …) so it never enters the change set, scope globs or the
+  secret scan; tracked files are not affected (BUG-373).
 - Workspaces are cloned with `--no-hardlinks` (no shared object inodes with the mirror/other jobs).
 - Remote URLs: only ssh / scp-like / https / http / file / absolute paths; no `transport::`, no leading `-`, no
   embedded credentials. Branch names validated; paths always after `--` or via NUL pathspec files.

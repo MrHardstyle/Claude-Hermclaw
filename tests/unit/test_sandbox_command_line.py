@@ -74,6 +74,8 @@ def test_podman_argv_has_every_isolation_flag(ws: Path) -> None:
     assert flag(argv, "--tmpfs") == ["/tmp:rw,nosuid,nodev,size=128m,mode=1777", "/dev/shm:rw,nosuid,nodev,noexec,size=64m,mode=1777"]
     assert "--read-only-tmpfs=false" in argv  # no implicit writable /run and /var/tmp
     assert "--userns=keep-id" in argv
+    # the passwd home is /tmp, not the workspace keep-id would write there (BUG-373)
+    assert flag(argv, "--passwd-entry") == ["$USERNAME:*:$UID:$GID:$NAME:/tmp:/bin/sh"]
     assert "--cap-drop=ALL" in argv and "--security-opt=no-new-privileges" in argv
     assert flag(argv, "--pids-limit") == ["256"]
     assert flag(argv, "--memory") == ["2g"] and flag(argv, "--memory-swap") == ["2g"]
@@ -104,6 +106,7 @@ def test_docker_argv_equivalent_flags(ws: Path) -> None:
     assert flag(argv, "--network") == ["bridge"]
     assert flag(argv, "--memory") == flag(argv, "--memory-swap") == ["2g"]
     assert "--userns=keep-id" not in argv and "--http-proxy=false" not in argv  # podman-only flags
+    assert flag(argv, "--passwd-entry") == []
     assert flag(argv, "--shm-size") == ["64m"] and "--log-driver=none" in argv
     assert flag(argv, "--tmpfs") == ["/tmp:rw,nosuid,nodev,size=128m,mode=1777"]
 

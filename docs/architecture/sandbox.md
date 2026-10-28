@@ -117,6 +117,7 @@ podman run --rm --name=hermclaw-<request_id>
   --pids-limit=<n> --memory=<m> --memory-swap=<m> --cpus=<c>                         # 18.4
   --pull=missing
   --userns=keep-id                                  # 18.1: worker uid inside, bind mount writable without root
+  --passwd-entry='$USERNAME:*:$UID:$GID:$NAME:/tmp:/bin/sh'   # passwd home /tmp, not the workspace (BUG-373)
   --read-only-tmpfs=false --tmpfs=/dev/shm:rw,nosuid,nodev,noexec,size=64m,mode=1777
   --http-proxy=false --log-driver=none
   --volume=<workspace>:/workspace:Z --workdir=/workspace

@@ -92,6 +92,13 @@ async def test_workspace_rw_rootfs_ro_tmp_rw(ws: Path) -> None:
     assert not _exists(r.container_name)  # --rm
 
 
+async def test_the_passwd_home_is_tmp_not_the_workspace(ws: Path) -> None:
+    """BUG-373: keep-id made /workspace the user's passwd home; the .NET runtime wrote its shared memory there."""
+    r = await sandbox().run(req('getent passwd "$(id -u)" | cut -d: -f6'), ws)
+    assert r.exit_code == 0, r
+    assert r.stdout.strip() == "/tmp"
+
+
 async def test_only_workspace_tmp_and_shm_writable(ws: Path) -> None:
     r = await sandbox().run(
         req("for d in /tmp /dev/shm /workspace /var/tmp /run /etc /usr /root; do touch $d/.w 2>/dev/null && echo $d=W || echo $d=RO; done"),

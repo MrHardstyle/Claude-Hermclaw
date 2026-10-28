@@ -438,6 +438,10 @@ def _base_rules(kind_capability: dict[str, str], capability_names: Sequence[str]
         "and opens the URL.",
         "Every file, name in backticks and HTTP status code the job names is a requirement: write it into the goal and "
         "an acceptance criterion of the step that delivers it (the runtime rejects a plan that leaves one out).",
+        "A presence pattern checks that a name exists, not how it is written: match the identifier (`to_roman\\b`, "
+        "`\\bToRoman\\(`), not a definition form such as `function to_roman` – most languages define a name in "
+        "several ways (`local function f`, `M.f = function`, `export const f =`), and a coder whose working code "
+        "fails a too literal pattern rewrites it or adds a comment just to match.",
         'When the job points to rules in a repository document ("the rules in the README"), the implementing step '
         "lists that document in repo_hints and its goal says to implement every rule of it; never summarise the rules "
         "in the goal – a summary drops some (type, optional/required), and the coder and the review follow the goal.",

@@ -162,6 +162,13 @@ async def test_create_workspace_isolated_clone_on_job_branch(world):
     assert git("branch", "--list", "main", cwd=path) == ""
     attrs = (path / ".git" / "info" / "attributes").read_text()
     assert "/**/.env -diff" in attrs or "**/.env -diff" in attrs
+    # build output stays out of git status and so out of the change set (BUG-373)
+    for build_file in ("src/App/obj/project.assets.json", "src/App/bin/Debug/net8.0/App.dll", "build/CMakeCache.txt"):
+        (path / build_file).parent.mkdir(parents=True, exist_ok=True)
+        (path / build_file).write_text("generated\n")
+    assert git("status", "--porcelain", "--untracked-files=all", cwd=path) == ""
+    for build_file in ("src/App/obj/project.assets.json", "src/App/bin/Debug/net8.0/App.dll", "build/CMakeCache.txt"):
+        (path / build_file).unlink()
     # DB row + audit row + event
     async with world.sessionmaker() as s:
         row = await s.get(Workspace, ws.id)

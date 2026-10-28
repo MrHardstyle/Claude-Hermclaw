@@ -4,6 +4,12 @@ Format: [Keep a Changelog](https://keepachangelog.com/de/1.1.0/), Versionen nach
 
 ## [Unreleased]
 
+## [0.1.0rc101] – Release Candidate (2026-10-28)
+
+### Behoben
+- **C# und VB.NET ohne falsche Scope-Verletzungen (BUG-373):** Das passwd-Home in der Sandbox ist `/tmp` statt des Arbeitsordners; die .NET-Laufzeit legte dort bei jedem Build `.dotnet/corefx/…` an, und jeder Testlauf galt als Scope-Verletzung. Build-Ausgaben (`obj/`, `bin/Debug|Release/`, CMake-Bäume, `*.o`, `*.class`, `target/debug|release/` …) stehen in jedem Arbeitsordner in `.git/info/exclude` und kommen nie mehr in den Änderungssatz, in Scope-Globs oder in den Secret-Scan.
+- **Präsenzkriterien prüfen Namen, keine Schreibweise (BUG-374):** Der Planer prüft mit einem Präsenzmuster, dass ein Name existiert (`to_roman\b`), nicht eine Definitionsform wie `function to_roman`; in Lua kostete das einen Versuch, und der Coder ergänzte am Ende einen Kommentar, nur damit das Muster passte.
+
 ## [0.1.0rc100] – Release Candidate (2026-10-28)
 
 ### Behoben

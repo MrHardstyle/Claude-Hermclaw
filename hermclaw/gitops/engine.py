@@ -103,6 +103,29 @@ MAX_LISTED_PATHS = 200
 AUTOSTASH_MESSAGE = "hermclaw-autostash"
 # git stash uses magic pathspecs (":/") internally; with GIT_LITERAL_PATHSPECS=1 untracked files are not cleaned
 STASH_ENV = {"GIT_LITERAL_PATHSPECS": "0"}
+# build output a compile or test run writes next to the sources, hidden from git in every workspace
+# ($GIT_DIR/info/exclude) so it never enters the change set, scope globs or the secret scan (R1-cs/R1-vb ladder
+# 2026-10-28: the planner allowed bin/** and obj/**, 133 build files reached the diff and the sha512 hashes in
+# project.assets.json failed the secret check, BUG-373); tracked files are not affected
+BUILD_OUTPUT_EXCLUDES: tuple[str, ...] = (
+    "obj/",
+    "**/bin/Debug/",
+    "**/bin/Release/",
+    "CMakeFiles/",
+    "CMakeCache.txt",
+    "cmake_install.cmake",
+    "CTestTestfile.cmake",
+    "**/Testing/Temporary/",
+    "*.o",
+    "*.class",
+    "**/target/debug/",
+    "**/target/release/",
+    "**/target/classes/",
+    "**/target/test-classes/",
+    "**/target/surefire-reports/",
+    "__pycache__/",
+    "*.pyc",
+)
 
 
 @dataclass(frozen=True, slots=True)
@@ -683,6 +706,7 @@ class GitEngine:
         await self.runner.run(["config", "core.autocrlf", "false"], cwd=path)
         gdir = await ops.git_dir(self.runner, path)
         await asyncio.to_thread(_fs.write_text, gdir / "info" / "attributes", self._attributes_text())
+        await asyncio.to_thread(_fs.write_text, gdir / "info" / "exclude", "\n".join(BUILD_OUTPUT_EXCLUDES) + "\n")
 
     async def get_workspace(self, workspace_id: uuid.UUID) -> WorkspaceInfo:
         info, _repo, _path = await self._load(workspace_id, require_active=False)

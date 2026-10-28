@@ -1162,6 +1162,10 @@ class PodmanSandbox(ContainerSandbox):
         mount = f"{workspace}:{WORKDIR}:Z" if self.selinux_relabel else f"{workspace}:{WORKDIR}"
         return [
             "--userns=keep-id",
+            # keep-id writes the workspace as the user's passwd home; tools that read the home from passwd instead
+            # of $HOME wrote into the workspace (the .NET runtime put .dotnet/corefx/… there on every build, each
+            # run a COMMAND_SCOPE_VIOLATION, BUG-373)
+            f"--passwd-entry=$USERNAME:*:$UID:$GID:$NAME:{BASE_CONTAINER_ENV['HOME']}:/bin/sh",
             "--read-only-tmpfs=false",  # no implicit writable /run, /var/tmp, /dev/shm tmpfs mounts
             f"--tmpfs=/dev/shm:rw,nosuid,nodev,noexec,size={self.shm_size},mode=1777",
             "--http-proxy=false",  # podman forwards the host's proxy variables (with credentials) by default
