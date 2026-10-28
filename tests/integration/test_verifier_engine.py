@@ -1094,6 +1094,30 @@ async def test_the_delivered_web_server_is_loaded_like_its_user_loads_it(session
     assert by_name(off.report)["serve"].status == "skip"
 
 
+async def test_a_header_the_server_never_reads_fails_the_serve_check(sessionmaker: Any, tmp_path: Path) -> None:
+    """Live G1 on rc96 (BUG-369): the page sent X-Collector-Token, the server checked X-Collector-Guard; the probe's
+    POST got 401 like any request without a token, and the check passed. The header is named as a problem."""
+    repo = py_repo(tmp_path)
+    write(
+        repo,
+        "server.py",
+        WEB_SERVER.replace(' api("/api/token");', "")
+        .replace(' api("/api/drop");', "")
+        .replace(
+            '        if self.path != "/api/save":\n            self.send_error(404)',
+            '        if self.path != "/api/save" or self.headers.get("X-App-Guard") != "s":\n            self.send_error(401)',
+        ),
+    )
+    # the script the server serves is built into it; the project's own copy sends the header
+    write(repo, "static/app.js", "requestJson('/api/save', 'POST', {headers: {'X-App-Token': t}});\n")
+    st = step(scope_contract=scope(allowed_new_paths=["server.py", "static/**"], target_paths=["calc.py"]))
+    outcome, *_ = await run(sessionmaker, repo, dataclasses.replace(st, job_level=True), kind="review")
+    check = by_name(outcome.report)["serve:server.py"]
+    assert check.status == "fail" and check.blocking, check.message
+    assert "static/app.js sends the header X-App-Token, but the server code never reads it (it names x-app-guard" in check.message
+    assert ["POST", "/api/save", 401] in check.evidence["probes"], "the probe itself takes the 401 for its missing token"
+
+
 API_MODULE = """\
 import json
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer

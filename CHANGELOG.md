@@ -4,6 +4,11 @@ Format: [Keep a Changelog](https://keepachangelog.com/de/1.1.0/), Versionen nach
 
 ## [Unreleased]
 
+## [0.1.0rc98] – Release Candidate (2026-10-28)
+
+### Behoben
+- **Seite und Server über denselben Header einig (BUG-369):** Die Server-Prüfung meldet einen eigenen Header (`X-…`), den ein Skript der Seite sendet und den der Server-Code nie liest; im G1-Widget scheiterte so jedes Speichern mit 401, während alle Prüfungen bestanden.
+
 ## [0.1.0rc97] – Release Candidate (2026-10-28)
 
 ### Behoben

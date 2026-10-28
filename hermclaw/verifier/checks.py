@@ -5,6 +5,7 @@ policy, secrets, conflict markers, syntax, compile, lint and the implement-step 
 from __future__ import annotations
 
 import asyncio
+import dataclasses
 import os
 import shlex
 from collections import defaultdict
@@ -23,7 +24,7 @@ from hermclaw.verifier.imports import MISSING_EXIT_CODE, interpreter_for, new_un
 from hermclaw.verifier.languages import CODE_LANGUAGES, detect_language, repo_has_tests
 from hermclaw.verifier.report import EXECUTOR_ERROR
 from hermclaw.verifier.secrets import SecretScanner
-from hermclaw.verifier.serve import pages, parse_serve_output, serve_command, serve_driver, servers
+from hermclaw.verifier.serve import header_mismatches, pages, parse_serve_output, serve_command, serve_driver, servers
 from hermclaw.verifier.syntax import (
     IN_PROCESS,
     SANDBOX_TOOLS,
@@ -506,6 +507,7 @@ async def serve_checks(ctx: VerifyContext) -> list[VerificationCheck]:
     hints = [*own, *ctx.step.command_hints]
     interpreter, _ = interpreter_for(hints)
     page_paths = pages(files)
+    headers = await asyncio.to_thread(header_mismatches, ctx.root, files)
     out: list[VerificationCheck] = []
     for server in found:
         name = f"serve:{server.path}"
@@ -529,6 +531,11 @@ async def serve_checks(ctx: VerifyContext) -> list[VerificationCheck]:
             problem = res.problem or (f"exit code {res.exit_code}" if not res.timed_out else "timed out")
             out.append(ctx.check("serve", name, "error", f"serve check could not run: {problem}", evidence))
             continue
+        if result.listening and headers:
+            # a 401 is no missing route for the probe, which has no token: a header the server never reads is (BUG-369)
+            result = dataclasses.replace(
+                result, problems=[*result.problems, *(h[0] for h in headers)], sources=[*result.sources, *([h[1]] for h in headers)]
+            )
         evidence["probes"] = result.probes[:40]
         if result.stderr:
             evidence["stderr"] = ctx.runner.clip(result.stderr, 3000)

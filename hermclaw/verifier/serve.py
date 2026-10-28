@@ -16,7 +16,8 @@ verifier starts it once in the sandbox the way the job's own acceptance commands
   passed as an argument, ``requestJson('/api/test', 'POST')``) – 404, 405 and 501 mean the route does not exist;
   401/403/400 are fine, the probe has no token or body; a route that does not answer within the probe's time waits on
   something the sandbox lacks (BUG-358);
-* checks that every HTML page of the project (outside tests, docs and templates) is served by it.
+* checks that every HTML page of the project (outside tests, docs and templates) is served by it;
+* checks that every custom header (``X-…``) a page script sends is one the server code reads (parse-only, BUG-369).
 
 Programs that do not listen within ``policies.verifier.serve_seconds`` are skipped (they may need settings the sandbox
 does not have). A problem fails a job-level review (the whole change must work together), and a single step that
@@ -312,6 +313,50 @@ def servers(root: Path, files: Iterable[str]) -> list[Server]:
     return scripts or modules[:MAX_SERVERS]
 
 
+#: a custom header a page script sets: ``'X-Token': …`` in a headers object, ``setRequestHeader('X-Token', …)``
+_SENT_HEADER = re.compile(r"""['"`](X-[A-Za-z0-9-]+)['"`]\s*[:,]""")
+#: a custom header the server code names
+_NAMED_HEADER = re.compile(r"""['"](X-[A-Za-z0-9-]+)['"]""", re.I)
+_SCRIPT_SUFFIXES = (".js", ".mjs", ".html", ".htm")
+
+
+def header_mismatches(root: Path, files: Iterable[str]) -> list[tuple[str, str]]:
+    """(problem, script) for every custom header a page script sends that the project's Python code never names – live
+    G1 on rc96 (BUG-369): ``app.js`` sent ``X-Collector-Token``, the collector checked ``X-Collector-Guard``, and every
+    save was refused; the route probe takes a 401 for its own missing token. Checked only when the Python code names
+    custom headers at all; a parameter ``x_token`` (FastAPI ``Header()``) counts as naming ``X-Token``."""
+    files = sorted(f for f in files if not _skipped(f))
+    python: list[str] = []
+    for path in [f for f in files if f.endswith(".py")][:MAX_SCAN_PY]:
+        if (text := _read_small(root / path)) is not None:
+            python.append(text)
+    named = {h.lower() for text in python for h in _NAMED_HEADER.findall(text)}
+    if not named:
+        return []
+    code = "\n".join(python).lower()
+    out: list[tuple[str, str]] = []
+    reported: set[str] = set()
+    for path in [f for f in files if f.lower().endswith(_SCRIPT_SUFFIXES)][:MAX_SCAN_PY]:
+        for header in dict.fromkeys(_SENT_HEADER.findall(_read_small(root / path) or "")):
+            key = header.lower()
+            if key in named or key.replace("-", "_") in code or key in reported:
+                continue
+            reported.add(key)
+            known = ", ".join(sorted(named))
+            problem = f"{path} sends the header {header}, but the server code never reads it (it names {known})"
+            out.append((f"{problem}: every request that needs it is refused", path))
+    return out
+
+
+def _read_small(path: Path) -> str | None:
+    try:
+        if path.stat().st_size > MAX_SCAN_BYTES:
+            return None
+        return path.read_text(encoding="utf-8")
+    except (OSError, UnicodeDecodeError):
+        return None
+
+
 def pages(files: Iterable[str]) -> list[str]:
     """The project's HTML pages a server is expected to serve (tests, docs and templates excluded)."""
     return sorted(f for f in files if f.lower().endswith((".html", ".htm")) and not _skipped(f))[:MAX_PAGES]
@@ -410,6 +455,7 @@ __all__ = [
     "SERVE_SCRIPT",
     "ServeResult",
     "Server",
+    "header_mismatches",
     "pages",
     "parse_serve_output",
     "serve_command",

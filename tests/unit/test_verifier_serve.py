@@ -13,6 +13,7 @@ from hermclaw.verifier.serve import (
     MAX_PAGES,
     SERVE_SCRIPT,
     Server,
+    header_mismatches,
     parse_serve_output,
     serve_command,
     serve_driver,
@@ -96,3 +97,24 @@ def test_the_compressed_driver_runs_the_serve_script(tmp_path: Path) -> None:
     result = parse_serve_output(out.stdout)
     assert result is not None, out.stderr
     assert not result.listening
+
+
+def test_a_header_the_page_sends_and_the_server_never_reads_is_named(tmp_path: Path) -> None:
+    """Live G1 on rc96 (BUG-369): app.js sent X-Collector-Token, the collector checked X-Collector-Guard, and every save
+    ended with 401 – which the route probe takes for its own missing token."""
+    (tmp_path / "static").mkdir()
+    (tmp_path / "tests").mkdir()
+    (tmp_path / "collector.py").write_text('def ok(h, guard):\n    return h.headers.get("X-Collector-Guard") == guard\n')
+    (tmp_path / "static/app.js").write_text(
+        "fetch(p, { headers: { 'Content-Type': 'application/json', 'X-Collector-Token': token() } });\n"
+        "xhr.setRequestHeader('X-Collector-Guard', t);\n"
+    )
+    (tmp_path / "tests/test_app.js").write_text("fetch(p, { headers: { 'X-Test-Only': 1 } });\n")
+    files = ["collector.py", "static/app.js", "tests/test_app.js"]
+    ((problem, where),) = header_mismatches(tmp_path, files)
+    assert where == "static/app.js" and "sends the header X-Collector-Token" in problem and "x-collector-guard" in problem
+    # a FastAPI parameter names its header; a server that names no custom header is not checked
+    (tmp_path / "api.py").write_text('def h(x_collector_token: str = Header()):\n    return {"X-Frame-Options": "DENY"}\n')
+    assert header_mismatches(tmp_path, [*files, "api.py"]) == []
+    (tmp_path / "collector.py").write_text("def ok(h):\n    return True\n")
+    assert header_mismatches(tmp_path, files) == []
