@@ -46,6 +46,12 @@ Noch keine.
 
 ## Behobene Bugs
 
+### BUG-372 – `go test` ohne `-v` zählt Pakete als Tests, eine Mindestzahl an Tests scheitert fälschlich
+- Phase: Sprach-Leiter R1-go mit 0.1.0rc98, 2026-10-28 (Job f80ec877, bestanden) · Komponente: tools (`testparse.py`), verifier (`evidence.py`) · Severity: P2 · blockierend: nein (hier kein `min_passed`) · Status: **behoben im Repository** (`tests/unit/test_tools_testparse.py::test_go_without_verbose_output_counts_packages`, `tests/integration/test_verifier_engine.py::test_a_go_package_count_does_not_fail_a_minimum_of_tests`)
+- Reproduktion: Fünf Testfunktionen bestehen, der Verifier meldet „go: passed – 1 passed, 0 failed“. Mit `min_passed: 5` im Akzeptanzkriterium wäre der Schritt gescheitert.
+- Ursache: Ohne `-v` gibt `go test` nur eine Zeile je Paket aus (`ok  roemisch 0.003s`); der Parser zählt sie ersatzweise als bestandene Tests.
+- Fix: Eine solche Zählung ist als Paketzählung markiert (`TestCounts.packages_only`); eine Mindestzahl an Tests lässt den Check daran nicht scheitern, der Befund nennt `go test -v`. Ein scheiterndes Paket scheitert weiterhin.
+
 ### BUG-371 – Rust und Go laufen ohne Lint: ungenutzter Code und falsche Formatstrings fallen niemandem auf
 - Phase: Sprach-Leiter R1-rust mit 0.1.0rc98, 2026-10-28 (Job b386b9c6, bestanden) · Komponente: core (`config.py`: `DEFAULT_LINT_COMMANDS`), config (`policies.example.yaml`) · Severity: P2 · blockierend: nein · Status: **behoben im Repository** (`tests/unit/test_config_wake_retention_policies.py::test_the_shipped_lint_commands_cover_rust_and_go_and_skip_without_their_project`)
 - Reproduktion: Der Verifier meldet bei der Rust-Aufgabe „no changed files in a language with a configured lint command“; `policies.verifier.lint_commands` kennt nur Python. Eine ungenutzte Variable in `src/lib.rs` oder `fmt.Sprintf("%d", s)` mit einem String in Go bestehen jede Prüfung.

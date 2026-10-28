@@ -283,3 +283,10 @@ def test_the_runners_of_the_new_toolchains_are_recognised(output: str, exit_code
     repeats), Lua (busted) and Bash (bats, TAP) – each detected without naming the framework."""
     assert summarise(output, exit_code).line() == line
     assert parse_counts(output, summarise(output, exit_code).framework) is not None
+
+
+def test_go_without_verbose_output_counts_packages() -> None:
+    """BUG-372: the package lines of go test without -v are no test count."""
+    from hermclaw.tools.testparse import parse_go
+
+    assert parse_go(GO_PKGS).packages_only and not parse_go(GO).packages_only

@@ -4,6 +4,11 @@ Format: [Keep a Changelog](https://keepachangelog.com/de/1.1.0/), Versionen nach
 
 ## [Unreleased]
 
+## [0.1.0rc100] – Release Candidate (2026-10-28)
+
+### Behoben
+- **Go-Pakete sind keine Tests (BUG-372):** `go test` ohne `-v` meldet nur Pakete; eine Mindestzahl an Tests im Akzeptanzkriterium scheitert daran nicht mehr fälschlich.
+
 ## [0.1.0rc99] – Release Candidate (2026-10-28)
 
 ### Behoben

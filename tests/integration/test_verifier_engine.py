@@ -449,6 +449,26 @@ async def test_failing_and_insufficient_tests(sessionmaker: Any, tmp_path: Path)
         assert statuses == ["failed", "failed"]
 
 
+async def test_a_go_package_count_does_not_fail_a_minimum_of_tests(sessionmaker: Any, tmp_path: Path) -> None:
+    """R1-go on rc98 (BUG-372): go test without -v prints one line per package, so five passing tests read as "1
+    passed"; a minimum of tests fails only on a count of tests, a failing package still fails."""
+    repo = py_repo(tmp_path)
+    write(repo, "calc.py", CALC + "# change\n")
+    ok = "printf 'ok  \\troemisch\\t0.003s\\n'"
+    st = step(
+        acceptance=[
+            {"type": "test", "command": ok, "framework": "go", "min_passed": 5},
+            {"type": "test", "command": "printf 'FAIL\\troemisch\\t0.003s\\n'; exit 1", "framework": "go", "min_passed": 5},
+        ],
+        scope_contract=scope(target_paths=["calc.py"]),
+    )
+    outcome, *_ = await run(sessionmaker, repo, st)
+    names = by_name(outcome.report)
+    packages = names["acceptance[0]:test"]
+    assert packages.status == "pass" and "counts packages, not tests" in packages.evidence["note"], packages.message
+    assert names["acceptance[1]:test"].status == "fail"
+
+
 async def test_implement_step_in_repo_with_tests_needs_test_evidence(sessionmaker: Any, tmp_path: Path) -> None:
     repo = py_repo(tmp_path)
     write(repo, "calc.py", CALC + "# change\n")

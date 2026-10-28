@@ -355,7 +355,12 @@ async def run_test_evidence(ctx: VerifyContext, index: int, ev: TestEvidence) ->
             problems.append(f"exit code {out.exit_code}")
         if counts.failed or counts.errors:
             problems.append(f"{counts.failed} failed, {counts.errors} errors")
-        if counts.passed < ev.min_passed:
+        if counts.passed < ev.min_passed and counts.packages_only:
+            # package lines are no test count: a minimum of tests fails only on a count of tests (BUG-372)
+            evidence["note"] = (
+                f"the output counts packages, not tests: at least {ev.min_passed} tests not verified (go test -v counts tests)"
+            )
+        elif counts.passed < ev.min_passed:
             problems.append(f"{counts.passed} passed, at least {ev.min_passed} required")
         executed = counts.total > 0
         if problems:

@@ -64,6 +64,8 @@ class TestCounts:
     failed: int = 0
     errors: int = 0
     skipped: int = 0
+    #: the runner counted packages, not tests (``go test`` without ``-v``): a minimum number of tests is not verified
+    packages_only: bool = False
 
     __test__ = False  # not a pytest class
 
@@ -284,7 +286,8 @@ def parse_go(out: str) -> TestCounts | None:
     build_failures = len(_GO_BUILD_FAIL.findall(out))
     if cases:
         return TestCounts("go", passed=cases.count("PASS"), failed=cases.count("FAIL"), skipped=cases.count("SKIP"), errors=build_failures)
-    return TestCounts("go", passed=len(pkg_ok), failed=len(pkg_fail) - build_failures, errors=build_failures)
+    # without -v go test prints one line per package: five passing tests read as "1 passed" (R1-go on rc98, BUG-372)
+    return TestCounts("go", passed=len(pkg_ok), failed=len(pkg_fail) - build_failures, errors=build_failures, packages_only=True)
 
 
 # ---------------------------------------------------------------------------------------------- cargo test
