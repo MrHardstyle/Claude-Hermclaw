@@ -16,7 +16,8 @@ _TEST_FILE_RE = re.compile(
     (^test_.+\.py$) | (.+_test\.py$) | (^conftest\.py$)
     | (.+\.(test|spec)\.(js|jsx|ts|tsx|mjs|cjs)$)
     | (.+Test\.php$) | (.+_test\.go$) | (.+_spec\.rb$) | (.+_test\.rb$)
-    | (.+Tests?\.(java|kt|cs)$)
+    | (.+Tests?\.(java|kt|cs|vb|fs)$)
+    | (.+\.Tests\.ps1$) | (.+\.bats$) | (.+_(test|spec)\.lua$) | (.+_test\.(rs|c|cc|cpp|cxx)$) | (^test_.+\.(c|cc|cpp|cxx)$)
     """
 )
 

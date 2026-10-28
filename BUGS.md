@@ -46,6 +46,12 @@ Noch keine.
 
 ## Behobene Bugs
 
+### BUG-376 – Testdateien der neuen Sprachen zählen außerhalb von `tests/` nicht als Tests
+- Phase: Auswertung der Sprach-Leitern R1, 2026-10-28 · Komponente: verifier (`languages.py`), repo_intelligence (`paths.py`) · Severity: P2 · blockierend: nein · Status: **behoben im Repository** (`tests/unit/test_verifier_units.py::test_repo_has_tests_and_lock_files`, `tests/unit/test_repo_intelligence_reader.py`)
+- Reproduktion: Ein PowerShell-Projekt mit `Roemisch.Tests.ps1` im Wurzelverzeichnis, ein Lua-Projekt mit `roemisch_spec.lua` neben dem Modul oder ein C++-Projekt mit `src/parse_test.cpp`: der Verifier meldet „the repository has no automated tests“ und verlangt keinen Testnachweis; Repo-Intelligence führt die Dateien nicht als vorhandene Tests.
+- Ursache: Die Dateinamen-Muster kannten nur Python, Go, JS/TS, PHP, Ruby, Java/Kotlin und C#.
+- Fix: Muster für Pester, bats, busted, VB.NET/F#-Testklassen und C/C++/Rust-Testdateien in beiden Erkennungen.
+
 ### BUG-375 – Das Lua-Image startet Lua 5.1, das .NET-Image kopiert bei jedem Start 98 Temp-Ordner
 - Phase: Vorbereitung der Sprach-Leiter R2, 2026-10-28 · Komponente: infra (`sandbox-images/lua`, `sandbox-images/dotnet`) · Severity: P2 · blockierend: nein · Status: **behoben im Repository** (Images Version 3; lokal gebaut und geprüft: `lua -v` → 5.4.7, `/tmp` im .NET-Image leer, `dotnet test` offline grün)
 - Reproduktion: `podman run --entrypoint=sh localhost/hermclaw-sandbox-lua:2 -c 'lua -v'` → „Lua 5.1.5“, während `busted` mit `/usr/bin/lua5.4` läuft und die Aufgaben Lua 5.4 verlangen (Ganzzahl-Division `//`, `math.type` fehlen unter `lua`). `ls -A /tmp` im .NET-Image zeigt 98 root-eigene `MSBuildTemp*`-/GUID-Ordner.

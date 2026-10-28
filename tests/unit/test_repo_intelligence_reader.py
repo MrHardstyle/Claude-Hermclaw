@@ -94,6 +94,10 @@ def test_path_helpers() -> None:
     assert matches_glob("a/node_modules/x.js", "**/node_modules/**") and matches_glob("file[1].txt", "file[0-9].txt") is False
     assert is_test_path("tests/unit/test_x.py") and is_test_path("src/x.test.ts") and is_test_path("pkg/x_test.go")
     assert is_test_path("tests/UserTest.php") and not is_test_path("src/contest.py")
+    assert all(
+        is_test_path(p) for p in ("Roemisch.Tests.ps1", "src/RoemischTests.vb", "check.bats", "roemisch_spec.lua", "src/parse_test.cpp")
+    )
+    assert not is_test_path("src/contest.cpp") and not is_test_path("build.ps1")
 
 
 def test_resolve_in_root_reports_normalised_path(tmp_path: Path) -> None:

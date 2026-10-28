@@ -8,6 +8,7 @@ Format: [Keep a Changelog](https://keepachangelog.com/de/1.1.0/), Versionen nach
 
 ### Behoben
 - **Lua 5.4 und ein leeres `/tmp` in den Sandbox-Images (BUG-375):** Im Lua-Image war `lua` Lua 5.1.5 (luarocks zieht lua5.1 mit höherer Priorität nach), obwohl busted und die Aufgaben Lua 5.4 nutzen; `lua`/`luac` sind jetzt auf 5.4 festgelegt. Das .NET-Image hinterließ 98 MSBuild-/NuGet-Temp-Ordner in `/tmp`, die podman bei jedem Sandbox-Start ins tmpfs kopierte. Die Images bekommen Version 3 (`hermclaw_sandbox_image_version`).
+- **Tests der neuen Sprachen werden erkannt (BUG-376):** Pester (`*.Tests.ps1`), bats, busted (`*_spec.lua`), VB.NET-/F#-Testklassen und C/C++/Rust-Testdateien (`*_test.cpp`, `test_*.c` …) zählen auch außerhalb eines `tests/`-Ordners als Tests: Der Verifier verlangt dann einen Testnachweis, und der Planer sieht sie als vorhandene Tests.
 
 ### Hinzugefügt
 - **Sprach-Leiter Stufe R2** (`tests/live/tournament/languages-r2.yaml`): dasselbe Kommandozeilenprogramm `kassenbuch` (CSV, centgenau, Kalenderdaten, CRLF, ordinale Sortierung, Monatsfilter, Exit-Codes) in allen acht Sandbox-Sprachen, bewertet mit einem sprachneutralen Prüfskript gegen das gebaute Programm; das Skript wird gegen eine Referenzimplementierung getestet.

@@ -109,7 +109,9 @@ _SHEBANG_LANG = {
 
 _TEST_DIRS = frozenset({"test", "tests", "__tests__", "spec", "specs", "testing"})
 _TEST_FILE = re.compile(
-    r"^(?:test_.+\.py|.+_test\.py|.+_test\.go|.+\.(?:test|spec)\.[cm]?[jt]sx?|.+Test\.php|.+_spec\.rb|.+Tests?\.(?:java|kt|cs)"
+    r"^(?:test_.+\.py|.+_test\.py|.+_test\.go|.+\.(?:test|spec)\.[cm]?[jt]sx?|.+Test\.php|.+_spec\.rb|.+Tests?\.(?:java|kt|cs|vb|fs)"
+    # the toolchains of 2026-10-27 outside a tests/ folder: Pester, bats, busted, C/C++/Rust test files (BUG-376)
+    r"|.+\.Tests\.ps1|.+\.bats|.+_(?:test|spec)\.lua|.+_test\.(?:rs|c|cc|cpp|cxx)|test_.+\.(?:c|cc|cpp|cxx)"
     r"|conftest\.py|pytest\.ini|phpunit\.xml(?:\.dist)?|jest\.config\.[cm]?[jt]s|vitest\.config\.[cm]?[jt]s)$"
 )
 

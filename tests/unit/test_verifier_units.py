@@ -92,6 +92,17 @@ def test_repo_has_tests_and_lock_files() -> None:
     assert repo_has_tests(["pkg/a_test.go"]) == ["pkg/a_test.go"]
     assert repo_has_tests(["web/src/App.test.tsx"]) == ["web/src/App.test.tsx"]
     assert repo_has_tests(["src/UserTest.php"]) == ["src/UserTest.php"]
+    # the toolchains of 2026-10-27 outside a tests/ folder (BUG-376)
+    for test_file in (
+        "Roemisch.Tests.ps1",
+        "src/RoemischTests.vb",
+        "check.bats",
+        "roemisch_spec.lua",
+        "src/parse_test.cpp",
+        "test_parse.c",
+    ):
+        assert repo_has_tests(["src/main.c", test_file]) == [test_file], test_file
+    assert repo_has_tests(["src/latest.lua", "src/contest.cpp", "build.ps1"]) == []
     assert len(repo_has_tests([f"tests/t{i}.py" for i in range(20)])) == 5
     assert is_lock_or_data_file("web/package-lock.json") and is_lock_or_data_file("go.sum") and is_lock_or_data_file("logo.svg")
     assert not is_lock_or_data_file("src/app.py")
