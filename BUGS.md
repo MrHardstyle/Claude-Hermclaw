@@ -46,6 +46,12 @@ Noch keine.
 
 ## Behobene Bugs
 
+### BUG-370 – Rust, Go und Java finden ihre eigene Toolchain in der Sandbox nicht
+- Phase: Sprach-Leiter R1-rust mit 0.1.0rc96, 2026-10-28 (Job ff7d7763, abgebrochen) · Komponente: worker (`execution/sandbox.py`) · Severity: P0 · blockierend: ja (jede Rust-, Go- und Java-Aufgabe) · Status: **behoben im Repository** (`tests/unit/test_sandbox_command_line.py`)
+- Reproduktion: Der Coder schreibt eine kleine Rust-Bibliothek; `cargo test` endet mit Exit-Code 127, der Verifier meldet „the rust toolchain is not available in the sandbox image“. Der Coder findet `/usr/local/rustup/toolchains/…` und versucht 15 Züge lang, `PATH` selbst zu setzen (Scope-Verletzungen, abgelehnte Erweiterung). `podman run --entrypoint=sh hermclaw-sandbox-rust -lc 'command -v cargo'` findet nichts, mit `-c` `/usr/local/cargo/bin/cargo`.
+- Ursache: Die Sandbox startete jeden Befehl in einer Login-Shell (`sh -lc`). Debians `/etc/profile` setzt dort `PATH` auf die Standardverzeichnisse zurück und verwirft, was die Images per `ENV PATH` eintragen – `/usr/local/cargo/bin`, `/usr/local/go/bin`, `/opt/java/openjdk/bin`. Die Prüfungen beim Bau der Images liefen ohne Login-Shell und sahen es nicht.
+- Fix: Die Sandbox startet Befehle mit `sh -c`; der `PATH` des Images bleibt erhalten.
+
 ### BUG-369 – Oberfläche und Server sprechen über verschiedene Header, und die Server-Prüfung hält das 401 für in Ordnung
 - Phase: G1 auf Strata IQ3_XXS mit 0.1.0rc96, 2026-10-28 (Job ae4bf2aa, bestanden; beim Nachprüfen des Ergebnisses gefunden) · Komponente: verifier (`serve.py`, `checks.py`) · Severity: P1 · blockierend: nein (Job bestanden, Ergebnis aber unbenutzbar) · Status: **behoben im Repository** (`tests/unit/test_verifier_serve.py::test_a_header_the_page_sends_and_the_server_never_reads_is_named`, `tests/integration/test_verifier_engine.py::test_a_header_the_server_never_reads_fails_the_serve_check`)
 - Reproduktion: `static/app.js` schickt bei jedem Speichern und Verbindungstest den Header `X-Collector-Token`; `collector.py` prüft `X-Collector-Guard`. Jede Änderung endet mit 401. Die Server-Prüfung ruft `POST /config` ohne Token auf, bekommt 401 und wertet das wie vorgesehen als „Probe hat kein Token“ – sie bestand, Review und Abnahme ebenso.

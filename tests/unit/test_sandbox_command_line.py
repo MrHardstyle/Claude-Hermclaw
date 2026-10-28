@@ -84,7 +84,8 @@ def test_podman_argv_has_every_isolation_flag(ws: Path) -> None:
     assert flag(argv, "--pull") == ["missing"]
     # image, then the shell and the command as ONE argv element (no shell interpolation by us)
     assert flag(argv, "--entrypoint") == ["sh"]
-    assert argv[-3:] == ["docker.io/library/python:3.12-slim", "-lc", "pytest -q"]
+    # not a login shell: /etc/profile would reset the PATH the image sets (BUG-370)
+    assert argv[-3:] == ["docker.io/library/python:3.12-slim", "-c", "pytest -q"]
     # options come before the image
     assert argv.index("docker.io/library/python:3.12-slim") > max(i for i, a in enumerate(argv) if a.startswith("--"))
     assert inv.timeout_seconds == 300  # policy default when the request did not set one

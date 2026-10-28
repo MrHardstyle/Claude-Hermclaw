@@ -50,7 +50,7 @@ class ContainerSandbox:                       # shared by PodmanSandbox / Docker
                  redactor: Redactor | None = None, managed_label: str | None = None, extra_images: Iterable[str] = (),
                  allowed_network: str | None = None, pull: Literal["always", "missing", "never", "newer"] = "missing",
                  kill_grace_seconds: float = 10.0, require_rootless: bool = False, selinux_relabel: bool = True,
-                 shell: Sequence[str] = ("sh", "-lc"), shm_size: str = "64m") -> None
+                 shell: Sequence[str] = ("sh", "-c"), shm_size: str = "64m") -> None
     async def run(self, req: CommandRequest, workspace_dir: Path) -> CommandResult
     def build_invocation(self, req: CommandRequest, workspace_dir: Path) -> SandboxInvocation   # validation + argv, no side effects
     async def preflight(self) -> EngineInfo         # startup check: engine reachable, rootless when required
@@ -121,7 +121,7 @@ podman run --rm --name=hermclaw-<request_id>
   --http-proxy=false --log-driver=none
   --volume=<workspace>:/workspace:Z --workdir=/workspace
   --env=HOME=/tmp --env=TMPDIR=/tmp --env=<NAME> ...
-  --entrypoint=sh <image> -lc <command>
+  --entrypoint=sh <image> -c <command>
 ```
 
 * **Images (18.2).** A request can only use one of these: `policy.image`, a value or alias of
@@ -142,9 +142,10 @@ podman run --rm --name=hermclaw-<request_id>
     such a name also looks secret (`DOCKER_AUTH_CONFIG`, `REGISTRY_AUTH_FILE`, …), it is refused.
   * **Nothing from the worker's own environment reaches the container.** `--http-proxy=false` also stops
     podman from injecting the host's proxy variables.
-* **Shell.** The command is a single argv element of `sh -lc`, so the worker never interpolates it into a
-  shell. A login shell sources the image's `/etc/profile`. On Debian images that resets `PATH` to the
-  standard directories. For images that depend on a custom `PATH`, pass `shell=("sh", "-c")`.
+* **Shell.** The command is a single argv element of `sh -c`, so the worker never interpolates it into a
+  shell. It is not a login shell: a login shell sources the image's `/etc/profile`, which on Debian images resets
+  `PATH` to the standard directories and dropped the toolchains the Rust, Go and Java images put on `PATH`
+  (BUG-370).
 * **Docker adapter.** `DockerSandbox` uses the same flags, except that it runs as
   `--user=<workspace uid>:<gid>` (instead of `--userns=keep-id`). It also uses `--shm-size` and
   `--mount=type=bind,...`, and `bridge` networking when network is allowed. Docker has no

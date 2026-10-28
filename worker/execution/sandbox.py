@@ -7,7 +7,7 @@ Every command of a step runs in its own throw-away container::
         --tmpfs /tmp:rw,size=<tmpfs> --userns=keep-id --cap-drop=ALL --security-opt=no-new-privileges
         --pids-limit <n> --memory <m> --memory-swap <m> --cpus <c> -v <workspace>:/workspace:Z -w /workspace
         --read-only-tmpfs=false --tmpfs /dev/shm:rw,size=<shm> --http-proxy=false --log-driver=none
-        --env NAME=value ... --entrypoint=sh <image> -lc <command>
+        --env NAME=value ... --entrypoint=sh <image> -c <command>
 
 * **18.1 rootless Podman** – :class:`PodmanSandbox`; ``--userns=keep-id`` maps the worker's uid into the
   container so the workspace bind mount stays writable without root. ``require_rootless`` (default on in
@@ -82,7 +82,9 @@ CONTAINER_PREFIX = "hermclaw-"
 LABEL_REQUEST = "hermclaw.request"
 LABEL_JOB = "hermclaw.job"
 LABEL_STEP = "hermclaw.step"
-DEFAULT_SHELL: tuple[str, ...] = ("sh", "-lc")
+#: not a login shell: Debian's ``/etc/profile`` resets ``PATH`` and dropped the toolchain directories the images set with
+#: ``ENV PATH`` – ``cargo``, ``go`` and ``java`` were "not found" in their own images (Rust ladder on rc96, BUG-370)
+DEFAULT_SHELL: tuple[str, ...] = ("sh", "-c")
 #: the local runner uses a non-login shell: host ``/etc/profile*`` must not inject variables or secrets
 LOCAL_SHELL: tuple[str, ...] = ("sh", "-c")
 #: podman/docker exit code when the engine itself (not the command) failed
