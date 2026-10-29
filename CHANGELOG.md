@@ -4,6 +4,11 @@ Format: [Keep a Changelog](https://keepachangelog.com/de/1.1.0/), Versionen nach
 
 ## [Unreleased]
 
+## [0.1.0rc104] – Release Candidate (2026-10-29)
+
+### Behoben
+- **Build-Produkte von cargo unter `$CARGO_TARGET_DIR` (BUG-379):** Kommando- und Testkriterien, die `./target/debug/<bin>` oder `target/release/<bin>` aufrufen, zeigen nach der Plan-Normalisierung auf `${CARGO_TARGET_DIR:-target}/…`; das Rust-Image baut nach `/tmp/cargo-target`. In der Bestätigung R2-rust kostete das einen Replan.
+
 ### Hinzugefügt
 - **Sprach-Leiter Stufe R3** (`tests/live/tournament/languages-r3.yaml`): ein kleiner Interpreter `rechner` (Zeilen mit `let`/`print`, feste Grammatik mit Präzedenz, rechtsassoziativer Potenz und unärem Minus, abschneidende 64-Bit-Ganzzahlarithmetik mit exakter Überlaufprüfung, Syntaxfehler mit Zeile und Spalte, erst prüfen, dann ausführen) in allen acht Sandbox-Sprachen; ein sprachneutrales Prüfskript mit 27 Checks, geprüft gegen eine Referenzimplementierung und fünf typische Fehlvarianten.
 

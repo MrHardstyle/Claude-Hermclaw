@@ -46,6 +46,12 @@ Noch keine.
 
 ## Behobene Bugs
 
+### BUG-379 – Abnahmekommandos rufen `./target/debug/<bin>` auf, die Sandbox baut nach `$CARGO_TARGET_DIR`
+- Phase: Bestätigungslauf R2-rust auf rc103, 2026-10-29 · Komponente: planner (`validation.py`, `prompt.py`), Wissen (`toolchains-2.yaml`) · Severity: P2 · blockierend: nein (Replan) · Status: **behoben im Repository** (`tests/unit/test_planner_validation.py::test_cargo_build_products_are_addressed_through_cargo_target_dir`)
+- Reproduktion: Leiter R2-rust (Job 41ebbc89): Das Kommandokriterium lautet `cargo build --offline && ./target/debug/kassenbuch …`. Das Rust-Image setzt `CARGO_TARGET_DIR=/tmp/cargo-target`, ein `./target` entsteht nie. Der Coder fand das Programm nicht, wollte `.cargo/config.toml` anlegen (Scope-Erweiterung abgelehnt) und forderte nach 16 Zügen einen Replan an.
+- Ursache: Der Planer kannte den Ort der Build-Produkte nicht; derselbe Fehler stand vorher in der versteckten Prüfung von R2-rust.
+- Fix: Die Plan-Normalisierung schreibt `target/debug/` und `target/release/` in Kommando- und Testkriterien mechanisch auf `${CARGO_TARGET_DIR:-target}/…` um (außerhalb der Sandbox derselbe Pfad); Planer-Hinweis und Rust-Wissen nennen den Pfad.
+
 ### BUG-378 – `cargo test` schreibt `Cargo.lock`, und jeder Testlauf gilt als Scope-Verletzung
 - Phase: Auswertung der Sprach-Leiter R2, 2026-10-29 · Komponente: scope (`guard.py`) · Severity: P2 · blockierend: nein · Status: **behoben im Repository** (`tests/unit/test_scope_guard.py::test_a_lock_file_beside_a_writable_manifest_may_be_written`)
 - Reproduktion: Leiter R2-rust (Job 1d3b5f93): Der Scope erlaubt `Cargo.toml`, `src/main.rs` und die Tests, aber nicht `Cargo.lock`. Jeder `cargo test --offline` legt `Cargo.lock` an → 5× `COMMAND_SCOPE_VIOLATION` trotz grüner Tests, zwei Scope-Erweiterungen als „semantisch“ abgelehnt, Umwege über `--lockfile-path`, Kopien nach `/tmp` und `rm -f Cargo.lock` (destruktiv abgelehnt).

@@ -55,7 +55,8 @@
   content: |
     The rust image (stable with clippy and rustfmt) has no network: dependencies from crates.io cannot be fetched, so
     `[dependencies]` stays empty. Build artefacts go to /tmp (CARGO_TARGET_DIR), only Cargo.lock appears in the
-    workspace. Use `cargo test --offline`, `cargo clippy --offline` and `cargo fmt --check`. Unit tests sit in a
+    workspace: a built program runs as `${CARGO_TARGET_DIR:-target}/debug/<bin>`, never ./target/debug/<bin>. Use
+    `cargo test --offline`, `cargo clippy --offline` and `cargo fmt --check`. Unit tests sit in a
     `#[cfg(test)] mod tests` of the module; integration tests in tests/*.rs use the crate as a library (src/lib.rs).
     Checked: image hermclaw-sandbox-rust:2.
 

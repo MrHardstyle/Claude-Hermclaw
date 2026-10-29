@@ -1110,3 +1110,26 @@ def test_a_file_the_job_names_without_a_path_goes_into_the_step_that_delivers_it
     code_only = ValidationContext.build(get_config(), FASTAPI.inputs, PlannerSettings(), job_text="Die models und users ändern.")
     plain = PlanContract.model_validate(plan("goal", [_impl("S001", goal="Change things.")]))
     assert carry_job_named_files(plain, code_only) == (plain, []), "code files reach the coder through imports"
+
+
+def test_cargo_build_products_are_addressed_through_cargo_target_dir() -> None:
+    """Live R2-rust on rc103 (BUG-379): the plan ran `cargo build --offline && ./target/debug/kassenbuch`, the rust image
+    builds into $CARGO_TARGET_DIR and the coder asked for a replan instead of running its acceptance."""
+    built = _impl(
+        "S001",
+        acceptance=[
+            {"type": "command", "command": "cargo build --offline && ./target/debug/kb x.csv; test $? -eq 2"},
+            {"type": "test", "command": "cargo test --offline && target/release/kb --help", "framework": "cargo"},
+            {"type": "command", "command": "ls ${CARGO_TARGET_DIR:-target}/debug/kb /tmp/target/debug/x my-target/release/y"},
+        ],
+    )
+    fixed, notes = prune_unreachable_must_change(PlanContract.model_validate(plan("goal", [built])), _ctx())
+    first, second, third = (c.command for c in fixed.steps[0].acceptance)
+    assert first == "cargo build --offline && ${CARGO_TARGET_DIR:-target}/debug/kb x.csv; test $? -eq 2"
+    assert second == "cargo test --offline && ${CARGO_TARGET_DIR:-target}/release/kb --help"
+    assert third == "ls ${CARGO_TARGET_DIR:-target}/debug/kb /tmp/target/debug/x my-target/release/y"
+    assert sum("CARGO_TARGET_DIR" in n for n in notes) == 2
+    again, more = prune_unreachable_must_change(fixed, _ctx())
+    assert again == fixed and not any("CARGO_TARGET_DIR" in n for n in more)
+    kept, _ = prune_unreachable_must_change(PlanContract.model_validate(plan("goal", [built])), _ctx(), preserved=frozenset({"S001"}))
+    assert kept.steps[0].acceptance[0].command.endswith("./target/debug/kb x.csv; test $? -eq 2")

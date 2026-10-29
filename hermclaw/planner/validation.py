@@ -1103,6 +1103,33 @@ def _ground_hints(plan: PlanContract, ctx: ValidationContext, preserved: frozens
     return plan, notes
 
 
+#: a cargo build product addressed below ./target; the sandbox images build into $CARGO_TARGET_DIR (/tmp/cargo-target)
+_CARGO_PRODUCT = re.compile(r"(?<![\w}$/.-])(?:\./)?target/(debug|release)/")
+
+
+def _cargo_target_commands(plan: PlanContract, preserved: frozenset[str]) -> tuple[PlanContract, list[str]]:
+    """Point command and test evidence at the cargo build products where cargo puts them (BUG-379): the rust image
+    sets CARGO_TARGET_DIR, so `cargo build && ./target/debug/app` finds no program. ``${CARGO_TARGET_DIR:-target}``
+    is the same path outside the sandbox. Live R2-rust on rc103: the coder could not run the plan's own acceptance
+    command and asked for a replan to add .cargo/config.toml."""
+    notes: list[str] = []
+    steps: list[PlanStep] = []
+    for step in plan.steps:
+        acceptance: list[AcceptanceCriterion] = []
+        for crit in step.acceptance:
+            command = crit.command if isinstance(crit, CommandEvidence | TestEvidence) else ""
+            moved = _CARGO_PRODUCT.sub(r"${CARGO_TARGET_DIR:-target}/\1/", command)
+            if step.id in preserved or moved == command or len(moved) > 2000:
+                acceptance.append(crit)
+                continue
+            acceptance.append(crit.model_copy(update={"command": moved}))
+            notes.append(f"step {step.id}: cargo build products addressed as ${{CARGO_TARGET_DIR:-target}} in '{moved[:80]}'")
+        steps.append(step.model_copy(update={"acceptance": acceptance}) if acceptance != step.acceptance else step)
+    if not notes:
+        return plan, []
+    return plan.model_copy(update={"steps": steps}), notes
+
+
 def _step_size_errors(step: PlanStep, ctx: ValidationContext) -> list[str]:
     """A step that creates more files than one coder attempt can write fails late on its turn budget. After the
     code-and-tests rule the planner merged a whole widget (collector, frontend, scripts, tests, fixtures, README:
@@ -1162,6 +1189,8 @@ def prune_unreachable_must_change(
     notes += ordered
     plan, unnamed = _drop_unnamed_existing_must_change(plan, ctx, preserved)
     notes += unnamed
+    plan, cargo = _cargo_target_commands(plan, preserved)
+    notes += cargo
     steps: list[PlanStep] = []
     for step in plan.steps:
         paths = _step_paths(step, ctx) if step.id not in preserved and step.kind.value in WORKSPACE_MUTATING_KINDS else []

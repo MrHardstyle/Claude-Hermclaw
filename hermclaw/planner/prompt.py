@@ -497,7 +497,8 @@ def _base_rules(kind_capability: dict[str, str], capability_names: Sequence[str]
         "installs. Prefer the standard library and dependencies the repository already declares.",
         # the toolchain images 2 (2026-10-27): commands that work network-less; Maven, Gradle and NuGet downloads do not
         "Test commands that work in the sandbox: Python `python -m pytest` or `python -m unittest`; Node `node --test` "
-        "or the npm test script; Rust `cargo test --offline`; Go `go test ./...` (command evidence that checks an exit "
+        "or the npm test script; Rust `cargo test --offline` (build products lie below $CARGO_TARGET_DIR, a command runs "
+        "`${CARGO_TARGET_DIR:-target}/debug/<bin>`, never ./target/debug); Go `go test ./...` (command evidence that checks an exit "
         "code runs a built binary, `go build -o /tmp/app . && /tmp/app ...`: `go run` exits 1 for any failure); "
         "C/C++ CMake with GoogleTest, built "
         "outside the repository (`cmake -S . -B /tmp/build && cmake --build /tmp/build && ctest --test-dir /tmp/build "
