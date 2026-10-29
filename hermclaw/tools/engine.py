@@ -62,9 +62,10 @@ from hermclaw.scope.expansion import is_test_path
 from hermclaw.scope.guard import ScopeGuard
 from hermclaw.stagnation.fingerprints import key_error_lines, normalise_text
 from hermclaw.tools import errors as E
-from hermclaw.tools.classify import CommandClassification, CommandClassifier, package_install
+from hermclaw.tools.classify import CommandClassification, CommandClassifier, mask_scratch_removals, package_install
 from hermclaw.tools.context import CallContext, NullCallbacks, ScopeExpansionOutcome, ToolCallbacks, ToolPermissions
 from hermclaw.tools.errors import ToolError, ToolProtocolError
+from hermclaw.tools.executors import LocalSandboxExecutor
 from hermclaw.tools.gitlocal import LocalGit
 from hermclaw.tools.locations import source_locations
 from hermclaw.tools.ops import OpsCall, OpsResult, OpsToolProvider
@@ -95,6 +96,7 @@ from hermclaw.tools.registry import (
     tool_schemas,
     validate_args,
 )
+from hermclaw.tools.remote import RemoteSandboxExecutor
 from hermclaw.tools.shellread import ShellRead, core_command, shell_read
 from hermclaw.tools.snapshot import DEFAULT_GENERATED_GLOBS, AuditOutcome, Decide, WorkspaceTracker
 from hermclaw.tools.testparse import TestSummary, parse_counts, summarise
@@ -277,6 +279,15 @@ def violation_lines(violations: Sequence[Any]) -> list[str]:
     if any(v.operation == "create" for v in violations):
         lines.append(TEMP_FILES_HINT)
     return lines
+
+
+def _isolated(executor: object) -> bool:
+    """Whether commands run in a sandbox with a /tmp of its own: never the unisolated subprocess fallback of dev/tests."""
+    while hasattr(executor, "inner"):
+        executor = executor.inner
+    if isinstance(executor, LocalSandboxExecutor):
+        return executor.mode == "sandbox"
+    return isinstance(executor, RemoteSandboxExecutor)
 
 
 class ToolEngine:
@@ -1606,6 +1617,9 @@ class ToolEngine:
             raise ToolError(
                 E.COMMAND_FORBIDDEN, f"command refused: {cls.reason}", data={"classification": cls.kind, "pattern": cls.pattern}
             )
+        masked = mask_scratch_removals(command) if cls.kind == "destructive" and _isolated(self.executor) else None
+        if masked is not None and self.classifier.classify(masked).kind not in ("forbidden", "destructive"):
+            cls = CommandClassification("mutate", "removes only scratch paths below the sandbox /tmp", cls.pattern)
         if cls.kind == "destructive" and not self.permissions.allow_destructive_commands:
             raise ToolError(
                 E.COMMAND_DESTRUCTIVE,

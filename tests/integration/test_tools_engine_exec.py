@@ -14,15 +14,20 @@ import pytest
 from hermclaw.contracts.events import EventType
 from hermclaw.contracts.scope import ScopeContract
 from hermclaw.contracts.tools import SALVAGE_DECISION, CoderAction, ToolName
+from hermclaw.contracts.worker import CommandResult
+from hermclaw.core.interfaces import ExecutionRequest, WorkspaceHandle
 from hermclaw.core.redaction import REDACTED
 from hermclaw.tools import errors as E
 from hermclaw.tools.context import ScopeExpansionOutcome, ToolPermissions
 from hermclaw.tools.engine import PIPEFAIL, ActionRejected
+from hermclaw.tools.executors import SubprocessExecutor
+from hermclaw.tools.remote import RemoteSandboxExecutor
 from tests.integration.test_tools_support import (
     SM,
     RecordingCallbacks,
     command_runs,
     commit_all,
+    dev_settings,
     events_for,
     fetch_test_runs,
     git,
@@ -230,6 +235,35 @@ async def test_destructive_commands_need_explicit_capability(sessionmaker: SM, r
     assert res.ok and not (repo / "build").exists()
     assert (await command_runs(sessionmaker, h.step.id))[0].classification == "destructive"
     assert (await h.call("run_command", command="sudo true")).error_code == E.COMMAND_FORBIDDEN  # forbidden stays forbidden
+
+
+class _IsolatedRunner(RemoteSandboxExecutor):
+    """Stands in for the sandbox, whose /tmp is a tmpfs of its own; runs the command locally."""
+
+    def __init__(self) -> None:
+        self.local = SubprocessExecutor(policies().sandbox, settings=dev_settings())
+
+    async def run(self, workspace: WorkspaceHandle, req: ExecutionRequest) -> CommandResult:  # type: ignore[override]
+        return await self.local.run(workspace, req)
+
+
+async def test_scratch_removals_below_the_sandbox_tmp_are_not_destructive(sessionmaker: SM, repo: Path, tmp_path: Path) -> None:
+    """Ladders R1/R2: `rm -rf /tmp/build && cmake -B /tmp/build` was refused as destructive in 3 of 7 cases, although
+    /tmp in the sandbox is a tmpfs of its own. Removals in the workspace still need the capability, and without a
+    sandbox (the subprocess fallback shares the host /tmp) nothing changes."""
+    scratch = Path("/tmp") / f"hc-scratch-{tmp_path.name}"
+    scratch.mkdir()
+    (repo / "build").mkdir()
+    h = await make_harness(sessionmaker, repo, executor=_IsolatedRunner())
+    res = await h.call("run_command", command=f"rm -rf {scratch} && mkdir -p {scratch}/out && echo ok")
+    assert res.ok and (scratch / "out").is_dir()
+    assert (await command_runs(sessionmaker, h.step.id))[0].classification == "mutate"
+    assert (await h.call("run_command", command=f"rm -rf {scratch} && rm -rf build")).error_code == E.COMMAND_DESTRUCTIVE
+    assert (await h.call("run_command", command="rm -rf /tmp/../workspace/build")).error_code == E.COMMAND_DESTRUCTIVE
+    plain = await make_harness(sessionmaker, repo)
+    assert (await plain.call("run_command", command=f"rm -rf {scratch}")).error_code == E.COMMAND_DESTRUCTIVE
+    assert (repo / "build").is_dir() and scratch.is_dir()
+    shutil.rmtree(scratch)
 
 
 async def test_command_side_effects_outside_scope_are_reverted(sessionmaker: SM, repo: Path) -> None:

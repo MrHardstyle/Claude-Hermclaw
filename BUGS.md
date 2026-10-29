@@ -46,6 +46,12 @@ Noch keine.
 
 ## Behobene Bugs
 
+### BUG-380 – `rm -rf /tmp/build` in der Sandbox gilt als destruktiv
+- Phase: Auswertung der Sprach-Leitern R1/R2, 2026-10-29 · Komponente: tools (`classify.py`, `engine.py`) · Severity: P3 · blockierend: nein · Status: **behoben im Repository** (`tests/integration/test_tools_engine_exec.py::test_scratch_removals_below_the_sandbox_tmp_are_not_destructive`, `tests/unit/test_tools_units.py::test_scratch_removals_below_tmp_are_masked`)
+- Reproduktion: R2-cpp (Job f959d4e4) `rm -rf /tmp/build && cmake -S . -B /tmp/build …`, R1/R2-rust `rm -rf /tmp/kbcheck2 && mkdir -p …`: 3 von 7 `COMMAND_DESTRUCTIVE` der Leitern trafen nur Scratch-Ordner; jede Ablehnung kostete einen Zug und einen Umweg.
+- Ursache: Das Muster `\brm\s+-[rf]+` kennt keinen Ort; in der Coder-Sandbox ist `/tmp` ein eigenes tmpfs je Container (`--read-only --tmpfs=/tmp`), getrennt vom Arbeitsordner.
+- Fix: Läuft der Coder in einer Sandbox (nicht im unisolierten Subprozess-Fallback), wird ein schlichtes `rm` mit ausschließlich festen Pfaden unter `/tmp/` (keine Anführungszeichen, Variablen, Globs, `..`, relativen Pfade) zur Prüfung durch `true` ersetzt und das Kommando neu klassifiziert; bleibt der Rest unbedenklich, gilt es als `mutate`. Löschen im Arbeitsordner bleibt destruktiv, der Klassifizierer der Ops-Werkzeuge ist unverändert.
+
 ### BUG-379 – Abnahmekommandos rufen `./target/debug/<bin>` auf, die Sandbox baut nach `$CARGO_TARGET_DIR`
 - Phase: Bestätigungslauf R2-rust auf rc103, 2026-10-29 · Komponente: planner (`validation.py`, `prompt.py`), Wissen (`toolchains-2.yaml`) · Severity: P2 · blockierend: nein (Replan) · Status: **behoben im Repository** (`tests/unit/test_planner_validation.py::test_cargo_build_products_are_addressed_through_cargo_target_dir`)
 - Reproduktion: Leiter R2-rust (Job 41ebbc89): Das Kommandokriterium lautet `cargo build --offline && ./target/debug/kassenbuch …`. Das Rust-Image setzt `CARGO_TARGET_DIR=/tmp/cargo-target`, ein `./target` entsteht nie. Der Coder fand das Programm nicht, wollte `.cargo/config.toml` anlegen (Scope-Erweiterung abgelehnt) und forderte nach 16 Zügen einen Replan an.

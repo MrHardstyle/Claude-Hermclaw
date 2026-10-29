@@ -4,6 +4,11 @@ Format: [Keep a Changelog](https://keepachangelog.com/de/1.1.0/), Versionen nach
 
 ## [Unreleased]
 
+## [0.1.0rc105] – Release Candidate (2026-10-29)
+
+### Behoben
+- **Scratch-Ordner unter `/tmp` dürfen in der Sandbox gelöscht werden (BUG-380):** `rm -rf /tmp/build && cmake -B /tmp/build` galt als destruktiv, obwohl `/tmp` in der Coder-Sandbox ein eigenes tmpfs ist. Ein `rm` mit festen Pfaden unter `/tmp/` zählt dort nicht mehr als destruktiv; Löschen im Arbeitsordner, Variablen, Globs und `..` weiterhin schon, und ohne Sandbox ändert sich nichts.
+
 ## [0.1.0rc104] – Release Candidate (2026-10-29)
 
 ### Behoben

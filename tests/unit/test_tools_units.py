@@ -12,7 +12,7 @@ from hermclaw.core.config import CapabilityConfig, CommandPolicy, load_config
 from hermclaw.core.errors import ConfigError
 from hermclaw.core.redaction import Redactor
 from hermclaw.tools import errors as E
-from hermclaw.tools.classify import CommandClassifier, command_segments, git_mutation, package_install
+from hermclaw.tools.classify import CommandClassifier, command_segments, git_mutation, mask_scratch_removals, package_install
 from hermclaw.tools.context import BASE_TOOLS, READ_ONLY_TOOLS, ToolPermissions
 from hermclaw.tools.errors import ToolError, ToolProtocolError
 from hermclaw.tools.output import clip_head, clip_middle, strip_ansi
@@ -161,6 +161,35 @@ def classifier() -> CommandClassifier:
 )
 def test_classification(classifier: CommandClassifier, command: str, kind: str) -> None:
     assert classifier.classify(command).kind == kind
+
+
+@pytest.mark.parametrize(
+    ("command", "masked"),
+    [
+        ("rm -rf /tmp/build && cmake -S . -B /tmp/build", " true && cmake -S . -B /tmp/build"),
+        ("rm -rf /tmp/a /tmp/b.d; ls", " true ; ls"),
+        ("rm -f /tmp/x.txt", " true "),
+        ("rm -rf build", None),
+        ("rm -rf /tmp", None),
+        ("rm -rf /tmp/", None),
+        ("rm -rf /tmp/../workspace", None),
+        ("rm -rf /tmp/x/", None),
+        ("rm -rf /tmp/$D", None),
+        ("rm -rf /tmp/*", None),
+        ("rm -rf '/tmp/x'", None),
+        ("rm -rf /tmp/x ./src", None),
+        ("rm -rf /tmp/x ~", None),
+        ("find /tmp/x -delete", None),
+    ],
+)
+def test_scratch_removals_below_tmp_are_masked(command: str, masked: str | None) -> None:
+    assert mask_scratch_removals(command) == masked
+
+
+def test_masked_scratch_removals_keep_what_else_the_command_does(classifier: CommandClassifier) -> None:
+    for command in ("rm -rf /tmp/x && rm -rf build", "rm -rf /tmp/x; sudo id", "bash -c 'rm -rf /' ; rm -rf /tmp/x"):
+        masked = mask_scratch_removals(command)
+        assert masked is not None and classifier.classify(masked).kind in ("forbidden", "destructive"), command
 
 
 @pytest.mark.parametrize(

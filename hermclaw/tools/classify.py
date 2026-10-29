@@ -189,6 +189,31 @@ def package_install(command: str) -> str | None:
     return None
 
 
+_SEPARATED = re.compile(r"(\|\||&&|[;&|\n])")
+_RM_OPTION = re.compile(r"^(?:-[rRfvdI]+|--(?:recursive|force|verbose|dir))$")
+_SCRATCH_PATH = re.compile(r"^/tmp/[A-Za-z0-9._+/-]+$")
+
+
+def _scratch_removal(segment: str) -> bool:
+    words = segment.split()
+    if len(words) < 2 or words[0] != "rm":
+        return False
+    paths = [w for w in words[1:] if not _RM_OPTION.match(w)]
+    return bool(paths) and all(_SCRATCH_PATH.match(p) and posixpath.normpath(p) == p for p in paths)
+
+
+def mask_scratch_removals(command: str) -> str | None:
+    """``command`` with every plain ``rm`` of fixed paths below /tmp replaced by ``true``, or ``None`` if it has none.
+
+    In the coder sandbox /tmp is a tmpfs of its own (``--read-only --tmpfs=/tmp``), apart from the workspace; removing a
+    scratch build there is no destructive act (``rm -rf /tmp/build && cmake -B /tmp/build``: 3 of 7 refusals in the
+    ladders R1/R2). Only literal paths qualify – no quotes, variables, globs, ``..`` or relative paths – and the masked
+    command is classified again, so whatever else it does still counts."""
+    parts = _SEPARATED.split(command)
+    masked = [" true " if i % 2 == 0 and _scratch_removal(part) else part for i, part in enumerate(parts)]
+    return "".join(masked) if masked != parts else None
+
+
 class CommandClassifier:
     def __init__(self, policy: CommandPolicy) -> None:
         self.forbidden = _compile(policy.forbidden_patterns, "forbidden_patterns")
