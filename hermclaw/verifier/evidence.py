@@ -271,6 +271,21 @@ def diff_evidence(ctx: VerifyContext, index: int, ev: DiffEvidence) -> Verificat
 
 
 # ------------------------------------------------------------------------------------------- command
+_GO_RUN = re.compile(r"(?:^|[;&|(]\s*|\s)go\s+run\s")
+_GO_EXIT_STATUS = re.compile(r"^exit status (\d+)$")
+
+
+def program_exit_code(command: str, exit_code: int | None, stderr: str) -> int | None:
+    """The exit code of the program a ``go run`` started (BUG-377): ``go run`` exits 1 whenever the program fails and
+    reports the program's own code as its last stderr line ``exit status N``; planners check exit codes 2 and 3 with
+    ``go run . args`` (ladder R2-go: a correct program failed three attempts and timed out)."""
+    if exit_code != 1 or not _GO_RUN.search(command):
+        return None
+    lines = [ln.strip() for ln in stderr.splitlines() if ln.strip()]
+    found = _GO_EXIT_STATUS.match(lines[-1]) if lines else None
+    return int(found.group(1)) if found else None
+
+
 async def command_evidence(ctx: VerifyContext, index: int, ev: CommandEvidence) -> VerificationCheck:
     name = label(index, ev)
     network = ev.network and ctx.step.network
@@ -296,8 +311,14 @@ async def command_evidence(ctx: VerifyContext, index: int, ev: CommandEvidence) 
     if out.timed_out:
         return ctx.check("command", name, "fail", f"command timed out after {ev.timeout_seconds}s", evidence)
     problems = []
-    if out.exit_code != ev.expect_exit_code:
-        problems.append(f"exit code {out.exit_code}, expected {ev.expect_exit_code}")
+    exit_code = out.exit_code
+    reported = program_exit_code(ev.command, exit_code, out.stderr)
+    if reported is not None and exit_code != ev.expect_exit_code:
+        exit_code = reported
+        evidence["program_exit_code"] = reported
+        evidence["exit_note"] = f"go run exited 1; the program itself exited {reported} (stderr 'exit status {reported}')"
+    if exit_code != ev.expect_exit_code:
+        problems.append(f"exit code {exit_code}, expected {ev.expect_exit_code}")
     if regex is not None:
         matched = regex.search(out.stdout) is not None
         evidence["stdout_matched"] = matched
@@ -305,7 +326,7 @@ async def command_evidence(ctx: VerifyContext, index: int, ev: CommandEvidence) 
             problems.append(f"stdout does not match {ev.stdout_pattern!r}")
     if problems:
         return ctx.check("command", name, "fail", "; ".join(problems), evidence)
-    return ctx.check("command", name, "pass", f"exit code {out.exit_code} as expected", evidence)
+    return ctx.check("command", name, "pass", f"exit code {exit_code} as expected", evidence)
 
 
 # ------------------------------------------------------------------------------------------- tests

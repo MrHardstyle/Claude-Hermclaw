@@ -47,7 +47,7 @@ tasks:
   hidden:
     dir: R2-rust
     image: rust
-    command: cargo build --offline --release -q >&2; KB_CMD=./target/release/kassenbuch bash _hidden/check.sh
+    command: cargo build --offline --release -q >&2; KB_CMD="${CARGO_TARGET_DIR:-target}/release/kassenbuch" bash _hidden/check.sh
     timeout_seconds: 900
 - id: R2-go
   title: Go – kassenbuch command line program

@@ -10,6 +10,8 @@ Matching semantics (shared by tools, verifier, git staging):
 - ``modify``/``delete`` require a match in ``target_paths``; ``create`` requires a match in
   ``allowed_new_paths`` (or ``target_paths`` when the file is explicitly listed there, also glob-escaped).
 - operations not in ``allowed_operations`` are refused.
+- a lock file next to a manifest the scope lets the step write (``Cargo.lock`` beside ``Cargo.toml``) may be created
+  or modified: the build tool writes it on every build or test run (BUG-378).
 """
 
 from __future__ import annotations
@@ -23,6 +25,32 @@ from hermclaw.core.config import ScopePolicy
 from hermclaw.core.errors import ScopeViolation
 
 Operation = Literal["create", "modify", "delete"]
+
+# lock file -> the manifest its build tool writes it from; ``cargo test`` creates Cargo.lock beside Cargo.toml, and a
+# scope listing only the manifest refused every test run of ladder R2-rust (COMMAND_SCOPE_VIOLATION, BUG-378)
+LOCK_FILE_MANIFESTS: dict[str, tuple[str, ...]] = {
+    "Cargo.lock": ("Cargo.toml",),
+    "go.sum": ("go.mod",),
+    "package-lock.json": ("package.json",),
+    "npm-shrinkwrap.json": ("package.json",),
+    "yarn.lock": ("package.json",),
+    "pnpm-lock.yaml": ("package.json",),
+    "bun.lockb": ("package.json",),
+    "poetry.lock": ("pyproject.toml",),
+    "uv.lock": ("pyproject.toml",),
+    "pdm.lock": ("pyproject.toml",),
+    "Pipfile.lock": ("Pipfile",),
+    "composer.lock": ("composer.json",),
+    "Gemfile.lock": ("Gemfile",),
+    "mix.lock": ("mix.exs",),
+    "flake.lock": ("flake.nix",),
+}
+
+
+def manifests_of_lock_file(path: str) -> list[str]:
+    """The manifests beside ``path`` whose build tool writes it as a lock file (empty for any other file)."""
+    head, _, name = path.rpartition("/")
+    return [f"{head}/{m}" if head else m for m in LOCK_FILE_MANIFESTS.get(name, ())]
 
 
 def _class_regex(pattern: str, start: int) -> tuple[str, int] | None:
@@ -168,11 +196,24 @@ class ScopeGuard:
                 return True, "target path"
             if not self.contract.strict_target_paths and any_match(p, self.contract.allowed_new_paths):
                 return True, "non-strict scope: allowed new path"
+            if operation == "modify" and (manifest := self._writable_manifest(p)):
+                return True, f"lock file of {manifest}"
             return False, f"path '{p}' is not a target path of scope v{self.contract.version}"
         # create
         if any_match(p, self.contract.allowed_new_paths) or any(_lists_file(pat, p) for pat in self.contract.target_paths):
             return True, "allowed new path"
+        if manifest := self._writable_manifest(p):
+            return True, f"lock file of {manifest}"
         return False, f"creating '{p}' is outside allowed_new_paths of scope v{self.contract.version}"
+
+    def _writable_manifest(self, lock_file: str) -> str | None:
+        """The manifest beside ``lock_file`` that this scope lets the step create or modify, if any."""
+        for manifest in manifests_of_lock_file(lock_file):
+            if self.is_forbidden(manifest):
+                continue
+            if any_match(manifest, self.contract.target_paths) or any_match(manifest, self.contract.allowed_new_paths):
+                return manifest
+        return None
 
     def allowed(self, path: str, operation: Operation) -> bool:
         return self.decide(path, operation)[0]

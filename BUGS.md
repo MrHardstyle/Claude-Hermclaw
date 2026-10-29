@@ -46,6 +46,18 @@ Noch keine.
 
 ## Behobene Bugs
 
+### BUG-378 – `cargo test` schreibt `Cargo.lock`, und jeder Testlauf gilt als Scope-Verletzung
+- Phase: Auswertung der Sprach-Leiter R2, 2026-10-29 · Komponente: scope (`guard.py`) · Severity: P2 · blockierend: nein · Status: **behoben im Repository** (`tests/unit/test_scope_guard.py::test_a_lock_file_beside_a_writable_manifest_may_be_written`)
+- Reproduktion: Leiter R2-rust (Job 1d3b5f93): Der Scope erlaubt `Cargo.toml`, `src/main.rs` und die Tests, aber nicht `Cargo.lock`. Jeder `cargo test --offline` legt `Cargo.lock` an → 5× `COMMAND_SCOPE_VIOLATION` trotz grüner Tests, zwei Scope-Erweiterungen als „semantisch“ abgelehnt, Umwege über `--lockfile-path`, Kopien nach `/tmp` und `rm -f Cargo.lock` (destruktiv abgelehnt).
+- Ursache: Der ScopeGuard kannte keine Beziehung zwischen Manifest und Lockdatei; das Build-Werkzeug schreibt die Lockdatei bei jedem Lauf.
+- Fix: Eine Lockdatei neben einem Manifest, das der Scope zu schreiben erlaubt (`Cargo.lock`/`Cargo.toml`, `go.sum`/`go.mod`, `package-lock.json`/`package.json`, `uv.lock`/`pyproject.toml` …), darf angelegt und geändert werden; verbotene Pfade gewinnen weiter, Löschen bleibt ausgeschlossen. Da der Guard für Werkzeuge, Verifier und Git-Staging gilt, landet die Lockdatei regulär im Änderungssatz.
+
+### BUG-377 – Exit-Code-Kriterien mit `go run` sind unerfüllbar
+- Phase: Auswertung der Sprach-Leiter R2, 2026-10-29 · Komponente: verifier (`evidence.py`), planner (`prompt.py`), Wissen (`toolchains-2.yaml`) · Severity: P1 · blockierend: ja (Zeitlimit) · Status: **behoben im Repository** (`tests/unit/test_verifier_units.py::test_go_run_reports_the_exit_code_of_the_program`)
+- Reproduktion: Leiter R2-go (Job b10d3400): Der Planer prüft die Exit-Codes 2 und 3 mit `go run . testdata/invalid.csv`. `go run` endet bei jedem Fehlschlag des Programms mit 1 und meldet den echten Code nur als letzte stderr-Zeile `exit status 2`. Drei Versuche à 37 min scheitern an „exit code 1, expected 2/3“, dann Replan und Zeitlimit (120,5 min) – das Programm bestand die versteckten Prüfungen mit 16/16.
+- Ursache: Der Verifier vergleicht den Exit-Code des Befehls, nicht den des Programms; der Planer kannte die Eigenheit von `go run` nicht.
+- Fix: Endet ein Befehl mit `go run` mit 1 und ist die letzte stderr-Zeile `exit status N`, prüft der Verifier N (Evidenz `program_exit_code`); ein Build-Fehler bleibt 1. Planer-Hinweis: Exit-Code-Kriterien für Go laufen gegen ein gebautes Programm. Wissenseintrag „Go in the sandbox“ ergänzt (nach dem Deploy `hermclaw memory-import`).
+
 ### BUG-376 – Testdateien der neuen Sprachen zählen außerhalb von `tests/` nicht als Tests
 - Phase: Auswertung der Sprach-Leitern R1, 2026-10-28 · Komponente: verifier (`languages.py`), repo_intelligence (`paths.py`) · Severity: P2 · blockierend: nein · Status: **behoben im Repository** (`tests/unit/test_verifier_units.py::test_repo_has_tests_and_lock_files`, `tests/unit/test_repo_intelligence_reader.py`)
 - Reproduktion: Ein PowerShell-Projekt mit `Roemisch.Tests.ps1` im Wurzelverzeichnis, ein Lua-Projekt mit `roemisch_spec.lua` neben dem Modul oder ein C++-Projekt mit `src/parse_test.cpp`: der Verifier meldet „the repository has no automated tests“ und verlangt keinen Testnachweis; Repo-Intelligence führt die Dateien nicht als vorhandene Tests.

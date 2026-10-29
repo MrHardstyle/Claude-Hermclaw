@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import subprocess
 import sys
 from pathlib import Path
@@ -176,6 +177,8 @@ def test_the_shipped_specs_load_and_name_deployed_sandbox_images(name: str) -> N
     spec = load_spec(root / "tests/live/tournament" / name)
     assert {t.hidden.image for t in spec.tasks if t.hidden.image} <= set(toolchains)
     assert len({t.id for t in spec.tasks}) == len(spec.tasks)
+    # the rust image builds into $CARGO_TARGET_DIR (/tmp/cargo-target): R2-rust graded a correct program 0/16
+    assert not [t.id for t in spec.tasks if re.search(r"(?<![}\w])target/(?:release|debug)/", t.hidden.command)]
 
 
 def test_the_r2_hidden_checks_pass_the_reference_and_fail_a_missing_program() -> None:

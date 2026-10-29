@@ -56,6 +56,27 @@ def test_guard_decisions() -> None:
     assert [v["path"] for v in g.audit([("src/app.py", "modify"), ("README.md", "modify")])] == ["README.md"]
 
 
+def test_a_lock_file_beside_a_writable_manifest_may_be_written() -> None:
+    """BUG-378: `cargo test` writes Cargo.lock beside Cargo.toml; a scope listing only the manifest refused every test
+    run of ladder R2-rust as COMMAND_SCOPE_VIOLATION."""
+    g = ScopeGuard(
+        ScopeContract(
+            target_paths=["web/package.json"],
+            allowed_new_paths=["Cargo.toml", "src/main.rs"],
+            forbidden_paths=["svc/go.mod", "svc/go.sum"],
+            allowed_operations=["create", "modify"],
+        ),
+        ScopePolicy(),
+    )
+    assert g.decide("Cargo.lock", "create") == (True, "lock file of Cargo.toml")
+    assert g.allowed("Cargo.lock", "modify")
+    assert g.allowed("web/package-lock.json", "create")
+    assert not g.allowed("web/Cargo.lock", "create")  # no manifest of its own beside it
+    assert not g.allowed("Cargo.lock", "delete")
+    assert not g.allowed("svc/go.sum", "create")  # forbidden wins
+    assert not g.allowed("src/Cargo.lock.bak", "create")
+
+
 # ---------------------------------------------------------------------------------------------- character classes
 @pytest.mark.parametrize(
     "literal,same_length_other",

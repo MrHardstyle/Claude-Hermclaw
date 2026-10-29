@@ -15,7 +15,7 @@ from hermclaw.verifier.checks import lint_command
 from hermclaw.verifier.conflicts import scan_conflicts
 from hermclaw.verifier.context import make_check
 from hermclaw.verifier.engine import _KeyedLocks
-from hermclaw.verifier.evidence import categorise_test, clean_glob, compile_pattern, label
+from hermclaw.verifier.evidence import categorise_test, clean_glob, compile_pattern, label, program_exit_code
 from hermclaw.verifier.languages import detect_language, is_lock_or_data_file, repo_has_tests
 from hermclaw.verifier.report import build_report, executor_failure, run_status
 from hermclaw.verifier.schema import SchemaParseError, parse_document, validate, validate_builtin
@@ -355,3 +355,14 @@ def test_a_container_engine_failure_is_not_a_failing_command() -> None:
     assert not outcome(exit_code=125, stderr="the command itself exited 125").failed_to_run
     assert not outcome(exit_code=None, timed_out=True, error="timeout: command exceeded 60s").failed_to_run
     assert outcome(exit_code=None, error="POLICY: refused").failed_to_run
+
+
+def test_go_run_reports_the_exit_code_of_the_program() -> None:
+    """BUG-377: `go run` exits 1 for every failing program; the program's own code is its last stderr line."""
+    failing = "Zeile 3: ungültiger Betrag\nexit status 2\n"
+    assert program_exit_code("go run . testdata/invalid.csv", 1, failing) == 2
+    assert program_exit_code("cd x && go run ./cmd/kb a.csv", 1, "exit status 3") == 3
+    assert program_exit_code("go run . a.csv", 1, "main.go:3:1: syntax error") is None  # a build failure stays 1
+    assert program_exit_code("go run . a.csv", 0, "exit status 2") is None
+    assert program_exit_code("./kassenbuch a.csv", 1, failing) is None
+    assert program_exit_code("cargo run -- a.csv", 1, failing) is None

@@ -4,6 +4,13 @@ Format: [Keep a Changelog](https://keepachangelog.com/de/1.1.0/), Versionen nach
 
 ## [Unreleased]
 
+## [0.1.0rc103] – Release Candidate (2026-10-29)
+
+### Behoben
+- **Exit-Codes hinter `go run` (BUG-377):** `go run` endet bei jedem Fehlschlag mit 1 und nennt den Code des Programms nur als `exit status N` auf stderr. Der Verifier wertet diesen Code, wenn ein Kriterium mit `go run` einen anderen Exit-Code erwartet; der Planer prüft Exit-Codes in Go gegen ein gebautes Programm. In der Leiter R2-go kostete das drei Versuche und das Zeitlimit, obwohl das Programm richtig war.
+- **Lockdateien neben einem Manifest im Scope (BUG-378):** `Cargo.lock`, `go.sum`, `package-lock.json`, `uv.lock` usw. dürfen angelegt und geändert werden, wenn der Scope das zugehörige Manifest im selben Ordner erlaubt. `cargo test` galt in der Leiter R2-rust sonst bei jedem Lauf als Scope-Verletzung.
+- **Leiter R2-rust bewertet das gebaute Programm:** Das Rust-Image baut nach `$CARGO_TARGET_DIR` (`/tmp/cargo-target`); die versteckte Prüfung suchte unter `./target/release` und gab dem richtigen Programm 0/16. Neu bewertet: 16/16.
+
 ## [0.1.0rc102] – Release Candidate (2026-10-28)
 
 ### Behoben

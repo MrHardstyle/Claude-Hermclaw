@@ -45,6 +45,8 @@
     The go image has no module proxy (GOPROXY=off) and no network: only the standard library is available. `go.mod`
     needs a module name and a `go` line (`go 1.22`). Test with `go test ./...`; `go vet ./...` catches common mistakes,
     `gofmt -l .` lists unformatted files. Caches live in /tmp, nothing is written to the workspace.
+    `go run . args` exits 1 whenever the program fails and prints `exit status N` as the last stderr line; to see
+    the program's own exit code, build first: `go build -o /tmp/app . && /tmp/app args; echo $?`.
     Checked: image hermclaw-sandbox-go:2.
 
 - kind: convention
