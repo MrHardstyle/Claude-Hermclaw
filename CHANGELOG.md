@@ -4,6 +4,9 @@ Format: [Keep a Changelog](https://keepachangelog.com/de/1.1.0/), Versionen nach
 
 ## [Unreleased]
 
+### Hinzugefügt
+- **Sprach-Leiter Stufe R3** (`tests/live/tournament/languages-r3.yaml`): ein kleiner Interpreter `rechner` (Zeilen mit `let`/`print`, feste Grammatik mit Präzedenz, rechtsassoziativer Potenz und unärem Minus, abschneidende 64-Bit-Ganzzahlarithmetik mit exakter Überlaufprüfung, Syntaxfehler mit Zeile und Spalte, erst prüfen, dann ausführen) in allen acht Sandbox-Sprachen; ein sprachneutrales Prüfskript mit 27 Checks, geprüft gegen eine Referenzimplementierung und fünf typische Fehlvarianten.
+
 ## [0.1.0rc103] – Release Candidate (2026-10-29)
 
 ### Behoben

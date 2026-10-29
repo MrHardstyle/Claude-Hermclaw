@@ -1,0 +1,416 @@
+# Language learning ladder, stage R3 (2026-10-29): a small interpreter `rechner` in every sandbox language – a line
+# language with let/print, a fixed expression grammar (precedence, right-associative power, unary minus), truncating
+# 64-bit integer arithmetic with exact overflow checks, syntax errors with line and column, parse before run.
+# Graded by one language-neutral hidden script (hidden/R3-*/check.sh, TAP, checked against r3_reference_rechner.py).
+# System runs only; one language at a time and never next to a tournament on the model host:
+#
+#   sudo -u hermclaw hermclaw coder-tournament /var/lib/hermclaw/tournament/languages-r3.yaml \
+#        --model system --task R3-go --reps 1 --out /var/lib/hermclaw/tournament/ladder-r3
+repository: hermclaw-test
+hidden_root: hidden
+models:
+- system
+defaults:
+  reps: 1
+  limit_minutes: 150
+tasks:
+- id: R3-rust
+  title: Rust – rechner interpreter
+  base_branch: acceptance/empty
+  limit_minutes: 150
+  prompt: |-
+    Schreibe in Rust das Kommandozeilenprogramm `rechner` (Cargo-Paket `rechner` im Wurzelverzeichnis, Binärprogramm `rechner`, keine externen Crates).
+    Das Programm führt ein kleines Rechenprogramm aus einer Textdatei (UTF-8) aus.
+    - Aufruf: `rechner DATEI` (genau ein Argument).
+    - Jede Zeile ist leer, ein Kommentar (erstes Zeichen außer Leerzeichen und Tabs ist `#`), `let NAME = AUSDRUCK` oder
+      `print AUSDRUCK`. Zeilenenden sind LF oder CRLF, die letzte Zeile darf ohne Zeilenende enden. Zwischen den Tokens
+      stehen beliebig viele Leerzeichen und Tabs, auch keine (`print(4)`).
+    - Tokens: ganze Zahlen aus den Ziffern `0-9`, Namen `[a-z_][a-z0-9_]*` (außer `let` und `print`), die Operatoren
+      `+ - * / % ^`, runde Klammern und `=`.
+    - Grammatik der Ausdrücke, genau so:
+          ausdruck := term (("+" | "-") term)*
+          term     := faktor (("*" | "/" | "%") faktor)*
+          faktor   := "-" faktor | potenz
+          potenz   := basis ("^" faktor)?
+          basis    := ZAHL | NAME | "(" ausdruck ")"
+      Also `2^3^2` = 512, `-2^2` = -4, `2*-3` = -6, `10-4-3` = 3.
+    - Alle Werte sind vorzeichenbehaftete 64-Bit-Ganzzahlen. `/` teilt ganzzahlig und schneidet Richtung null ab
+      (`-7/2` = -3), `%` ist der Rest dazu mit dem Vorzeichen des Dividenden (`-7%2` = -1, `7%-2` = 1). `^` potenziert
+      mit einem Exponenten ab 0 (`0^0` = 1); auch bei riesigen Exponenten kommt das Ergebnis sofort, wenn es in 64 Bit
+      passt (`(-1)^9223372036854775807` = -1).
+    - `let` weist einer Variablen einen Wert zu (erneute Zuweisung erlaubt), `print` gibt den Wert als Dezimalzahl in
+      einer eigenen Zeile auf stdout aus.
+    - Das Programm prüft zuerst die Syntax aller Zeilen und führt erst danach die Anweisungen der Reihe nach aus.
+    - Syntaxfehler → Exit-Code 2, nichts auf stdout, auf stderr `Zeile N, Spalte M: <Meldung>`. N ist die Zeilennummer in
+      der Datei ab 1, M die Spalte ab 1 des ersten Zeichens des Tokens, an dem der Fehler erkannt wird (ein Tab zählt als
+      eine Spalte); fehlt am Zeilenende etwas, ist M die Länge der Zeile ohne Zeilenende plus 1. Beginnt eine Zeile nicht
+      mit `let` oder `print`, ist M die Spalte ihres ersten Tokens. Eine Zahl größer als 9223372036854775807 ist ein
+      Syntaxfehler an ihrer Spalte, auch nach einem Minus.
+    - Laufzeitfehler → Exit-Code 3 und auf stderr eine Meldung mit `Zeile N`: Überlauf des 64-Bit-Bereichs bei jeder
+      Operation (auch Negation, Potenz und `-9223372036854775808 / -1`; `-9223372036854775808 % -1` ist dagegen 0),
+      Division oder Rest durch null, unbekannte Variable, negativer Exponent. Die Ausgaben der Zeilen davor bleiben auf
+      stdout, danach wird nichts mehr ausgeführt.
+    - Datei fehlt oder ist nicht lesbar → Exit-Code 1 und eine Meldung mit dem Dateipfad. Falsche Anzahl an Argumenten →
+      Exit-Code 4.
+    Sichere das Verhalten mit Tests ab (`cargo test`) und beschreibe Aufruf und Sprache kurz im `README.md`.
+  expected_changes:
+  - Cargo.toml
+  - Cargo.lock
+  - src/*
+  - tests/*
+  - README.md
+  - .gitignore
+  hidden:
+    dir: R3-rust
+    image: rust
+    command: cargo build --offline --release -q >&2; RC_CMD="${CARGO_TARGET_DIR:-target}/release/rechner" bash _hidden/check.sh
+    timeout_seconds: 900
+- id: R3-go
+  title: Go – rechner interpreter
+  base_branch: acceptance/empty
+  limit_minutes: 150
+  prompt: |-
+    Schreibe in Go das Kommandozeilenprogramm `rechner` (Modul `rechner` in `go.mod` im Wurzelverzeichnis, Paket `main` im Wurzelverzeichnis, nur die Standardbibliothek).
+    Das Programm führt ein kleines Rechenprogramm aus einer Textdatei (UTF-8) aus.
+    - Aufruf: `rechner DATEI` (genau ein Argument).
+    - Jede Zeile ist leer, ein Kommentar (erstes Zeichen außer Leerzeichen und Tabs ist `#`), `let NAME = AUSDRUCK` oder
+      `print AUSDRUCK`. Zeilenenden sind LF oder CRLF, die letzte Zeile darf ohne Zeilenende enden. Zwischen den Tokens
+      stehen beliebig viele Leerzeichen und Tabs, auch keine (`print(4)`).
+    - Tokens: ganze Zahlen aus den Ziffern `0-9`, Namen `[a-z_][a-z0-9_]*` (außer `let` und `print`), die Operatoren
+      `+ - * / % ^`, runde Klammern und `=`.
+    - Grammatik der Ausdrücke, genau so:
+          ausdruck := term (("+" | "-") term)*
+          term     := faktor (("*" | "/" | "%") faktor)*
+          faktor   := "-" faktor | potenz
+          potenz   := basis ("^" faktor)?
+          basis    := ZAHL | NAME | "(" ausdruck ")"
+      Also `2^3^2` = 512, `-2^2` = -4, `2*-3` = -6, `10-4-3` = 3.
+    - Alle Werte sind vorzeichenbehaftete 64-Bit-Ganzzahlen. `/` teilt ganzzahlig und schneidet Richtung null ab
+      (`-7/2` = -3), `%` ist der Rest dazu mit dem Vorzeichen des Dividenden (`-7%2` = -1, `7%-2` = 1). `^` potenziert
+      mit einem Exponenten ab 0 (`0^0` = 1); auch bei riesigen Exponenten kommt das Ergebnis sofort, wenn es in 64 Bit
+      passt (`(-1)^9223372036854775807` = -1).
+    - `let` weist einer Variablen einen Wert zu (erneute Zuweisung erlaubt), `print` gibt den Wert als Dezimalzahl in
+      einer eigenen Zeile auf stdout aus.
+    - Das Programm prüft zuerst die Syntax aller Zeilen und führt erst danach die Anweisungen der Reihe nach aus.
+    - Syntaxfehler → Exit-Code 2, nichts auf stdout, auf stderr `Zeile N, Spalte M: <Meldung>`. N ist die Zeilennummer in
+      der Datei ab 1, M die Spalte ab 1 des ersten Zeichens des Tokens, an dem der Fehler erkannt wird (ein Tab zählt als
+      eine Spalte); fehlt am Zeilenende etwas, ist M die Länge der Zeile ohne Zeilenende plus 1. Beginnt eine Zeile nicht
+      mit `let` oder `print`, ist M die Spalte ihres ersten Tokens. Eine Zahl größer als 9223372036854775807 ist ein
+      Syntaxfehler an ihrer Spalte, auch nach einem Minus.
+    - Laufzeitfehler → Exit-Code 3 und auf stderr eine Meldung mit `Zeile N`: Überlauf des 64-Bit-Bereichs bei jeder
+      Operation (auch Negation, Potenz und `-9223372036854775808 / -1`; `-9223372036854775808 % -1` ist dagegen 0),
+      Division oder Rest durch null, unbekannte Variable, negativer Exponent. Die Ausgaben der Zeilen davor bleiben auf
+      stdout, danach wird nichts mehr ausgeführt.
+    - Datei fehlt oder ist nicht lesbar → Exit-Code 1 und eine Meldung mit dem Dateipfad. Falsche Anzahl an Argumenten →
+      Exit-Code 4.
+    Sichere das Verhalten mit Tests ab (`go test ./...`) und beschreibe Aufruf und Sprache kurz im `README.md`.
+  expected_changes:
+  - go.mod
+  - '*.go'
+  - README.md
+  - .gitignore
+  hidden:
+    dir: R3-go
+    image: go
+    command: go build -o /tmp/rc . >&2; RC_CMD=/tmp/rc bash _hidden/check.sh
+    timeout_seconds: 900
+- id: R3-cpp
+  title: C++ – rechner interpreter with CMake
+  base_branch: acceptance/empty
+  limit_minutes: 150
+  prompt: |-
+    Schreibe in C++20 das Kommandozeilenprogramm `rechner` (CMake-Ziel `rechner`, eine ausführbare Datei; `CMakeLists.txt` im Wurzelverzeichnis, Quellen unter `src/`, nur die Standardbibliothek).
+    Das Programm führt ein kleines Rechenprogramm aus einer Textdatei (UTF-8) aus.
+    - Aufruf: `rechner DATEI` (genau ein Argument).
+    - Jede Zeile ist leer, ein Kommentar (erstes Zeichen außer Leerzeichen und Tabs ist `#`), `let NAME = AUSDRUCK` oder
+      `print AUSDRUCK`. Zeilenenden sind LF oder CRLF, die letzte Zeile darf ohne Zeilenende enden. Zwischen den Tokens
+      stehen beliebig viele Leerzeichen und Tabs, auch keine (`print(4)`).
+    - Tokens: ganze Zahlen aus den Ziffern `0-9`, Namen `[a-z_][a-z0-9_]*` (außer `let` und `print`), die Operatoren
+      `+ - * / % ^`, runde Klammern und `=`.
+    - Grammatik der Ausdrücke, genau so:
+          ausdruck := term (("+" | "-") term)*
+          term     := faktor (("*" | "/" | "%") faktor)*
+          faktor   := "-" faktor | potenz
+          potenz   := basis ("^" faktor)?
+          basis    := ZAHL | NAME | "(" ausdruck ")"
+      Also `2^3^2` = 512, `-2^2` = -4, `2*-3` = -6, `10-4-3` = 3.
+    - Alle Werte sind vorzeichenbehaftete 64-Bit-Ganzzahlen. `/` teilt ganzzahlig und schneidet Richtung null ab
+      (`-7/2` = -3), `%` ist der Rest dazu mit dem Vorzeichen des Dividenden (`-7%2` = -1, `7%-2` = 1). `^` potenziert
+      mit einem Exponenten ab 0 (`0^0` = 1); auch bei riesigen Exponenten kommt das Ergebnis sofort, wenn es in 64 Bit
+      passt (`(-1)^9223372036854775807` = -1).
+    - `let` weist einer Variablen einen Wert zu (erneute Zuweisung erlaubt), `print` gibt den Wert als Dezimalzahl in
+      einer eigenen Zeile auf stdout aus.
+    - Das Programm prüft zuerst die Syntax aller Zeilen und führt erst danach die Anweisungen der Reihe nach aus.
+    - Syntaxfehler → Exit-Code 2, nichts auf stdout, auf stderr `Zeile N, Spalte M: <Meldung>`. N ist die Zeilennummer in
+      der Datei ab 1, M die Spalte ab 1 des ersten Zeichens des Tokens, an dem der Fehler erkannt wird (ein Tab zählt als
+      eine Spalte); fehlt am Zeilenende etwas, ist M die Länge der Zeile ohne Zeilenende plus 1. Beginnt eine Zeile nicht
+      mit `let` oder `print`, ist M die Spalte ihres ersten Tokens. Eine Zahl größer als 9223372036854775807 ist ein
+      Syntaxfehler an ihrer Spalte, auch nach einem Minus.
+    - Laufzeitfehler → Exit-Code 3 und auf stderr eine Meldung mit `Zeile N`: Überlauf des 64-Bit-Bereichs bei jeder
+      Operation (auch Negation, Potenz und `-9223372036854775808 / -1`; `-9223372036854775808 % -1` ist dagegen 0),
+      Division oder Rest durch null, unbekannte Variable, negativer Exponent. Die Ausgaben der Zeilen davor bleiben auf
+      stdout, danach wird nichts mehr ausgeführt.
+    - Datei fehlt oder ist nicht lesbar → Exit-Code 1 und eine Meldung mit dem Dateipfad. Falsche Anzahl an Argumenten →
+      Exit-Code 4.
+    Sichere das Verhalten mit GoogleTest-Tests unter `tests/` ab, die über `ctest` laufen, und beschreibe Aufruf und Sprache kurz im `README.md`.
+  expected_changes:
+  - CMakeLists.txt
+  - include/*
+  - src/*
+  - tests/*
+  - README.md
+  - .gitignore
+  hidden:
+    dir: R3-cpp
+    image: cpp
+    command: cmake -S . -B /tmp/rcb -G Ninja >&2 && cmake --build /tmp/rcb --target rechner >&2; RC_CMD="$(find /tmp/rcb -type
+      f -name rechner -perm -u+x | head -1)" bash _hidden/check.sh
+    timeout_seconds: 900
+- id: R3-java
+  title: Java – rechner interpreter
+  base_branch: acceptance/empty
+  limit_minutes: 150
+  prompt: |-
+    Schreibe in Java 21 das Kommandozeilenprogramm `rechner` mit der Hauptklasse `rechner.Main` (Quellen unter `src/main/java/rechner/`, nur das JDK, kein Maven oder Gradle).
+    Das Programm führt ein kleines Rechenprogramm aus einer Textdatei (UTF-8) aus.
+    - Aufruf: `java -cp <Klassen> rechner.Main DATEI` (genau ein Argument).
+    - Jede Zeile ist leer, ein Kommentar (erstes Zeichen außer Leerzeichen und Tabs ist `#`), `let NAME = AUSDRUCK` oder
+      `print AUSDRUCK`. Zeilenenden sind LF oder CRLF, die letzte Zeile darf ohne Zeilenende enden. Zwischen den Tokens
+      stehen beliebig viele Leerzeichen und Tabs, auch keine (`print(4)`).
+    - Tokens: ganze Zahlen aus den Ziffern `0-9`, Namen `[a-z_][a-z0-9_]*` (außer `let` und `print`), die Operatoren
+      `+ - * / % ^`, runde Klammern und `=`.
+    - Grammatik der Ausdrücke, genau so:
+          ausdruck := term (("+" | "-") term)*
+          term     := faktor (("*" | "/" | "%") faktor)*
+          faktor   := "-" faktor | potenz
+          potenz   := basis ("^" faktor)?
+          basis    := ZAHL | NAME | "(" ausdruck ")"
+      Also `2^3^2` = 512, `-2^2` = -4, `2*-3` = -6, `10-4-3` = 3.
+    - Alle Werte sind vorzeichenbehaftete 64-Bit-Ganzzahlen. `/` teilt ganzzahlig und schneidet Richtung null ab
+      (`-7/2` = -3), `%` ist der Rest dazu mit dem Vorzeichen des Dividenden (`-7%2` = -1, `7%-2` = 1). `^` potenziert
+      mit einem Exponenten ab 0 (`0^0` = 1); auch bei riesigen Exponenten kommt das Ergebnis sofort, wenn es in 64 Bit
+      passt (`(-1)^9223372036854775807` = -1).
+    - `let` weist einer Variablen einen Wert zu (erneute Zuweisung erlaubt), `print` gibt den Wert als Dezimalzahl in
+      einer eigenen Zeile auf stdout aus.
+    - Das Programm prüft zuerst die Syntax aller Zeilen und führt erst danach die Anweisungen der Reihe nach aus.
+    - Syntaxfehler → Exit-Code 2, nichts auf stdout, auf stderr `Zeile N, Spalte M: <Meldung>`. N ist die Zeilennummer in
+      der Datei ab 1, M die Spalte ab 1 des ersten Zeichens des Tokens, an dem der Fehler erkannt wird (ein Tab zählt als
+      eine Spalte); fehlt am Zeilenende etwas, ist M die Länge der Zeile ohne Zeilenende plus 1. Beginnt eine Zeile nicht
+      mit `let` oder `print`, ist M die Spalte ihres ersten Tokens. Eine Zahl größer als 9223372036854775807 ist ein
+      Syntaxfehler an ihrer Spalte, auch nach einem Minus.
+    - Laufzeitfehler → Exit-Code 3 und auf stderr eine Meldung mit `Zeile N`: Überlauf des 64-Bit-Bereichs bei jeder
+      Operation (auch Negation, Potenz und `-9223372036854775808 / -1`; `-9223372036854775808 % -1` ist dagegen 0),
+      Division oder Rest durch null, unbekannte Variable, negativer Exponent. Die Ausgaben der Zeilen davor bleiben auf
+      stdout, danach wird nichts mehr ausgeführt.
+    - Datei fehlt oder ist nicht lesbar → Exit-Code 1 und eine Meldung mit dem Dateipfad. Falsche Anzahl an Argumenten →
+      Exit-Code 4.
+    Sichere das Verhalten mit JUnit-5-Tests unter `src/test/java/rechner/` ab und beschreibe Aufruf und Sprache kurz im `README.md`.
+  expected_changes:
+  - src/*
+  - README.md
+  - .gitignore
+  hidden:
+    dir: R3-java
+    image: java
+    command: find src/main/java -name '*.java' > /tmp/rcs && javac -encoding UTF-8 -d /tmp/rcc @/tmp/rcs >&2; RC_CMD="java
+      -cp /tmp/rcc rechner.Main" bash _hidden/check.sh
+    timeout_seconds: 900
+- id: R3-cs
+  title: C# – rechner console application
+  base_branch: acceptance/empty
+  limit_minutes: 150
+  prompt: |-
+    Schreibe in C# (.NET 8) die Konsolenanwendung `src/Rechner/Rechner.csproj` (Programm `Rechner.dll`, keine zusätzlichen NuGet-Pakete).
+    Das Programm führt ein kleines Rechenprogramm aus einer Textdatei (UTF-8) aus.
+    - Aufruf: `dotnet Rechner.dll DATEI` (genau ein Argument).
+    - Jede Zeile ist leer, ein Kommentar (erstes Zeichen außer Leerzeichen und Tabs ist `#`), `let NAME = AUSDRUCK` oder
+      `print AUSDRUCK`. Zeilenenden sind LF oder CRLF, die letzte Zeile darf ohne Zeilenende enden. Zwischen den Tokens
+      stehen beliebig viele Leerzeichen und Tabs, auch keine (`print(4)`).
+    - Tokens: ganze Zahlen aus den Ziffern `0-9`, Namen `[a-z_][a-z0-9_]*` (außer `let` und `print`), die Operatoren
+      `+ - * / % ^`, runde Klammern und `=`.
+    - Grammatik der Ausdrücke, genau so:
+          ausdruck := term (("+" | "-") term)*
+          term     := faktor (("*" | "/" | "%") faktor)*
+          faktor   := "-" faktor | potenz
+          potenz   := basis ("^" faktor)?
+          basis    := ZAHL | NAME | "(" ausdruck ")"
+      Also `2^3^2` = 512, `-2^2` = -4, `2*-3` = -6, `10-4-3` = 3.
+    - Alle Werte sind vorzeichenbehaftete 64-Bit-Ganzzahlen. `/` teilt ganzzahlig und schneidet Richtung null ab
+      (`-7/2` = -3), `%` ist der Rest dazu mit dem Vorzeichen des Dividenden (`-7%2` = -1, `7%-2` = 1). `^` potenziert
+      mit einem Exponenten ab 0 (`0^0` = 1); auch bei riesigen Exponenten kommt das Ergebnis sofort, wenn es in 64 Bit
+      passt (`(-1)^9223372036854775807` = -1).
+    - `let` weist einer Variablen einen Wert zu (erneute Zuweisung erlaubt), `print` gibt den Wert als Dezimalzahl in
+      einer eigenen Zeile auf stdout aus.
+    - Das Programm prüft zuerst die Syntax aller Zeilen und führt erst danach die Anweisungen der Reihe nach aus.
+    - Syntaxfehler → Exit-Code 2, nichts auf stdout, auf stderr `Zeile N, Spalte M: <Meldung>`. N ist die Zeilennummer in
+      der Datei ab 1, M die Spalte ab 1 des ersten Zeichens des Tokens, an dem der Fehler erkannt wird (ein Tab zählt als
+      eine Spalte); fehlt am Zeilenende etwas, ist M die Länge der Zeile ohne Zeilenende plus 1. Beginnt eine Zeile nicht
+      mit `let` oder `print`, ist M die Spalte ihres ersten Tokens. Eine Zahl größer als 9223372036854775807 ist ein
+      Syntaxfehler an ihrer Spalte, auch nach einem Minus.
+    - Laufzeitfehler → Exit-Code 3 und auf stderr eine Meldung mit `Zeile N`: Überlauf des 64-Bit-Bereichs bei jeder
+      Operation (auch Negation, Potenz und `-9223372036854775808 / -1`; `-9223372036854775808 % -1` ist dagegen 0),
+      Division oder Rest durch null, unbekannte Variable, negativer Exponent. Die Ausgaben der Zeilen davor bleiben auf
+      stdout, danach wird nichts mehr ausgeführt.
+    - Datei fehlt oder ist nicht lesbar → Exit-Code 1 und eine Meldung mit dem Dateipfad. Falsche Anzahl an Argumenten →
+      Exit-Code 4.
+    Sichere das Verhalten mit einem xUnit-Testprojekt unter `tests/` ab (`dotnet test`) und beschreibe Aufruf und Sprache kurz im `README.md`.
+  expected_changes:
+  - src/*
+  - tests/*
+  - '*.sln'
+  - README.md
+  - .gitignore
+  hidden:
+    dir: R3-cs
+    image: dotnet
+    command: dotnet build src/Rechner/Rechner.csproj -o /tmp/rc -nologo -v q >&2; RC_CMD="dotnet /tmp/rc/Rechner.dll" bash
+      _hidden/check.sh
+    timeout_seconds: 900
+- id: R3-vb
+  title: VB.NET – rechner console application
+  base_branch: acceptance/empty
+  limit_minutes: 150
+  prompt: |-
+    Schreibe in Visual Basic .NET (.NET 8) die Konsolenanwendung `src/Rechner/Rechner.vbproj` (Programm `Rechner.dll`, keine zusätzlichen NuGet-Pakete).
+    Das Programm führt ein kleines Rechenprogramm aus einer Textdatei (UTF-8) aus.
+    - Aufruf: `dotnet Rechner.dll DATEI` (genau ein Argument).
+    - Jede Zeile ist leer, ein Kommentar (erstes Zeichen außer Leerzeichen und Tabs ist `#`), `let NAME = AUSDRUCK` oder
+      `print AUSDRUCK`. Zeilenenden sind LF oder CRLF, die letzte Zeile darf ohne Zeilenende enden. Zwischen den Tokens
+      stehen beliebig viele Leerzeichen und Tabs, auch keine (`print(4)`).
+    - Tokens: ganze Zahlen aus den Ziffern `0-9`, Namen `[a-z_][a-z0-9_]*` (außer `let` und `print`), die Operatoren
+      `+ - * / % ^`, runde Klammern und `=`.
+    - Grammatik der Ausdrücke, genau so:
+          ausdruck := term (("+" | "-") term)*
+          term     := faktor (("*" | "/" | "%") faktor)*
+          faktor   := "-" faktor | potenz
+          potenz   := basis ("^" faktor)?
+          basis    := ZAHL | NAME | "(" ausdruck ")"
+      Also `2^3^2` = 512, `-2^2` = -4, `2*-3` = -6, `10-4-3` = 3.
+    - Alle Werte sind vorzeichenbehaftete 64-Bit-Ganzzahlen. `/` teilt ganzzahlig und schneidet Richtung null ab
+      (`-7/2` = -3), `%` ist der Rest dazu mit dem Vorzeichen des Dividenden (`-7%2` = -1, `7%-2` = 1). `^` potenziert
+      mit einem Exponenten ab 0 (`0^0` = 1); auch bei riesigen Exponenten kommt das Ergebnis sofort, wenn es in 64 Bit
+      passt (`(-1)^9223372036854775807` = -1).
+    - `let` weist einer Variablen einen Wert zu (erneute Zuweisung erlaubt), `print` gibt den Wert als Dezimalzahl in
+      einer eigenen Zeile auf stdout aus.
+    - Das Programm prüft zuerst die Syntax aller Zeilen und führt erst danach die Anweisungen der Reihe nach aus.
+    - Syntaxfehler → Exit-Code 2, nichts auf stdout, auf stderr `Zeile N, Spalte M: <Meldung>`. N ist die Zeilennummer in
+      der Datei ab 1, M die Spalte ab 1 des ersten Zeichens des Tokens, an dem der Fehler erkannt wird (ein Tab zählt als
+      eine Spalte); fehlt am Zeilenende etwas, ist M die Länge der Zeile ohne Zeilenende plus 1. Beginnt eine Zeile nicht
+      mit `let` oder `print`, ist M die Spalte ihres ersten Tokens. Eine Zahl größer als 9223372036854775807 ist ein
+      Syntaxfehler an ihrer Spalte, auch nach einem Minus.
+    - Laufzeitfehler → Exit-Code 3 und auf stderr eine Meldung mit `Zeile N`: Überlauf des 64-Bit-Bereichs bei jeder
+      Operation (auch Negation, Potenz und `-9223372036854775808 / -1`; `-9223372036854775808 % -1` ist dagegen 0),
+      Division oder Rest durch null, unbekannte Variable, negativer Exponent. Die Ausgaben der Zeilen davor bleiben auf
+      stdout, danach wird nichts mehr ausgeführt.
+    - Datei fehlt oder ist nicht lesbar → Exit-Code 1 und eine Meldung mit dem Dateipfad. Falsche Anzahl an Argumenten →
+      Exit-Code 4.
+    Sichere das Verhalten mit einem xUnit-Testprojekt unter `tests/` ab (`dotnet test`) und beschreibe Aufruf und Sprache kurz im `README.md`.
+  expected_changes:
+  - src/*
+  - tests/*
+  - '*.sln'
+  - README.md
+  - .gitignore
+  hidden:
+    dir: R3-vb
+    image: dotnet
+    command: dotnet build src/Rechner/Rechner.vbproj -o /tmp/rc -nologo -v q >&2; RC_CMD="dotnet /tmp/rc/Rechner.dll" bash
+      _hidden/check.sh
+    timeout_seconds: 900
+- id: R3-lua
+  title: Lua – rechner interpreter
+  base_branch: acceptance/empty
+  limit_minutes: 150
+  prompt: |-
+    Schreibe in Lua 5.4 das Kommandozeilenprogramm `rechner.lua` (im Wurzelverzeichnis, keine externen Rocks).
+    Das Programm führt ein kleines Rechenprogramm aus einer Textdatei (UTF-8) aus.
+    - Aufruf: `lua rechner.lua DATEI` (genau ein Argument).
+    - Jede Zeile ist leer, ein Kommentar (erstes Zeichen außer Leerzeichen und Tabs ist `#`), `let NAME = AUSDRUCK` oder
+      `print AUSDRUCK`. Zeilenenden sind LF oder CRLF, die letzte Zeile darf ohne Zeilenende enden. Zwischen den Tokens
+      stehen beliebig viele Leerzeichen und Tabs, auch keine (`print(4)`).
+    - Tokens: ganze Zahlen aus den Ziffern `0-9`, Namen `[a-z_][a-z0-9_]*` (außer `let` und `print`), die Operatoren
+      `+ - * / % ^`, runde Klammern und `=`.
+    - Grammatik der Ausdrücke, genau so:
+          ausdruck := term (("+" | "-") term)*
+          term     := faktor (("*" | "/" | "%") faktor)*
+          faktor   := "-" faktor | potenz
+          potenz   := basis ("^" faktor)?
+          basis    := ZAHL | NAME | "(" ausdruck ")"
+      Also `2^3^2` = 512, `-2^2` = -4, `2*-3` = -6, `10-4-3` = 3.
+    - Alle Werte sind vorzeichenbehaftete 64-Bit-Ganzzahlen. `/` teilt ganzzahlig und schneidet Richtung null ab
+      (`-7/2` = -3), `%` ist der Rest dazu mit dem Vorzeichen des Dividenden (`-7%2` = -1, `7%-2` = 1). `^` potenziert
+      mit einem Exponenten ab 0 (`0^0` = 1); auch bei riesigen Exponenten kommt das Ergebnis sofort, wenn es in 64 Bit
+      passt (`(-1)^9223372036854775807` = -1).
+    - `let` weist einer Variablen einen Wert zu (erneute Zuweisung erlaubt), `print` gibt den Wert als Dezimalzahl in
+      einer eigenen Zeile auf stdout aus.
+    - Das Programm prüft zuerst die Syntax aller Zeilen und führt erst danach die Anweisungen der Reihe nach aus.
+    - Syntaxfehler → Exit-Code 2, nichts auf stdout, auf stderr `Zeile N, Spalte M: <Meldung>`. N ist die Zeilennummer in
+      der Datei ab 1, M die Spalte ab 1 des ersten Zeichens des Tokens, an dem der Fehler erkannt wird (ein Tab zählt als
+      eine Spalte); fehlt am Zeilenende etwas, ist M die Länge der Zeile ohne Zeilenende plus 1. Beginnt eine Zeile nicht
+      mit `let` oder `print`, ist M die Spalte ihres ersten Tokens. Eine Zahl größer als 9223372036854775807 ist ein
+      Syntaxfehler an ihrer Spalte, auch nach einem Minus.
+    - Laufzeitfehler → Exit-Code 3 und auf stderr eine Meldung mit `Zeile N`: Überlauf des 64-Bit-Bereichs bei jeder
+      Operation (auch Negation, Potenz und `-9223372036854775808 / -1`; `-9223372036854775808 % -1` ist dagegen 0),
+      Division oder Rest durch null, unbekannte Variable, negativer Exponent. Die Ausgaben der Zeilen davor bleiben auf
+      stdout, danach wird nichts mehr ausgeführt.
+    - Datei fehlt oder ist nicht lesbar → Exit-Code 1 und eine Meldung mit dem Dateipfad. Falsche Anzahl an Argumenten →
+      Exit-Code 4.
+    Sichere das Verhalten mit busted-Tests unter `spec/` ab und beschreibe Aufruf und Sprache kurz im `README.md`.
+  expected_changes:
+  - '*.lua'
+  - spec/*
+  - README.md
+  - .busted
+  hidden:
+    dir: R3-lua
+    image: lua
+    command: RC_CMD="lua rechner.lua" bash _hidden/check.sh
+    timeout_seconds: 900
+- id: R3-bash
+  title: Bash – rechner interpreter
+  base_branch: acceptance/empty
+  limit_minutes: 150
+  prompt: |-
+    Schreibe das Bash-Skript `rechner.sh` (im Wurzelverzeichnis, ausführbar).
+    Das Programm führt ein kleines Rechenprogramm aus einer Textdatei (UTF-8) aus.
+    - Aufruf: `./rechner.sh DATEI` (genau ein Argument).
+    - Jede Zeile ist leer, ein Kommentar (erstes Zeichen außer Leerzeichen und Tabs ist `#`), `let NAME = AUSDRUCK` oder
+      `print AUSDRUCK`. Zeilenenden sind LF oder CRLF, die letzte Zeile darf ohne Zeilenende enden. Zwischen den Tokens
+      stehen beliebig viele Leerzeichen und Tabs, auch keine (`print(4)`).
+    - Tokens: ganze Zahlen aus den Ziffern `0-9`, Namen `[a-z_][a-z0-9_]*` (außer `let` und `print`), die Operatoren
+      `+ - * / % ^`, runde Klammern und `=`.
+    - Grammatik der Ausdrücke, genau so:
+          ausdruck := term (("+" | "-") term)*
+          term     := faktor (("*" | "/" | "%") faktor)*
+          faktor   := "-" faktor | potenz
+          potenz   := basis ("^" faktor)?
+          basis    := ZAHL | NAME | "(" ausdruck ")"
+      Also `2^3^2` = 512, `-2^2` = -4, `2*-3` = -6, `10-4-3` = 3.
+    - Alle Werte sind vorzeichenbehaftete 64-Bit-Ganzzahlen. `/` teilt ganzzahlig und schneidet Richtung null ab
+      (`-7/2` = -3), `%` ist der Rest dazu mit dem Vorzeichen des Dividenden (`-7%2` = -1, `7%-2` = 1). `^` potenziert
+      mit einem Exponenten ab 0 (`0^0` = 1); auch bei riesigen Exponenten kommt das Ergebnis sofort, wenn es in 64 Bit
+      passt (`(-1)^9223372036854775807` = -1).
+    - `let` weist einer Variablen einen Wert zu (erneute Zuweisung erlaubt), `print` gibt den Wert als Dezimalzahl in
+      einer eigenen Zeile auf stdout aus.
+    - Das Programm prüft zuerst die Syntax aller Zeilen und führt erst danach die Anweisungen der Reihe nach aus.
+    - Syntaxfehler → Exit-Code 2, nichts auf stdout, auf stderr `Zeile N, Spalte M: <Meldung>`. N ist die Zeilennummer in
+      der Datei ab 1, M die Spalte ab 1 des ersten Zeichens des Tokens, an dem der Fehler erkannt wird (ein Tab zählt als
+      eine Spalte); fehlt am Zeilenende etwas, ist M die Länge der Zeile ohne Zeilenende plus 1. Beginnt eine Zeile nicht
+      mit `let` oder `print`, ist M die Spalte ihres ersten Tokens. Eine Zahl größer als 9223372036854775807 ist ein
+      Syntaxfehler an ihrer Spalte, auch nach einem Minus.
+    - Laufzeitfehler → Exit-Code 3 und auf stderr eine Meldung mit `Zeile N`: Überlauf des 64-Bit-Bereichs bei jeder
+      Operation (auch Negation, Potenz und `-9223372036854775808 / -1`; `-9223372036854775808 % -1` ist dagegen 0),
+      Division oder Rest durch null, unbekannte Variable, negativer Exponent. Die Ausgaben der Zeilen davor bleiben auf
+      stdout, danach wird nichts mehr ausgeführt.
+    - Datei fehlt oder ist nicht lesbar → Exit-Code 1 und eine Meldung mit dem Dateipfad. Falsche Anzahl an Argumenten →
+      Exit-Code 4.
+    Sichere das Verhalten mit bats-Tests unter `tests/` ab und beschreibe Aufruf und Sprache kurz im `README.md`.
+  expected_changes:
+  - rechner.sh
+  - tests/*
+  - README.md
+  hidden:
+    dir: R3-bash
+    image: generic
+    command: RC_CMD="bash rechner.sh" bash _hidden/check.sh
+    timeout_seconds: 900

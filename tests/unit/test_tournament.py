@@ -168,7 +168,7 @@ def test_spec_loads_plans_hidden_dirs_and_weights(tmp_path: Path) -> None:
         load_spec(path)
 
 
-@pytest.mark.parametrize("name", ["coder-tournament.yaml", "languages.yaml", "languages-r2.yaml"])
+@pytest.mark.parametrize("name", ["coder-tournament.yaml", "languages.yaml", "languages-r2.yaml", "languages-r3.yaml"])
 def test_the_shipped_specs_load_and_name_deployed_sandbox_images(name: str) -> None:
     """A typo in a shipped spec or a hidden check on an image the workers do not build would only surface hours into a
     run on the model host."""
@@ -181,19 +181,25 @@ def test_the_shipped_specs_load_and_name_deployed_sandbox_images(name: str) -> N
     assert not [t.id for t in spec.tasks if re.search(r"(?<![}\w])target/(?:release|debug)/", t.hidden.command)]
 
 
-def test_the_r2_hidden_checks_pass_the_reference_and_fail_a_missing_program() -> None:
-    """Ladder stage R2 grades every language with one shell script; it must agree with the specification (checked
-    against a Python reference implementation) and fail every check when the build left no program."""
+@pytest.mark.parametrize(
+    ("stage", "reference", "variable", "checks"),
+    [("R2", "r2_reference_kassenbuch.py", "KB_CMD", 16), ("R3", "r3_reference_rechner.py", "RC_CMD", 27)],
+)
+def test_the_ladder_hidden_checks_pass_the_reference_and_fail_a_missing_program(
+    stage: str, reference: str, variable: str, checks: int
+) -> None:
+    """Ladder stages R2 and R3 grade every language with one shell script each; it must agree with the specification
+    (checked against a Python reference implementation) and fail every check when the build left no program."""
     root = Path(__file__).resolve().parents[2] / "tests/live/tournament"
-    scripts = {p.read_bytes() for p in (root / "hidden").glob("R2-*/check.sh")}
+    scripts = {p.read_bytes() for p in (root / "hidden").glob(f"{stage}-*/check.sh")}
     assert len(scripts) == 1
-    check = next((root / "hidden").glob("R2-*/check.sh"))
-    reference = f"{sys.executable} {root / 'r2_reference_kassenbuch.py'}"
-    for kb_cmd, passed, failed in ((reference, 16, 0), ("", 0, 16)):
+    check = next((root / "hidden").glob(f"{stage}-*/check.sh"))
+    command = f"{sys.executable} {root / reference}"
+    for cmd, passed, failed in ((command, checks, 0), ("", 0, checks)):
         res = subprocess.run(
             ["bash", str(check)],
             check=False,
-            env={"PATH": os.environ["PATH"], "KB_CMD": kb_cmd},
+            env={"PATH": os.environ["PATH"], variable: cmd},
             capture_output=True,
             text=True,
             timeout=120,
