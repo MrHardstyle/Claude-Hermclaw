@@ -898,6 +898,40 @@ async def test_leftovers_another_open_step_declares_wait_for_that_step(world: Wo
     assert (Path(ws.path) / "frontend.js").read_text() == "// left by a superseded step\n"
 
 
+
+async def test_a_leftover_the_steps_own_files_name_is_not_parked(world: World, tmp_path: Path) -> None:
+    """Ladder R3-cpp (BUG-385): after a replan S001 owned CMakeLists.txt and the tests, but src/main.cpp and
+    src/interp.hpp that they name went to S002 and were parked – S001's build broke. A leftover of another step that the
+    step's own files name stays in the work tree."""
+    from tests.unit.test_planner_support import plan, step
+
+    seen: list[list[str]] = []
+
+    class LeftoverVerifier(ScriptedVerifier):
+        async def verify(self, step: StepContract, workspace: WorkspaceHandle, **kw: Any) -> VerificationOutcome:
+            if self.calls == 0:  # a superseded step left the page script behind, and S001's module loads it
+                (workspace.path / "frontend.js").write_text("// left by a superseded step\n")
+                with (workspace.path / "src" / "module.py").open("a") as fh:
+                    fh.write('PAGE = "frontend.js"\n')
+            outcome = await super().verify(step, workspace, **kw)
+            seen.append(list(outcome.report.changed_files))
+            return outcome
+
+    two_steps = plan(
+        "Set VALUE to 2 and add a frontend",
+        [
+            step("S001", "implement", "coding", "Change VALUE in src/module.py from 1 to 2.", repo_hints=["src/module.py"]),
+            step("S002", "implement", "coding", "Write the web page script.", allowed_new_paths=["frontend.js"], depends_on=["S001"]),
+        ],
+    )
+    models = Models([two_steps], [EDIT, DONE, DONE, DONE, DONE, DONE])
+    verifier = LeftoverVerifier(world, [False, True, True])
+    jid = await _job(world)
+    await _run(world, _driver(world, models, tmp_path), [_handler(world, models, verifier, None), ReviewHandler()], [jid])
+    assert "frontend.js" in seen[1], "the file S001's module names stays for S001"
+    ws = (await world.engine.list_workspaces(jid))[0]
+    assert (Path(ws.path) / "frontend.js").read_text() == "// left by a superseded step\n"
+
 async def test_a_resumed_correction_gets_verifier_items_of_the_current_work_tree(world: World, tmp_path: Path) -> None:
     """Live G1 (BUG-259): a deploy paused S002's correction attempt after it had removed the unused imports; the resumed
     attempt got the old lint output, tried to remove the imports again and was blocked by the stagnation guard. A

@@ -46,6 +46,12 @@ Noch keine.
 
 ## Behobene Bugs
 
+### BUG-385 – Nach einem Replan parkt Hermclaw Dateien, auf denen der Build des laufenden Schritts aufbaut
+- Phase: Leiter R3-cpp auf rc107, 2026-10-30 · Komponente: coder (`handler.py`) · Severity: P2 · blockierend: nein · Status: **behoben im Repository** (`tests/integration/test_coder_handler.py::test_a_leftover_the_steps_own_files_name_is_not_parked`)
+- Reproduktion: R3-cpp (Job b96e69f2) Plan v2: S001 bekam `CMakeLists.txt`, Lexer, Parser und `tests/test_rechner.cpp`, S002 `src/interp.hpp`, `src/main.cpp` und die Fixtures. Beim Start von S001 parkte Hermclaw die fünf Dateien (BUG-257), obwohl `CMakeLists.txt` `src/main.cpp` und der Test `interp.hpp` einbindet. Der Build war kaputt; S001 erweiterte den Scope, scheiterte an der Fixture und verlangte nach 6 Zügen einen zweiten Replan (rund 30 Minuten).
+- Ursache: Das Parken (BUG-257) fragte nur, welcher Schritt eine Datei laut Plan liefert, nicht, ob die Dateien des laufenden Schritts sie brauchen.
+- Fix: Eine Datei eines anderen Schritts bleibt im Arbeitsbaum, wenn eine eigene Datei des Schritts (Änderung oder Ziel im Scope) sie nennt – per Pfad, Dateiname in Anführungszeichen oder spitzen Klammern oder Python-Import –, auch über mehrere Stufen; sie gehört dann zum Schritt wie andere Altlasten.
+
 ### BUG-384 – Ein Befehl sucht, was ein früherer Befehl unter `/tmp` angelegt hat
 - Phase: Leiter R3-cpp auf rc107, 2026-10-30 · Komponente: tools (`engine.py`, `registry.py`) · Severity: P3 · blockierend: nein · Status: **behoben im Repository** (`tests/integration/test_tools_engine_exec.py::test_a_command_missing_the_tmp_of_an_earlier_one_learns_that_tmp_starts_empty`)
 - Reproduktion: R3-cpp (Job b96e69f2) Versuch 2, Zug 12: `cmake --build /tmp/build && ctest --test-dir /tmp/build` nach einem früheren Befehl, der `/tmp/build` konfiguriert hatte – „Error: /tmp/build is not a directory“. Seit dem 20.10. 8 solche Aufrufe in 6 Jobs (C++-Kassenbuch dreimal `/tmp/build`, Cargo-Manifest und SQLite-Datei unter `/tmp`).

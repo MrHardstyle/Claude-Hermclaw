@@ -13,6 +13,7 @@ from __future__ import annotations
 import asyncio
 import contextlib
 import dataclasses
+import re
 import uuid
 from collections.abc import Awaitable, Callable, Sequence
 from dataclasses import dataclass, field
@@ -219,6 +220,50 @@ def step_contract(row: Step, scope: ScopeContract | None = None) -> StepContract
         }
     )
 
+
+
+_REF_FILE_BYTES = 512_000  # larger files are not searched for names of leftovers
+
+
+def _names(text: str, rel: str) -> bool:
+    """Whether ``text`` names the file ``rel``: its path, its file name in quotes or angle brackets (``#include
+    "interp.hpp"``) or, for Python, its module in an import."""
+    if rel in text:
+        return True
+    name = rel.rsplit("/", 1)[-1]
+    if re.search(rf"[\"'<]{re.escape(name)}[\"'>]", text):
+        return True
+    if not rel.endswith(".py"):
+        return False
+    module = rel.removesuffix(".py").removesuffix("/__init__").removeprefix("src/").replace("/", ".")
+    return re.search(rf"^\s*(?:from\s+{re.escape(module)}\s+import|import\s+{re.escape(module)}\b)", text, re.M) is not None
+
+
+def needed_leftovers(root: Path, foreign: Sequence[str], sources: Sequence[str]) -> list[str]:
+    """The leftovers of other steps that the step's own files name, and those the named ones name in turn: the step
+    cannot build or test without them. Ladder R3-cpp: after a replan the new S001 owned CMakeLists.txt and the tests,
+    but src/main.cpp and src/interp.hpp they name went to S002 and were parked – the build broke and S001 spent its
+    attempt on a scope expansion and a second replan (BUG-385)."""
+    needed: list[str] = []
+    queue = [p for p in dict.fromkeys(sources) if p not in foreign]
+    seen: set[str] = set()
+    while queue:
+        src = queue.pop()
+        if src in seen:
+            continue
+        seen.add(src)
+        try:
+            file = root / src
+            if not file.is_file() or file.stat().st_size > _REF_FILE_BYTES:
+                continue
+            text = file.read_text(encoding="utf-8", errors="replace")
+        except OSError:
+            continue
+        for rel in foreign:
+            if rel not in needed and _names(text, rel):
+                needed.append(rel)
+                queue.append(rel)
+    return needed
 
 def _item_dict(i: CorrectionItem) -> dict[str, str]:
     return {
@@ -505,6 +550,10 @@ class ImplementStepHandler:
         await self.deps.git.unpark_paths(ws, mine, step_id=ctx.step_id)
         changed = await self.deps.git.changed_files(handle)
         foreign = [p for p in changed if path_matches(p, claims) and not path_matches(p, mine)]
+        if foreign:  # what the step's own files build on stays: parked, it breaks their build (BUG-385)
+            sources = [*(p for p in changed if p not in foreign), *(p for p in contract.target_paths if "*" not in p)]
+            keep = await asyncio.to_thread(needed_leftovers, Path(handle.path), foreign, sources)
+            foreign = [p for p in foreign if p not in keep]
         if foreign and await self.deps.git.park_paths(ws, foreign, step_id=ctx.step_id):
             changed = await self.deps.git.changed_files(handle)
         # uncommitted changes of an earlier unfinished step are this step's to finish, not a scope violation – checked on

@@ -4,6 +4,11 @@ Format: [Keep a Changelog](https://keepachangelog.com/de/1.1.0/), Versionen nach
 
 ## [Unreleased]
 
+## [0.1.0rc109] – Release Candidate (2026-10-31)
+
+### Behoben
+- **Kein Parken von Dateien, auf denen der Build aufbaut (BUG-385):** Nach einem Replan in R3-cpp parkte Hermclaw `src/main.cpp` und `src/interp.hpp` für den späteren Schritt, obwohl `CMakeLists.txt` und der Test des laufenden Schritts sie einbinden; der Build brach, und der Schritt verlangte einen zweiten Replan. Dateien, die die eigenen Dateien des Schritts nennen, bleiben jetzt im Arbeitsbaum.
+
 ## [0.1.0rc108] – Release Candidate (2026-10-30)
 
 ### Behoben
