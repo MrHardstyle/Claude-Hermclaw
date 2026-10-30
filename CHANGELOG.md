@@ -4,6 +4,11 @@ Format: [Keep a Changelog](https://keepachangelog.com/de/1.1.0/), Versionen nach
 
 ## [Unreleased]
 
+## [0.1.0rc108] – Release Candidate (2026-10-30)
+
+### Behoben
+- **`/tmp` beginnt in jedem Befehl leer (BUG-384):** In R3-cpp baute der Coder nach `/tmp/build` und rief Build und Tests im nächsten Befehl auf, dessen neue Sandbox kein `/tmp/build` mehr hatte; seit dem 20.10. kostete das 8 Züge in 6 Jobs. Die Beschreibung von `run_command` sagt es jetzt, und ein Befehl, der an einem selbst genannten `/tmp`-Pfad scheitert, bekommt einen Hinweis mit Beispiel.
+
 ## [0.1.0rc107] – Release Candidate (2026-10-30)
 
 ### Behoben

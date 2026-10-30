@@ -46,6 +46,12 @@ Noch keine.
 
 ## Behobene Bugs
 
+### BUG-384 – Ein Befehl sucht, was ein früherer Befehl unter `/tmp` angelegt hat
+- Phase: Leiter R3-cpp auf rc107, 2026-10-30 · Komponente: tools (`engine.py`, `registry.py`) · Severity: P3 · blockierend: nein · Status: **behoben im Repository** (`tests/integration/test_tools_engine_exec.py::test_a_command_missing_the_tmp_of_an_earlier_one_learns_that_tmp_starts_empty`)
+- Reproduktion: R3-cpp (Job b96e69f2) Versuch 2, Zug 12: `cmake --build /tmp/build && ctest --test-dir /tmp/build` nach einem früheren Befehl, der `/tmp/build` konfiguriert hatte – „Error: /tmp/build is not a directory“. Seit dem 20.10. 8 solche Aufrufe in 6 Jobs (C++-Kassenbuch dreimal `/tmp/build`, Cargo-Manifest und SQLite-Datei unter `/tmp`).
+- Ursache: Jeder Befehl läuft in einer neuen Sandbox (`podman run --rm`, `/tmp` als eigenes tmpfs); weder die Werkzeugbeschreibung noch die Fehlermeldung sagt das.
+- Fix: Die Beschreibung von `run_command` sagt, dass `/tmp` in jedem Befehl leer beginnt; scheitert ein Befehl in der Sandbox an einem `/tmp`-Pfad, den er selbst nennt, folgt ein Hinweis mit Beispiel, das Verzeichnis im selben Befehl anzulegen und zu benutzen.
+
 ### BUG-383 – Der Coder schreibt eine lange Datei für wenige Zeilen ganz neu
 - Phase: Leiter R3-rust/R3-java auf rc105/rc106, 2026-10-30 · Komponente: tools (`engine.py`) · Severity: P3 · blockierend: nein · Status: **behoben im Repository** (`tests/integration/test_tools_engine_read_write.py::test_a_rewrite_of_a_long_file_for_a_few_lines_points_to_replace_text`)
 - Reproduktion: R3-java (Job 310d918b) Versuch 2: `Main.java` mit rund 570 Zeilen zehnmal in 21 Zügen per `write_file` komplett geschrieben, jedes Mal mit wenigen geänderten Zeilen, dazwischen zwei Testläufe. R3-rust (Job 67e9b280) Versuch 2: `main.rs` fünfmal ganz neu, zwei Antworten brachen am Ausgabelimit ab (`MODEL_OUTPUT_TRUNCATED`), ein Zug wiederholte den Inhalt unverändert.

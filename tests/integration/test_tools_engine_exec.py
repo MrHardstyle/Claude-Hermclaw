@@ -266,6 +266,20 @@ async def test_scratch_removals_below_the_sandbox_tmp_are_not_destructive(sessio
     shutil.rmtree(scratch)
 
 
+
+async def test_a_command_missing_the_tmp_of_an_earlier_one_learns_that_tmp_starts_empty(sessionmaker: SM, repo: Path, tmp_path: Path) -> None:
+    """Live R3-cpp: `cmake --build /tmp/build` after an earlier command had configured /tmp/build failed with
+    '/tmp/build is not a directory' – each command gets a new sandbox with an empty /tmp (BUG-384)."""
+    gone = f"/tmp/hc-gone-{tmp_path.name}"
+    h = await make_harness(sessionmaker, repo, executor=_IsolatedRunner())
+    res = await h.call("run_command", command=f"LC_ALL=C ls {gone}/rechner")
+    assert not res.ok and f"[hint] {gone} is gone: every command runs in a new sandbox whose /tmp starts empty" in res.output
+    other = await h.call("run_command", command="LC_ALL=C ls /tmp/hc-elsewhere-x && echo")  # any /tmp path the command names and misses
+    assert "[hint] /tmp/hc-elsewhere-x is gone" in other.output
+    assert "is gone" not in (await h.call("run_command", command="LC_ALL=C ls missing-file")).output  # not under /tmp
+    plain = await make_harness(sessionmaker, repo)  # the subprocess fallback shares the host /tmp
+    assert "is gone" not in (await plain.call("run_command", command=f"LC_ALL=C ls {gone}/rechner")).output
+
 async def test_command_side_effects_outside_scope_are_reverted(sessionmaker: SM, repo: Path) -> None:
     (repo / "notes.txt").write_text("dirty but uncommitted\n")  # untracked file that existed before the command
     h = await make_harness(sessionmaker, repo, contract=scope(**SCOPE))

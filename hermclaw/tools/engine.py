@@ -282,6 +282,26 @@ def violation_lines(violations: Sequence[Any]) -> list[str]:
     return lines
 
 
+# a path under /tmp that the failed command uses and its output reports missing (BUG-384)
+_TMP_MISSING = re.compile(r"(/tmp/[\w.+-]+)[^\n]{0,160}?(?:No such file|not a directory|does not exist|cannot access|not found)", re.I)
+TMP_GONE_HINT = (
+    "[hint] {path} is gone: every command runs in a new sandbox whose /tmp starts empty, so a build directory or file "
+    "an earlier command put under /tmp is not there any more. Create and use it in the same command, e.g. "
+    "'cmake -S . -B /tmp/b && cmake --build /tmp/b && ctest --test-dir /tmp/b'."
+)
+
+
+def _tmp_gone(command: str, output: str) -> str | None:
+    """The /tmp path a failed command expected from an earlier one: live R3-cpp and a C++ kassenbuch job built into
+    /tmp/build and ran the build or tests from it in the next command, where the fresh sandbox had no /tmp/build
+    ('/tmp/build is not a directory'), and spent a turn each time (BUG-384)."""
+    for m in _TMP_MISSING.finditer(output):
+        path = m.group(1).rstrip(".")
+        root = "/".join(path.split("/")[:3])
+        if root in command:
+            return root
+    return None
+
 def _isolated(executor: object) -> bool:
     """Whether commands run in a sandbox with a /tmp of its own: never the unisolated subprocess fallback of dev/tests."""
     while hasattr(executor, "inner"):
@@ -1861,6 +1881,10 @@ class ToolEngine:
         missing = self._missing_module_hint(f"{res.stdout}\n{res.stderr}") if res is not None else None
         if missing:
             footer.append(missing)
+        if res is not None and not res.timed_out and res.exit_code != 0 and _isolated(self.executor):
+            gone = _tmp_gone(command, f"{stdout}\n{stderr}")
+            if gone:
+                footer.append(TMP_GONE_HINT.format(path=gone))
         parts += footer
         return "\n".join(parts), truncated or t1 or t2
 

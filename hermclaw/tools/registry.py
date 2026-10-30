@@ -313,7 +313,8 @@ _SPECS: list[ToolSpec] = [
         RunCommandArgs,
         "exec",
         "Run a shell command in the sandbox, starting in the repository root (no git mutations, no sudo; out-of-scope file "
-        "changes are reverted).",
+        "changes are reverted). Every command runs in a new sandbox whose /tmp starts empty: build and run from a /tmp "
+        "directory in one command.",
     ),
     _spec(ToolName.run_test, RunTestArgs, "exec", "Run a test command in the sandbox and get parsed pass/fail counts."),
     _spec(
