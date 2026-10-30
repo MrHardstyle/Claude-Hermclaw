@@ -383,6 +383,24 @@ async def test_review_invariant_major_finding_forces_correction(world: World, tm
     assert reviewer.earlier[0] == () and any("configurable via env" in f for f in reviewer.earlier[1])
 
 
+async def test_review_findings_survive_a_correction_the_verifier_rejects(world: World, tmp_path: Path) -> None:
+    """BUG-382 (ladder R3-rust on rc105): the review correction broke the build, the next correction got only the
+    compiler errors, its review was told of no earlier finding and the step fell back to the state with the defect.
+    The review findings stay in the correction after the verifier failure and reach the next review."""
+    models = Models([_plan()], [EDIT, *[DONE] * 8])
+    verifier, reviewer = ScriptedVerifier(world, [True, False, True]), ScriptedReviewer(["major_pass", "pass"])
+    jid = await _job(world)
+    jobs = await _run(world, _driver(world, models, tmp_path), [_handler(world, models, verifier, reviewer), ReviewHandler()], [jid])
+    assert jobs[jid].status == "succeeded", (jobs[jid].error_code, jobs[jid].error_message)
+    assert verifier.calls == 3 and reviewer.calls == 2
+    assert any("configurable via env" in m.content for m in models.coder_prompts[-1]), "the finding must reach the third attempt"
+    assert any("configurable via env" in f for f in reviewer.earlier[1]), "the second review must judge the earlier finding"
+    async with world.sessionmaker() as s:
+        rows = (await s.execute(select(StepAttempt).where(StepAttempt.job_id == jid).order_by(StepAttempt.attempt_no))).scalars().all()
+    inputs = [a.correction_input for a in rows if (a.correction_input or {}).get("source") == "verifier"]
+    assert inputs and [i["source"] for i in inputs[0]["items"]][-1] == "review"
+
+
 async def test_a_failed_review_correction_falls_back_to_the_verified_work(world: World, tmp_path: Path) -> None:
     """BUG-315 (ladder A7 on rc66): the work passed verification, the review asked for a correction with a major
     finding, and the correction broke the work and blocked the step. The step falls back to the verified state, verifies

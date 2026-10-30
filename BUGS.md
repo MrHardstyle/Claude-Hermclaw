@@ -46,6 +46,12 @@ Noch keine.
 
 ## Behobene Bugs
 
+### BUG-382 – Eine Review-Korrektur, die der Verifier ablehnt, verliert die Review-Befunde
+- Phase: Leiter R3-rust auf rc105 (Job 67e9b280), 2026-10-30 · Komponente: coder (`handler.py`) · Severity: P2 · blockierend: nein · Status: **behoben im Repository** (`tests/integration/test_coder_handler.py::test_review_findings_survive_a_correction_the_verifier_rejects`)
+- Reproduktion: Versuch 1 bestand den Verifier, das Review verlangte unter anderem `-9223372036854775808 % -1` = 0. Versuch 2 (Review-Korrektur) hinterließ Code, der nicht kompilierte; die Korrektur für Versuch 3 enthielt nur die Compiler- und Testfehler. Versuch 3 behob sie, sein Review hörte nichts vom früheren Befund, und der Schritt fiel auf den verifizierten Stand von Versuch 1 zurück: versteckte Prüfung 26/27, genau `minimum remainder -1 is 0` fehlte.
+- Ursache: Jede Korrektur trug nur die Befunde der letzten Prüfung; die Review-Befunde, die der Versuch beheben sollte, galten nach einem Verifier-Fehlschlag als erledigt, ohne dass ein Review sie beurteilt hatte.
+- Fix: Eine Korrektur aus Verifier, Scope, Zugbudget oder Stagnation übernimmt die Review-Befunde der laufenden Korrektur, bis ein Review den Stand beurteilt hat; damit sieht auch das nächste Review sie als frühere Befunde.
+
 ### BUG-381 – Das Review erfindet strengere Eingaberegeln, und der Coder setzt sie um
 - Phase: Leiter R3-rust auf rc105 (Job 67e9b280), 2026-10-30 · Komponente: review (`prompt.py`) · Severity: P2 · blockierend: nein · Status: **behoben im Repository** (`tests/unit/test_review_prompt.py::test_system_prompt_rules`)
 - Reproduktion: Versuch 1 bestand den Verifier (11 cargo-Tests). Das Review meldete fünf „major“-Befunde, nur einer war echt (`-9223372036854775808 % -1` muss 0 sein). Die übrigen verlangten Regeln, die die Aufgabe nicht kennt: keine führenden Nullen bei „ganze Zahlen aus den Ziffern `0-9`“, eine andere Fehlerspalte an der Grenze Zahl/Name. Versuch 2 setzte sie um (`Zahl darf keine führende Null haben`), lehnte damit `007` ab und verbrauchte seine 20 Züge.

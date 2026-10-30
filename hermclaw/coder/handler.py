@@ -231,6 +231,19 @@ def _item_dict(i: CorrectionItem) -> dict[str, str]:
     }
 
 
+# corrections raised after a review judged the state: the review findings the attempt addressed are settled there
+_REVIEW_JUDGED = frozenset({"review", "coverage"})
+
+
+def _review_items(ctx: StepRunContext) -> list[CorrectionItem]:
+    """The review findings this correction attempt had to address. They stay in every further correction until a
+    review judged them: a review correction that broke the build got only the compiler errors, the next attempt fixed
+    those, its review never heard of `MIN % -1` and the step fell back to the state with that defect (ladder R3-rust,
+    BUG-382)."""
+    pending = ctx.attempt_kind == "correction" or bool(ctx.correction_input.get("pending"))
+    return [c for c in corrections_from_input(ctx.correction_input) if c.source == "review"] if pending else []
+
+
 def corrections_from_input(data: dict[str, Any]) -> list[CorrectionItem]:
     out: list[CorrectionItem] = []
     for d in data.get("items") or []:
@@ -415,6 +428,8 @@ class ImplementStepHandler:
         self, ctx: StepRunContext, row: Step, source: str, items: list[CorrectionItem], code: str, detail: str
     ) -> StepOutcome:
         """Schedule a bounded correction attempt carrying the evidence, or escalate to the replanner."""
+        if source not in _REVIEW_JUDGED:
+            items = [*items, *(c for c in _review_items(ctx) if c not in items)]
         limit = self.config.policies.correction.max_corrections_per_step
         evidence = {"source": source, "items": [_item_dict(i) for i in items[:30]], "detail": DEFAULT_REDACTOR.text(detail)[:2000]}
         if row.correction_count >= limit or row.attempt_count >= row.max_attempts:
