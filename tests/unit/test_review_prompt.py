@@ -133,6 +133,9 @@ def test_system_prompt_rules() -> None:
         "language of the JOB GOAL",
         # G1 quality review (BUG-231): Bearer instead of the researched x-api-key, verify_ssl read but never applied
         "RESEARCH FACTS",
+        # R3-rust: "no leading zeros" demanded for "ganze Zahlen aus den Ziffern 0-9", the coder then rejected 007 (BUG-381)
+        "Rejecting input the JOB GOAL allows is as wrong",
+        "quotes the sentence that states it",
         "never applies",
         "Hand-written parsers",
         "Hollow tests",

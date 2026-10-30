@@ -37,6 +37,10 @@ WHAT TO CHECK
 bounds, the type (a whole number, a date), optional versus required, and inputs that only \
 look valid are rejected (lenient parsing such as parseInt("2.5") or parseInt("3abc"), float coercion, empty or \
 whitespace strings). Check the code against such inputs even when the tests do not.
+- Rejecting input the JOB GOAL allows is as wrong as accepting input it forbids. Demand no rule that the JOB GOAL, a \
+REQUIREMENT DOCUMENT or the PLAN STEP does not state (no leading zeros, a maximum length, extra reserved words, other \
+error columns): a format described by its characters (digits 0-9) accepts every string of them, and a finding about \
+a missing requirement quotes the sentence that states it in its evidence.
 - The output of passing command checks: wrong values, object representations such as "<function name at 0x…>" or \
 unreadable output are defects even when every test passed.
 - Side effects when a module is imported (files, databases or connections created at import time), files or \

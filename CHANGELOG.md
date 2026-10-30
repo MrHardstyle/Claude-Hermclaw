@@ -4,6 +4,11 @@ Format: [Keep a Changelog](https://keepachangelog.com/de/1.1.0/), Versionen nach
 
 ## [Unreleased]
 
+## [0.1.0rc106] – Release Candidate (2026-10-30)
+
+### Behoben
+- **Das Review erfindet keine strengeren Eingaberegeln mehr (BUG-381):** In der Leiter R3-rust verlangte das Review „keine führenden Nullen“, obwohl die Aufgabe nur Ziffern `0-9` nennt, und der Coder lehnte danach `007` ab. Der Review-Prompt wertet das Ablehnen erlaubter Eingaben wie das Annehmen verbotener, untersagt Regeln, die Auftrag, Anforderungsdokumente und Planschritt nicht nennen, und verlangt für eine fehlende Anforderung das Zitat des Satzes, der sie aufstellt.
+
 ## [0.1.0rc105] – Release Candidate (2026-10-29)
 
 ### Behoben

@@ -46,6 +46,12 @@ Noch keine.
 
 ## Behobene Bugs
 
+### BUG-381 – Das Review erfindet strengere Eingaberegeln, und der Coder setzt sie um
+- Phase: Leiter R3-rust auf rc105 (Job 67e9b280), 2026-10-30 · Komponente: review (`prompt.py`) · Severity: P2 · blockierend: nein · Status: **behoben im Repository** (`tests/unit/test_review_prompt.py::test_system_prompt_rules`)
+- Reproduktion: Versuch 1 bestand den Verifier (11 cargo-Tests). Das Review meldete fünf „major“-Befunde, nur einer war echt (`-9223372036854775808 % -1` muss 0 sein). Die übrigen verlangten Regeln, die die Aufgabe nicht kennt: keine führenden Nullen bei „ganze Zahlen aus den Ziffern `0-9`“, eine andere Fehlerspalte an der Grenze Zahl/Name. Versuch 2 setzte sie um (`Zahl darf keine führende Null haben`), lehnte damit `007` ab und verbrauchte seine 20 Züge.
+- Ursache: Die Regel „inputs that only look valid are rejected“ drängt das Review zu Strenge; nichts verlangte, dass ein Befund über eine fehlende Anforderung diese Anforderung belegt.
+- Fix: Der Review-Prompt nennt das Ablehnen erlaubter Eingaben einen ebenso schweren Fehler wie das Annehmen verbotener, verbietet Regeln, die weder Auftrag noch Anforderungsdokument noch Planschritt nennen (führende Nullen, Höchstlängen, zusätzliche Schlüsselwörter, andere Fehlerspalten), und verlangt für einen Befund über eine fehlende Anforderung das Zitat des Satzes, der sie aufstellt.
+
 ### BUG-380 – `rm -rf /tmp/build` in der Sandbox gilt als destruktiv
 - Phase: Auswertung der Sprach-Leitern R1/R2, 2026-10-29 · Komponente: tools (`classify.py`, `engine.py`) · Severity: P3 · blockierend: nein · Status: **behoben im Repository** (`tests/integration/test_tools_engine_exec.py::test_scratch_removals_below_the_sandbox_tmp_are_not_destructive`, `tests/unit/test_tools_units.py::test_scratch_removals_below_tmp_are_masked`)
 - Reproduktion: R2-cpp (Job f959d4e4) `rm -rf /tmp/build && cmake -S . -B /tmp/build …`, R1/R2-rust `rm -rf /tmp/kbcheck2 && mkdir -p …`: 3 von 7 `COMMAND_DESTRUCTIVE` der Leitern trafen nur Scratch-Ordner; jede Ablehnung kostete einen Zug und einen Umweg.
