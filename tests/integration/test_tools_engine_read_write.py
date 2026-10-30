@@ -277,6 +277,25 @@ async def test_a_replace_that_finds_nothing_shows_the_current_lines_and_allows_a
     assert indent.ok or "copy from here exactly" in indent.output
 
 
+async def test_a_rewrite_of_a_long_file_for_a_few_lines_points_to_replace_text(sessionmaker: SM, repo: Path) -> None:
+    """Ladder R3 (BUG-383): a 570-line Main.java was written in full ten times in 21 turns to change a few lines each.
+    Such an overwrite says how few lines it changed; a real rewrite, a short file and an append do not."""
+    h = await make_harness(sessionmaker, repo, contract=scope(**IMPLEMENT_SCOPE))
+    big = [f"V{i} = {i}\n" for i in range(300)]
+    assert (await h.call("write_file", path="src/new_feature.py", content="".join(big))).ok
+    big[10], big[200] = "V10 = 11\n", "V200 = 201\n"
+    res = await h.call("write_file", path="src/new_feature.py", content="".join(big))
+    assert res.ok and "repeated 300 lines to change 2" in res.output and "replace_text" in res.output
+    other = "".join(f"W{i} = {i}\n" for i in range(300))
+    res = await h.call("write_file", path="src/new_feature.py", content=other)
+    assert res.ok and "repeated" not in res.output
+    res = await h.call("write_file", path="src/new_feature.py", content="X = 1\n", append=True)
+    assert res.ok and "repeated" not in res.output
+    assert (await h.call("write_file", path="src/new_small.py", content="".join(big[:50]))).ok
+    res = await h.call("write_file", path="src/new_small.py", content="".join(big[:49]) + "V49 = 0\n")
+    assert res.ok and "repeated" not in res.output
+
+
 async def test_an_overwrite_that_drops_existing_tests_says_which(sessionmaker: SM, repo: Path) -> None:
     """BUG-336 (ladder A10 #4): rewriting tests/test_api.py dropped three tests the job said to keep; the write answered
     plainly "overwrote" and the hidden check found them missing."""

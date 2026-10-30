@@ -18,6 +18,7 @@ and pushes are runtime-controlled (gitops).
 from __future__ import annotations
 
 import asyncio
+import difflib
 import functools
 import hashlib
 import json
@@ -288,6 +289,25 @@ def _isolated(executor: object) -> bool:
     if isinstance(executor, LocalSandboxExecutor):
         return executor.mode == "sandbox"
     return isinstance(executor, RemoteSandboxExecutor)
+
+
+# an overwrite of a file this long that changes at most this share of its lines gets the replace_text note
+_REWRITE_MIN_LINES = 150
+_REWRITE_SHARE = 0.15
+
+
+def _rewritten_for_little(old: str | None, new: str) -> int | None:
+    """The changed lines of an overwrite that repeats a long file to change a few of them, else None: ladder R3 wrote a
+    570-line Main.java in full ten times in 21 turns to change a few lines each, ran its tests twice, and two rewrites
+    of main.rs broke off at the output limit (BUG-383)."""
+    if old is None:
+        return None
+    a, b = old.splitlines(), new.splitlines()
+    if len(a) < _REWRITE_MIN_LINES:
+        return None
+    blocks = difflib.SequenceMatcher(None, a, b, autojunk=False).get_opcodes()
+    changed = sum(max(i2 - i1, j2 - j1) for tag, i1, i2, j1, j2 in blocks if tag != "equal")
+    return changed if 0 < changed <= len(a) * _REWRITE_SHARE else None
 
 
 class ToolEngine:
@@ -1311,6 +1331,13 @@ class ToolEngine:
         )
         if restored:
             note += f"\nnote: {restored} masked line(s) you copied unchanged keep their real value"
+        rewritten = _rewritten_for_little(old_text, content) if exists and not args.append else None
+        if rewritten is not None:
+            note += (
+                f"\nnote: this overwrite repeated {lines} lines to change {rewritten} – change lines of an existing file "
+                "with replace_text (one call per changed block): a whole-file rewrite spends a turn's output on unchanged "
+                "lines and breaks off at the output limit"
+            )
         if lines > READ_VISIBLE_LINES and not rel.lower().endswith(_NOT_SPLIT):
             # live G1 on rc95 (BUG-367): an 850-line collector.py written in one go was paged through in 13 reads,
             # each pushing an earlier part out of view, and three attempts ended without the config, docs and tests

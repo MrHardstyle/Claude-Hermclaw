@@ -46,6 +46,12 @@ Noch keine.
 
 ## Behobene Bugs
 
+### BUG-383 – Der Coder schreibt eine lange Datei für wenige Zeilen ganz neu
+- Phase: Leiter R3-rust/R3-java auf rc105/rc106, 2026-10-30 · Komponente: tools (`engine.py`) · Severity: P3 · blockierend: nein · Status: **behoben im Repository** (`tests/integration/test_tools_engine_read_write.py::test_a_rewrite_of_a_long_file_for_a_few_lines_points_to_replace_text`)
+- Reproduktion: R3-java (Job 310d918b) Versuch 2: `Main.java` mit rund 570 Zeilen zehnmal in 21 Zügen per `write_file` komplett geschrieben, jedes Mal mit wenigen geänderten Zeilen, dazwischen zwei Testläufe. R3-rust (Job 67e9b280) Versuch 2: `main.rs` fünfmal ganz neu, zwei Antworten brachen am Ausgabelimit ab (`MODEL_OUTPUT_TRUNCATED`), ein Zug wiederholte den Inhalt unverändert.
+- Ursache: `write_file` meldete nur „overwrote … (N lines)“; dass `replace_text` für kleine Änderungen gedacht ist, stand allein in der Werkzeugbeschreibung.
+- Fix: Überschreibt `write_file` eine Datei ab 150 Zeilen und ändert dabei höchstens 15 % der Zeilen, nennt das Ergebnis die Zahl der wiederholten und der geänderten Zeilen und verweist auf `replace_text` je geändertem Block.
+
 ### BUG-382 – Eine Review-Korrektur, die der Verifier ablehnt, verliert die Review-Befunde
 - Phase: Leiter R3-rust auf rc105 (Job 67e9b280), 2026-10-30 · Komponente: coder (`handler.py`) · Severity: P2 · blockierend: nein · Status: **behoben im Repository** (`tests/integration/test_coder_handler.py::test_review_findings_survive_a_correction_the_verifier_rejects`)
 - Reproduktion: Versuch 1 bestand den Verifier, das Review verlangte unter anderem `-9223372036854775808 % -1` = 0. Versuch 2 (Review-Korrektur) hinterließ Code, der nicht kompilierte; die Korrektur für Versuch 3 enthielt nur die Compiler- und Testfehler. Versuch 3 behob sie, sein Review hörte nichts vom früheren Befund, und der Schritt fiel auf den verifizierten Stand von Versuch 1 zurück: versteckte Prüfung 26/27, genau `minimum remainder -1 is 0` fehlte.

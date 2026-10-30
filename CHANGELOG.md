@@ -4,6 +4,11 @@ Format: [Keep a Changelog](https://keepachangelog.com/de/1.1.0/), Versionen nach
 
 ## [Unreleased]
 
+## [0.1.0rc107] – Release Candidate (2026-10-30)
+
+### Behoben
+- **Hinweis bei ganzer Neufassung für wenige Zeilen (BUG-383):** In R3-java schrieb der Coder die 570 Zeilen von `Main.java` zehnmal in 21 Zügen komplett neu, um jeweils wenige Zeilen zu ändern; in R3-rust brachen zwei solche Antworten am Ausgabelimit ab. `write_file` nennt bei Dateien ab 150 Zeilen, deren Überschreiben höchstens 15 % der Zeilen ändert, wie wenig sich geändert hat, und verweist auf `replace_text`.
+
 ## [0.1.0rc106] – Release Candidate (2026-10-30)
 
 ### Behoben
