@@ -439,7 +439,13 @@ def _failure(check: VerificationCheck, lim: CorrectionLimits) -> VerifierFailure
 
 
 def evidence_excerpt(evidence: Mapping[str, Any], limit: int) -> str:
-    """Most informative part of a check's evidence first (stderr/stdout/output/…), then the rest as compact JSON."""
+    """Most informative part of a check's evidence first (stderr/stdout/output/…), then the rest as compact JSON.
+
+    Long output keeps its first error lines and the runner's summary, not only its head: the ctest output of ladder
+    R3-cpp began with 1,400 chars of CMake configure and build lines, and the correction showed only those – which
+    tests failed and why was cut off, and two attempts re-ran the tests to find out (BUG-386)."""
+    from hermclaw.context_builder.failure import preserve_failure  # the context builder builds on this package's types
+
     if not evidence or limit <= 0:
         return ""
     parts: list[str] = []
@@ -448,11 +454,11 @@ def evidence_excerpt(evidence: Mapping[str, Any], limit: int) -> str:
         if value in (None, "", [], {}):
             continue
         text = value if isinstance(value, str) else compact_json(value, limit)
-        parts.append(f"{key}: {clip(redact(text.strip()), limit)}")
+        parts.append(f"{key}: {preserve_failure(redact(text.strip()), limit)[0]}")
     rest = {k: v for k, v in evidence.items() if k not in _EVIDENCE_TEXT_KEYS and v not in (None, "", [], {})}
     if rest:
         parts.append(compact_json(rest, limit))
-    return clip(redact(" | ".join(parts)), limit)
+    return preserve_failure(redact(" | ".join(parts)), limit)[0]
 
 
 def _evidence_path(evidence: Mapping[str, Any]) -> str:

@@ -4,6 +4,11 @@ Format: [Keep a Changelog](https://keepachangelog.com/de/1.1.0/), Versionen nach
 
 ## [Unreleased]
 
+## [0.1.0rc110] – Release Candidate (2026-10-31)
+
+### Behoben
+- **Fehlerzeilen statt Build-Rauschen in der Korrektur (BUG-386):** In R3-cpp zeigte die Korrektur zu zwei roten ctest-Tests nur die CMake-Zeilen vom Anfang der Ausgabe; welche Tests scheiterten, war abgeschnitten. Evidenz-Auszüge behalten jetzt die ersten Fehlerzeilen und die Zusammenfassung des Testläufers.
+
 ## [0.1.0rc109] – Release Candidate (2026-10-31)
 
 ### Behoben

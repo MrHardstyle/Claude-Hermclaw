@@ -46,6 +46,12 @@ Noch keine.
 
 ## Behobene Bugs
 
+### BUG-386 – Die Korrektur zeigt von einer langen Testausgabe nur den Anfang
+- Phase: Leiter R3-cpp auf rc109, 2026-10-31 · Komponente: review (`correction.py`), context_builder · Severity: P2 · blockierend: nein · Status: **behoben im Repository** (`tests/unit/test_review_correction.py::test_evidence_excerpt_keeps_the_failure_behind_build_output`)
+- Reproduktion: R3-cpp-Wiederholung (Job 82d9cff3) Versuch 3: die Korrektur zu „ctest: failed – 2 passed, 2 failed“ zeigte als Evidenz nur die CMake-Konfigurations- und Build-Zeilen, dann „…[314 chars omitted]“. Welche Tests scheiterten und an welcher Assertion, fehlte; der Coder ließ die Tests in Versuch 3 sechsmal laufen, um es herauszufinden, und das Zeitlimit beendete den Job bei versteckt 27/27.
+- Ursache: `evidence_excerpt` kürzte jede Ausgabe vom Anfang her; bei Build-Werkzeugen steht dort nur Rauschen.
+- Fix: `evidence_excerpt` kürzt mit `preserve_failure` – die ersten Fehlerzeilen und die Zusammenfassung des Testläufers bleiben ganz, Anfang und Ende füllen den Rest, Auslassungen sind markiert.
+
 ### BUG-385 – Nach einem Replan parkt Hermclaw Dateien, auf denen der Build des laufenden Schritts aufbaut
 - Phase: Leiter R3-cpp auf rc107, 2026-10-30 · Komponente: coder (`handler.py`) · Severity: P2 · blockierend: nein · Status: **behoben im Repository** (`tests/integration/test_coder_handler.py::test_a_leftover_the_steps_own_files_name_is_not_parked`)
 - Reproduktion: R3-cpp (Job b96e69f2) Plan v2: S001 bekam `CMakeLists.txt`, Lexer, Parser und `tests/test_rechner.cpp`, S002 `src/interp.hpp`, `src/main.cpp` und die Fixtures. Beim Start von S001 parkte Hermclaw die fünf Dateien (BUG-257), obwohl `CMakeLists.txt` `src/main.cpp` und der Test `interp.hpp` einbindet. Der Build war kaputt; S001 erweiterte den Scope, scheiterte an der Fixture und verlangte nach 6 Zügen einen zweiten Replan (rund 30 Minuten).

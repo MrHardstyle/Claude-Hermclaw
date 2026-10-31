@@ -280,6 +280,17 @@ def test_evidence_excerpt_prioritises_output() -> None:
     assert evidence_excerpt({}, 100) == ""
 
 
+
+def test_evidence_excerpt_keeps_the_failure_behind_build_output() -> None:
+    """Ladder R3-cpp (BUG-386): the ctest output began with CMake configure and build lines; the excerpt showed only
+    those, never which test failed and why."""
+    build = [f"-- Detecting CXX compile features {i} - done" for i in range(40)]
+    failure = ["/workspace/tests/rechner_test.cpp:287: Failure", "  Actual: false", "Expected: true"]
+    output = "\n".join([*build, "[ RUN      ] RechnerTest.Grenzen", *failure, "[  FAILED  ] RechnerTest.Grenzen", "50% tests passed, 2 tests failed out of 4"])
+    text = evidence_excerpt({"output": output, "cmd": "ctest"}, 800)
+    assert len(text) <= 800 and "chars omitted" in text
+    assert all(line in text for line in failure) and "2 tests failed out of 4" in text
+
 def test_non_repository_paths_never_become_item_paths() -> None:
     review = ReviewContract(verdict="fix_required", findings=[_finding("major", "reads outside the repo", path="../../etc/shadow")])
     report = _report(_check("unit", "pytest", "boom", path="/abs/outside.py"))
