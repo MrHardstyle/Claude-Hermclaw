@@ -1133,3 +1133,20 @@ def test_cargo_build_products_are_addressed_through_cargo_target_dir() -> None:
     assert again == fixed and not any("CARGO_TARGET_DIR" in n for n in more)
     kept, _ = prune_unreachable_must_change(PlanContract.model_validate(plan("goal", [built])), _ctx(), preserved=frozenset({"S001"}))
     assert kept.steps[0].acceptance[0].command.endswith("./target/debug/kb x.csv; test $? -eq 2")
+
+
+def test_a_literal_percent_in_a_printf_without_arguments_is_doubled() -> None:
+    """Live R3-lua on rc116 (BUG-394): `printf 'print -7%2\nprint 7%-2\n' > f && lua rechner.lua f` – dash stops at the
+    invalid directive with exit code 2, so the acceptance could never pass."""
+    built = _impl(
+        "S001",
+        acceptance=[
+            {"type": "command", "command": "printf 'print -7%2\\nprint 7%-2\\n' > /tmp/ok.txt && lua rechner.lua /tmp/ok.txt"},
+            {"type": "command", "command": "printf 'print -7%%2\\n' > /tmp/a.txt && printf '%s\\n' x | cat"},
+        ],
+    )
+    fixed, notes = prune_unreachable_must_change(PlanContract.model_validate(plan("goal", [built])), _ctx())
+    first, second = (c.command for c in fixed.steps[0].acceptance)
+    assert first == "printf 'print -7%%2\\nprint 7%%-2\\n' > /tmp/ok.txt && lua rechner.lua /tmp/ok.txt"
+    assert second == "printf 'print -7%%2\\n' > /tmp/a.txt && printf '%s\\n' x | cat"  # escaped, and a format with arguments
+    assert sum("printf format" in n for n in notes) == 1

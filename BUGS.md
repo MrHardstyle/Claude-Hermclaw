@@ -46,6 +46,12 @@ Noch keine.
 
 ## Behobene Bugs
 
+### BUG-394 – Akzeptanzbefehl mit `printf '…%2…'` kann nie bestehen
+- Phase: Leiter R3-lua auf rc116, 2026-10-31 · Komponente: planner (`validation.py`) · Severity: P1 · blockierend: ja (der Schritt kann sein Kriterium nicht erfüllen) · Status: **behoben im Repository** (`tests/unit/test_planner_validation.py::test_a_literal_percent_in_a_printf_without_arguments_is_doubled`)
+- Reproduktion: R3-lua (Job 3ef8756d): acceptance[2] des Plans war `printf 'print 1+2\n…print -7%2\nprint 7%-2\n…' > /tmp/rechner_ok.txt && lua rechner.lua /tmp/rechner_ok.txt`. dash bricht bei `%2\` mit „invalid directive“ und Exit-Code 2 ab, die Datei endet nach `print -7`; das Kriterium „Exit-Code 0, stdout 512“ scheiterte in jedem Versuch, obwohl das Programm alle Beispielwerte richtig berechnete.
+- Ursache: Der Planer schrieb das `%` der Aufgabe in ein printf-Format, ohne es zu verdoppeln; die Normalisierung prüfte Befehle nur auf cargo-Pfade (BUG-379).
+- Fix: Die Planer-Normalisierung schreibt in einem `printf`, dessen Format das einzige Argument ist, jedes einzelne `%` als `%%` (schon verdoppelte bleiben); ein printf mit Argumenten bleibt unverändert.
+
 ### BUG-393 – VB-Variable verdeckt einen Typ gleichen Namens: BC30456 ohne Erklärung
 - Phase: Leiter R3-vb auf rc114, 2026-10-31 · Komponente: tools (`locations.py`, `engine.py`), verifier (`checks.py`) · Severity: P3 · blockierend: nein · Status: **behoben im Repository** (`tests/unit/test_tools_locations.py::test_a_vb_variable_hiding_a_type_of_the_same_name_is_named`)
 - Reproduktion: R3-vb (Job 1a1683ff) Versuch 2: `Dim path As String = Path.Combine(Path.GetTempPath(), …)` im Test scheiterte mit „'Combine' is not a member of 'String'“; der Coder benannte eine von zwei solchen Stellen um, der Testbuild blieb rot.

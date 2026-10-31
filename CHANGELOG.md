@@ -4,6 +4,11 @@ Format: [Keep a Changelog](https://keepachangelog.com/de/1.1.0/), Versionen nach
 
 ## [Unreleased]
 
+## [0.1.0rc117] – Release Candidate (2026-10-31)
+
+### Behoben
+- **printf-Format in Akzeptanzbefehlen (BUG-394):** Der Plan für R3-lua erzeugte die Beispieldatei mit `printf 'print -7%2…'`; die Shell brach am `%2` ab, und das Kriterium konnte nie bestehen. Die Planer-Normalisierung verdoppelt jetzt ein einzelnes `%` im Format eines printf ohne Argumente.
+
 ## [0.1.0rc116] – Release Candidate (2026-10-31)
 
 ### Behoben

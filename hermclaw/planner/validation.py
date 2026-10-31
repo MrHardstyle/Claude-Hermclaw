@@ -1130,6 +1130,45 @@ def _cargo_target_commands(plan: PlanContract, preserved: frozenset[str]) -> tup
     return plan.model_copy(update={"steps": steps}), notes
 
 
+#: a printf whose quoted format is its only argument (a redirection, pipe or list operator follows, or nothing)
+_LONE_PRINTF = re.compile(r"""(?<![\w-])printf\s+(?P<q>['"])(?P<fmt>[^'"\\$`]*(?:\\.[^'"\\$`]*)*)(?P=q)(?=\s*(?:$|[>|&;)]|\d>))""")
+
+
+def _literal_percent(fmt: str) -> str:
+    out, i = [], 0
+    while i < len(fmt):
+        if fmt.startswith("%%", i):
+            out.append("%%")
+            i += 2
+            continue
+        out.append("%%" if fmt[i] == "%" else fmt[i])
+        i += 1
+    return "".join(out)
+
+
+def _printf_percent_commands(plan: PlanContract, preserved: frozenset[str]) -> tuple[PlanContract, list[str]]:
+    """Write a literal ``%`` in the format of a printf without arguments as ``%%`` (BUG-394): live R3-lua on rc116 the
+    plan's acceptance ran `printf 'print -7%2\nprint 7%-2\n' > /tmp/rechner_ok.txt && lua rechner.lua …`; dash stops
+    at the invalid directive `%2` with exit code 2, so the criterion could never pass. Without arguments a
+    conversion prints nothing useful, so every single ``%`` there is meant as text."""
+    notes: list[str] = []
+    steps: list[PlanStep] = []
+    for step in plan.steps:
+        acceptance: list[AcceptanceCriterion] = []
+        for crit in step.acceptance:
+            command = crit.command if isinstance(crit, CommandEvidence | TestEvidence) else ""
+            fixed = _LONE_PRINTF.sub(lambda m: f"printf {m['q']}{_literal_percent(m['fmt'])}{m['q']}", command)
+            if step.id in preserved or fixed == command:
+                acceptance.append(crit)
+                continue
+            acceptance.append(crit.model_copy(update={"command": fixed}))
+            notes.append(f"step {step.id}: literal '%' of a printf format written as '%%' in '{fixed[:80]}'")
+        steps.append(step.model_copy(update={"acceptance": acceptance}) if acceptance != step.acceptance else step)
+    if not notes:
+        return plan, []
+    return plan.model_copy(update={"steps": steps}), notes
+
+
 def _step_size_errors(step: PlanStep, ctx: ValidationContext) -> list[str]:
     """A step that creates more files than one coder attempt can write fails late on its turn budget. After the
     code-and-tests rule the planner merged a whole widget (collector, frontend, scripts, tests, fixtures, README:
@@ -1191,6 +1230,8 @@ def prune_unreachable_must_change(
     notes += unnamed
     plan, cargo = _cargo_target_commands(plan, preserved)
     notes += cargo
+    plan, printf = _printf_percent_commands(plan, preserved)
+    notes += printf
     steps: list[PlanStep] = []
     for step in plan.steps:
         paths = _step_paths(step, ctx) if step.id not in preserved and step.kind.value in WORKSPACE_MUTATING_KINDS else []
