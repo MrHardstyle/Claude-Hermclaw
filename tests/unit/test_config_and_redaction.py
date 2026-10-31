@@ -189,3 +189,18 @@ def test_code_that_computes_a_secret_stays_readable() -> None:
         assert Redactor().text(text) == text, text
     for text in ("TOKEN=Ab3x(9kz)", "password=Pa55(word)", "secret = s3cr3t_value"):
         assert REDACTED in Redactor().text(text), text
+
+
+def test_a_block_colon_after_a_secret_name_is_no_value() -> None:
+    """Live G1 rc119 (BUG-398): the review quoted ``if username and not password:`` and the ``raise`` below it; the
+    coder saw ``***REDACTED*** ValueError(…)``, copied it, and two writes were refused. A value never starts on the next
+    line, and an unquoted keyword is code."""
+    for text in (
+        'if username and not password:\n    raise ValueError("password is required")',
+        "if not api_key: return None",
+        "token = None",
+        "password: true",
+    ):
+        assert Redactor().text(text) == text, text
+    for text in ("password: hunter2x", "api_key = Zr9xkq77", 'password = "raise"'):
+        assert REDACTED in Redactor().text(text), text

@@ -1,4 +1,4 @@
 """Hermclaw Next – universal local multi-agent system."""
 
-__version__ = "0.1.0rc119"
+__version__ = "0.1.0rc120"
 PROTOCOL_VERSION = 1

@@ -46,6 +46,12 @@ Noch keine.
 
 ## Behobene Bugs
 
+### BUG-398 – Redaktor liest den Doppelpunkt eines Blocks als `password:`-Wert
+- Phase: G1-Abnahme auf rc119, 2026-10-31 · Komponente: core (`redaction.py`) · Severity: P2 · blockierend: nein (Stagnation, zwei abgelehnte Schreibzüge) · Status: **behoben im Repository** (`tests/unit/test_config_and_redaction.py::test_a_block_colon_after_a_secret_name_is_no_value`)
+- Reproduktion: G1 (Job 7ff4a5f6) S003: Das Review zitierte `if username and not password:` mit dem `raise ValueError(…)` der nächsten Zeile als Beleg; in der Korrektur stand `***REDACTED*** ValueError(…)`. Der Coder kopierte die Zeile in sein `write_file` (abgelehnt, REDACTED_PLACEHOLDER) und suchte sie zweimal per `replace_text` (nicht gefunden) – Stagnation `edit_mechanics`.
+- Ursache: Das Schlüssel-Wert-Muster ließ zwischen `password:` und dem Wert beliebigen Leerraum zu, auch Zeilenumbrüche; `raise` galt als Wert.
+- Fix: Der Trenner um `:`/`=` überschreitet keine Zeile mehr, und ein ungequotetes Schlüsselwort (`raise`, `return`, `None`, `true`, `null` …) ist kein Wert. Gilt auch für den Secret-Scan des Verifiers (gleiche Muster).
+
 ### BUG-397 – Wiederholungsabbruch des Modellservers gilt als „Ausgabelimit erreicht“
 - Phase: Leiter R3-bash auf rc117, 2026-10-31 · Komponente: models (`gateway.py`) · Severity: P2 · blockierend: nein (Review fail-closed, Rückfall auf den verifizierten Stand) · Status: **behoben im Repository** (`tests/unit/test_models_gateway.py::test_structured_answers_stopped_far_below_the_limit_are_repaired_hotter`)
 - Reproduktion: R3-bash (Job afe55d1d) Versuch 3: das Heavy Review endete nach 3407 und dann nach 469 von 6144 Tokens mit `finish_reason=length` und leerem Inhalt; Hermclaw meldete „hit the output limit of 6144 tokens“, bat um eine kürzere Antwort und schloss das Review mit `MODEL_OUTPUT_TRUNCATED` fail-closed. Strata-Log: „the reply repeated one token ('0') 256 times in a row: ended as "length"“ (#606). In zehn Tagen 19 solche Abbrüche (`'0'` 15-mal, `'9'` 4-mal; Review, Coder-Züge), alle weit unter dem Limit.

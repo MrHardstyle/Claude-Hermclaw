@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import keyword
 import re
 from collections.abc import Iterable
 from typing import Any
@@ -14,7 +15,7 @@ _PATTERNS: list[re.Pattern[str]] = [
     re.compile(
         # optional identifier prefix (DB_PASSWORD, smtp-password, apiToken, X_API_KEY) – never a plural/suffix (max_tokens)
         r"(\b(?:[A-Za-z0-9]+[_-]|[a-z0-9]+(?=[A-Z]))*(?i:api[_-]?key|access[_-]?token|auth[_-]?token|token|secret|password|passwd|"
-        r"private[_-]?token|client[_-]?secret)\b[\"']?\s*[:=]\s*[\"']?)([^\s\"',;]{4,})"
+        r"private[_-]?token|client[_-]?secret)\b[\"']?[ \t]*[:=][ \t]*[\"']?)([^\s\"',;]{4,})"
     ),
     re.compile(r"\bglpat-[A-Za-z0-9_-]{20,}\b"),  # GitLab personal access token
     re.compile(r"\bgh[pousr]_[A-Za-z0-9]{30,}\b"),  # GitHub tokens
@@ -27,6 +28,10 @@ _PATTERNS: list[re.Pattern[str]] = [
 SECRET_PATTERNS: tuple[re.Pattern[str], ...] = tuple(_PATTERNS)
 
 _KEY_VALUE = _PATTERNS[2]
+# ``if username and not password:`` + ``raise ValueError(…)`` on the next line: the key's colon ends a block, and the
+# word after it is code. The separator never crosses a line, and an unquoted keyword is no value (live G1 rc119: the
+# review quoted the check, the coder saw ``***REDACTED*** ValueError``, copied it, and two attempts were refused, BUG-398)
+_CODE_KEYWORDS = frozenset({*keyword.kwlist, "null", "nil", "true", "false", "undefined", "throw", "then", "do"})
 # ``api_key = config["x"]``, ``token = self.token``, ``password = getpass.getpass()``: code that *reads* a secret. Masking
 # it showed the coder broken code (``api_key = ***REDACTED***"x"]``), which it copied into new files (BUG-225).
 _CODE_REFERENCE = re.compile(r"^[A-Za-z_]\w*(?:\.[A-Za-z_]\w*)*(?:\(\)?|\[)?[)\]}]*$")
@@ -99,6 +104,8 @@ def is_benign_value(value: str, *, quoted: bool) -> bool:
         return True
     if quoted:
         return False
+    if value in _CODE_KEYWORDS:
+        return True
     if len(value) <= 80 and _CODE_EXPRESSION.match(value):
         return True
     return len(value) <= 60 and bool(_CODE_SIGNS & set(value)) and bool(_CODE_REFERENCE.match(value))

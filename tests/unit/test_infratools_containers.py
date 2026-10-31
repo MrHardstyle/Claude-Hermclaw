@@ -277,7 +277,8 @@ async def test_remote_inspect_survives_transport_redaction() -> None:
     redacted = DEFAULT_REDACTOR.text(json.dumps([doc], indent=2))
     with pytest.raises(json.JSONDecodeError):
         json.loads(redacted)
-    assert loads_lenient(redacted)[0]["Config"]["Passwd"] == "***REDACTED***"
+    config = loads_lenient(redacted)[0]["Config"]
+    assert config["api_key"] == "***REDACTED***" and config["Passwd"] is True  # a JSON literal is no secret (BUG-398)
     runner = FakeRunner({"podman inspect": (0, redacted, "")})
     info = await ContainerInventory(HostExecutor(remote=runner, hosts=HOSTS)).inspect("sbx_web_1", host="web-223", engine="podman")
     assert info.name == "sbx_web_1" and info.health == "healthy"

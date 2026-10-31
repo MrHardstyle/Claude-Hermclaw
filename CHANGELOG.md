@@ -4,6 +4,11 @@ Format: [Keep a Changelog](https://keepachangelog.com/de/1.1.0/), Versionen nach
 
 ## [Unreleased]
 
+## [0.1.0rc120] – Release Candidate (2026-10-31)
+
+### Behoben
+- **Block-Doppelpunkt ist kein Geheimnis (BUG-398):** `if not password:` mit `raise …` in der nächsten Zeile wurde zu `***REDACTED*** ValueError(…)`; der Coder der G1-Abnahme kopierte das und blieb hängen. Der Redaktor maskiert keinen Wert mehr über einen Zeilenumbruch hinweg und keine ungequoteten Schlüsselwörter.
+
 ## [0.1.0rc119] – Release Candidate (2026-10-31)
 
 ### Behoben
