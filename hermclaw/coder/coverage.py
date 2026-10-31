@@ -7,6 +7,11 @@ with both coder models – one service still a JSON array, ``[]`` for none (A9),
 with distinct ids (A7). The verifier ran the delivered tests and passed, the review did not see the gap (Research
 R-035, ladder A7 #6/#7). The model judges which test checks a requirement; whether a named test exists is checked
 here, so an invented test name counts as a gap.
+
+The TASK is the whole job: in a plan of several steps the model listed the requirements of the other steps too and the
+correction asked a metrics step for tests of the collectors, the JSON interface and the frontend, which later steps
+build (G1 on rc119, S003 and S004, BUG-399). The prompt names the other work steps of the plan; their requirements are
+left out.
 """
 
 from __future__ import annotations
@@ -53,6 +58,8 @@ List every requirement of the TASK and STEP GOAL that a test can check on the be
 outputs, status codes, error cases, edge cases the text names (one item, none, invalid values), persistence, limits.
 Keep each requirement short and concrete, one behaviour per item.
 Leave out requirements about documentation, the README, file names or layout, the tests themselves, tooling or style.
+The TASK is the whole job. When OTHER STEPS are listed, the plan splits the TASK into steps: list only the requirements
+of the work this STEP GOAL does and leave out every requirement that belongs to the work of an OTHER STEP.
 For each requirement name the tests from TEST NAMES that check exactly that behaviour – a test that only touches the
 feature without asserting the behaviour does not count. Copy the names exactly; leave the list empty when no test
 checks it. Answer with JSON only."""
@@ -107,7 +114,7 @@ def read_tests(root: Path, changed: Sequence[str]) -> dict[str, str]:
     return out
 
 
-def build_messages(request: str, goal: str, tests: dict[str, str]) -> list[ChatMessage]:
+def build_messages(request: str, goal: str, tests: dict[str, str], others: Sequence[str] = ()) -> list[ChatMessage]:
     names = [f"{path}::{name}" for path, text in tests.items() for name in names_in(text)]
     sources, used = [], 0
     for path, text in tests.items():
@@ -118,14 +125,11 @@ def build_messages(request: str, goal: str, tests: dict[str, str]) -> list[ChatM
         clip = text if len(text) <= left else text[:left] + "\n…[truncated]"
         sources.append(f"--- {path}\n{clip}")
         used += len(clip)
-    user = "\n\n".join(
-        [
-            f"TASK\n{request[:_MAX_REQUEST_CHARS]}",
-            f"STEP GOAL\n{goal[:_MAX_REQUEST_CHARS]}",
-            "TEST NAMES\n" + "\n".join(names),
-            "TEST SOURCES\n" + "\n\n".join(sources),
-        ]
-    )
+    parts = [f"TASK\n{request[:_MAX_REQUEST_CHARS]}", f"STEP GOAL\n{goal[:_MAX_REQUEST_CHARS]}"]
+    if others:
+        parts.append("OTHER STEPS (their work is checked in those steps)\n" + "\n".join(f"- {o}" for o in others)[:_MAX_REQUEST_CHARS])
+    parts += ["TEST NAMES\n" + "\n".join(names), "TEST SOURCES\n" + "\n\n".join(sources)]
+    user = "\n\n".join(parts)
     return [ChatMessage("system", SYSTEM_PROMPT), ChatMessage("user", DEFAULT_REDACTOR.text(user))]
 
 
@@ -178,14 +182,15 @@ async def check_coverage(
     attempt_id: uuid.UUID,
     max_tokens: int,
     temperature: float | None = None,
+    others: Sequence[str] = (),
 ) -> CoverageResult | None:
-    """None when the step delivered no test file (nothing to judge)."""
+    """None when the step delivered no test file (nothing to judge); ``others`` are the other work steps of the plan."""
     tests = read_tests(root, changed)
     if not tests:
         return None
     result = await chat.structured(
         alias,
-        build_messages(request, goal, tests),
+        build_messages(request, goal, tests, others),
         CoverageDraft,
         ctx=CallContext(purpose="coverage", job_id=job_id, step_id=step_id, attempt_id=attempt_id),
         max_repairs=1,

@@ -46,6 +46,12 @@ Noch keine.
 
 ## Behobene Bugs
 
+### BUG-399 – Abdeckungsprüfung verlangt Tests für die Arbeit anderer Planschritte
+- Phase: G1-Abnahme auf rc119, 2026-10-31 · Komponente: coder (`coverage.py`, `handler.py`) · Severity: P2 · blockierend: nein (ein Korrekturversuch je Schritt verbraucht) · Status: **behoben im Repository** (`tests/unit/test_coverage.py::test_the_prompt_names_the_other_work_steps_of_the_plan`)
+- Reproduktion: G1 (Job 7ff4a5f6) S004 v2 („shared metric normalization and thresholds“) bestand Verifier (18/21) und Review (pass); die Abdeckungsprüfung meldete 9 Lücken, alle aus der Arbeit anderer Schritte: parallele Abfrage der Server, nicht erreichbare Server, falsche Zugangsdaten (S010/S011), JSON-Schnittstelle auf 127.0.0.1 (S005), Frontend ohne Frameworks (S006), Server hinzufügen/entfernen. Versuch 1 endete `COVERAGE_GAP`, die Korrektur sollte Tests für Code schreiben, den erst spätere Schritte bauen. Schon S003 (Konfiguration) bekam Lücken wie „Settings-Bereich im Frontend“.
+- Ursache: Der Prompt ließ „jede Anforderung von TASK und STEP GOAL“ auflisten; TASK ist der ganze Auftrag. Bei einem Plan mit mehreren Schritten landeten so die Anforderungen aller Schritte in jedem Schritt.
+- Fix: Der Prompt nennt die anderen aktuellen Arbeitsschritte des Plans (Schlüssel, Titel, Ziel) unter OTHER STEPS; Anforderungen, die zu deren Arbeit gehören, werden ausgelassen. Ein Plan mit einem Schritt bleibt unverändert.
+
 ### BUG-398 – Redaktor liest den Doppelpunkt eines Blocks als `password:`-Wert
 - Phase: G1-Abnahme auf rc119, 2026-10-31 · Komponente: core (`redaction.py`) · Severity: P2 · blockierend: nein (Stagnation, zwei abgelehnte Schreibzüge) · Status: **behoben im Repository** (`tests/unit/test_config_and_redaction.py::test_a_block_colon_after_a_secret_name_is_no_value`)
 - Reproduktion: G1 (Job 7ff4a5f6) S003: Das Review zitierte `if username and not password:` mit dem `raise ValueError(…)` der nächsten Zeile als Beleg; in der Korrektur stand `***REDACTED*** ValueError(…)`. Der Coder kopierte die Zeile in sein `write_file` (abgelehnt, REDACTED_PLACEHOLDER) und suchte sie zweimal per `replace_text` (nicht gefunden) – Stagnation `edit_mechanics`.

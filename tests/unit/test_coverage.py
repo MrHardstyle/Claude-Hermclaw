@@ -55,3 +55,14 @@ def test_the_correction_names_the_tools_of_the_existing_tests() -> None:
     message = gap_items(["unknown id is 404"], imports_of(tests))[0].message
     assert "(they import json, urllib, tasks_app, pytest)" in message and "no new package" in message
     assert "they import" not in gap_items(["x"])[0].message
+
+
+def test_the_prompt_names_the_other_work_steps_of_the_plan() -> None:
+    """BUG-399 (G1 on rc119): the metrics step S004 was asked for tests of the collectors, the JSON interface and the
+    frontend, which the TASK names and later steps build. The other work steps are listed, their requirements left out."""
+    tests = {"tests/test_metrics.py": "def test_units():\n    pass\n"}
+    system, user = (m.content for m in build_messages("Dashboard", "Normalize metrics", tests, ["S005 JSON API: serve /api"]))
+    assert "OTHER STEPS (their work is checked in those steps)\n- S005 JSON API: serve /api" in user
+    assert user.index("STEP GOAL") < user.index("OTHER STEPS") < user.index("TEST NAMES")
+    assert "leave out every requirement that belongs to the work of an OTHER STEP" in system
+    assert "OTHER STEPS" not in build_messages("Dashboard", "Normalize metrics", tests)[1].content

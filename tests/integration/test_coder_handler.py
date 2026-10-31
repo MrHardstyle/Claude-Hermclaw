@@ -1118,6 +1118,7 @@ async def test_a_requirement_no_delivered_test_checks_becomes_one_correction(wor
     jobs = await _run(world, _driver(world, models, tmp_path), [_handler(world, models, verifier, None), ReviewHandler()], [jid])
     assert jobs[jid].status == "succeeded", (jobs[jid].error_code, jobs[jid].error_message)
     assert len(models.coverage_prompts) == 1 and "test_value" in models.coverage_prompts[0][1].content
+    assert "OTHER STEPS" not in models.coverage_prompts[0][1].content  # a one-step plan has no other work (BUG-399)
     checked = [e.payload for e in await _events(world, jid) if e.event_type == "coverage.checked"]
     assert checked == [{"alias": "coder-main", "requirements": 2, "tests": 1, "gaps": ["VALUE is an integer"]}]
     correction_prompt = json.dumps([m.content for m in models.coder_prompts[3]])

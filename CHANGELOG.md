@@ -4,6 +4,11 @@ Format: [Keep a Changelog](https://keepachangelog.com/de/1.1.0/), Versionen nach
 
 ## [Unreleased]
 
+## [0.1.0rc121] – Release Candidate (2026-10-31)
+
+### Behoben
+- **Abdeckung nur für die eigene Arbeit (BUG-399):** Die Prüfung, ob die eigenen Tests eines Schritts alle Anforderungen abdecken, las den ganzen Auftrag und verlangte vom Metrik-Schritt der G1-Abnahme Tests für Collectors, JSON-Schnittstelle und Frontend. Sie bekommt jetzt die anderen Planschritte genannt und lässt deren Anforderungen aus.
+
 ## [0.1.0rc120] – Release Candidate (2026-10-31)
 
 ### Behoben

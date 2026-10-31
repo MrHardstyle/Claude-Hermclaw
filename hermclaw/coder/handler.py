@@ -28,7 +28,7 @@ from hermclaw.coder.coverage import check_coverage, gap_items, read_tests
 from hermclaw.coder.loop import CoderLoop, CoderResult, CoderSettings, StagnationHook, history_from_checkpoint
 from hermclaw.context_builder import ContextBuilder, ContextBuilderConfig, CorrectionItem, StepBrief
 from hermclaw.contracts.acceptance import AcceptanceCriterion
-from hermclaw.contracts.common import FindingSeverity, StepKind
+from hermclaw.contracts.common import MUTATING_STEP_KINDS, FindingSeverity, StepKind
 from hermclaw.contracts.events import EventType
 from hermclaw.contracts.review import ReviewContract, enforce_review_invariant
 from hermclaw.contracts.scope import ScopeContract, ScopeExpansionRequest
@@ -359,6 +359,19 @@ class ImplementStepHandler:
         if job is None:
             return ""
         return "\n".join([job.title, job.prompt, *(str(i) for i in inputs)])
+
+    async def _other_work_steps(self, ctx: StepRunContext) -> list[str]:
+        """The other current work steps of the job, key, title and goal: the coverage check leaves their requirements out
+        (BUG-399)."""
+        stmt = select(Step).where(
+            Step.job_id == ctx.job_id,
+            Step.id != ctx.step_id,
+            Step.superseded.is_(False),
+            Step.kind.in_([k.value for k in MUTATING_STEP_KINDS]),
+        )
+        async with self.sm() as s:
+            rows = (await s.execute(stmt.order_by(Step.step_key))).scalars().all()
+        return [f"{r.step_key} {r.title}: {r.goal[:300]}" for r in rows]
 
     async def _job_request(self, job_id: uuid.UUID) -> str:
         """The user's request for the whole job (title and prompt) for the coder's STEP GOAL section (BUG-212)."""
@@ -948,6 +961,7 @@ class ImplementStepHandler:
                     changed,
                     request=await self._job_request(ctx.job_id),
                     goal=run.step.goal,
+                    others=await self._other_work_steps(ctx),
                     job_id=ctx.job_id,
                     step_id=ctx.step_id,
                     attempt_id=ctx.attempt_id,
