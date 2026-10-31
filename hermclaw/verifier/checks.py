@@ -16,7 +16,7 @@ from typing import Any
 from hermclaw.contracts.acceptance import CommandEvidence, TestEvidence
 from hermclaw.contracts.verification import VerificationCheck
 from hermclaw.repo_intelligence.paths import is_test_path
-from hermclaw.tools.locations import keyword_hint
+from hermclaw.tools.locations import vb_hints
 from hermclaw.verifier.changes import matching, read_bytes, read_text
 from hermclaw.verifier.conflicts import scan_conflicts
 from hermclaw.verifier.context import VerifyContext
@@ -370,9 +370,9 @@ async def compile_checks(ctx: VerifyContext) -> list[VerificationCheck]:
             out.append(ctx.check("compile", name, "skip", f"the {language} toolchain is not available in the sandbox image", evidence))
         else:
             message = f"{command} failed with exit code {res.exit_code}"
-            keyword = await asyncio.to_thread(keyword_hint, res.output, lambda rel: _lines(root, rel))
-            if keyword:  # the correction carries it (BUG-391)
-                message += " " + keyword
+            hints = await asyncio.to_thread(vb_hints, res.output, lambda rel: _lines(root, rel))
+            if hints:  # the correction carries them (BUG-391, BUG-393)
+                message += " " + " ".join(hints)
             out.append(ctx.check("compile", name, "fail", message, evidence))
     if not out:
         out.append(

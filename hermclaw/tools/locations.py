@@ -129,3 +129,49 @@ def keyword_hint(output: str, lines_of: LinesOf, *, cwd: str = ".") -> str | Non
         f"`{words[0].lower()}` is the keyword too. Rename it everywhere (e.g. `{words[0]}Text`, `Op`) or escape it as "
         f"`[{words[0]}]`."
     )
+
+
+# vbc: "path(line,col): error BC30456: 'Combine' is not a member of 'String'." where a local hides a type (BUG-393)
+_VB_NOT_MEMBER = re.compile(
+    r"(?P<path>/?(?:[\w.\-]+/)*[\w\-][\w.\-]*\.vb)\((?P<line>\d+),(?P<col>\d+)\): error BC30456: '\w+' is not a member of '[\w.]+'",
+    re.I,
+)
+_VB_DECLARATION = re.compile(r"\b(?:Dim|Const|Static|ByVal|ByRef)\s+([A-Za-z_]\w*)|[(,]\s*([A-Za-z_]\w*)\s+As\b", re.I)
+
+
+def shadow_hint(output: str, lines_of: LinesOf, *, cwd: str = ".") -> str | None:
+    """A hint when a BC30456 error points at a capitalised name that a variable of the same file declares in another
+    case – the variable hides the type of that name.
+
+    Live ladder R3-vb on rc114: ``Dim path As String = Path.Combine(Path.GetTempPath(), …)`` failed with "'Combine' is
+    not a member of 'String'"; VB ignores case, so the local ``path`` hid ``System.IO.Path``, and the coder fixed one
+    of two such lines."""
+    for m in _VB_NOT_MEMBER.finditer(output):
+        number, col = int(m.group("line")), int(m.group("col"))
+        for rel in _candidates(m.group("path"), cwd):
+            lines = lines_of(rel)
+            if lines is None:
+                continue
+            word = _WORD.match(lines[number - 1][col - 1 :]) if 0 < number <= len(lines) and col > 0 else None
+            if word is None:
+                break
+            name = word.group(1)
+            if not name[0].isupper():
+                break  # a variable's own missing member, not a type hidden by one
+            for n, text in enumerate(lines, 1):
+                code = text.split("'", 1)[0]
+                for d in _VB_DECLARATION.finditer(code):
+                    local = d.group(1) or d.group(2)
+                    if local.lower() == name.lower() and local != name:
+                        return (
+                            f"[hint] `{name}` in {rel}:{number} is the variable `{local}` declared in line {n}, not the "
+                            f"type: Visual Basic ignores case, so a variable hides a type of the same name. Rename the "
+                            f"variable everywhere (e.g. `{local}Value`) or qualify the type (e.g. `System.IO.{name}`)."
+                        )
+            break
+    return None
+
+
+def vb_hints(output: str, lines_of: LinesOf, *, cwd: str = ".") -> list[str]:
+    """The Visual Basic hints for a failed build's output (BUG-391, BUG-393)."""
+    return [h for h in (keyword_hint(output, lines_of, cwd=cwd), shadow_hint(output, lines_of, cwd=cwd)) if h]

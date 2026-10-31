@@ -46,6 +46,12 @@ Noch keine.
 
 ## Behobene Bugs
 
+### BUG-393 – VB-Variable verdeckt einen Typ gleichen Namens: BC30456 ohne Erklärung
+- Phase: Leiter R3-vb auf rc114, 2026-10-31 · Komponente: tools (`locations.py`, `engine.py`), verifier (`checks.py`) · Severity: P3 · blockierend: nein · Status: **behoben im Repository** (`tests/unit/test_tools_locations.py::test_a_vb_variable_hiding_a_type_of_the_same_name_is_named`)
+- Reproduktion: R3-vb (Job 1a1683ff) Versuch 2: `Dim path As String = Path.Combine(Path.GetTempPath(), …)` im Test scheiterte mit „'Combine' is not a member of 'String'“; der Coder benannte eine von zwei solchen Stellen um, der Testbuild blieb rot.
+- Ursache: VB unterscheidet Groß/Klein nicht; die lokale Variable `path` verdeckt `System.IO.Path`. Die Meldung nennt nur den String-Typ.
+- Fix: Zeigt ein BC30456-Fehler auf einen großgeschriebenen Namen, den dieselbe Datei in anderer Schreibweise als Variable deklariert, nennen `run_command` und die Compile-Prüfung Variable, Zeile und Ausweg (umbenennen oder `System.IO.Path` schreiben). Die VB-Hinweise (BUG-391, BUG-393) laufen gemeinsam über `vb_hints`.
+
 ### BUG-392 – Projektdatei im Unterordner: Befehle laufen im falschen Sandbox-Image
 - Phase: Leiter R3-vb auf rc114, 2026-10-31 · Komponente: runtime (`images.py`) · Severity: P2 · blockierend: nein · Status: **behoben im Repository** (`tests/integration/test_sandbox_images.py::test_a_project_file_in_a_subfolder_selects_its_toolchain`)
 - Reproduktion: R3-vb (Job 1a1683ff) Versuch 1: Zug 1 (`dotnet --version; … cat /opt/nuget/versions.txt`) lief im dotnet-Image und zeigte die Paketversionen, Zug 3 (`cat /opt/nuget/versions.txt` allein) meldete „No such file or directory“. Der Coder suchte die Pakete danach sechs Züge lang (`dotnet new list`, `ls ~/.nuget`, `find /opt …`).

@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from hermclaw.tools.locations import enclosing, keyword_hint, source_locations
+from hermclaw.tools.locations import enclosing, keyword_hint, shadow_hint, source_locations
 
 FILES = {
     "tests/test_app.py": [
@@ -72,3 +72,21 @@ def test_vb_keywords_used_as_names_are_named() -> None:
     assert keyword_hint(output.replace("BC30183", "BC30201"), files.get) is None  # another error
     assert keyword_hint(output, {}.get) is None  # file not in the workspace
     assert keyword_hint("/workspace/src/Rechner/Parser.vb(9,1): error BC30183: x", files.get) is None  # beyond the file
+
+
+def test_a_vb_variable_hiding_a_type_of_the_same_name_is_named() -> None:
+    """Live R3-vb (BUG-393): ``Dim path As String = Path.Combine(...)`` – "'Combine' is not a member of 'String'"."""
+    files = {
+        "tests/UnitTest1.vb": [
+            "Public Class RechnerTests",
+            '    Dim path As String = Path.Combine(Path.GetTempPath(), "x.txt")',
+            "    Sub Run(token As Token)",
+            "        token.Missing()",
+        ]
+    }
+    output = "/workspace/tests/UnitTest1.vb(2,26): error BC30456: 'Combine' is not a member of 'String'. [/workspace/t.vbproj]\n"
+    hint = shadow_hint(output, files.get)
+    assert hint is not None and hint.startswith("[hint] `Path` in tests/UnitTest1.vb:2 is the variable `path` declared in line 2")
+    # a variable's own missing member is no hidden type
+    own = "/workspace/tests/UnitTest1.vb(4,9): error BC30456: 'Missing' is not a member of 'Token'. [/workspace/t.vbproj]\n"
+    assert shadow_hint(own, files.get) is None

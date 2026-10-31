@@ -4,6 +4,11 @@ Format: [Keep a Changelog](https://keepachangelog.com/de/1.1.0/), Versionen nach
 
 ## [Unreleased]
 
+## [0.1.0rc116] – Release Candidate (2026-10-31)
+
+### Behoben
+- **VB-Variable verdeckt einen Typ (BUG-393):** `Dim path … = Path.Combine(…)` meldet nur „'Combine' is not a member of 'String'“. `run_command` und die Compile-Prüfung nennen jetzt die verdeckende Variable.
+
 ## [0.1.0rc115] – Release Candidate (2026-10-31)
 
 ### Behoben
