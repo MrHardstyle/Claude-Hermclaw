@@ -758,6 +758,39 @@ async def test_apply_patch_locates_bare_hunks_in_an_existing_file(sessionmaker: 
     assert "return b * a" in (repo / "src" / "calc.py").read_text()
 
 
+async def test_apply_patch_of_several_files_without_git_headers(sessionmaker: SM, repo: Path) -> None:
+    """BUG-390: ``git apply --recount`` counted the next section's ``--- a/path`` as a removed line of the hunk before
+    it ("new file src/x depends on old contents"); every plain multi-file patch since 21.10. failed. Hunk counts that
+    are off and an empty line between the sections are fine as well."""
+    h = await make_harness(sessionmaker, repo, contract=scope(**IMPLEMENT_SCOPE))
+    patch = (
+        "--- /dev/null\n+++ b/src/new_sample.py\n@@ -0,0 +1,1 @@\n+let x = 2\n+print x\n\n"
+        "--- a/src/calc.py\n+++ b/src/calc.py\n@@ -1,9 +1,9 @@\n def mul(a, b):\n-    return a * b\n+    return b * a\n \n"
+    )
+    res = await h.call("apply_patch", patch=patch)
+    assert res.ok, res.output
+    assert (repo / "src" / "new_sample.py").read_text() == "let x = 2\nprint x\n"
+    assert "return b * a" in (repo / "src" / "calc.py").read_text()
+
+
+async def test_apply_patch_adds_lines_that_lost_their_plus(sessionmaker: SM, repo: Path) -> None:
+    """Live ladder R3 (BUG-389): the coder copied the task's grammar into a new file and its continuation line came
+    without the ``+``; git refused the whole patch ("recount: unexpected line")."""
+    h = await make_harness(sessionmaker, repo, contract=scope(**IMPLEMENT_SCOPE))
+    patch = (
+        "--- /dev/null\n+++ b/src/new_grammar.py\n@@ -0,0 +1,3 @@\n+# ausdruck := term\nterm := faktor\n+X = 1\n"
+        "--- a/src/calc.py\n+++ b/src/calc.py\n@@ -1,2 +1,4 @@\n def mul(a, b):\n+    # a*b\nb*a\n     return a * b\n"
+    )
+    res = await h.call("apply_patch", patch=patch)
+    assert res.ok, res.output
+    assert (repo / "src" / "new_grammar.py").read_text() == "# ausdruck := term\nterm := faktor\nX = 1\n"
+    assert (repo / "src" / "calc.py").read_text().startswith("def mul(a, b):\n    # a*b\nb*a\n    return a * b\n")
+    assert "2 line(s) without a diff prefix taken as added lines" in res.output
+    # after a context line an unprefixed line is not guessed: git judges the patch as written
+    res = await h.call("apply_patch", patch="--- a/app.py\n+++ b/app.py\n@@ -1,2 +1,2 @@\n def add(a, b):\nreturn 0\n")
+    assert res.error_code == E.PATCH_INVALID
+
+
 async def test_apply_patch_scope_is_checked_for_every_file_before_applying(sessionmaker: SM, repo: Path) -> None:
     h = await make_harness(sessionmaker, repo, contract=scope(**IMPLEMENT_SCOPE))
     patch = PATCH_OK + (

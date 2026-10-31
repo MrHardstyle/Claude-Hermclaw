@@ -71,7 +71,15 @@ from hermclaw.tools.gitlocal import LocalGit
 from hermclaw.tools.locations import source_locations
 from hermclaw.tools.ops import OpsCall, OpsResult, OpsToolProvider
 from hermclaw.tools.output import clip_head, clip_middle, missing_modules, strip_ansi
-from hermclaw.tools.patch import diff_section_path, locate_bare_hunks, parse_numstat, parse_patch, rebuild_new_files
+from hermclaw.tools.patch import (
+    diff_section_path,
+    locate_bare_hunks,
+    parse_numstat,
+    parse_patch,
+    prefix_added_lines,
+    rebuild_new_files,
+    recount_hunks,
+)
 from hermclaw.tools.recorder import PendingEvent, ToolRecorder
 from hermclaw.tools.registry import (
     ApplyPatchArgs,
@@ -1585,8 +1593,10 @@ class ToolEngine:
     # ============================================================================================ 17.4 patch
     async def _apply_patch(self, args: ApplyPatchArgs, ctx: CallContext, events: list[PendingEvent]) -> ToolResult:
         guard = self._guard_for_write()
-        text, rebuilt = rebuild_new_files(args.patch, self._is_new_file)
+        text, prefixed = prefix_added_lines(args.patch)
+        text, rebuilt = rebuild_new_files(text, self._is_new_file)
         text, located = locate_bare_hunks(text, self._current_text)
+        text = recount_hunks(text)
         parsed = parse_patch(text)
         if any(f.binary for f in parsed.files):
             raise ToolError(E.PATCH_INVALID, "binary patches are not supported; use write_file for text files")
@@ -1646,6 +1656,8 @@ class ToolEngine:
             summary += f" (header rebuilt as a new file: {', '.join(rebuilt)}; write_file creates a file more simply)"
         if located:
             summary += f" (bare '@@' hunks located by their lines in: {', '.join(located)})"
+        if prefixed:
+            summary += f" ({prefixed} line(s) without a diff prefix taken as added lines – check them)"
         return self._ok(ToolName.apply_patch, f"patch applied: {summary}", mutated_paths=mutated, data={"changes": changes})
 
     def _is_new_file(self, raw: str) -> bool:

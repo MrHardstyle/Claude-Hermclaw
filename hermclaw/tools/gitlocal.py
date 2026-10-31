@@ -164,10 +164,10 @@ class LocalGit:
         return await self.run("checkout-index", "-f", "-q", "-z", "--stdin", stdin=b"\0".join(p.encode() for p in paths) + b"\0")
 
     async def apply_numstat(self, patch: bytes, strip: int) -> GitRun:
-        return await self.run("apply", f"-p{strip}", "--recount", "--numstat", "-z", "-", stdin=patch)
+        return await self.run("apply", f"-p{strip}", "--numstat", "-z", "-", stdin=patch)
 
     async def apply_check(self, patch: bytes, strip: int) -> GitRun:
-        return await self.run("apply", f"-p{strip}", "--recount", "--check", "--whitespace=nowarn", "-", stdin=patch)
+        return await self.run("apply", f"-p{strip}", "--check", "--whitespace=nowarn", "-", stdin=patch)
 
     async def apply(self, patch: bytes, strip: int) -> GitRun:
-        return await self.run("apply", f"-p{strip}", "--recount", "--whitespace=nowarn", "-", stdin=patch)
+        return await self.run("apply", f"-p{strip}", "--whitespace=nowarn", "-", stdin=patch)

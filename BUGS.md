@@ -46,6 +46,18 @@ Noch keine.
 
 ## Behobene Bugs
 
+### BUG-390 – `apply_patch` scheitert an jedem einfachen Patch über mehrere Dateien
+- Phase: Leiter R3-vb auf rc110/rc112, 2026-10-31 · Komponente: tools (`patch.py`, `gitlocal.py`) · Severity: P1 · blockierend: nein · Status: **behoben im Repository** (`tests/integration/test_tools_engine_read_write.py::test_apply_patch_of_several_files_without_git_headers`)
+- Reproduktion: R3-vb (Job 92c6b083) Versuch 2: ein Patch für `Model.vb`, `Program.vb` und das neue `tests/sample.txt` scheiterte mit „new file tests/sample.txt depends on old contents“. Seit 21.10. scheiterten alle 9 `apply_patch`-Aufrufe mit mehreren Dateien ohne `diff --git`-Zeilen (Meldungen „depends on old contents“, „corrupt patch“), unabhängig vom Inhalt.
+- Ursache: `git apply --recount` zählt die Zeilen eines Hunks bis zum nächsten `@@` oder `diff`; der Kopf `--- a/pfad` des nächsten Abschnitts wurde so zur entfernten Zeile des vorigen Hunks.
+- Fix: Die Engine zählt die Hunks selbst (ein Hunk endet am nächsten Hunk, am nächsten `---`/`+++`-Paar oder an `diff --git`; Leerzeilen am Ende eines Hunks sind Trenner) und ruft `git apply` ohne `--recount` auf.
+
+### BUG-389 – Patch-Zeilen ohne `+` verwerfen den ganzen Patch
+- Phase: Leiter R3-vb auf rc112, 2026-10-31 · Komponente: tools (`patch.py`) · Severity: P2 · blockierend: nein · Status: **behoben im Repository** (`tests/integration/test_tools_engine_read_write.py::test_apply_patch_adds_lines_that_lost_their_plus`)
+- Reproduktion: R3-vb-Wiederholung (Job 37ec9f6d) Versuch 1, Zug 16: in einem neuen `Evaluator.vb` stand die aus der Aufgabe kopierte Grammatikzeile `term := faktor …` ohne `+`; git lehnte den Patch ab („recount: unexpected line“), wie in vier weiteren R3-Jobs seit 27.10.
+- Ursache: Das Modell verliert das Präfix bei kopierten, eingerückten Textblöcken; git verwirft dann den ganzen Patch.
+- Fix: Eine Hunk-Zeile ohne Präfix (weder Leerzeichen, `+`, `-` noch `\`) gilt als hinzugefügt, wenn der Abschnitt die Datei anlegt oder die Zeile einer hinzugefügten folgt; die Ausgabe nennt die Zahl solcher Zeilen. Nach einer Kontext- oder `-`-Zeile bleibt sie, wie sie ist, und git urteilt.
+
 ### BUG-388 – Verschachtelte .NET-Projekte: doppelte Assembly-Attribute ohne Erklärung
 - Phase: Leiter R3-vb auf rc110, 2026-10-31 · Komponente: tools (`engine.py`) · Severity: P3 · blockierend: nein · Status: **behoben im Repository** (`tests/integration/test_tools_engine_exec.py::test_a_build_compiling_a_nested_projects_obj_files_learns_why`)
 - Reproduktion: R3-vb (Job 92c6b083) Versuch 3: der Plan nannte `dotnet test tests/Rechner.Tests.vbproj`, der Coder hatte `tests/Rechner.Tests/Rechner.Tests.vbproj`. Er legte das Projekt zusätzlich am genannten Pfad an; das äußere Projekt kompilierte die `obj/`-Dateien des inneren mit (`BC30663 Attribute 'AssemblyCompanyAttribute' cannot be applied multiple times`). Der Coder verbrauchte die letzten Züge mit `<Compile Include>`-Versuchen; der Job endete im Zeitlimit bei versteckt 18/27.
@@ -54,7 +66,7 @@ Noch keine.
 
 ### BUG-387 – `apply_patch` scheitert an Hunks mit nacktem `@@`
 - Phase: Leiter R3-vb auf rc110, 2026-10-31 · Komponente: tools (`patch.py`, `engine.py`) · Severity: P2 · blockierend: nein · Status: **behoben im Repository** (`tests/integration/test_tools_engine_read_write.py::test_apply_patch_locates_bare_hunks_in_an_existing_file`)
-- Reproduktion: R3-vb (Job 92c6b083) Versuch 2, Zug 19: der Coder änderte `Model.vb` und `Program.vb` mit Hunks, deren Kopf nur `@@` ist (ohne `-a,b +c,d`); git lehnte den ganzen Patch ab, der Zug war verloren, der Versuch endete am Zugbudget. Seit 21.10. scheiterten 40 von 57 `apply_patch`-Aufrufen, 14 davon an nackten `@@` (keiner davon gelang je).
+- Reproduktion: R3-vb (Job 92c6b083) Versuch 2, Zug 19: der Coder änderte `Model.vb` und `Program.vb` mit Hunks, deren Kopf nur `@@` ist (ohne `-a,b +c,d`); git lehnte den ganzen Patch ab (zusätzlich BUG-390), der Zug war verloren, der Versuch endete am Zugbudget. Seit 21.10. scheiterten 40 von 57 `apply_patch`-Aufrufen, 14 davon an nackten `@@` (keiner davon gelang je).
 - Ursache: `git apply` braucht Zeilennummern im Hunk-Kopf; BUG-364 baute nur Hunks neuer Dateien um.
 - Fix: Ein nackter Hunk gegen eine bestehende Datei wird über seine Kontext- und `-`-Zeilen in der Datei gesucht (nach dem vorigen Hunk, Leerzeichen am Zeilenende dürfen abweichen, Leerzeilen ohne Präfix zählen als leere Kontextzeile) und bekommt seine Zeilennummern; angrenzende Hunks werden zusammengelegt, ein Hunk ohne nachfolgenden Kontext bekommt die nächste Zeile (sonst verlangt git das Dateiende). Wird ein Hunk nicht gefunden, nennt `PATCH_INVALID` ihn statt „No valid patches in input“.
 

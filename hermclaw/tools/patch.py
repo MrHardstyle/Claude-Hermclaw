@@ -182,6 +182,72 @@ def parse_patch(text: str) -> ParsedPatch:
     return ParsedPatch(files, _strip_level(files))
 
 
+_COUNTED_HUNK = re.compile(r"^@@ -(\d+)(?:,\d+)? \+(\d+)(?:,\d+)? @@(.*)$")
+
+
+def recount_hunks(text: str) -> str:
+    """Set the line counts of every numbered hunk header from its body (BUG-390).
+
+    ``git apply --recount`` counts a hunk's lines up to the next ``@@`` or ``diff`` line, so in a plain unified diff
+    of several files the next section's ``--- a/path`` header became a removed line ("new file x depends on old
+    contents"; all 9 such apply_patch calls since 21.10. failed). The engine recounts instead: a body ends at the next
+    hunk, the next ``---``/``+++`` pair or ``diff --git`` line, and empty lines that end a body are separators, not
+    context (they are dropped)."""
+    lines = text.split("\n")
+    out: list[str] = []
+    i = 0
+    while i < len(lines):
+        m = _COUNTED_HUNK.match(lines[i])
+        if not m:
+            out.append(lines[i])
+            i += 1
+            continue
+        j = i + 1
+        while j < len(lines) and not _ends_hunk(lines, j):
+            j += 1
+        body = lines[i + 1 : j]
+        while body and body[-1] == "":
+            body.pop()
+        old = sum(1 for b in body if b[:1] in " -" or b == "")
+        new = sum(1 for b in body if b[:1] in " +" or b == "")
+        out += [f"@@ -{m.group(1)},{old} +{m.group(2)},{new} @@{m.group(3)}", *body]
+        i = j
+    return "\n".join(out) + ("\n" if text.endswith("\n") else "")
+
+
+def _ends_hunk(lines: list[str], j: int) -> bool:
+    line = lines[j]
+    if line.startswith("@@") or _DIFF_GIT.match(line):
+        return True
+    return line.startswith("--- ") and j + 1 < len(lines) and lines[j + 1].startswith("+++ ")
+
+
+def prefix_added_lines(text: str) -> tuple[str, int]:
+    """Give a hunk line that lacks its diff prefix the ``+`` it lost (BUG-389).
+
+    Live ladder R3 (5 calls since 27.10., R3-vb on rc112 among them): the coder copied the task's grammar into a new
+    file and the continuation line ``term := faktor ...`` came without its ``+``; git refused the whole patch
+    ("recount: unexpected line"). A line inside a hunk that starts with none of `` ``, ``+``, ``-``, ``\\`` is added
+    content when the section creates its file or the line follows an added line; anywhere else it stays as written
+    and git judges it. Blank lines are left to the other repairs. Returns the patch and the number of lines fixed."""
+    lines = text.split("\n")
+    in_hunk, creating, prev, fixed = False, False, "", 0
+    for i, line in enumerate(lines):
+        if _DIFF_GIT.match(line) or (line.startswith("--- ") and i + 1 < len(lines) and lines[i + 1].startswith("+++ ")):
+            in_hunk, creating = False, _header_path(line) == DEV_NULL if line.startswith("--- ") else False
+            continue
+        if line.startswith("@@"):
+            in_hunk, prev = True, ""
+            continue
+        if not in_hunk or not line.strip():
+            continue
+        if line[0] in " +-\\":
+            prev = line[0]
+        elif creating or prev == "+":
+            lines[i], prev, fixed = "+" + line, "+", fixed + 1
+    return ("\n".join(lines), fixed) if fixed else (text, 0)
+
+
 def rebuild_new_files(text: str, is_new: Callable[[str], bool]) -> tuple[str, list[str]]:
     """Rebuild the sections of a plain unified diff that create a file as a clean new-file patch (BUG-364).
 

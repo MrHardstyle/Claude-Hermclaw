@@ -4,6 +4,12 @@ Format: [Keep a Changelog](https://keepachangelog.com/de/1.1.0/), Versionen nach
 
 ## [Unreleased]
 
+## [0.1.0rc113] – Release Candidate (2026-10-31)
+
+### Behoben
+- **Patches über mehrere Dateien (BUG-390):** `git apply --recount` las den Kopf `--- a/pfad` des nächsten Abschnitts als entfernte Zeile; jeder einfache Patch über mehrere Dateien scheiterte. Die Engine zählt die Hunks jetzt selbst.
+- **Patch-Zeilen ohne `+` (BUG-389):** Kopierte Textzeilen ohne Präfix in neuen Dateien oder zwischen hinzugefügten Zeilen gelten als hinzugefügt, statt den ganzen Patch zu verwerfen.
+
 ## [0.1.0rc112] – Release Candidate (2026-10-31)
 
 ### Behoben
