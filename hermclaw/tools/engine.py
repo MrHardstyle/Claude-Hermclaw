@@ -71,7 +71,7 @@ from hermclaw.tools.gitlocal import LocalGit
 from hermclaw.tools.locations import source_locations
 from hermclaw.tools.ops import OpsCall, OpsResult, OpsToolProvider
 from hermclaw.tools.output import clip_head, clip_middle, missing_modules, strip_ansi
-from hermclaw.tools.patch import diff_section_path, parse_numstat, parse_patch, rebuild_new_files
+from hermclaw.tools.patch import diff_section_path, locate_bare_hunks, parse_numstat, parse_patch, rebuild_new_files
 from hermclaw.tools.recorder import PendingEvent, ToolRecorder
 from hermclaw.tools.registry import (
     ApplyPatchArgs,
@@ -301,6 +301,7 @@ def _tmp_gone(command: str, output: str) -> str | None:
         if root in command:
             return root
     return None
+
 
 def _isolated(executor: object) -> bool:
     """Whether commands run in a sandbox with a /tmp of its own: never the unisolated subprocess fallback of dev/tests."""
@@ -1568,6 +1569,7 @@ class ToolEngine:
     async def _apply_patch(self, args: ApplyPatchArgs, ctx: CallContext, events: list[PendingEvent]) -> ToolResult:
         guard = self._guard_for_write()
         text, rebuilt = rebuild_new_files(args.patch, self._is_new_file)
+        text, located = locate_bare_hunks(text, self._current_text)
         parsed = parse_patch(text)
         if any(f.binary for f in parsed.files):
             raise ToolError(E.PATCH_INVALID, "binary patches are not supported; use write_file for text files")
@@ -1625,11 +1627,20 @@ class ToolEngine:
         summary = ", ".join(f"{op} {p}" for p, op in sorted(targets))
         if rebuilt:
             summary += f" (header rebuilt as a new file: {', '.join(rebuilt)}; write_file creates a file more simply)"
+        if located:
+            summary += f" (bare '@@' hunks located by their lines in: {', '.join(located)})"
         return self._ok(ToolName.apply_patch, f"patch applied: {summary}", mutated_paths=mutated, data={"changes": changes})
 
     def _is_new_file(self, raw: str) -> bool:
         _, target = self.fs.resolve_for_write(canonical_path(raw))
         return not target.exists()
+
+    def _current_text(self, raw: str) -> str | None:
+        try:
+            _, target = self.fs.resolve_for_write(canonical_path(raw))
+            return target.read_text(encoding="utf-8") if target.is_file() else None
+        except (ToolError, OSError, UnicodeDecodeError, ValueError):
+            return None
 
     # ============================================================================================ 17.5/17.6 commands
     def _scope_violation_event(self, tool: ToolName, audit: AuditOutcome, events: list[PendingEvent]) -> None:

@@ -4,6 +4,11 @@ Format: [Keep a Changelog](https://keepachangelog.com/de/1.1.0/), Versionen nach
 
 ## [Unreleased]
 
+## [0.1.0rc111] – Release Candidate (2026-10-31)
+
+### Behoben
+- **Patches mit nacktem `@@` (BUG-387):** In R3-vb verlor der Coder einen Zug, weil git Hunks ohne Zeilennummern im Kopf nie anwendet; seit 21.10. scheiterten 14 `apply_patch`-Aufrufe daran. `apply_patch` sucht solche Hunks jetzt über ihre Zeilen in der bestehenden Datei und setzt die Nummern ein; nicht gefundene Hunks werden mit Namen gemeldet.
+
 ## [0.1.0rc110] – Release Candidate (2026-10-31)
 
 ### Behoben

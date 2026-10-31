@@ -214,6 +214,116 @@ def rebuild_new_files(text: str, is_new: Callable[[str], bool]) -> tuple[str, li
     return ("\n".join(out) + "\n", rebuilt) if rebuilt else (text, [])
 
 
+_NUMBERED_HUNK = re.compile(r"^@@ -\d+(?:,\d+)? \+\d+(?:,\d+)? @@")
+_GIT_HEADER = ("diff --git ", "index ", "new file mode ", "deleted file mode ", "old mode ", "new mode ", "similarity ")
+
+
+def locate_bare_hunks(text: str, read: Callable[[str], str | None]) -> tuple[str, list[str]]:
+    """Give the bare ``@@`` hunks of a patch against an existing file their line numbers (BUG-387).
+
+    Live ladder R3-vb on rc110: the coder wrote hunks headed by a bare ``@@`` (no ``-a,b +c,d``), which git never
+    applies ("No valid patches in input"); 14 of 40 failed apply_patch calls since 21.10. had them. Each such hunk is
+    looked up in the file ``read`` returns: its context and ``-`` lines must occur there as one block (after the
+    previous hunk; trailing whitespace may differ, the file's text is then used), a blank body line counts as an
+    empty context line. A hunk that is not found raises ``PATCH_INVALID`` naming it. Returns the patch and the paths
+    whose hunks were located."""
+    lines = text.split("\n")
+    starts = [i for i in range(len(lines) - 1) if lines[i].startswith("--- ") and lines[i + 1].startswith("+++ ")]
+    if not any(ln.startswith("@@") and not _NUMBERED_HUNK.match(ln) for ln in lines):
+        return text, []
+    out = lines[: starts[0]] if starts else lines
+    located: list[str] = []
+    for n, start in enumerate(starts):
+        end = starts[n + 1] if n + 1 < len(starts) else len(lines)
+        section = lines[start:end]
+        tail: list[str] = []
+        while len(section) > 2 and (section[-1].startswith(_GIT_HEADER) or (n + 1 < len(starts) and not section[-1].strip())):
+            tail.insert(0, section.pop())
+        new = _header_path(section[1])
+        path = strip_prefix(new, 1 if new.startswith("b/") else 0)
+        bare = any(ln.startswith("@@") and not _NUMBERED_HUNK.match(ln) for ln in section[2:])
+        content = read(path) if path is not None and bare and _header_path(section[0]) != DEV_NULL else None
+        if content is None:
+            out += section + tail
+            continue
+        out += section[:2] + _locate_section(path or "", section[2:], content.split("\n")) + tail
+        located.append(path or "")
+    return ("\n".join(out), located) if located else (text, [])
+
+
+def _locate_section(path: str, body: list[str], file_lines: list[str]) -> list[str]:
+    out: list[str] = []
+    hunks: list[list[str]] = []
+    for line in body:
+        if line.startswith("@@"):
+            hunks.append([line])
+        elif hunks:
+            hunks[-1].append(line)
+        else:
+            out.append(line)
+    pos = 0
+    items: list[list[str] | tuple[int, int, int, list[str]]] = []  # numbered hunks as they are, located ones as (at, old, new, rows)
+    for k, hunk in enumerate(hunks, 1):
+        if _NUMBERED_HUNK.match(hunk[0]):
+            items.append(hunk)
+            continue
+        rows = hunk[1:]
+        while rows and not rows[-1].strip():
+            rows.pop()
+        old = [r[1:] if r[:1] in " -" else "" for r in rows if r[:1] in " -" or not r.strip()]
+        at = _find_block(file_lines, old, pos)
+        if at is None:
+            where = f" after line {pos}" if pos else ""
+            raise ToolError(
+                E.PATCH_INVALID,
+                f"hunk {k} for '{path}' has a bare '@@' header and its context and '-' lines do not occur together in the "
+                f"file{where}; re-read the lines and copy them exactly, or change them with replace_text",
+            )
+        i, fixed = at, []
+        for r in rows:
+            if r[:1] in " -" or not r.strip():
+                fixed.append(("-" if r[:1] == "-" else " ") + file_lines[i])
+                i += 1
+            else:
+                fixed.append(r)
+        new_count = sum(1 for r in fixed if r[:1] in " +")
+        prev = items[-1] if items else None
+        if isinstance(prev, tuple) and prev[0] + prev[1] == at:  # adjacent hunks: one hunk, git refuses overlaps
+            items[-1] = (prev[0], prev[1] + len(old), prev[2] + new_count, prev[3] + fixed)
+        else:
+            items.append((at, len(old), new_count, fixed))
+        pos = at + len(old)
+    real = len(file_lines) - (1 if file_lines and file_lines[-1] == "" else 0)
+    delta = 0
+    for item in items:
+        if not isinstance(item, tuple):
+            out += item
+            continue
+        at, old_n, new_n, rows = item
+        # git matches a hunk without trailing context only at the end of the file: give it the next line
+        extra = 0 if rows[-1][:1] == " " or at + old_n >= real else 1
+        out.append(f"@@ -{at + 1},{old_n + extra} +{at + 1 + delta},{new_n + extra} @@")
+        out += rows + [" " + file_lines[at + old_n]] * extra
+        delta += new_n - old_n
+    return out
+
+
+def _same(line: str) -> str:
+    return line
+
+
+def _find_block(file_lines: list[str], old: list[str], pos: int) -> int | None:
+    """First index at or after ``pos`` where ``old`` occurs (exactly, else up to trailing whitespace)."""
+    if not old or not any(o.strip() for o in old):
+        return None
+    for norm in (_same, str.rstrip):
+        want = [norm(o) for o in old]
+        for at in range(pos, len(file_lines) - len(old) + 1):
+            if all(norm(file_lines[at + j]) == w for j, w in enumerate(want)):
+                return at
+    return None
+
+
 def _created_lines(body: list[str]) -> list[str] | None:
     """The file content of a creation hunk body, ``None`` if the body changes or keeps existing lines. A blank line
     is an empty line of the file unless it trails the last ``+`` line."""

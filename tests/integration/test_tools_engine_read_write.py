@@ -734,6 +734,30 @@ async def test_apply_patch_creates_a_file_from_a_sloppy_creation_patch(sessionma
     assert not res.ok and not (repo / "src" / "new_ctx.py").exists()
 
 
+async def test_apply_patch_locates_bare_hunks_in_an_existing_file(sessionmaker: SM, repo: Path) -> None:
+    """Live ladder R3-vb on rc110 (BUG-387): the coder changed existing files with hunks headed by a bare ``@@``;
+    git applies none of them ("No valid patches in input") and the turn was lost."""
+    h = await make_harness(sessionmaker, repo, contract=scope(target_paths=["src/calc.py", "src/util.py"]))
+    patch = (
+        "--- a/src/calc.py\n+++ b/src/calc.py\n@@\n def mul(a, b):\n-    return a * b\n+    return b * a\n\n@@\n"
+        "\n def div(a, b):  \n-    return a / b\n+    return a // b\n"
+    )
+    res = await h.call("apply_patch", patch=patch)
+    assert res.ok, res.output
+    assert (repo / "src" / "calc.py").read_text() == "def mul(a, b):\n    return b * a\n\n\ndef div(a, b):\n    return a // b\n"
+    assert "bare '@@' hunks located by their lines in: src/calc.py" in res.output
+    # a second hunk is looked up after the first one: the repeated line of util.py is changed in its second place
+    res = await h.call("apply_patch", patch="--- a/src/util.py\n+++ b/src/util.py\n@@\n-X = 1\n+X = 2\n@@\n-X = 1\n+X = 3\n")
+    assert res.ok, res.output
+    assert (repo / "src" / "util.py").read_text() == "X = 2\nX = 3\n"
+    # lines that are not in the file: refused with the hunk named, nothing changed
+    res = await h.call(
+        "apply_patch", patch="--- a/src/calc.py\n+++ b/src/calc.py\n@@\n def mul(a, b):\n-    return a ** b\n+    return 0\n"
+    )
+    assert res.error_code == E.PATCH_INVALID and "hunk 1 for 'src/calc.py' has a bare '@@' header" in res.output
+    assert "return b * a" in (repo / "src" / "calc.py").read_text()
+
+
 async def test_apply_patch_scope_is_checked_for_every_file_before_applying(sessionmaker: SM, repo: Path) -> None:
     h = await make_harness(sessionmaker, repo, contract=scope(**IMPLEMENT_SCOPE))
     patch = PATCH_OK + (

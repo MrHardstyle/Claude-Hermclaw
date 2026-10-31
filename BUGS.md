@@ -46,6 +46,12 @@ Noch keine.
 
 ## Behobene Bugs
 
+### BUG-387 – `apply_patch` scheitert an Hunks mit nacktem `@@`
+- Phase: Leiter R3-vb auf rc110, 2026-10-31 · Komponente: tools (`patch.py`, `engine.py`) · Severity: P2 · blockierend: nein · Status: **behoben im Repository** (`tests/integration/test_tools_engine_read_write.py::test_apply_patch_locates_bare_hunks_in_an_existing_file`)
+- Reproduktion: R3-vb (Job 92c6b083) Versuch 2, Zug 19: der Coder änderte `Model.vb` und `Program.vb` mit Hunks, deren Kopf nur `@@` ist (ohne `-a,b +c,d`); git lehnte den ganzen Patch ab, der Zug war verloren, der Versuch endete am Zugbudget. Seit 21.10. scheiterten 40 von 57 `apply_patch`-Aufrufen, 14 davon an nackten `@@` (keiner davon gelang je).
+- Ursache: `git apply` braucht Zeilennummern im Hunk-Kopf; BUG-364 baute nur Hunks neuer Dateien um.
+- Fix: Ein nackter Hunk gegen eine bestehende Datei wird über seine Kontext- und `-`-Zeilen in der Datei gesucht (nach dem vorigen Hunk, Leerzeichen am Zeilenende dürfen abweichen, Leerzeilen ohne Präfix zählen als leere Kontextzeile) und bekommt seine Zeilennummern; angrenzende Hunks werden zusammengelegt, ein Hunk ohne nachfolgenden Kontext bekommt die nächste Zeile (sonst verlangt git das Dateiende). Wird ein Hunk nicht gefunden, nennt `PATCH_INVALID` ihn statt „No valid patches in input“.
+
 ### BUG-386 – Die Korrektur zeigt von einer langen Testausgabe nur den Anfang
 - Phase: Leiter R3-cpp auf rc109, 2026-10-31 · Komponente: review (`correction.py`), context_builder · Severity: P2 · blockierend: nein · Status: **behoben im Repository** (`tests/unit/test_review_correction.py::test_evidence_excerpt_keeps_the_failure_behind_build_output`)
 - Reproduktion: R3-cpp-Wiederholung (Job 82d9cff3) Versuch 3: die Korrektur zu „ctest: failed – 2 passed, 2 failed“ zeigte als Evidenz nur die CMake-Konfigurations- und Build-Zeilen, dann „…[314 chars omitted]“. Welche Tests scheiterten und an welcher Assertion, fehlte; der Coder ließ die Tests in Versuch 3 sechsmal laufen, um es herauszufinden, und das Zeitlimit beendete den Job bei versteckt 27/27.
