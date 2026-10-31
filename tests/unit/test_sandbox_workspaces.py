@@ -347,3 +347,19 @@ def test_setuid_and_world_writable_bits_stripped(dest: Path) -> None:
     extract_tar_safely(buf.getvalue(), dest)
     assert stat.S_IMODE((dest / "tool").stat().st_mode) == 0o755
     assert stat.S_IMODE((dest / "shared").stat().st_mode) == 0o755
+
+
+def test_a_chmod_travels_like_a_content_change(tree: Path, tmp_path: Path) -> None:
+    """Live R3-bash on rc117 (BUG-396): `chmod +x rechner.sh` in the sandbox never reached the orchestrator – the
+    content digest of the manifest stayed the same, so the sync saw no change."""
+    before = manifest(tree)
+    assert before["run.sh"] == hashlib.sha256(b"executable\x00#!/bin/sh\n").hexdigest()
+    (tree / "README.md").chmod(0o755)
+    (tree / "run.sh").chmod(0o644)
+    changed, deleted = diff_manifest(before, manifest(tree))
+    assert changed == ["README.md", "run.sh"] and deleted == []
+    copy = tmp_path / "copy"
+    copy.mkdir()
+    (copy / "README.md").write_text("# hi\n")  # same content, not executable: the synced mode replaces it
+    extract_tar_safely(build_tar(tree, changed), copy)
+    assert os.access(copy / "README.md", os.X_OK) and not os.access(copy / "run.sh", os.X_OK)

@@ -79,6 +79,7 @@ from hermclaw.tools.patch import (
     prefix_added_lines,
     rebuild_new_files,
     recount_hunks,
+    retarget_existing_creations,
 )
 from hermclaw.tools.recorder import PendingEvent, ToolRecorder
 from hermclaw.tools.registry import (
@@ -1594,6 +1595,7 @@ class ToolEngine:
     async def _apply_patch(self, args: ApplyPatchArgs, ctx: CallContext, events: list[PendingEvent]) -> ToolResult:
         guard = self._guard_for_write()
         text, prefixed = prefix_added_lines(args.patch)
+        text, retargeted = retarget_existing_creations(text, lambda raw: not self._is_new_file(raw))
         text, rebuilt = rebuild_new_files(text, self._is_new_file)
         text, located = locate_bare_hunks(text, self._current_text)
         text = recount_hunks(text)
@@ -1605,7 +1607,13 @@ class ToolEngine:
             rel = canonical_path(t.path)
             if rel == ".":
                 raise ToolError(E.PATCH_INVALID, "patch header without a file path")
-            rel, _target = self.fs.resolve_for_write(rel)
+            rel, target = self.fs.resolve_for_write(rel)
+            if t.operation == "create" and target.exists():
+                raise ToolError(
+                    E.PATCH_INVALID,
+                    f"'{rel}' already exists, and a '--- /dev/null' section creates a file: change it with '--- a/{rel}' "
+                    "hunks or replace_text, or replace it whole with write_file",
+                )
             targets.append((rel, t.operation))
         await self._authorise(ToolName.apply_patch, targets, events)
         added = [ln[1:] for ln in args.patch.splitlines() if ln.startswith("+") and not ln.startswith("+++")]
@@ -1654,6 +1662,8 @@ class ToolEngine:
         summary = ", ".join(f"{op} {p}" for p, op in sorted(targets))
         if rebuilt:
             summary += f" (header rebuilt as a new file: {', '.join(rebuilt)}; write_file creates a file more simply)"
+        if retargeted:
+            summary += f" ('--- /dev/null' read as a change of the existing {', '.join(retargeted)})"
         if located:
             summary += f" (bare '@@' hunks located by their lines in: {', '.join(located)})"
         if prefixed:

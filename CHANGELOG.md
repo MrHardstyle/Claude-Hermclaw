@@ -4,6 +4,12 @@ Format: [Keep a Changelog](https://keepachangelog.com/de/1.1.0/), Versionen nach
 
 ## [Unreleased]
 
+## [0.1.0rc118] – Release Candidate (2026-10-31)
+
+### Behoben
+- **`chmod` in der Sandbox (BUG-396):** Der Abgleich zwischen Orchestrator und Exec-Host verglich nur Inhalte, ein `chmod +x` ging in beide Richtungen verloren; R3-bash scheiterte an `./rechner.sh` mit Exit 126. Das Ausführungsrecht zählt jetzt im Abgleich mit.
+- **`--- /dev/null` für eine bestehende Datei (BUG-395):** Ein solcher Abschnitt mit Kontext- oder `-`-Zeilen wird jetzt als Änderung der Datei angewandt, statt den ganzen Patch zu verwerfen; einer mit nur neuen Zeilen bekommt eine klare Ablehnung.
+
 ## [0.1.0rc117] – Release Candidate (2026-10-31)
 
 ### Behoben

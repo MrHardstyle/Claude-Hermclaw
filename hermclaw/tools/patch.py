@@ -222,6 +222,48 @@ def _ends_hunk(lines: list[str], j: int) -> bool:
     return line.startswith("--- ") and j + 1 < len(lines) and lines[j + 1].startswith("+++ ")
 
 
+def retarget_existing_creations(text: str, exists: Callable[[str], bool]) -> tuple[str, list[str]]:
+    """Turn a ``--- /dev/null`` section for a file that exists into a change of that file (BUG-395).
+
+    Live ladder R3-bash on rc117: the coder headed its README.md section with ``--- /dev/null`` although README.md
+    existed, and git refused the whole patch ("new file README.md depends on old contents"). A section whose body
+    keeps or removes lines (context or ``-`` lines) cannot create a file, so it is meant as a change: its header
+    becomes ``--- a/path``, a ``new file mode`` line goes, and its ``@@ -0,0 …`` hunk headers become bare ``@@`` for
+    :func:`locate_bare_hunks`. A section of ``+`` lines only is left to the engine's 'already exists' refusal."""
+    lines = text.split("\n")
+    starts = [i for i in range(len(lines) - 1) if lines[i].startswith("--- ") and lines[i + 1].startswith("+++ ")]
+    changed: list[str] = []
+    drop: set[int] = set()
+    for n, start in enumerate(starts):
+        end = starts[n + 1] if n + 1 < len(starts) else len(lines)
+        if _header_path(lines[start]) != DEV_NULL:
+            continue
+        new = _header_path(lines[start + 1])
+        path = strip_prefix(new, 1 if new.startswith("b/") else 0)
+        body = lines[start + 2 : end]
+        keeps = any(b.startswith((" ", "-")) and not b.startswith("--- ") for b in body)
+        if path is None or not keeps or not _safe_exists(exists, path):
+            continue
+        lines[start] = f"--- a/{path}" if new.startswith("b/") else f"--- {path}"
+        for i in range(start + 2, end):
+            if re.match(r"^@@ -0(?:,0)? \+", lines[i]):
+                lines[i] = "@@"
+        for i in range(max(0, start - 3), start):
+            if lines[i].startswith("new file mode "):
+                drop.add(i)
+        changed.append(path)
+    if not changed:
+        return text, []
+    return "\n".join(line for i, line in enumerate(lines) if i not in drop), changed
+
+
+def _safe_exists(exists: Callable[[str], bool], path: str) -> bool:
+    try:
+        return exists(path)
+    except (ToolError, OSError, ValueError):
+        return False
+
+
 def prefix_added_lines(text: str) -> tuple[str, int]:
     """Give a hunk line that lacks its diff prefix the ``+`` it lost (BUG-389).
 

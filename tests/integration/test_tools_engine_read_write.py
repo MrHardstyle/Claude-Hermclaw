@@ -791,6 +791,24 @@ async def test_apply_patch_adds_lines_that_lost_their_plus(sessionmaker: SM, rep
     assert res.error_code == E.PATCH_INVALID
 
 
+async def test_apply_patch_reads_a_creation_of_an_existing_file_as_its_change(sessionmaker: SM, repo: Path) -> None:
+    """Live ladder R3-bash (BUG-395): the coder headed its section for the existing file with ``--- /dev/null``; git
+    refused the whole patch ("new file README.md depends on old contents")."""
+    h = await make_harness(sessionmaker, repo, contract=scope(**IMPLEMENT_SCOPE))
+    patch = (
+        "--- /dev/null\n+++ b/src/new_check.py\n@@ -0,0 +1,1 @@\n+CHECK = 1\n"
+        "--- /dev/null\n+++ b/src/calc.py\n@@ -0,0 +1,3 @@\n def mul(a, b):\n-    return a * b\n+    return b * a\n \n"
+    )
+    res = await h.call("apply_patch", patch=patch)
+    assert res.ok, res.output
+    assert "return b * a" in (repo / "src" / "calc.py").read_text() and (repo / "src" / "new_check.py").exists()
+    assert "'--- /dev/null' read as a change of the existing src/calc.py" in res.output
+    # only added lines for an existing file: refused with the way out, not git's "already exists in working directory"
+    res = await h.call("apply_patch", patch="--- /dev/null\n+++ b/src/calc.py\n@@ -0,0 +1 @@\n+X = 1\n")
+    assert res.error_code == E.PATCH_INVALID and "'src/calc.py' already exists" in res.output
+    assert "return b * a" in (repo / "src" / "calc.py").read_text()
+
+
 async def test_apply_patch_scope_is_checked_for_every_file_before_applying(sessionmaker: SM, repo: Path) -> None:
     h = await make_harness(sessionmaker, repo, contract=scope(**IMPLEMENT_SCOPE))
     patch = PATCH_OK + (

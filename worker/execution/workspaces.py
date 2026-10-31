@@ -520,7 +520,11 @@ def _symlink_digest(target: str) -> str:
 
 
 def manifest(src: Path, *, exclude: Iterable[str] = DEFAULT_EXCLUDES) -> dict[str, str]:
-    """``relative path -> sha256`` of every regular file and symlink (``sha256("symlink\\0" + target)``)."""
+    """``relative path -> sha256`` of every regular file and symlink (``sha256("symlink\\0" + target)``).
+
+    An executable file hashes ``"executable\\0" + content``: live R3-bash on rc117 the coder's ``chmod +x rechner.sh``
+    in the sandbox never reached the orchestrator, and a mode change made by ``apply_patch`` never reached the worker,
+    because the content digest stayed the same (BUG-396)."""
     excluded = tuple(exclude)
     out: dict[str, str] = {}
     root_fd = _open_root(src)
@@ -536,6 +540,8 @@ def manifest(src: Path, *, exclude: Iterable[str] = DEFAULT_EXCLUDES) -> dict[st
                 if fd is None:
                     continue
                 digest = hashlib.sha256()
+                if os.fstat(fd).st_mode & 0o111:  # a chmod must travel like a content change (BUG-396)
+                    digest.update(b"executable\x00")
                 with os.fdopen(fd, "rb") as fh:
                     while chunk := fh.read(_CHUNK):
                         digest.update(chunk)

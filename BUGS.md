@@ -46,6 +46,18 @@ Noch keine.
 
 ## Behobene Bugs
 
+### BUG-396 – `chmod` in der Sandbox geht verloren
+- Phase: Leiter R3-bash auf rc117, 2026-10-31 · Komponente: worker (`worker/execution/workspaces.py`), tools (`remote.py`) · Severity: P1 · blockierend: ja (ein Skript, das ausführbar sein muss, wird es nie) · Status: **behoben im Repository** (`tests/unit/test_sandbox_workspaces.py::test_a_chmod_travels_like_a_content_change`)
+- Reproduktion: R3-bash (Job afe55d1d) Versuch 1: `chmod +x rechner.sh && test -x rechner.sh && bats tests` – in der Sandbox ausführbar, danach meldete der Verifier `test -x rechner.sh` mit Exit 1 und `./rechner.sh …` mit Exit 126 für alle sechs Programm-Kriterien. Versuch 2 setzte den Modus per `apply_patch` (`old mode 100644` / `new mode 100755`) – auf dem Orchestrator angekommen, aber nie beim Exec-Host.
+- Ursache: Das Abgleich-Manifest zwischen Orchestrator und Exec-Host (`manifest`) hasht nur den Inhalt; eine reine Modusänderung ändert den Hash nicht und wird in keiner Richtung übertragen.
+- Fix: Eine ausführbare Datei hasht `"executable\0" + Inhalt`; ein `chmod` gilt damit als Änderung, und das Tar des Abgleichs trägt den Modus (Rechte wie bisher auf `0o755` begrenzt).
+
+### BUG-395 – Patch-Abschnitt `--- /dev/null` für eine bestehende Datei verwirft den ganzen Patch
+- Phase: Leiter R3-bash auf rc117, 2026-10-31 · Komponente: tools (`patch.py`, `engine.py`) · Severity: P3 · blockierend: nein · Status: **behoben im Repository** (`tests/integration/test_tools_engine_read_write.py::test_apply_patch_reads_a_creation_of_an_existing_file_as_its_change`)
+- Reproduktion: R3-bash (Job afe55d1d) Zug 18: ein Patch legte `tests/rechner.bats` an und änderte `README.md`, dessen Abschnitt aber mit `--- /dev/null` begann; git lehnte alles ab („new file README.md depends on old contents“), der Coder brauchte einen weiteren Zug. Ähnlich seit 21.10. „kassenbuch.sh: already exists in working directory“.
+- Ursache: Das Modell verwechselt die Kopfzeilen für neue und bestehende Dateien; gits Meldung nennt den Ausweg nicht.
+- Fix: Ein `--- /dev/null`-Abschnitt für eine bestehende Datei, der Zeilen behält oder entfernt, wird als Änderung gelesen (`--- a/pfad`, `@@ -0,0 …` als nacktes `@@`, das BUG-387 verortet); einer mit nur `+`-Zeilen wird mit Ausweg abgelehnt („already exists … write_file“).
+
 ### BUG-394 – Akzeptanzbefehl mit `printf '…%2…'` kann nie bestehen
 - Phase: Leiter R3-lua auf rc116, 2026-10-31 · Komponente: planner (`validation.py`) · Severity: P1 · blockierend: ja (der Schritt kann sein Kriterium nicht erfüllen) · Status: **behoben im Repository** (`tests/unit/test_planner_validation.py::test_a_literal_percent_in_a_printf_without_arguments_is_doubled`)
 - Reproduktion: R3-lua (Job 3ef8756d): acceptance[2] des Plans war `printf 'print 1+2\n…print -7%2\nprint 7%-2\n…' > /tmp/rechner_ok.txt && lua rechner.lua /tmp/rechner_ok.txt`. dash bricht bei `%2\` mit „invalid directive“ und Exit-Code 2 ab, die Datei endet nach `print -7`; das Kriterium „Exit-Code 0, stdout 512“ scheiterte in jedem Versuch, obwohl das Programm alle Beispielwerte richtig berechnete.
