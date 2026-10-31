@@ -4,6 +4,11 @@ Format: [Keep a Changelog](https://keepachangelog.com/de/1.1.0/), Versionen nach
 
 ## [Unreleased]
 
+## [0.1.0rc114] – Release Candidate (2026-10-31)
+
+### Behoben
+- **VB-Schlüsselwort als Name (BUG-391):** `BC30183 Keyword is not valid as an identifier` nennt das Wort nicht; R3-vb scheiterte fünf Versuche lang an `Operator`. `run_command` und die Compile-Prüfung nennen das Wort jetzt und den Ausweg.
+
 ## [0.1.0rc113] – Release Candidate (2026-10-31)
 
 ### Behoben

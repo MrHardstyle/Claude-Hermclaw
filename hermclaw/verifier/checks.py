@@ -16,6 +16,7 @@ from typing import Any
 from hermclaw.contracts.acceptance import CommandEvidence, TestEvidence
 from hermclaw.contracts.verification import VerificationCheck
 from hermclaw.repo_intelligence.paths import is_test_path
+from hermclaw.tools.locations import keyword_hint
 from hermclaw.verifier.changes import matching, read_bytes, read_text
 from hermclaw.verifier.conflicts import scan_conflicts
 from hermclaw.verifier.context import VerifyContext
@@ -336,6 +337,11 @@ def _dotnet_build(root: Path) -> str | None:
     return " && ".join(f"dotnet build '{p}' -nologo -v q" for p in projects[:20])
 
 
+def _lines(root: Path, rel: str) -> list[str] | None:
+    text, _why = read_text(root, rel, limit=MAX_SYNTAX_FILE_BYTES)
+    return text.splitlines() if text is not None else None
+
+
 async def compile_checks(ctx: VerifyContext) -> list[VerificationCheck]:
     root = ctx.root
     changed = ctx.changes.paths
@@ -363,7 +369,11 @@ async def compile_checks(ctx: VerifyContext) -> list[VerificationCheck]:
         elif res.exit_code in (126, 127):
             out.append(ctx.check("compile", name, "skip", f"the {language} toolchain is not available in the sandbox image", evidence))
         else:
-            out.append(ctx.check("compile", name, "fail", f"{command} failed with exit code {res.exit_code}", evidence))
+            message = f"{command} failed with exit code {res.exit_code}"
+            keyword = await asyncio.to_thread(keyword_hint, res.output, lambda rel: _lines(root, rel))
+            if keyword:  # the correction carries it (BUG-391)
+                message += " " + keyword
+            out.append(ctx.check("compile", name, "fail", message, evidence))
     if not out:
         out.append(
             ctx.check(

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import dataclasses
+import os
 import shutil
 from pathlib import Path
 from typing import Any
@@ -1189,3 +1190,24 @@ async def test_a_server_module_without_main_block_is_started_through_its_start_f
     write(repo, "api.py", API_MODULE + "\n# touched\n")
     api_only, *_ = await run(sessionmaker, repo, dataclasses.replace(st, job_level=True), kind="review")
     assert by_name(api_only.report)["serve:api.py"].status == "pass", by_name(api_only.report)["serve:api.py"].message
+
+
+async def test_compile_failure_names_a_vb_keyword_used_as_a_name(sessionmaker: Any, tmp_path: Path, monkeypatch: Any) -> None:
+    """Live R3-vb (BUG-391): vbc's BC30183 names no word; the compile check's message, which the correction carries,
+    names it."""
+    files = {"App.vbproj": '<Project Sdk="Microsoft.NET.Sdk"></Project>\n', "Node.vb": "Public Class Node\nEnd Class\n"}
+    repo = init_repo(tmp_path / "repo", files)
+    write(repo, "Node.vb", "Public Class Node\n    Public Property Operator As String\nEnd Class\n")
+    bin_dir = tmp_path / "bin"
+    bin_dir.mkdir()
+    fake = bin_dir / "dotnet"
+    fake.write_text(
+        "#!/bin/sh\necho '/workspace/Node.vb(2,21): error BC30183: Keyword is not valid as an identifier. [/workspace/App.vbproj]'\nexit 1\n"
+    )
+    fake.chmod(0o755)
+    monkeypatch.setenv("PATH", f"{bin_dir}:{os.environ['PATH']}")
+    st = step("documentation", scope_contract=scope(target_paths=["Node.vb"]))
+    executor = WorkspaceShellExecutor()
+    outcome, *_ = await run(sessionmaker, repo, st, verifier=make_verifier(sessionmaker, executor), kind="documentation")
+    check = by_name(outcome.report)["compile:dotnet"]
+    assert check.status == "fail" and "[hint] `Operator` is a reserved word in Visual Basic" in check.message

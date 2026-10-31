@@ -94,3 +94,38 @@ def source_locations(output: str, lines_of: LinesOf, *, cwd: str = ".", limit: i
         if len(found) >= limit:
             break
     return found
+
+
+# vbc: "path(line,col): error BC30183: Keyword is not valid as an identifier." names no word (BUG-391)
+_VB_KEYWORD = re.compile(r"(?P<path>/?(?:[\w.\-]+/)*[\w\-][\w.\-]*\.vb)\((?P<line>\d+),(?P<col>\d+)\): error BC30183\b", re.I)
+_WORD = re.compile(r"\[?([A-Za-z_]\w*)")
+
+
+def keyword_hint(output: str, lines_of: LinesOf, *, cwd: str = ".") -> str | None:
+    """A hint naming the Visual Basic keywords that BC30183 errors point at in workspace files, else ``None``.
+
+    Live ladder R3-vb on rc110/rc112: ``Public Property Operator As String`` failed 13 times over five attempts; vbc
+    only says "Keyword is not valid as an identifier", and the coder rewrote whole files without finding the word.
+    """
+    words: list[str] = []
+    cache: dict[str, Sequence[str] | None] = {}
+    for m in _VB_KEYWORD.finditer(output):
+        number, col = int(m.group("line")), int(m.group("col"))
+        for rel in _candidates(m.group("path"), cwd):
+            if rel not in cache:
+                cache[rel] = lines_of(rel)
+            lines = cache[rel]
+            if lines is None:
+                continue
+            word = _WORD.match(lines[number - 1][col - 1 :]) if 0 < number <= len(lines) and col > 0 else None
+            if word and word.group(1).lower() not in {w.lower() for w in words}:
+                words.append(word.group(1))
+            break
+    if not words:
+        return None
+    named = ", ".join(f"`{w}`" for w in words[:8])
+    return (
+        f"[hint] {named} is a reserved word in Visual Basic and cannot be a name (BC30183); VB ignores case, so "
+        f"`{words[0].lower()}` is the keyword too. Rename it everywhere (e.g. `{words[0]}Text`, `Op`) or escape it as "
+        f"`[{words[0]}]`."
+    )

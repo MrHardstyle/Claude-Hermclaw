@@ -46,6 +46,12 @@ Noch keine.
 
 ## Behobene Bugs
 
+### BUG-391 – VB-Schlüsselwort als Name: BC30183 nennt das Wort nicht
+- Phase: Leiter R3-vb auf rc110/rc112, 2026-10-31 · Komponente: tools (`locations.py`, `engine.py`), verifier (`checks.py`) · Severity: P2 · blockierend: nein · Status: **behoben im Repository** (`tests/unit/test_tools_locations.py::test_vb_keywords_used_as_names_are_named`, `tests/integration/test_verifier_engine.py::test_compile_failure_names_a_vb_keyword_used_as_a_name`)
+- Reproduktion: R3-vb (Jobs 92c6b083, 37ec9f6d) – fünf Versuche scheiterten am Build, 13-mal mit `error BC30183: Keyword is not valid as an identifier` (u. a. `Public Property Operator As String`, Parameter `operator`). Der Coder schrieb ganze Dateien neu (Lexer.vb siebenmal in einem Versuch), ohne das Wort zu finden.
+- Ursache: vbc nennt nur Zeile und Spalte; dass `Operator` (in jeder Schreibweise) ein reserviertes Wort ist, steht nirgends.
+- Fix: Für BC30183 liest Hermclaw das Wort an der genannten Stelle aus der Datei und hängt einen Hinweis an – in der `run_command`-Ausgabe und in der Meldung der Compile-Prüfung, die die Korrektur trägt: reserviertes Wort, VB ignoriert Groß/Klein, überall umbenennen oder als `[Operator]` schreiben.
+
 ### BUG-390 – `apply_patch` scheitert an jedem einfachen Patch über mehrere Dateien
 - Phase: Leiter R3-vb auf rc110/rc112, 2026-10-31 · Komponente: tools (`patch.py`, `gitlocal.py`) · Severity: P1 · blockierend: nein · Status: **behoben im Repository** (`tests/integration/test_tools_engine_read_write.py::test_apply_patch_of_several_files_without_git_headers`)
 - Reproduktion: R3-vb (Job 92c6b083) Versuch 2: ein Patch für `Model.vb`, `Program.vb` und das neue `tests/sample.txt` scheiterte mit „new file tests/sample.txt depends on old contents“. Seit 21.10. scheiterten alle 9 `apply_patch`-Aufrufe mit mehreren Dateien ohne `diff --git`-Zeilen (Meldungen „depends on old contents“, „corrupt patch“), unabhängig vom Inhalt.

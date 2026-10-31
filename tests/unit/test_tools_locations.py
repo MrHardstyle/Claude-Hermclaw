@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from hermclaw.tools.locations import enclosing, source_locations
+from hermclaw.tools.locations import enclosing, keyword_hint, source_locations
 
 FILES = {
     "tests/test_app.py": [
@@ -50,3 +50,25 @@ def test_limit_and_top_level_lines() -> None:
     named = source_locations(out, lines_of, limit=2)
     assert named == ["tests/test_app.py:1: class TestTasks:", "tests/test_app.py:2 (in class TestTasks:): def test_open(self):"]
     assert enclosing(["x = 1"], 0) is None
+
+
+def test_vb_keywords_used_as_names_are_named() -> None:
+    """Live R3-vb (BUG-391): vbc says only "Keyword is not valid as an identifier"; the hint names the word."""
+    files = {
+        "src/Rechner/Parser.vb": [
+            "Public Class BinaryNode",
+            "    Public Property Operator As String",
+            "    Public Sub New(operator As String, [Next] As Object)",
+        ]
+    }
+    output = (
+        "/workspace/src/Rechner/Parser.vb(2,21): error BC30183: Keyword is not valid as an identifier. [/workspace/x.vbproj]\n"
+        "/workspace/src/Rechner/Parser.vb(3,20): error BC30183: Keyword is not valid as an identifier. [/workspace/x.vbproj]\n"
+        "/workspace/src/Rechner/Parser.vb(3,41): error BC30183: Keyword is not valid as an identifier. [/workspace/x.vbproj]\n"
+    )
+    hint = keyword_hint(output, files.get)
+    assert hint is not None and hint.startswith("[hint] `Operator`, `Next` is a reserved word in Visual Basic")
+    assert "`[Operator]`" in hint
+    assert keyword_hint(output.replace("BC30183", "BC30201"), files.get) is None  # another error
+    assert keyword_hint(output, {}.get) is None  # file not in the workspace
+    assert keyword_hint("/workspace/src/Rechner/Parser.vb(9,1): error BC30183: x", files.get) is None  # beyond the file

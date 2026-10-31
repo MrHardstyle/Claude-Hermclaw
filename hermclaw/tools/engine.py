@@ -68,7 +68,7 @@ from hermclaw.tools.context import CallContext, NullCallbacks, ScopeExpansionOut
 from hermclaw.tools.errors import ToolError, ToolProtocolError
 from hermclaw.tools.executors import LocalSandboxExecutor
 from hermclaw.tools.gitlocal import LocalGit
-from hermclaw.tools.locations import source_locations
+from hermclaw.tools.locations import keyword_hint, source_locations
 from hermclaw.tools.ops import OpsCall, OpsResult, OpsToolProvider
 from hermclaw.tools.output import clip_head, clip_middle, missing_modules, strip_ansi
 from hermclaw.tools.patch import (
@@ -1899,6 +1899,9 @@ class ToolEngine:
             named = source_locations(f"{stdout}\n{stderr}", self._source_lines, cwd=run.cwd)
             if named:
                 footer.append("[source] the lines this output names:\n" + "\n".join(named))
+            keyword = keyword_hint(f"{stdout}\n{stderr}", self._source_lines, cwd=run.cwd)
+            if keyword:
+                footer.append(keyword)
         fixed = len(header) + len(status) + sum(len(f) + 1 for f in footer) + 40
         room = max(200, budget - fixed)
         truncated = bool(res and (res.stdout_truncated or res.stderr_truncated))
