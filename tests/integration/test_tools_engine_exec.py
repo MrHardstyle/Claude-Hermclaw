@@ -266,8 +266,9 @@ async def test_scratch_removals_below_the_sandbox_tmp_are_not_destructive(sessio
     shutil.rmtree(scratch)
 
 
-
-async def test_a_command_missing_the_tmp_of_an_earlier_one_learns_that_tmp_starts_empty(sessionmaker: SM, repo: Path, tmp_path: Path) -> None:
+async def test_a_command_missing_the_tmp_of_an_earlier_one_learns_that_tmp_starts_empty(
+    sessionmaker: SM, repo: Path, tmp_path: Path
+) -> None:
     """Live R3-cpp: `cmake --build /tmp/build` after an earlier command had configured /tmp/build failed with
     '/tmp/build is not a directory' – each command gets a new sandbox with an empty /tmp (BUG-384)."""
     gone = f"/tmp/hc-gone-{tmp_path.name}"
@@ -279,6 +280,23 @@ async def test_a_command_missing_the_tmp_of_an_earlier_one_learns_that_tmp_start
     assert "is gone" not in (await h.call("run_command", command="LC_ALL=C ls missing-file")).output  # not under /tmp
     plain = await make_harness(sessionmaker, repo)  # the subprocess fallback shares the host /tmp
     assert "is gone" not in (await plain.call("run_command", command=f"LC_ALL=C ls {gone}/rechner")).output
+
+
+async def test_a_build_compiling_a_nested_projects_obj_files_learns_why(sessionmaker: SM, repo: Path) -> None:
+    """Live R3-vb: the plan named tests/Rechner.Tests.vbproj, the coder had tests/Rechner.Tests/Rechner.Tests.vbproj;
+    the outer project compiled the inner one's obj/ files and failed with BC30663 (BUG-388)."""
+    h = await make_harness(sessionmaker, repo)
+    line = (
+        "/workspace/tests/obj/Debug/net8.0/Rechner.Tests.AssemblyInfo.vb(15,2): error BC30663: Attribute "
+        "'AssemblyCompanyAttribute' cannot be applied multiple times. [/workspace/tests/Rechner.Tests.vbproj]"
+    )
+    res = await h.call("run_command", command=f'echo "{line}"; exit 1')
+    assert "[hint] tests/Rechner.Tests.vbproj compiles the generated obj/ files of another project" in res.output
+    ok = await h.call("run_command", command=f'echo "{line}"')  # only a failed build gets the hint
+    assert "compiles the generated obj/" not in ok.output
+    other = await h.call("run_command", command="echo \"Program.cs(3,2): error CS0579: Duplicate 'X' attribute [/w/a.csproj]\"; exit 1")
+    assert "compiles the generated obj/" not in other.output  # a duplicate attribute in the project's own source
+
 
 async def test_command_side_effects_outside_scope_are_reverted(sessionmaker: SM, repo: Path) -> None:
     (repo / "notes.txt").write_text("dirty but uncommitted\n")  # untracked file that existed before the command

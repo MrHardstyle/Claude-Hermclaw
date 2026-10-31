@@ -46,6 +46,12 @@ Noch keine.
 
 ## Behobene Bugs
 
+### BUG-388 – Verschachtelte .NET-Projekte: doppelte Assembly-Attribute ohne Erklärung
+- Phase: Leiter R3-vb auf rc110, 2026-10-31 · Komponente: tools (`engine.py`) · Severity: P3 · blockierend: nein · Status: **behoben im Repository** (`tests/integration/test_tools_engine_exec.py::test_a_build_compiling_a_nested_projects_obj_files_learns_why`)
+- Reproduktion: R3-vb (Job 92c6b083) Versuch 3: der Plan nannte `dotnet test tests/Rechner.Tests.vbproj`, der Coder hatte `tests/Rechner.Tests/Rechner.Tests.vbproj`. Er legte das Projekt zusätzlich am genannten Pfad an; das äußere Projekt kompilierte die `obj/`-Dateien des inneren mit (`BC30663 Attribute 'AssemblyCompanyAttribute' cannot be applied multiple times`). Der Coder verbrauchte die letzten Züge mit `<Compile Include>`-Versuchen; der Job endete im Zeitlimit bei versteckt 18/27.
+- Ursache: Ein SDK-Projekt bindet alle Quelldateien unter seinem Ordner ein, auch die erzeugten eines tieferen Projekts; die Ausgabe nennt nur doppelte Attribute.
+- Fix: Scheitert ein Befehl mit `BC30663`/`CS0579` aus einer `AssemblyAttributes`- oder `AssemblyInfo`-Datei, hängt `run_command` einen Hinweis an: das genannte Projekt kompiliert die `obj/`-Dateien eines Projekts darunter; ein Projekt je Ordnerbaum, das verschachtelte verschieben, löschen oder ausschließen und den Pfad der Akzeptanz bauen.
+
 ### BUG-387 – `apply_patch` scheitert an Hunks mit nacktem `@@`
 - Phase: Leiter R3-vb auf rc110, 2026-10-31 · Komponente: tools (`patch.py`, `engine.py`) · Severity: P2 · blockierend: nein · Status: **behoben im Repository** (`tests/integration/test_tools_engine_read_write.py::test_apply_patch_locates_bare_hunks_in_an_existing_file`)
 - Reproduktion: R3-vb (Job 92c6b083) Versuch 2, Zug 19: der Coder änderte `Model.vb` und `Program.vb` mit Hunks, deren Kopf nur `@@` ist (ohne `-a,b +c,d`); git lehnte den ganzen Patch ab, der Zug war verloren, der Versuch endete am Zugbudget. Seit 21.10. scheiterten 40 von 57 `apply_patch`-Aufrufen, 14 davon an nackten `@@` (keiner davon gelang je).

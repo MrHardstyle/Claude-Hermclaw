@@ -4,6 +4,11 @@ Format: [Keep a Changelog](https://keepachangelog.com/de/1.1.0/), Versionen nach
 
 ## [Unreleased]
 
+## [0.1.0rc112] – Release Candidate (2026-10-31)
+
+### Behoben
+- **Hinweis bei verschachtelten .NET-Projekten (BUG-388):** In R3-vb kompilierte ein Testprojekt in `tests/` die `obj/`-Dateien des Projekts in `tests/Rechner.Tests/` mit und scheiterte an doppelten Assembly-Attributen. `run_command` erklärt diesen Fehler jetzt und nennt den Ausweg.
+
 ## [0.1.0rc111] – Release Candidate (2026-10-31)
 
 ### Behoben

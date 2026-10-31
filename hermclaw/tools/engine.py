@@ -291,6 +291,23 @@ TMP_GONE_HINT = (
 )
 
 
+# duplicate assembly attributes from obj/: a .NET project also compiles a nested project's generated files (BUG-388)
+_DUP_ASSEMBLY_ATTR = re.compile(
+    r"(?:AssemblyAttributes|AssemblyInfo)\.\w+\(\d+,\d+\): error (?:BC30663|CS0579)[^\n]*\[([^\]\n]+\.\w+proj)\]"
+)
+NESTED_PROJECT_HINT = (
+    "[hint] {project} compiles the generated obj/ files of another project in a folder below it (duplicate assembly "
+    "attributes): an SDK project includes every source file under its own folder. Keep one project per folder tree – "
+    'move or delete the nested project, or exclude its folder with <Compile Remove="Sub/**" /> – and build the '
+    "project path the acceptance names."
+)
+
+
+def _nested_project(output: str) -> str | None:
+    m = _DUP_ASSEMBLY_ATTR.search(output)
+    return m.group(1).removeprefix("/workspace/") if m else None
+
+
 def _tmp_gone(command: str, output: str) -> str | None:
     """The /tmp path a failed command expected from an earlier one: live R3-cpp and a C++ kassenbuch job built into
     /tmp/build and ran the build or tests from it in the next command, where the fresh sandbox had no /tmp/build
@@ -1896,6 +1913,9 @@ class ToolEngine:
             gone = _tmp_gone(command, f"{stdout}\n{stderr}")
             if gone:
                 footer.append(TMP_GONE_HINT.format(path=gone))
+        nested = _nested_project(f"{stdout}\n{stderr}") if res is not None and res.exit_code != 0 else None
+        if nested:
+            footer.append(NESTED_PROJECT_HINT.format(project=nested))
         parts += footer
         return "\n".join(parts), truncated or t1 or t2
 
