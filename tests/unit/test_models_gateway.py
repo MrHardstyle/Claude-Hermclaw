@@ -34,13 +34,13 @@ from tests.integration.test_models_support import MASTER_KEY, models_config
 CTX = CallContext(purpose="planner")
 
 
-def completion(content: Any, *, reasoning: str | None = None, finish: str = "stop") -> dict[str, Any]:
+def completion(content: Any, *, reasoning: str | None = None, finish: str = "stop", tokens: int = 3) -> dict[str, Any]:
     msg: dict[str, Any] = {"role": "assistant", "content": content}
     if reasoning is not None:
         msg["reasoning_content"] = reasoning
     return {
         "choices": [{"index": 0, "finish_reason": finish, "message": msg}],
-        "usage": {"prompt_tokens": 11, "completion_tokens": 3, "total_tokens": 14},
+        "usage": {"prompt_tokens": 11, "completion_tokens": tokens, "total_tokens": 11 + tokens},
     }
 
 
@@ -398,7 +398,7 @@ async def test_structured_exhausts_budget(script: Script) -> None:
 async def test_structured_cut_off_answers_get_a_concise_repair_then_raise(script: Script) -> None:
     """BUG-223: a repair of an answer cut off at the output limit was cut off again (three 4-minute calls per turn)."""
     cut = '{"title": "t", "steps": ["a very long'
-    script.add("planner-gemma", completion(cut, finish="length"), completion(cut, finish="length"))
+    script.add("planner-gemma", completion(cut, finish="length", tokens=100), completion(cut, finish="length", tokens=100))
     async with make(script) as gw:
         with pytest.raises(ModelOutputTruncated) as exc:
             await gw.structured("planner-gemma", [ChatMessage("user", "plan")], Plan, ctx=CTX, max_tokens=100)
@@ -406,16 +406,37 @@ async def test_structured_cut_off_answers_get_a_concise_repair_then_raise(script
     assert "output limit of 100 tokens" in script.requests[1]["messages"][-1]["content"]
     assert exc.value.details["attempts"] == 2 and exc.value.details["max_tokens"] == 100
 
-    script.add("planner-gemma", completion(cut, finish="length"))
+    script.add("planner-gemma", completion(cut, finish="length", tokens=100))
     async with make(script) as gw:
         with pytest.raises(ModelOutputTruncated):
-            await gw.structured("planner-gemma", [ChatMessage("user", "plan")], Plan, ctx=CTX, truncation_repairs=0)
+            await gw.structured("planner-gemma", [ChatMessage("user", "plan")], Plan, ctx=CTX, max_tokens=100, truncation_repairs=0)
     assert len(script.requests) == 3  # no repair at all
 
-    script.add("planner-gemma", completion(cut, finish="length"), completion('{"title": "t", "steps": ["one"]}'))
+    script.add("planner-gemma", completion(cut, finish="length", tokens=100), completion('{"title": "t", "steps": ["one"]}'))
     async with make(script) as gw:
-        out = await gw.structured("planner-gemma", [ChatMessage("user", "plan")], Plan, ctx=CTX)
+        out = await gw.structured("planner-gemma", [ChatMessage("user", "plan")], Plan, ctx=CTX, max_tokens=100)
     assert out.value.steps == ["one"] and out.repair_attempts == 1
+
+
+async def test_structured_answers_stopped_far_below_the_limit_are_repaired_hotter(script: Script) -> None:
+    """BUG-397: Strata ends a reply repeating one token ("0000…") as "length" after 469 of 6144 tokens; the review was
+    told twice to answer more concisely and failed closed."""
+    script.add("planner-gemma", completion("", finish="length", tokens=469), completion('{"title": "t", "steps": ["one"]}'))
+    async with make(script) as gw:
+        out = await gw.structured(
+            "planner-gemma", [ChatMessage("user", "plan")], Plan, ctx=CTX, max_tokens=6144, temperature=0.15, truncation_repairs=0
+        )
+    assert out.value.steps == ["one"] and out.repair_attempts == 1
+    repair = script.requests[1]["messages"][-1]["content"]
+    assert "repeated one character" in repair and "output limit" not in repair
+    assert script.requests[0]["temperature"] == 0.15 and script.requests[1]["temperature"] == 0.7
+
+    script.add("planner-gemma", *[completion("", finish="length", tokens=469) for _ in range(3)])
+    async with make(script) as gw:
+        with pytest.raises(ModelOutputInvalid) as exc:
+            await gw.structured("planner-gemma", [ChatMessage("user", "plan")], Plan, ctx=CTX, max_tokens=6144)
+    assert not isinstance(exc.value, ModelOutputTruncated)  # no "write in parts" for the coder
+    assert len(script.requests) == 5
 
 
 async def test_structured_zero_repairs(script: Script) -> None:

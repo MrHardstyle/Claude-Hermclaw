@@ -46,6 +46,12 @@ Noch keine.
 
 ## Behobene Bugs
 
+### BUG-397 – Wiederholungsabbruch des Modellservers gilt als „Ausgabelimit erreicht“
+- Phase: Leiter R3-bash auf rc117, 2026-10-31 · Komponente: models (`gateway.py`) · Severity: P2 · blockierend: nein (Review fail-closed, Rückfall auf den verifizierten Stand) · Status: **behoben im Repository** (`tests/unit/test_models_gateway.py::test_structured_answers_stopped_far_below_the_limit_are_repaired_hotter`)
+- Reproduktion: R3-bash (Job afe55d1d) Versuch 3: das Heavy Review endete nach 3407 und dann nach 469 von 6144 Tokens mit `finish_reason=length` und leerem Inhalt; Hermclaw meldete „hit the output limit of 6144 tokens“, bat um eine kürzere Antwort und schloss das Review mit `MODEL_OUTPUT_TRUNCATED` fail-closed. Strata-Log: „the reply repeated one token ('0') 256 times in a row: ended as "length"“ (#606). In zehn Tagen 19 solche Abbrüche (`'0'` 15-mal, `'9'` 4-mal; Review, Coder-Züge), alle weit unter dem Limit.
+- Ursache: Das Gateway las jedes `length` als Abschneiden am Ausgabelimit. Die Reparatur („much more concisely“) traf die Ursache nicht und lief bei derselben niedrigen Temperatur (0,15–0,2) erneut in die Ziffernschleife; im Coder (`truncation_repairs=0`) folgte sofort der Hinweis, in Teilen zu schreiben.
+- Fix: Ein `length` unter 90 % des angefragten Ausgabelimits gilt als vom Server gestoppte Wiederholung: Die Reparatur nennt die Wiederholung (lange Zahlen benennen statt ausschreiben), läuft mit mindestens Temperatur 0,7 und zählt nie als Abschneiden (`ModelOutputTruncated`).
+
 ### BUG-396 – `chmod` in der Sandbox geht verloren
 - Phase: Leiter R3-bash auf rc117, 2026-10-31 · Komponente: worker (`worker/execution/workspaces.py`), tools (`remote.py`) · Severity: P1 · blockierend: ja (ein Skript, das ausführbar sein muss, wird es nie) · Status: **behoben im Repository** (`tests/unit/test_sandbox_workspaces.py::test_a_chmod_travels_like_a_content_change`)
 - Reproduktion: R3-bash (Job afe55d1d) Versuch 1: `chmod +x rechner.sh && test -x rechner.sh && bats tests` – in der Sandbox ausführbar, danach meldete der Verifier `test -x rechner.sh` mit Exit 1 und `./rechner.sh …` mit Exit 126 für alle sechs Programm-Kriterien. Versuch 2 setzte den Modus per `apply_patch` (`old mode 100644` / `new mode 100755`) – auf dem Orchestrator angekommen, aber nie beim Exec-Host.

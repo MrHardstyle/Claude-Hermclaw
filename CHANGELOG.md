@@ -4,6 +4,11 @@ Format: [Keep a Changelog](https://keepachangelog.com/de/1.1.0/), Versionen nach
 
 ## [Unreleased]
 
+## [0.1.0rc119] – Release Candidate (2026-10-31)
+
+### Behoben
+- **Wiederholungsabbruch ist kein Ausgabelimit (BUG-397):** Strata beendet eine Antwort, die 256-mal dasselbe Token wiederholt (im R3-bash-Review „0000…“ nach 469 von 6144 Tokens), mit `length`. Hermclaw las das als „zu lang“ und ließ das Review fail-closed enden. Ein `length` weit unter dem Limit wird jetzt mit passendem Hinweis und höherer Temperatur repariert.
+
 ## [0.1.0rc118] – Release Candidate (2026-10-31)
 
 ### Behoben

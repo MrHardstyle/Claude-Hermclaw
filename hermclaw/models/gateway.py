@@ -262,6 +262,23 @@ TRUNCATED_REPAIR = (
     "that the complete JSON fits."
 )
 
+# BUG-397: Strata ends a reply that repeats one token 256 times as "length" (its #606) - the heavy review of R3-bash
+# thought "0000…" after 469 of 6144 tokens, twice, and was told it was too long. Such a stop is a degenerate run, not
+# a cut-off: the repair names it and samples hotter, and it never counts as a truncation
+EARLY_STOP_SHARE = 0.9
+DEGENERATE_TEMPERATURE = 0.7
+DEGENERATE_REPAIR = (
+    "The answer was stopped after {tokens} of its {max_tokens} output tokens because it repeated one character over "
+    "and over (a run like '0000…' or '9999…'); the model server ends such output. Do not write long numbers or digit "
+    "strings out, name them (for example 2^63-1 or INT64_MAX). Answer again with the complete JSON."
+)
+
+
+def stopped_early(result: ChatResult, limit: int) -> bool:
+    """The reply ended as "length" well below its output limit: the server stopped it (a repeated token), the limit
+    did not cut it off (BUG-397)."""
+    return result.finish_reason == "length" and result.completion_tokens is not None and result.completion_tokens < limit * EARLY_STOP_SHARE
+
 
 @dataclass(frozen=True)
 class GatewayOptions:
@@ -454,18 +471,23 @@ class LiteLLMGateway:
         invocation_ids: list[str] = []
         last: _Attempt | None = None
         truncated = 0
+        sampling = temperature
         for attempt_no in range(max_repairs + 1):
             convo = list(conversation)
 
             async def run(
-                profile: ModelProfileConfig, fallback_used: bool, _convo: list[ChatMessage] = convo, _n: int = attempt_no
+                profile: ModelProfileConfig,
+                fallback_used: bool,
+                _convo: list[ChatMessage] = convo,
+                _n: int = attempt_no,
+                _temperature: float | None = sampling,
             ) -> _Attempt:
                 return await self._invoke(
                     profile,
                     _convo,
                     ctx=ctx,
                     max_tokens=max_tokens,
-                    temperature=temperature,
+                    temperature=_temperature,
                     json_schema=json_schema,
                     timeout_seconds=timeout_seconds,
                     repair_attempt=_n,
@@ -485,11 +507,22 @@ class LiteLLMGateway:
                 return StructuredResult(value=last.parsed, result=last.result, repair_attempts=attempt_no)
             error = last.error or "invalid answer"
             errors.append(error)
-            if last.result.finish_reason == "length":
+            used = pinned or self.registry.get(last.result.alias)
+            limit = output_tokens(used, max_tokens)
+            if stopped_early(last.result, limit):
+                error = DEGENERATE_REPAIR.format(tokens=last.result.completion_tokens, max_tokens=limit)
+                errors[-1] = error
+                sampling = max(DEGENERATE_TEMPERATURE, used.temperature if temperature is None else temperature)
+                log.info("degenerate reply stopped early, repairing hotter", extra={"alias": used.alias, "temperature": sampling})
+            elif last.result.finish_reason == "length":
                 truncated += 1
                 error = TRUNCATED_REPAIR.format(max_tokens=max_tokens or "the")
                 errors[-1] = error
-            if last.result.finish_reason == "length" and (truncated > truncation_repairs or attempt_no >= max_repairs):
+            if (
+                last.result.finish_reason == "length"
+                and not stopped_early(last.result, limit)
+                and (truncated > truncation_repairs or attempt_no >= max_repairs)
+            ):
                 # cut off at the output limit: a plain repair under the same limit is cut off again. The coder spent
                 # three 4-minute calls per turn on one oversized write_file (grand job G1 on 0.1.0rc24, BUG-223); the
                 # caller has to make the answer smaller instead
