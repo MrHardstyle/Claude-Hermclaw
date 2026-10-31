@@ -285,3 +285,21 @@ async def test_missing_images_reports_unbuilt_toolchain_images_without_pulling()
     sbx = PodmanSandbox(policy(node="localhost/hermclaw-sandbox-never-built:1"), pull="missing", managed_label="hermclaw.r022test=true")
     assert await sbx.missing_images() == ["localhost/hermclaw-sandbox-never-built:1"]  # alpine default is present
     assert subprocess.run(["podman", "image", "exists", "localhost/hermclaw-sandbox-never-built:1"], check=False).returncode == 1
+
+
+async def test_a_project_file_in_a_subfolder_selects_its_toolchain(sessionmaker: Any, tmp_path: Path) -> None:
+    """Live R3-vb (BUG-392): the first step created src/Rechner/Rechner.vbproj; until a .vb file existed, `cat
+    /opt/nuget/versions.txt` ran in the default image and found nothing. A manifest at the root wins; build output,
+    dependencies and hidden folders do not count."""
+    ws = await _workspace(sessionmaker, tmp_path)
+    pol = policy(python=PYTHON_IMAGE, dotnet="localhost/hermclaw-sandbox-dotnet:3", node=NODE_IMAGE)
+    (tmp_path / "node_modules" / "x").mkdir(parents=True)
+    (tmp_path / "node_modules" / "x" / "package.json").write_text("{}", encoding="utf-8")
+    (tmp_path / ".cache" / "a").mkdir(parents=True)
+    (tmp_path / ".cache" / "a" / "App.csproj").write_text("x\n", encoding="utf-8")
+    assert await SandboxImageSelector(sessionmaker, pol, FakeRepo([])).image_for(ws) is None
+    (tmp_path / "src" / "Rechner").mkdir(parents=True)
+    (tmp_path / "src" / "Rechner" / "Rechner.vbproj").write_text("x\n", encoding="utf-8")
+    assert await SandboxImageSelector(sessionmaker, pol, FakeRepo([])).image_for(ws) == "dotnet"
+    (tmp_path / "package.json").write_text("{}", encoding="utf-8")
+    assert await SandboxImageSelector(sessionmaker, pol, FakeRepo([])).image_for(ws) == "node"

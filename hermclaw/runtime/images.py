@@ -127,6 +127,15 @@ def command_toolchain(command: str) -> str | None:
     return aliases.pop() if len(aliases) == 1 else None
 
 
+_MANIFEST_DEPTH = 3
+_SKIPPED_DIRS = frozenset({"node_modules", "bin", "obj", "target", "build", "dist", "vendor", "venv"})
+
+
+def _visible(path: Path, root: Path) -> bool:
+    parts = path.relative_to(root).parts[:-1]
+    return path.is_file() and not any(p.startswith(".") or p in _SKIPPED_DIRS for p in parts)
+
+
 class SandboxImageSelector:
     def __init__(self, sessionmaker: async_sessionmaker[AsyncSession], policy: SandboxPolicy, repo: RepoContextProvider | None) -> None:
         self.sm, self.policy, self.repo = sessionmaker, policy, repo
@@ -162,12 +171,14 @@ class SandboxImageSelector:
         return None
 
     def _manifest_alias(self, handle: WorkspaceHandle) -> str | None:
+        """The alias of a manifest at the root, else of one up to ``_MANIFEST_DEPTH`` folders below it: R3-vb's first
+        step created ``src/Rechner/Rechner.vbproj``, and until a ``.vb`` file existed the coder's ``cat
+        /opt/nuget/versions.txt`` ran in the default image ("No such file", BUG-392)."""
         root = Path(handle.path)
-        for name, alias in MANIFEST_IMAGE_ALIASES:
-            if alias not in self.policy.images:
-                continue
-            if any(p.is_file() for p in root.glob(name)) if "*" in name else (root / name).is_file():
-                return alias
+        for depth in range(_MANIFEST_DEPTH + 1):
+            for name, alias in MANIFEST_IMAGE_ALIASES:
+                if alias in self.policy.images and any(_visible(p, root) for p in root.glob("*/" * depth + name)):
+                    return alias
         return None
 
     async def image_for(self, handle: WorkspaceHandle) -> str | None:

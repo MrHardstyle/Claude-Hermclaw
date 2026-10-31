@@ -46,6 +46,12 @@ Noch keine.
 
 ## Behobene Bugs
 
+### BUG-392 – Projektdatei im Unterordner: Befehle laufen im falschen Sandbox-Image
+- Phase: Leiter R3-vb auf rc114, 2026-10-31 · Komponente: runtime (`images.py`) · Severity: P2 · blockierend: nein · Status: **behoben im Repository** (`tests/integration/test_sandbox_images.py::test_a_project_file_in_a_subfolder_selects_its_toolchain`)
+- Reproduktion: R3-vb (Job 1a1683ff) Versuch 1: Zug 1 (`dotnet --version; … cat /opt/nuget/versions.txt`) lief im dotnet-Image und zeigte die Paketversionen, Zug 3 (`cat /opt/nuget/versions.txt` allein) meldete „No such file or directory“. Der Coder suchte die Pakete danach sechs Züge lang (`dotnet new list`, `ls ~/.nuget`, `find /opt …`).
+- Ursache: Ein neues Repository ohne erkannten Code bekommt sein Image über eine Projektdatei, gesucht wurde aber nur im Wurzelordner; `src/Rechner/Rechner.vbproj` zählte nicht. Befehle ohne Toolchain-Programm liefen deshalb im Default-Image, bis die ersten `.vb`-Dateien existierten.
+- Fix: Projektdateien zählen auch bis drei Ordner unter der Wurzel (zuerst die Wurzel, dann jede Ebene); `node_modules`, `bin`, `obj`, `target`, `build`, `dist`, `vendor`, `venv` und versteckte Ordner zählen nicht.
+
 ### BUG-391 – VB-Schlüsselwort als Name: BC30183 nennt das Wort nicht
 - Phase: Leiter R3-vb auf rc110/rc112, 2026-10-31 · Komponente: tools (`locations.py`, `engine.py`), verifier (`checks.py`) · Severity: P2 · blockierend: nein · Status: **behoben im Repository** (`tests/unit/test_tools_locations.py::test_vb_keywords_used_as_names_are_named`, `tests/integration/test_verifier_engine.py::test_compile_failure_names_a_vb_keyword_used_as_a_name`)
 - Reproduktion: R3-vb (Jobs 92c6b083, 37ec9f6d) – fünf Versuche scheiterten am Build, 13-mal mit `error BC30183: Keyword is not valid as an identifier` (u. a. `Public Property Operator As String`, Parameter `operator`). Der Coder schrieb ganze Dateien neu (Lexer.vb siebenmal in einem Versuch), ohne das Wort zu finden.

@@ -4,6 +4,11 @@ Format: [Keep a Changelog](https://keepachangelog.com/de/1.1.0/), Versionen nach
 
 ## [Unreleased]
 
+## [0.1.0rc115] – Release Candidate (2026-10-31)
+
+### Behoben
+- **Projektdatei im Unterordner (BUG-392):** Ein neues Projekt mit `src/Rechner/Rechner.vbproj` bekam sein Toolchain-Image erst mit der ersten `.vb`-Datei; vorher liefen Befehle wie `cat /opt/nuget/versions.txt` im Default-Image. Projektdateien zählen jetzt bis drei Ordner tief.
+
 ## [0.1.0rc114] – Release Candidate (2026-10-31)
 
 ### Behoben
