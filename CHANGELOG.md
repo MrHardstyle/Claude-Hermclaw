@@ -4,6 +4,11 @@ Format: [Keep a Changelog](https://keepachangelog.com/de/1.1.0/), Versionen nach
 
 ## [Unreleased]
 
+## [0.1.0rc124] – Release Candidate (2026-11-01)
+
+### Behoben
+- **JavaScript mit HTML-Strings wird geprüft (BUG-402):** Die JSX-Erkennung zählte Tags in Strings und Template-Strings mit; ein Widget, das sein Markup in Template-Strings baut, lief nie durch `node --check`. Die Erkennung sieht jetzt nur den Code außerhalb von Literalen und Kommentaren.
+
 ## [0.1.0rc123] – Release Candidate (2026-11-01)
 
 ### Behoben

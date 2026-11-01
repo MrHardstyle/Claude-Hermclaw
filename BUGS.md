@@ -46,6 +46,12 @@ Noch keine.
 
 ## Behobene Bugs
 
+### BUG-402 – HTML in JavaScript-Template-Strings gilt als JSX, die Syntaxprüfung entfällt
+- Phase: G1-Abnahme auf rc123, 2026-11-01 (Job d266b866) · Komponente: verifier (`syntax.py`) · Severity: P2 · blockierend: nein (ungeprüfter Code) · Status: **behoben im Repository** (`tests/unit/test_verifier_units.py::test_jsx_is_left_to_compile_check`)
+- Reproduktion: S006 #1 (Widget ohne Framework): `static/app.js` baut sein Markup in Template-Strings (`` `<div class="row">…</div>` ``). Der Verifier meldete `syntax:static/app.js skip – contains JSX: covered by the compile check / lint`; Compile- und Lint-Prüfung übersprangen ebenfalls (keine Toolchain-Marker, kein Lint-Befehl). Die Datei lief nie durch `node --check`, auch nicht als Rückmeldung nach dem Schreiben.
+- Ursache: Die JSX-Erkennung suchte schließende Tags (`</span>`) im ganzen Text, also auch in Strings, Template-Strings und Kommentaren.
+- Fix: Die Erkennung sieht nur den Code: Kommentare und Inhalte von String- und Template-Literalen sind ausgeblendet, `${…}`-Ausdrücke bleiben Code (verschachtelte Templates darin ebenfalls ausgeblendet). Ein Anführungszeichen-String endet am Zeilenende, damit ein Apostroph im JSX-Text höchstens den Rest seiner Zeile ausblendet. Im G1-Fall wird `app.js` jetzt mit `node --check` geprüft.
+
 ### BUG-401 – Lange Befehle scheitern am Exec-Host, und ihr Echo verdrängt die Ausgabe
 - Phase: G1-Abnahme auf rc121, 2026-11-01 (Job 2c8055eb) · Komponente: contracts (`worker.py`), tools (`engine.py`) · Severity: P2 · blockierend: nein (verbrauchte Züge und Versuche) · Status: **behoben im Repository** (`tests/integration/test_tools_engine_exec.py::test_a_run_command_as_long_as_the_tool_allows_reaches_the_exec_host`)
 - Reproduktion: S003 #2 und #3 (Parser mit Tests): dreimal `run_command` mit einem Python-Here-Document von 9.500 bis 13.100 Zeichen, das die Testdateien schreibt, jedes Mal `SANDBOX_ERROR` (`ValidationError: String should have at most 8000 characters` für `CommandRequest`). Jeder dieser Züge dauert auf Strata mehrere Minuten; S003 blockierte nach drei Versuchen, `tests/test_proxmox.py` fehlte bis zum letzten Zug.

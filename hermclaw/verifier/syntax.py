@@ -272,10 +272,66 @@ async def check_in_sandbox(runner: CommandRunner, language: str, paths: Sequence
     return results
 
 
+def _js_code_only(text: str) -> str:
+    """``text`` without its comments and the contents of its string and template literals (line structure kept; the
+    ``${…}`` expressions of a template stay code, so a template nested in one is blanked too): HTML in a template
+    literal is not JSX. A quote string ends at the line end, so an apostrophe in JSX text blanks no more than the rest
+    of its line."""
+    out: list[str] = []
+    braces: list[int] = []  # per open ${…}: the depth of the braces opened inside it
+    i, n = 0, len(text)
+    in_template = False
+    while i < n:
+        c = text[i]
+        if in_template:
+            if c == "\\":
+                i += 2
+            elif c == "`":
+                out.append(c)
+                in_template, i = False, i + 1
+            elif text.startswith("${", i):
+                braces.append(0)
+                out.append("${")
+                in_template, i = False, i + 2
+            else:
+                if c == "\n":
+                    out.append(c)
+                i += 1
+        elif c == "/" and text.startswith("//", i):
+            j = text.find("\n", i)
+            i = n if j < 0 else j
+        elif c == "/" and text.startswith("/*", i):
+            j = text.find("*/", i + 2)
+            j = n if j < 0 else j + 2
+            out.append("\n" * text.count("\n", i, j))
+            i = j
+        elif c == "`":
+            out.append(c)
+            in_template, i = True, i + 1
+        elif c in "'\"":
+            j = i + 1
+            while j < n and text[j] not in (c, "\n"):
+                j += 2 if text[j] == "\\" else 1
+            out.append(c + c)
+            i = min(n, j + 1)
+        elif braces and c == "}" and braces[-1] == 0:
+            braces.pop()
+            out.append(c)
+            in_template, i = True, i + 1
+        else:
+            if braces and c in "{}":
+                braces[-1] += 1 if c == "{" else -1
+            out.append(c)
+            i += 1
+    return "".join(out)
+
+
 def javascript_needs_compile_check(path: str, text: str) -> str | None:
     """Reason to leave a JavaScript file to the compile/lint stage (JSX cannot be parsed by ``node --check``)."""
     if path.endswith(".jsx"):
         return "JSX file: covered by the compile check / lint"
-    if _JSX.search(text):
+    # only tags in the code itself: a framework-free widget building its markup in template literals was never parsed –
+    # compile and lint skip without a toolchain, so app.js went unchecked (live G1 rc123, BUG-402)
+    if _JSX.search(_js_code_only(text)):
         return "contains JSX: covered by the compile check / lint"
     return None

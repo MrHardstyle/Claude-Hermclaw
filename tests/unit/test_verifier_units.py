@@ -163,6 +163,14 @@ def test_jsx_is_left_to_compile_check() -> None:
     assert javascript_needs_compile_check("a.js", "const el = <div className='x'>hi</div>;") is not None
     assert javascript_needs_compile_check("a.js", "function f() { return (\n  <App />\n); }") is not None
     assert javascript_needs_compile_check("a.js", "if (a < b && c > d) { x = a <b; }") is None
+    # JSX text with an apostrophe still counts; markup in strings, templates and comments does not (BUG-402)
+    assert javascript_needs_compile_check("a.js", "const C = () => (\n  <p>Don't stop</p>\n);") is not None
+    widget = (
+        'function row(label) {\n  return `\n    <div class="row">\n      <span>${label}</span>\n    </div>`;\n}\n'
+        "const tip = '<b>x</b>'; // </div>\nconst t = \"</span>\"; /* <App /> */\nel.innerHTML = row('a');\n"
+        "const card = `<ul>${items.map((x) => { return `<li>${x}</li>`; }).join('')}</ul>`;\n"
+    )
+    assert javascript_needs_compile_check("a.js", widget) is None
 
 
 # ------------------------------------------------------------------------------------------- schema
