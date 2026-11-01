@@ -8,12 +8,25 @@ are merged into one snippet; identical content is never shown twice (e.g. vendor
 from __future__ import annotations
 
 import hashlib
+import re
 from collections.abc import Awaitable, Callable, Iterable, Sequence
 from dataclasses import dataclass, field, replace
 
 from hermclaw.context_builder.tokens import char_cost
 
 ORIGIN_PRIORITY = ("failure", "target", "acceptance", "search", "context")
+
+#: a line that starts a definition (function, method, class, type) in the common languages, nested at most two levels
+_DEFINITION = re.compile(
+    r"^[ \t]{0,8}(?:(?:export|default|public|private|protected|internal|static|async|abstract|final|override|local|pub"
+    r"(?:\([\w ]+\))?|Public|Private|Friend|Shared|Overrides)\s+)*"
+    r"(?:(?:def|class|function|fn|struct|enum|interface|trait|impl|module|Sub|Function|Class|Module|Structure)\s+[\w$]"
+    r"|func\s+[\w(])"  # Go: a method starts with its receiver
+)
+_OUTLINE_ITEMS = 40
+_OUTLINE_CHARS = 110
+#: share of a section's budget the outlines of the snippets left out may take from the code
+OUTLINE_SHARE = 0.15
 
 
 @dataclass(frozen=True)
@@ -171,7 +184,17 @@ def fence_for(text: str) -> str:
     return "`" * max(3, longest + 1)
 
 
-def render_snippet(s: Snippet, *, shown_end: int | None = None, text: str | None = None) -> str:
+def outline_lines(s: Snippet, after: int = 0) -> list[str]:
+    """The definitions of ``s`` after line ``after``, one ``line: text`` each – where to read in a part not shown."""
+    out = []
+    for i, line in enumerate(s.text.splitlines()):
+        number = s.start + i
+        if number > after and _DEFINITION.match(line):
+            out.append(f"  {number}: {line.strip()[:_OUTLINE_CHARS]}")
+    return out[:_OUTLINE_ITEMS]
+
+
+def render_snippet(s: Snippet, *, shown_end: int | None = None, text: str | None = None, outline: bool = False) -> str:
     body = s.text if text is None else text
     end = s.end if shown_end is None else shown_end
     fence = fence_for(body)
@@ -179,7 +202,19 @@ def render_snippet(s: Snippet, *, shown_end: int | None = None, text: str | None
     out = f"{header}\n{fence}\n{body.rstrip(chr(10))}\n{fence}\n"
     if shown_end is not None and shown_end < s.end:
         out += f"[… lines {shown_end + 1}-{s.end} not shown; use read_range to see them …]\n"
+        defs = outline_lines(s, after=shown_end) if outline else []
+        if defs:
+            out += "Definitions in those lines:\n" + "\n".join(defs) + "\n"
     return out
+
+
+def render_outline(s: Snippet) -> str:
+    """A snippet the budget left out, as the list of its definitions; empty when it has none."""
+    defs = outline_lines(s)
+    if not defs:
+        return ""
+    head = f"### {s.path} lines {s.start}-{s.end} not shown (context budget); its definitions, read_range for the code:"
+    return head + "\n" + "\n".join(defs) + "\n"
 
 
 @dataclass
@@ -188,11 +223,40 @@ class PackResult:
     cost: int
     dropped: list[tuple[str, str]]
     truncated: bool
+    #: outlines of the snippets the budget left out, in rank order (not code: no line of them counts as shown)
+    outlines: list[str] = field(default_factory=list)
 
 
-def pack_snippets(snippets: Sequence[Snippet], budget: int, *, min_cost: int, max_items: int) -> PackResult:
+def pack_snippets(snippets: Sequence[Snippet], budget: int, *, min_cost: int, max_items: int, outline: bool = False) -> PackResult:
     """First-fit packing in rank order; a snippet that does not fit is clipped (head lines) when at least
-    ``min_cost`` remains, otherwise skipped (smaller lower-ranked snippets may still fit)."""
+    ``min_cost`` remains, otherwise skipped (smaller lower-ranked snippets may still fit).
+
+    With ``outline`` the parts left out stay findable: a clipped snippet lists the definitions of its hidden lines, and
+    the outlines of the snippets left out get their room first. The coder budget of a 32K model holds two or three
+    files of 300 lines – in G1 it showed 126 of 326 lines of one file and nothing of two others; reading one pushed the
+    other out of the context, and the coder read the files in turn until the step stagnated (G1 on rc119, S004:
+    metrics/proxmox/unraid, 4× ``read_file metrics.py``, BUG-400). The outlines take at most ``OUTLINE_SHARE`` of the
+    budget; what does not fit there is left out as before."""
+    first = _pack(snippets, budget, min_cost=min_cost, max_items=max_items, outline=outline)
+    if not outline or not first.dropped:
+        return first
+    cap, chosen, room = int(budget * OUTLINE_SHARE), [], 0
+    for s in sorted(snippets, key=rank_key):
+        block = render_outline(s) if s.exact and (s.label, "budget") in first.dropped else ""
+        if block and room + char_cost(block) + 1 <= cap:
+            chosen.append((s.label, block))
+            room += char_cost(block) + 1
+    if not chosen:
+        return first
+    res = _pack(snippets, budget - room, min_cost=min_cost, max_items=max_items, outline=outline)
+    for label, block in chosen:  # a snippet the smaller budget still left out; one it now clips shows its own definitions
+        if (label, "budget") in res.dropped:
+            res.outlines.append(block)
+            res.cost += char_cost(block) + 1
+    return res
+
+
+def _pack(snippets: Sequence[Snippet], budget: int, *, min_cost: int, max_items: int, outline: bool) -> PackResult:
     selected: list[tuple[Snippet, str]] = []
     dropped: list[tuple[str, str]] = []
     used = 0
@@ -209,7 +273,7 @@ def pack_snippets(snippets: Sequence[Snippet], budget: int, *, min_cost: int, ma
             continue
         remaining = budget - used
         if remaining >= min_cost and s.exact:
-            clipped = _clip_snippet(s, remaining - 1)
+            clipped = _clip_snippet(s, remaining - 1, outline=outline)
             if clipped is not None:
                 # the selected snippet is what the block shows: a clipped snippet kept its full range, and the history
                 # and the read guards called lines the context had cut "shown above" (live G1 rc91, BUG-362)
@@ -221,7 +285,7 @@ def pack_snippets(snippets: Sequence[Snippet], budget: int, *, min_cost: int, ma
     return PackResult(selected=selected, cost=used, dropped=dropped, truncated=truncated or bool(dropped))
 
 
-def _clip_snippet(s: Snippet, budget: int) -> tuple[Snippet, str] | None:
+def _clip_snippet(s: Snippet, budget: int, *, outline: bool = False) -> tuple[Snippet, str] | None:
     """The head of ``s`` whose rendering fits ``budget``, as (the shown part, its block). A merged snippet is shown from
     its focus: clipped from line 1, a read of lines 134-388 merged into the target head 1-400 showed lines 1-329, and
     the coder read the same lines again and again (live G1 on rc96, BUG-368)."""
@@ -229,12 +293,12 @@ def _clip_snippet(s: Snippet, budget: int) -> tuple[Snippet, str] | None:
     if s.focus is not None and s.focus > s.start:
         tail = replace(s, start=s.focus, text="\n".join(lines[s.focus - s.start :]), focus=None)
         block = render_snippet(tail)
-        return (tail, block) if char_cost(block) <= budget else _clip_snippet(tail, budget)
+        return (tail, block) if char_cost(block) <= budget else _clip_snippet(tail, budget, outline=outline)
     lo, hi, best = 1, len(lines) - 1, None
     while lo <= hi:  # largest number of head lines whose rendering fits
         mid = (lo + hi) // 2
         text = "\n".join(lines[:mid])
-        block = render_snippet(s, shown_end=s.start + mid - 1, text=text)
+        block = render_snippet(s, shown_end=s.start + mid - 1, text=text, outline=outline)
         if char_cost(block) <= budget:
             best, lo = (replace(s, end=s.start + mid - 1, text=text), block), mid + 1
         else:
@@ -242,10 +306,11 @@ def _clip_snippet(s: Snippet, budget: int) -> tuple[Snippet, str] | None:
     return best
 
 
-def render_packed(selected: Sequence[tuple[Snippet, str]]) -> str:
-    """Blocks grouped by file (files ordered by their best rank), ascending line order inside a file."""
+def render_packed(selected: Sequence[tuple[Snippet, str]], outlines: Sequence[str] = ()) -> str:
+    """Blocks grouped by file (files ordered by their best rank), ascending line order inside a file; the outlines of
+    the snippets left out follow."""
     first_rank: dict[str, int] = {}
     for i, (s, _) in enumerate(selected):
         first_rank.setdefault(s.path, i)
     ordered = sorted(selected, key=lambda item: (first_rank[item[0].path], item[0].start, item[0].end))
-    return "\n".join(block for _, block in ordered)
+    return "\n".join([*(block for _, block in ordered), *outlines])

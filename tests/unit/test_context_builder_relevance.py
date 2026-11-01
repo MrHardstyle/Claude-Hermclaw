@@ -5,7 +5,7 @@ from __future__ import annotations
 from dataclasses import replace
 
 from hermclaw.context_builder import SectionName, char_cost, estimate_tokens
-from hermclaw.context_builder.snippets import Snippet, dedupe_snippets, make_snippet, pack_snippets
+from hermclaw.context_builder.snippets import Snippet, dedupe_snippets, make_snippet, pack_snippets, render_packed, render_snippet
 from hermclaw.contracts.acceptance import CommandEvidence, TestEvidence
 from hermclaw.contracts.scope import ScopeContract
 from hermclaw.core.interfaces import RepoHit
@@ -204,6 +204,41 @@ def test_pack_clips_and_skips_deterministically() -> None:
     assert [s.label for s, _ in res2.selected] == ["b.py:1-1"] and ("a.py:1-200", "budget") in res2.dropped
     res3 = pack_snippets([small, big], 100_000, min_cost=300, max_items=1)
     assert [s.label for s, _ in res3.selected] == ["a.py:1-200"] and ("b.py:1-1", "limit") in res3.dropped
+
+
+def _module(name: str, functions: int, body: int = 12) -> str:
+    out = [f'"""{name} module."""', "import json", ""]
+    for i in range(functions):
+        out += ["", f"def {name}_{i}(value):", *(f"    value = value + {j}  # step {j}" for j in range(body)), "    return value", ""]
+    out += ["class Collector:", "    def collect(self):", "        return []"]
+    return "\n".join(out)
+
+
+def test_files_the_budget_leaves_out_stay_findable_by_their_definitions() -> None:
+    """BUG-400 (G1 on rc119, S004): three collector modules of ~300 lines did not fit the coder budget together; reading
+    one pushed the next out of the context and the coder read metrics.py four times until the step stagnated. A file
+    left out is listed with its definitions, a clipped one with the definitions of its hidden lines, all within budget."""
+    read = make_snippet("proxmox.py", 1, _module("proxmox", 12), 3.0, "target")
+    clipped = make_snippet("metrics.py", 1, _module("metrics", 12), 2.0, "target")
+    left = make_snippet("unraid.py", 1, _module("unraid", 12), 1.0, "target")
+    budget = char_cost(render_snippet(read)) + char_cost(render_snippet(clipped)) // 2
+    res = pack_snippets([left, clipped, read], budget, min_cost=300, max_items=10, outline=True)
+    assert res.cost <= budget and [s.path for s, _ in res.selected] == ["proxmox.py", "metrics.py"]
+    shown, block = res.selected[1]
+    assert shown.end < clipped.end and "Definitions in those lines:" in block
+    hidden = [line for line in block.split("Definitions in those lines:\n")[1].splitlines() if line.strip()]
+    assert hidden and all(int(line.split(":")[0]) > shown.end for line in hidden) and hidden[-1].endswith("def collect(self):")
+    (outline,) = res.outlines
+    assert outline.startswith("### unraid.py lines 1-") and "not shown (context budget)" in outline
+    assert "def unraid_0(value):" in outline and "class Collector:" in outline and "value = value" not in outline
+    assert ("unraid.py:1-" + str(left.end), "budget") in res.dropped  # the outline is no code: the file stays left out
+    body = render_packed(res.selected, res.outlines)
+    assert body.index("### proxmox.py") < body.index("### metrics.py") < body.index("### unraid.py")
+    plain = pack_snippets([left, clipped, read], budget, min_cost=300, max_items=10)
+    assert not plain.outlines and "Definitions in those lines" not in render_packed(plain.selected)
+    # a file without definitions gets no outline
+    data = make_snippet("data.txt", 1, numbered(400), 0.5, "context")
+    assert not pack_snippets([read, data], char_cost(render_snippet(read)) + 50, min_cost=300, max_items=10, outline=True).outlines
 
 
 async def test_a_read_merged_into_a_file_head_is_clipped_from_where_it_starts() -> None:

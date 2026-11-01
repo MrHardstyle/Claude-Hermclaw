@@ -46,6 +46,12 @@ Noch keine.
 
 ## Behobene Bugs
 
+### BUG-400 – Kontextbudget verdrängt ganze Dateien, der Coder liest sie reihum neu
+- Phase: G1-Abnahme auf rc119, 2026-10-31 · Komponente: context_builder (`snippets.py`, `builder.py`) · Severity: P2 · blockierend: nein (Stagnation, verbrauchte Versuche) · Status: **behoben im Repository** (`tests/unit/test_context_builder_relevance.py::test_files_the_budget_leaves_out_stay_findable_by_their_definitions`)
+- Reproduktion: G1 (Job 7ff4a5f6) S004 v1 #2: STAGNATION nach viermal `read_file metrics.py`. Das Coder-Budget (32.768 Kontext − 12.288 Ausgabe − Reserve = 18.841 Tokens) ließ RELEVANT CODE rund 16.900 Zeichen: `metrics.py` (377 Zeilen) ganz, `config.py` bis Zeile 44, `proxmox.py` (326 Zeilen) gar nicht. Wer eine Datei las, verdrängte die andere; die Lese-Sperre ließ den erneuten Lesezugriff zu Recht durch. Lese-Schleifen-Stagnation seit 23.10. fast nur in G1 (8–22 je Lauf, 7 Stopps).
+- Ursache: Eine Datei, die nicht ins Budget passte, verschwand ganz aus dem Kontext; der Coder wusste nicht mehr, wo welche Funktion steht, und las die ganze Datei.
+- Fix: Für die Abschnitte RELEVANT CODE/TESTS bleibt eine verdrängte Datei mit ihren Definitionen (Zeilennummer und Kopfzeile) sichtbar, ein gekürzter Ausschnitt nennt die Definitionen seiner nicht gezeigten Zeilen. Die Gliederungen nehmen höchstens 15 % des Abschnittsbudgets; sie zählen nicht als gezeigter Code (Lese-Sperre unverändert). Im G1-Fall: `metrics.py` bis Zeile 360 plus die Gliederungen von `config.py` und `proxmox.py`.
+
 ### BUG-399 – Abdeckungsprüfung verlangt Tests für die Arbeit anderer Planschritte
 - Phase: G1-Abnahme auf rc119, 2026-10-31 · Komponente: coder (`coverage.py`, `handler.py`) · Severity: P2 · blockierend: nein (ein Korrekturversuch je Schritt verbraucht) · Status: **behoben im Repository** (`tests/unit/test_coverage.py::test_the_prompt_names_the_other_work_steps_of_the_plan`)
 - Reproduktion: G1 (Job 7ff4a5f6) S004 v2 („shared metric normalization and thresholds“) bestand Verifier (18/21) und Review (pass); die Abdeckungsprüfung meldete 9 Lücken, alle aus der Arbeit anderer Schritte: parallele Abfrage der Server, nicht erreichbare Server, falsche Zugangsdaten (S010/S011), JSON-Schnittstelle auf 127.0.0.1 (S005), Frontend ohne Frameworks (S006), Server hinzufügen/entfernen. Versuch 1 endete `COVERAGE_GAP`, die Korrektur sollte Tests für Code schreiben, den erst spätere Schritte bauen. Schon S003 (Konfiguration) bekam Lücken wie „Settings-Bereich im Frontend“.

@@ -424,13 +424,15 @@ class ContextBuilder:
         # unused code budget -> tests; then unused tests budget -> code (only if code had to leave snippets out).
         # The reported section budget is what the section was allowed when it was (last) packed.
         code_allowed = split.code_cost
-        code_pack = pack_snippets(code_snips, code_allowed, min_cost=cfg.min_snippet_cost, max_items=cfg.max_code_snippets)
+        code_pack = pack_snippets(code_snips, code_allowed, min_cost=cfg.min_snippet_cost, max_items=cfg.max_code_snippets, outline=True)
         tests_allowed = split.tests_cost + (code_allowed - code_pack.cost)
-        test_pack = pack_snippets(test_snips, tests_allowed, min_cost=cfg.min_snippet_cost, max_items=cfg.max_test_snippets)
+        test_pack = pack_snippets(test_snips, tests_allowed, min_cost=cfg.min_snippet_cost, max_items=cfg.max_test_snippets, outline=True)
         spare = tests_allowed - test_pack.cost
         if spare > 0 and any(reason == "budget" for _, reason in code_pack.dropped):
             code_allowed = code_pack.cost + spare
-            code_pack = pack_snippets(code_snips, code_allowed, min_cost=cfg.min_snippet_cost, max_items=cfg.max_code_snippets)
+            code_pack = pack_snippets(
+                code_snips, code_allowed, min_cost=cfg.min_snippet_cost, max_items=cfg.max_code_snippets, outline=True
+            )
         final_budget = dict(cost)
         final_budget[SectionName.RELEVANT_CODE] = code_allowed
         final_budget[SectionName.RELEVANT_TESTS] = tests_allowed
@@ -438,12 +440,14 @@ class ContextBuilder:
             (SectionName.RELEVANT_CODE, code_pack, len(code_snips)),
             (SectionName.RELEVANT_TESTS, test_pack, len(test_snips)),
         ):
-            sec = RenderedSection(name, body=render_packed(pack.selected), truncated=pack.truncated, items_included=len(pack.selected))
+            sec = RenderedSection(
+                name, body=render_packed(pack.selected, pack.outlines), truncated=pack.truncated, items_included=len(pack.selected)
+            )
             for label, reason in pack.dropped:
                 sec.drop(label, reason)
             if not total:
                 sec.omitted_reason = "empty"
-            elif not pack.selected:
+            elif not pack.selected and not pack.outlines:
                 sec.omitted_reason = "budget"
             rendered[name] = sec
         packs = {SectionName.RELEVANT_CODE: code_pack, SectionName.RELEVANT_TESTS: test_pack}

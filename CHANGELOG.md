@@ -4,6 +4,11 @@ Format: [Keep a Changelog](https://keepachangelog.com/de/1.1.0/), Versionen nach
 
 ## [Unreleased]
 
+## [0.1.0rc122] – Release Candidate (2026-11-01)
+
+### Behoben
+- **Verdrängte Dateien bleiben auffindbar (BUG-400):** Passt eine Datei nicht mehr ins Kontextbudget des Coders, zeigt RELEVANT CODE ihre Definitionen mit Zeilennummern statt nichts; der Coder kann gezielt `read_range` lesen, statt Dateien reihum ganz neu zu lesen (G1: viermal `read_file metrics.py` bis zur Stagnation).
+
 ## [0.1.0rc121] – Release Candidate (2026-10-31)
 
 ### Behoben
