@@ -4,6 +4,11 @@ Format: [Keep a Changelog](https://keepachangelog.com/de/1.1.0/), Versionen nach
 
 ## [Unreleased]
 
+## [0.1.0rc123] – Release Candidate (2026-11-01)
+
+### Behoben
+- **Lange Befehle erreichen den Exec-Host (BUG-401):** `run_command` nahm seit BUG-356 bis 32.000 Zeichen, die Anfrage an den Exec-Host nur 8000; Here-Documents, die Testdateien schreiben, scheiterten mit `SANDBOX_ERROR`. Die Grenze passt jetzt zur Werkzeuggrenze, und die Ausgabe eines Laufs wiederholt vom Befehl nur Anfang und Ende statt die eigentliche Ausgabe zu verdrängen.
+
 ## [0.1.0rc122] – Release Candidate (2026-11-01)
 
 ### Behoben

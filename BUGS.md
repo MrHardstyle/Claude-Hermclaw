@@ -46,6 +46,12 @@ Noch keine.
 
 ## Behobene Bugs
 
+### BUG-401 – Lange Befehle scheitern am Exec-Host, und ihr Echo verdrängt die Ausgabe
+- Phase: G1-Abnahme auf rc121, 2026-11-01 (Job 2c8055eb) · Komponente: contracts (`worker.py`), tools (`engine.py`) · Severity: P2 · blockierend: nein (verbrauchte Züge und Versuche) · Status: **behoben im Repository** (`tests/integration/test_tools_engine_exec.py::test_a_run_command_as_long_as_the_tool_allows_reaches_the_exec_host`)
+- Reproduktion: S003 #2 und #3 (Parser mit Tests): dreimal `run_command` mit einem Python-Here-Document von 9.500 bis 13.100 Zeichen, das die Testdateien schreibt, jedes Mal `SANDBOX_ERROR` (`ValidationError: String should have at most 8000 characters` für `CommandRequest`). Jeder dieser Züge dauert auf Strata mehrere Minuten; S003 blockierte nach drei Versuchen, `tests/test_proxmox.py` fehlte bis zum letzten Zug.
+- Ursache: BUG-356 hob die Grenze von `run_command` auf 32.000 Zeichen, die Anfrage an den Exec-Host (`CommandRequest`) blieb bei 8000; nur der lokale Fallback ohne Exec-Host nahm lange Befehle an. Dazu stellte die Ausgabe eines Laufs den ganzen Befehl voran: bei einem langen Befehl blieben 200 Zeichen für die eigentliche Ausgabe.
+- Fix: `CommandRequest` nimmt 36.000 Zeichen (Werkzeuggrenze plus `cd`- und pipefail-Zeile). Die Ausgabe eines Laufs wiederholt vom Befehl höchstens 1200 Zeichen (Anfang und Ende); der ganze Befehl steht in der Aktion des Coders und in `command_runs`.
+
 ### BUG-400 – Kontextbudget verdrängt ganze Dateien, der Coder liest sie reihum neu
 - Phase: G1-Abnahme auf rc119, 2026-10-31 · Komponente: context_builder (`snippets.py`, `builder.py`) · Severity: P2 · blockierend: nein (Stagnation, verbrauchte Versuche) · Status: **behoben im Repository** (`tests/unit/test_context_builder_relevance.py::test_files_the_budget_leaves_out_stay_findable_by_their_definitions`)
 - Reproduktion: G1 (Job 7ff4a5f6) S004 v1 #2: STAGNATION nach viermal `read_file metrics.py`. Das Coder-Budget (32.768 Kontext − 12.288 Ausgabe − Reserve = 18.841 Tokens) ließ RELEVANT CODE rund 16.900 Zeichen: `metrics.py` (377 Zeilen) ganz, `config.py` bis Zeile 44, `proxmox.py` (326 Zeilen) gar nicht. Wer eine Datei las, verdrängte die andere; die Lese-Sperre ließ den erneuten Lesezugriff zu Recht durch. Lese-Schleifen-Stagnation seit 23.10. fast nur in G1 (8–22 je Lauf, 7 Stopps).

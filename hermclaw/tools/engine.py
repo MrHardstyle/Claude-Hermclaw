@@ -137,6 +137,7 @@ PIPEFAIL = "(set -o pipefail) 2>/dev/null && set -o pipefail"
 
 READ_REPEAT_WINDOW = 6  # turns; the context shows the files of the last 6 reads (context_builder ``_read_spans``)
 READ_VISIBLE_LINES = 400  # the context shows at most this many lines of one read (context_builder ``max_snippet_lines``)
+COMMAND_ECHO_CHARS = 1200  # of a command, the output of its run repeats at most this much
 READ_FOLLOW_MIN_LINES = 60  # lines after a repeated read that the coder is given instead of a refusal (BUG-342)
 #: files whose size is not a design choice: data, documentation, lock files – everything else gets the split hint
 _NOT_SPLIT = (".md", ".txt", ".rst", ".json", ".jsonl", ".csv", ".tsv", ".lock", ".toml", ".yaml", ".yml", ".xml", ".svg", ".ini", ".cfg")
@@ -1890,7 +1891,10 @@ class ToolEngine:
 
     def _render_run(self, command: str, run: _RunOutcome, *, budget: int, head_ratio: float) -> tuple[str, bool]:
         res = run.result
-        header = f"$ {command}" + (f"  (cwd: {run.cwd})" if run.cwd != "." else "")
+        # the coder's action carries the whole command; a 12,000-character here-document echoed in full left a 200-character
+        # room for its output (live G1 rc121, BUG-401)
+        shown, _ = clip_middle(command, COMMAND_ECHO_CHARS, head_ratio=0.7)
+        header = f"$ {shown}" + (f"  (cwd: {run.cwd})" if run.cwd != "." else "")
         if res is None or run.sandbox_failed:
             status = f"sandbox error: {run.error}"
         elif res.timed_out:

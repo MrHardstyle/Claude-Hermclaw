@@ -22,7 +22,7 @@
       "type": "string"
     },
     "command": {
-      "maxLength": 8000,
+      "maxLength": 36000,
       "minLength": 1,
       "title": "Command",
       "type": "string"

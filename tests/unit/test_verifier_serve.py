@@ -81,7 +81,7 @@ def test_a_script_with_main_block_wins_over_a_module_helper(tmp_path: Path) -> N
 def test_the_serve_driver_fits_into_one_sandbox_command() -> None:
     # BUG-366: as plain text the script alone was longer than CommandRequest allows; every live serve check since rc91
     # ended in "could not run" and failed the step with VERIFIER_UNAVAILABLE
-    assert len(SERVE_SCRIPT) > MAX_COMMAND_CHARS // 2
+    assert len(SERVE_SCRIPT) > 4000
     pages = [f"frontend/very/long/folder/name/for/page-number-{i:02d}/index.html" for i in range(MAX_PAGES)]
     env = {f"HOMELAB_DASHBOARD_SETTING_{i}": "placeholder" for i in range(12)}
     command = "python homelab_dashboard/collector_server_with_a_long_name.py --config config.example.toml --port 8765"

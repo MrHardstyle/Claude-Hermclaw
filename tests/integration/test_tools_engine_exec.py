@@ -14,13 +14,14 @@ import pytest
 from hermclaw.contracts.events import EventType
 from hermclaw.contracts.scope import ScopeContract
 from hermclaw.contracts.tools import SALVAGE_DECISION, CoderAction, ToolName
-from hermclaw.contracts.worker import CommandResult
+from hermclaw.contracts.worker import CommandRequest, CommandResult
 from hermclaw.core.interfaces import ExecutionRequest, WorkspaceHandle
 from hermclaw.core.redaction import REDACTED
 from hermclaw.tools import errors as E
 from hermclaw.tools.context import ScopeExpansionOutcome, ToolPermissions
 from hermclaw.tools.engine import PIPEFAIL, ActionRejected
 from hermclaw.tools.executors import SubprocessExecutor
+from hermclaw.tools.registry import MAX_COMMAND_CHARS as MAX_TOOL_COMMAND_CHARS
 from hermclaw.tools.remote import RemoteSandboxExecutor
 from tests.integration.test_tools_support import (
     SM,
@@ -264,6 +265,25 @@ async def test_scratch_removals_below_the_sandbox_tmp_are_not_destructive(sessio
     assert (await plain.call("run_command", command=f"rm -rf {scratch}")).error_code == E.COMMAND_DESTRUCTIVE
     assert (repo / "build").is_dir() and scratch.is_dir()
     shutil.rmtree(scratch)
+
+
+class _WorkerRunner(_IsolatedRunner):
+    """Builds the request the exec host validates, as :meth:`RemoteSandboxExecutor.run` does, then runs locally."""
+
+    async def run(self, workspace: WorkspaceHandle, req: ExecutionRequest) -> CommandResult:  # type: ignore[override]
+        CommandRequest(request_id="r-1", job_id="j", step_id="s", workspace="w", command=req.command)
+        return await super().run(workspace, req)
+
+
+async def test_a_run_command_as_long_as_the_tool_allows_reaches_the_exec_host(sessionmaker: SM, repo: Path) -> None:
+    """Live G1 rc121: three here-documents of 9,500 to 13,100 characters that write test files failed with
+    SANDBOX_ERROR; the tool takes 32,000 characters, the exec host request only took 8000 (BUG-401)."""
+    body = "\n".join(f"# line {i:05d} of a generated test file" for i in range(MAX_TOOL_COMMAND_CHARS // 40))
+    command = f"python3 - <<'PY'\n{body}\nprint('long ok')\nPY"
+    assert 20_000 < len(command) <= MAX_TOOL_COMMAND_CHARS
+    h = await make_harness(sessionmaker, repo, executor=_WorkerRunner())
+    res = await h.call("run_command", command=command, cwd="src")
+    assert res.ok and "long ok" in res.output, res.output[-500:]
 
 
 async def test_a_command_missing_the_tmp_of_an_earlier_one_learns_that_tmp_starts_empty(

@@ -52,8 +52,10 @@ class WorkerHeartbeat(Contract):
     sent_at: datetime
 
 
-#: longest command a sandbox request carries (the serve check's driver must fit, BUG-366)
-MAX_COMMAND_CHARS = 8000
+#: longest command a sandbox request carries (the serve check's driver must fit, BUG-366): the coder's run_command
+#: (``hermclaw.tools.registry.MAX_COMMAND_CHARS``) plus the ``cd`` and pipefail lines the tool engine puts in front;
+#: at 8000 every longer run_command reached the exec host as a ValidationError (live G1 rc121, BUG-401)
+MAX_COMMAND_CHARS = 36_000
 
 
 class CommandRequest(Contract):
