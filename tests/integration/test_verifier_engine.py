@@ -1081,7 +1081,7 @@ async def test_the_delivered_web_server_is_loaded_like_its_user_loads_it(session
     outcome, *_ = await run(sessionmaker, repo, job, kind="review")
     check = by_name(outcome.report)["serve:server.py"]
     assert check.status == "fail" and check.blocking and not outcome.report.passed, check.message
-    assert "calls GET /api/token, but the server answered 404" in check.message
+    assert "calls GET or POST /api/token, but the server answered 404" in check.message
     # BUG-358: a method passed as an argument is used, and a dropped connection is no missing route
     assert "/api/save" not in check.message and ["POST", "/api/save", 200] in check.evidence["probes"]
     assert "calls GET /api/drop, but the server gave no answer (" in check.message

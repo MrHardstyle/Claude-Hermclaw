@@ -46,6 +46,12 @@ Noch keine.
 
 ## Behobene Bugs
 
+### BUG-404 – Serve-Prüfung ruft eine Route ohne genannte Methode nur mit GET auf
+- Phase: G1-Abnahme auf rc123, 2026-11-01 (Job d266b866) · Komponente: verifier (`serve.py`) · Severity: P1 · blockierend: ja (Fehlalarm blockierte den Frontend-Schritt) · Status: **behoben im Repository** (`tests/unit/test_verifier_serve.py::test_a_route_named_without_its_method_is_tried_with_get_and_post`)
+- Reproduktion: S006 (Widget) #2, #3 und nach dem Replan v2 #1: `static/app.js` nennt seine Routen in einem Objekt (`const api = { test: "/api/test", … }`) und ruft weiter unten `fetchJson(api.test, { method: "POST" })` auf. Die Serve-Prüfung meldete jedes Mal blockierend „/static/app.js calls GET /api/test, but the server answered 404: the route does not exist“; der Server bediente `/api/test` richtig nur per POST. Der Schritt lief in den Replan und scheiterte danach erneut.
+- Ursache: Die Methode wird nur direkt neben dem String-Literal gesucht (`method:` in den 300 Zeichen danach oder als Argument). Steht sie dort nicht, nahm die Prüfung GET an, und eine POST-Route antwortet auf GET mit 404.
+- Fix: Ohne Methode neben dem Literal ruft die Prüfung GET und danach POST auf; ein Problem ist es nur, wenn beide 404/405/501 liefern („calls GET or POST …“). Eine neben dem Literal genannte Methode gilt wie bisher allein.
+
 ### BUG-403 – Planer verbietet Feldnamen für Zugangsdaten, der Coder verschleiert sie
 - Phase: G1-Abnahme auf rc123, 2026-11-01 (Job d266b866) · Komponente: planner (`enrich.py`) · Severity: P2 · blockierend: nein (verbrauchte Versuche, verschleierter Code) · Status: **behoben im Repository** (`tests/unit/test_planner_enrich.py::test_absence_of_bare_credential_words_is_left_to_the_secret_scan`)
 - Reproduktion: S006 (Widget mit Einstellungsformular für API-Zugänge) bekam vom Planer `absence (password|token|api_key|api-key)` für `static/**`. #2 scheiterte daran mit 23 Treffern (`api_token_user`, Formularfelder); der Coder schrieb die Feldnamen als `["Pass", "wort"].join("")` und `["api", "_", "token"].join("")`, um das Kriterium zu umgehen.

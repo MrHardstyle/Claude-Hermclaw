@@ -13,7 +13,8 @@ verifier starts it once in the sandbox the way the job's own acceptance commands
 * loads ``/`` (when the project has HTML pages; a JSON API has no start page) and every local script, stylesheet and
   image the page references – each must answer 200;
 * calls every route the page's scripts name (``"/api/…"`` string literals, with the ``method`` written next to them or
-  passed as an argument, ``requestJson('/api/test', 'POST')``) – 404, 405 and 501 mean the route does not exist;
+  passed as an argument, ``requestJson('/api/test', 'POST')``; without one GET, then POST, BUG-404) – 404, 405 and 501
+  mean the route does not exist;
   401/403/400 are fine, the probe has no token or body; a route that does not answer within the probe's time waits on
   something the sandbox lacks (BUG-358);
 * checks that every HTML page of the project (outside tests, docs and templates) is served by it;
@@ -195,9 +196,17 @@ try:
                     after = re.match(r"\s*,\s*['\"`](GET|POST|PUT|PATCH|DELETE)['\"`]", text[m.end(): m.end() + 40], re.I)
                     before = re.search(r"['\"`](GET|POST|PUT|PATCH|DELETE)['\"`]\s*,\s*$", text[max(m.start() - 40, 0): m.start()], re.I)
                     found = after or before or near
-                    method = found.group(1).upper() if found else "GET"
-                    st, _, err = fetch(method, base + route, b"{}" if method != "GET" else None)
-                    probes.append([method, route, st])
+                    # no method next to the literal (`api = {test: "/api/test"}`, called as fetch(api.test, {method:
+                    # "POST"}) far below): GET, then POST - a POST-only route answered GET with 404 and blocked the
+                    # widget step three times (live G1 rc123, BUG-404)
+                    tried = []
+                    for method in [found.group(1).upper()] if found else ["GET", "POST"]:
+                        tried.append(method)
+                        st, _, err = fetch(method, base + route, b"{}" if method != "GET" else None)
+                        probes.append([method, route, st])
+                        if st not in (404, 405, 501):
+                            break
+                    method = " or ".join(tried)
                     if st in (404, 405, 501):
                         problem(f"{source} calls {method} {route}, but the server answered {st}: the route does not exist", where)
                     elif st is None and "timed out" not in err.lower():

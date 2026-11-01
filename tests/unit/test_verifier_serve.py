@@ -118,3 +118,59 @@ def test_a_header_the_page_sends_and_the_server_never_reads_is_named(tmp_path: P
     assert header_mismatches(tmp_path, [*files, "api.py"]) == []
     (tmp_path / "collector.py").write_text("def ok(h):\n    return True\n")
     assert header_mismatches(tmp_path, files) == []
+
+
+WIDGET_SERVER = """import os
+from http.server import BaseHTTPRequestHandler, HTTPServer
+
+PAGE = b'<html><body><script src="/app.js"></script></body></html>'
+SCRIPT = open("app.js", "rb").read()
+
+
+class H(BaseHTTPRequestHandler):
+    def _send(self, status, body=b"{}", ctype="application/json"):
+        self.send_response(status)
+        self.send_header("Content-Type", ctype)
+        self.end_headers()
+        self.wfile.write(body)
+
+    def do_GET(self):
+        if self.path == "/":
+            return self._send(200, PAGE, "text/html")
+        if self.path == "/app.js":
+            return self._send(200, SCRIPT, "application/javascript")
+        if self.path == "/api/metrics":
+            return self._send(200)
+        self._send(404)
+
+    def do_POST(self):
+        self._send(200 if self.path == "/api/test" else 404)
+
+    def log_message(self, *args):
+        pass
+
+
+if __name__ == "__main__":
+    HTTPServer(("127.0.0.1", int(os.environ["WIDGET_PORT"])), H).serve_forever()
+"""
+
+
+def test_a_route_named_without_its_method_is_tried_with_get_and_post(tmp_path: Path) -> None:
+    """Live G1 on rc123 (BUG-404): app.js named its routes in an object and called ``fetch(api.test, {method: "POST"})``
+    far below; the probe took GET, the POST-only route answered 404, and the widget step was blocked three times."""
+    filler = "\n".join(f"// line {i}" for i in range(40))
+    (tmp_path / "app.js").write_text(
+        'const api = { metrics: "/api/metrics", test: "/api/test", gone: "/api/gone" };\n'
+        f"{filler}\n"
+        'fetch(api.test, { method: "POST", body: "{}" });\n'
+    )
+    (tmp_path / "server.py").write_text(WIDGET_SERVER)
+    driver = serve_driver(
+        [sys.executable], f"{shlex.quote(sys.executable)} server.py", Server("server.py", {"WIDGET_PORT": "port"}), [], 15.0
+    )
+    words = shlex.split(driver)
+    out = subprocess.run(words, cwd=tmp_path, capture_output=True, text=True, timeout=120, check=False)
+    result = parse_serve_output(out.stdout)
+    assert result is not None and result.listening, out.stderr
+    assert ["POST", "/api/test", 200] in result.probes
+    assert result.problems == ["/app.js calls GET or POST /api/gone, but the server answered 404: the route does not exist"]
