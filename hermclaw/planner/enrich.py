@@ -16,6 +16,7 @@ Everything is generic and depends only on the plan, the validation context and t
 
 from __future__ import annotations
 
+import re
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, field
 from typing import Any
@@ -23,6 +24,7 @@ from typing import Any
 from pydantic import BaseModel, ConfigDict, Field, ValidationError
 
 from hermclaw.contracts.acceptance import (
+    AbsenceEvidence,
     AcceptanceCriterion,
     DiffEvidence,
     ScopeEvidence,
@@ -194,6 +196,25 @@ def _without_change_demands(acceptance: list[AcceptanceCriterion]) -> list[Accep
     return out
 
 
+# words naming a credential; an absence criterion forbidding only these forbids the field names every settings form and
+# config loader needs – what it means (no secret in the code) is the secret scan of the security criterion
+_CREDENTIAL_WORDS = frozenset(
+    {
+        "password", "passwd", "pwd", "secret", "secrets", "token", "tokens", "apikey", "apikeys", "apitoken", "apisecret",
+        "accesstoken", "authtoken", "bearer", "credential", "credentials", "privatekey", "clientsecret",
+    }
+)  # fmt: skip
+_PATTERN_NOISE = re.compile(r"\(\?[a-zA-Z]+\)|\\b|\[[-_\s\\]+\][?*+]?|\\s[?*+]?|\\[-_]|[-_?^$]")
+
+
+def _forbids_credential_words(item: AcceptanceCriterion) -> bool:
+    """An absence criterion whose pattern is nothing but credential words (``(password|token|api_key|api-key)``)."""
+    if not isinstance(item, AbsenceEvidence) or not item.pattern:
+        return False
+    words = _PATTERN_NOISE.sub("", item.pattern).lower().replace("(", "").replace(")", "").replace(":", "").split("|")
+    return all(w in _CREDENTIAL_WORDS for w in words)
+
+
 def generate_acceptance(
     step: PlanStep, ctx: ValidationContext, earlier_new_paths: Sequence[str] = ()
 ) -> tuple[list[AcceptanceCriterion], list[str]]:
@@ -204,6 +225,10 @@ def generate_acceptance(
     seen: set[str] = set()
     for item in step.acceptance:
         key = item.model_dump_json()
+        # the frontend step of a widget with a settings form for API access got "no password|token|api_key in static/**";
+        # its coder spelled the field names as ["Pass", "wort"].join("") to get past it (live G1 rc123, BUG-403)
+        if _forbids_credential_words(item):
+            continue
         if key not in seen:
             seen.add(key)
             acceptance.append(item)

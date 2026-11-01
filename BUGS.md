@@ -46,6 +46,12 @@ Noch keine.
 
 ## Behobene Bugs
 
+### BUG-403 – Planer verbietet Feldnamen für Zugangsdaten, der Coder verschleiert sie
+- Phase: G1-Abnahme auf rc123, 2026-11-01 (Job d266b866) · Komponente: planner (`enrich.py`) · Severity: P2 · blockierend: nein (verbrauchte Versuche, verschleierter Code) · Status: **behoben im Repository** (`tests/unit/test_planner_enrich.py::test_absence_of_bare_credential_words_is_left_to_the_secret_scan`)
+- Reproduktion: S006 (Widget mit Einstellungsformular für API-Zugänge) bekam vom Planer `absence (password|token|api_key|api-key)` für `static/**`. #2 scheiterte daran mit 23 Treffern (`api_token_user`, Formularfelder); der Coder schrieb die Feldnamen als `["Pass", "wort"].join("")` und `["api", "_", "token"].join("")`, um das Kriterium zu umgehen.
+- Ursache: Das Kriterium verbietet die Namen, nicht die Werte. Jedes Formular und jeder Konfigurationsleser für Zugangsdaten braucht diese Namen; gemeint ist „kein Geheimnis im Code“, und das prüft der Secret-Scan des Security-Kriteriums, den jeder ändernde Schritt ohnehin bekommt.
+- Fix: Die Planaufbereitung streicht Absence-Kriterien, deren Muster nur aus Wörtern für Zugangsdaten besteht (password, token, api_key, secret, Bearer, … auch mit `\b`, `(?i)`, `[_-]?`). Muster mit Werten (`password\s*=\s*"…`) oder anderen Wörtern bleiben.
+
 ### BUG-402 – HTML in JavaScript-Template-Strings gilt als JSX, die Syntaxprüfung entfällt
 - Phase: G1-Abnahme auf rc123, 2026-11-01 (Job d266b866) · Komponente: verifier (`syntax.py`) · Severity: P2 · blockierend: nein (ungeprüfter Code) · Status: **behoben im Repository** (`tests/unit/test_verifier_units.py::test_jsx_is_left_to_compile_check`)
 - Reproduktion: S006 #1 (Widget ohne Framework): `static/app.js` baut sein Markup in Template-Strings (`` `<div class="row">…</div>` ``). Der Verifier meldete `syntax:static/app.js skip – contains JSX: covered by the compile check / lint`; Compile- und Lint-Prüfung übersprangen ebenfalls (keine Toolchain-Marker, kein Lint-Befehl). Die Datei lief nie durch `node --check`, auch nicht als Rückmeldung nach dem Schreiben.

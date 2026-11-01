@@ -83,6 +83,29 @@ def test_documentation_step_is_workspace_mutating() -> None:
     assert _types(s, _ctx()) == ["diff", "test", "scope", "security"]
 
 
+@pytest.mark.parametrize(
+    ("pattern", "dropped"),
+    [
+        ("(password|token|api_key|api-key)", True),
+        (r"(?i)\b(api[_-]?key|secret|Bearer)\b", True),
+        ("password", True),
+        (r"password\s*=\s*['\"]\w+", False),  # a value, not a name
+        ("(password|cdn\\.)", False),
+        ("(jquery|react)", False),
+    ],
+)
+def test_absence_of_bare_credential_words_is_left_to_the_secret_scan(pattern: str, dropped: bool) -> None:
+    s = _step(
+        acceptance=[
+            {"type": "presence", "path_glob": "static/app.js", "pattern": "fetch"},
+            {"type": "absence", "path_glob": "static/**", "pattern": pattern},
+        ]
+    )
+    acceptance, _ = generate_acceptance(s, _ctx())
+    assert any(a.type == "absence" for a in acceptance) is not dropped
+    assert any(a.type == "security" for a in acceptance)
+
+
 @pytest.mark.parametrize("kind", ["review", "test", "research", "ssh", "deploy"])
 def test_non_workspace_kinds_get_no_generated_acceptance(kind: str) -> None:
     caps = {"review": "review", "test": "testing", "research": "research", "ssh": "ssh", "deploy": "deploy"}
