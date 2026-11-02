@@ -91,6 +91,7 @@ def test_documentation_step_is_workspace_mutating() -> None:
         ("(password|token|api_key|api-key)", True),
         (r"(?i)\b(api[_-]?key|secret|Bearer)\b", True),
         ("password", True),
+        ("password|token_value|api_key", True),  # a field name holding a credential word
         (r"password\s*=\s*['\"]\w+", False),  # a value, not a name
         ("(password|cdn\\.)", False),
         ("(jquery|react)", False),

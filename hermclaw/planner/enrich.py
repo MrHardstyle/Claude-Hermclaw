@@ -209,11 +209,12 @@ _PATTERN_NOISE = re.compile(r"\(\?[a-zA-Z]+\)|\\b|\[[-_\s\\]+\][?*+]?|\\s[?*+]?|
 
 
 def _forbids_credential_words(item: AcceptanceCriterion) -> bool:
-    """An absence criterion whose pattern is nothing but credential words (``(password|token|api_key|api-key)``)."""
+    """An absence criterion whose pattern is nothing but credential words (``(password|token|api_key|api-key)``),
+    also as part of a field name: after a replan the ban came back as ``password|token_value|api_key`` (G1 rc124)."""
     if not isinstance(item, AbsenceEvidence) or not item.pattern:
         return False
     words = _PATTERN_NOISE.sub("", item.pattern).lower().replace("(", "").replace(")", "").replace(":", "").split("|")
-    return all(w in _CREDENTIAL_WORDS for w in words)
+    return all(w.isalnum() and any(c in w for c in _CREDENTIAL_WORDS) for w in words)
 
 
 def _sibling_references_relative(item: AcceptanceCriterion) -> AcceptanceCriterion:

@@ -46,6 +46,12 @@ Noch keine.
 
 ## Behobene Bugs
 
+### BUG-406 – Wortverbot kommt nach dem Replan als Feldname zurück
+- Phase: G1-Abnahme auf rc124, 2026-11-02 (Job d8624613) · Komponente: planner (`enrich.py`) · Severity: P2 · blockierend: ja (Kriterium widerspricht dem Schritt) · Status: **behoben im Repository** (`tests/unit/test_planner_enrich.py::test_absence_of_bare_credential_words_is_left_to_the_secret_scan`)
+- Reproduktion: Nach dem Replan verlangte der neue S006 (Hilfsfunktionen des Widgets, darunter `publicServer` und `credentialsText`, die Zugangsdaten aus der Antwort entfernen) „kein `password|token_value|api_key` in `static/app.js`“. Der BUG-403-Filter ließ das Kriterium stehen, weil `token_value` kein reines Zugangsdaten-Wort ist.
+- Ursache: Der Filter erkannte nur Muster aus genau den bekannten Wörtern, nicht Feldnamen, die eines davon enthalten.
+- Fix: Ein Absenzkriterium entfällt auch, wenn jede Alternative ein einfacher Name ist, der ein Zugangsdaten-Wort enthält (`token_value`, `apiKeyField`). Muster mit Werten (`password\s*=\s*'…`) oder anderen Wörtern bleiben.
+
 ### BUG-405 – Präsenzkriterium verlangt den Workspace-Pfad für einen relativen Verweis
 - Phase: G1-Abnahme auf rc124, 2026-11-02 (Job d8624613) · Komponente: planner (`enrich.py`) · Severity: P1 · blockierend: ja (Fehlalarm blockierte den Frontend-Schritt) · Status: **behoben im Repository** (`tests/unit/test_planner_enrich.py::test_presence_of_a_sibling_by_its_workspace_path_allows_the_relative_reference`)
 - Reproduktion: S006 (Widget) #1: Der Planer verlangte `static/styles\.css|static/app\.js` in `static/index.html`. Der Coder schrieb richtig `href="styles.css"` und `src="app.js"` – der Server aus S005 liefert `static/` als Wurzel aus. Der Verifier meldete blockierend „0 match(es)“; `href="static/styles.css"` hätte beim Ausliefern 404 ergeben, das Kriterium war für eine funktionierende Seite unerfüllbar.

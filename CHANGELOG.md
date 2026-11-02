@@ -8,6 +8,7 @@ Format: [Keep a Changelog](https://keepachangelog.com/de/1.1.0/), Versionen nach
 
 ### Behoben
 - **Relative Verweise erfüllen Präsenzkriterien (BUG-405):** Verlangt ein Kriterium `static/app.js` in `static/index.html`, zählt auch der richtige relative Verweis `src="app.js"`; vorher blockierte es den Frontend-Schritt eines Widgets, dessen Server `static/` als Wurzel ausliefert.
+- **Auch Feldnamen mit Zugangsdaten-Wörtern sind erlaubt (BUG-406):** Das Verbot `password|token_value|api_key` nach einem Replan wird wie die reinen Wörter aus BUG-403 dem Secret-Scan überlassen.
 
 ## [0.1.0rc124] – Release Candidate (2026-11-01)
 
