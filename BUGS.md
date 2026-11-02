@@ -46,6 +46,12 @@ Noch keine.
 
 ## Behobene Bugs
 
+### BUG-408 – Verbotene Altlast eines blockierten Schritts scheitert am Scope des neuen Schritts
+- Phase: G1-Abnahme auf rc126, 2026-11-02 (Job 7ecee9db) · Komponente: coder (`handler.py`) · Severity: P2 · blockierend: ja (Scope-Verletzung ohne eigene Änderung, Replan) · Status: **behoben im Repository** (`tests/integration/test_coder_handler.py::test_a_leftover_the_steps_scope_forbids_is_parked_for_the_step_that_names_it`)
+- Reproduktion: S005 (Collector) war nach drei Versuchen blockiert und ließ `collector.py`, `metrics.py`, `docs/api.md` und zwei Testdateien uncommittet zurück. Der Replan gab sie S006 als Repo-Hinweise und verbot sie dem neuen S005 (Beispielkonfiguration). S005 #1 scheiterte mit „5 out-of-scope change(s)“, #2 bat um einen Replan; 33 Minuten und ein zusätzlicher Replan gingen verloren.
+- Ursache: Altlasten werden nur geparkt, wenn ein anderer offener Schritt sie als neue Datei (`allowed_new_paths`) beansprucht; die Dateien existierten aber schon und standen bei S006 nur in den Repo-Hinweisen. Übernehmen (BUG-206/255) geht für verbotene Pfade nie, also blieben sie als Verstoß stehen.
+- Fix: Eine Altlast, die der Scope des laufenden Schritts verbietet und die er nicht selbst geändert hat, wird ebenfalls geparkt und kehrt zurück, sobald ein Schritt startet, der sie nennt.
+
 ### BUG-407 – Secret-Scan hält eine Feldbeschriftung für ein Passwort
 - Phase: G1-Abnahme auf rc125, 2026-11-02 (Job 417a1b72) · Komponente: verifier (`secrets.py`) · Severity: P2 · blockierend: ja (Fehlalarm im Secret-Scan) · Status: **behoben im Repository** (`tests/unit/test_verifier_secrets.py::test_ordinary_code_is_not_reported`)
 - Reproduktion: S002 #1 schrieb in `config.py` Kommentare für die TOML-Datei als Wörterbuch (`"password": "Zugangsdaten (wird lokal gespeichert)"`). Secret-Scan und Sicherheitskriterium meldeten blockierend „possible secret(s) added to config.py: line 133 (secret_assignment)“.

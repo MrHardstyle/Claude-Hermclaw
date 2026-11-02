@@ -4,6 +4,11 @@ Format: [Keep a Changelog](https://keepachangelog.com/de/1.1.0/), Versionen nach
 
 ## [Unreleased]
 
+## [0.1.0rc127] – Release Candidate (2026-11-02)
+
+### Behoben
+- **Verbotene Altlasten werden geparkt (BUG-408):** Uncommittete Dateien eines blockierten Schritts, die der Scope des neuen Schritts verbietet, gelten nicht mehr als dessen Scope-Verletzung; sie warten auf den Schritt, der sie nennt.
+
 ## [0.1.0rc126] – Release Candidate (2026-11-02)
 
 ### Behoben

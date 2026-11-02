@@ -932,6 +932,50 @@ async def test_a_leftover_the_steps_own_files_name_is_not_parked(world: World, t
     ws = (await world.engine.list_workspaces(jid))[0]
     assert (Path(ws.path) / "frontend.js").read_text() == "// left by a superseded step\n"
 
+
+async def test_a_leftover_the_steps_scope_forbids_is_parked_for_the_step_that_names_it(world: World, tmp_path: Path) -> None:
+    """Live G1 rc126 (BUG-408): the replanned S005 forbade collector.py, which the blocked S005 had left uncommitted
+    and the next step names in its repo hints (not as a new path: the file existed); never adopted, it failed the scope
+    check twice and the step asked for a replan. A leftover the step's scope forbids is set aside and handed to the step that names it."""
+    from tests.unit.test_planner_support import plan, step
+
+    seen: list[list[str]] = []
+
+    class LeftoverVerifier(ScriptedVerifier):
+        async def verify(self, step: StepContract, workspace: WorkspaceHandle, **kw: Any) -> VerificationOutcome:
+            if self.calls == 0:  # a blocked step left its README change behind
+                (workspace.path / "README.md").write_text("# left by a blocked step\n")
+            outcome = await super().verify(step, workspace, **kw)
+            seen.append(list(outcome.report.changed_files))
+            return outcome
+
+    two_steps = plan(
+        "Set VALUE to 2 and fix the README",
+        [
+            step(
+                "S001",
+                "implement",
+                "coding",
+                "Change VALUE in src/module.py from 1 to 2.",
+                repo_hints=["src/module.py"],
+                forbidden_paths=["README.md"],
+            ),
+            step("S002", "implement", "coding", "Fix the README.", repo_hints=["README.md"], depends_on=["S001"]),
+        ],
+    )
+    finish = act("complete_step", summary="README kept", changed_files=["README.md"], tests_run=[])
+    models = Models([two_steps], [EDIT, DONE, DONE, DONE, finish])  # second DONE: BUG-258 reminder
+    verifier = LeftoverVerifier(world, [False, True, True])
+    jid = await _job(world)
+    jobs = await _run(world, _driver(world, models, tmp_path), [_handler(world, models, verifier, None), ReviewHandler()], [jid])
+    assert jobs[jid].status == "succeeded", (jobs[jid].error_code, jobs[jid].error_message)
+    assert "README.md" not in seen[1], "S001 is not checked on the file its scope forbids"
+    async with world.sessionmaker() as s:
+        steps = {st.step_key: st for st in (await s.execute(select(Step).where(Step.job_id == jid))).scalars()}
+    assert steps["S002"].result["files"] == ["README.md"]
+    ws = (await world.engine.list_workspaces(jid))[0]
+    assert (Path(ws.path) / "README.md").read_text() == "# left by a blocked step\n"
+
 async def test_a_resumed_correction_gets_verifier_items_of_the_current_work_tree(world: World, tmp_path: Path) -> None:
     """Live G1 (BUG-259): a deploy paused S002's correction attempt after it had removed the unused imports; the resumed
     attempt got the old lint output, tried to remove the imports again and was blocked by the stagnation guard. A

@@ -562,16 +562,21 @@ class ImplementStepHandler:
         claims, mine = await self._path_claims(ctx.step_id)
         await self.deps.git.unpark_paths(ws, mine, step_id=ctx.step_id)
         changed = await self.deps.git.changed_files(handle)
+        own = await self._own_changes(ctx.step_id)
         foreign = [p for p in changed if path_matches(p, claims) and not path_matches(p, mine)]
         if foreign:  # what the step's own files build on stays: parked, it breaks their build (BUG-385)
             sources = [*(p for p in changed if p not in foreign), *(p for p in contract.target_paths if "*" not in p)]
             keep = await asyncio.to_thread(needed_leftovers, Path(handle.path), foreign, sources)
             foreign = [p for p in foreign if p not in keep]
+        # a leftover the step's scope forbids is never adopted and fails the scope check whatever the step does: parked
+        # too, until a step that names it starts (live G1 rc126: the replanned S005 forbade the collector files the
+        # blocked S005 had left, failed on them and asked for a replan, BUG-408)
+        forbidden = (await self.deps.scope_engine.guard_for(ctx.step_id)).is_forbidden
+        foreign += [p for p in changed if p not in foreign and p not in own and forbidden(p)]
         if foreign and await self.deps.git.park_paths(ws, foreign, step_id=ctx.step_id):
             changed = await self.deps.git.changed_files(handle)
         # uncommitted changes of an earlier unfinished step are this step's to finish, not a scope violation – checked on
         # every attempt: another step can run (and be blocked) between two attempts of this one (live G1, BUG-255)
-        own = await self._own_changes(ctx.step_id)
         leftovers = [p for p in changed if p not in own]
         adopted = await self.deps.scope_engine.adopt_leftovers(ctx.step_id, leftovers) if leftovers else None
         contract = adopted or contract
