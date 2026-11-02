@@ -4,6 +4,11 @@ Format: [Keep a Changelog](https://keepachangelog.com/de/1.1.0/), Versionen nach
 
 ## [Unreleased]
 
+## [0.1.0rc125] – Release Candidate (2026-11-02)
+
+### Behoben
+- **Relative Verweise erfüllen Präsenzkriterien (BUG-405):** Verlangt ein Kriterium `static/app.js` in `static/index.html`, zählt auch der richtige relative Verweis `src="app.js"`; vorher blockierte es den Frontend-Schritt eines Widgets, dessen Server `static/` als Wurzel ausliefert.
+
 ## [0.1.0rc124] – Release Candidate (2026-11-01)
 
 ### Behoben

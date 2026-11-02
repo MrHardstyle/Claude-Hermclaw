@@ -27,6 +27,7 @@ from hermclaw.contracts.acceptance import (
     AbsenceEvidence,
     AcceptanceCriterion,
     DiffEvidence,
+    PresenceEvidence,
     ScopeEvidence,
     SecurityEvidence,
     TestEvidence,
@@ -215,6 +216,26 @@ def _forbids_credential_words(item: AcceptanceCriterion) -> bool:
     return all(w in _CREDENTIAL_WORDS for w in words)
 
 
+def _sibling_references_relative(item: AcceptanceCriterion) -> AcceptanceCriterion:
+    """A presence criterion over files in a directory that names other files by their workspace path: ``static/app.js``
+    in ``static/index.html``. The file refers to its siblings relative to its own directory (``src="app.js"``) – the
+    served page would not even find ``static/app.js`` – so the directory prefix becomes optional. An absolute reference
+    (``/static/app.js``) keeps its prefix."""
+    if not isinstance(item, PresenceEvidence) or not item.pattern:
+        return item
+    parts: list[str] = []
+    for part in item.path_glob.split("/")[:-1]:
+        if any(c in part for c in GLOB_CHARS) or part in ("", "."):
+            break
+        parts.append(part)
+    if not parts:
+        return item
+    prefix = r"\\?/".join(re.escape(p) for p in parts) + r"\\?/"
+    # an optional prefix ("(?:static/)?", from the model or an earlier enrichment) is left as it is
+    pattern = re.sub(rf"(?<![\w./\\-]){prefix}(?!\)\?)", lambda m: f"(?:{m.group(0)})?", item.pattern)
+    return item if pattern == item.pattern else item.model_copy(update={"pattern": pattern})
+
+
 def generate_acceptance(
     step: PlanStep, ctx: ValidationContext, earlier_new_paths: Sequence[str] = ()
 ) -> tuple[list[AcceptanceCriterion], list[str]]:
@@ -223,12 +244,15 @@ def generate_acceptance(
     # identical criteria are dropped: models sometimes repeat one criterion until the list limit (live job 50784df5)
     acceptance: list[AcceptanceCriterion] = []
     seen: set[str] = set()
-    for item in step.acceptance:
-        key = item.model_dump_json()
+    for given in step.acceptance:
         # the frontend step of a widget with a settings form for API access got "no password|token|api_key in static/**";
         # its coder spelled the field names as ["Pass", "wort"].join("") to get past it (live G1 rc123, BUG-403)
-        if _forbids_credential_words(item):
+        if _forbids_credential_words(given):
             continue
+        # "static/styles\.css|static/app\.js" in static/index.html failed a correct href="styles.css" whose server
+        # serves static/ as its root (live G1 rc124, BUG-405)
+        item = _sibling_references_relative(given)
+        key = item.model_dump_json()
         if key not in seen:
             seen.add(key)
             acceptance.append(item)

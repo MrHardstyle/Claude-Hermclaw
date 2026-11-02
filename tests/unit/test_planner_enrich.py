@@ -2,10 +2,12 @@
 
 from __future__ import annotations
 
+import re
 from typing import Any
 
 import pytest
 
+from hermclaw.contracts.acceptance import PresenceEvidence
 from hermclaw.contracts.common import Risk
 from hermclaw.contracts.plan import PlanContract, PlanStep
 from hermclaw.core.config import get_config
@@ -104,6 +106,26 @@ def test_absence_of_bare_credential_words_is_left_to_the_secret_scan(pattern: st
     acceptance, _ = generate_acceptance(s, _ctx())
     assert any(a.type == "absence" for a in acceptance) is not dropped
     assert any(a.type == "security" for a in acceptance)
+
+
+@pytest.mark.parametrize(
+    ("glob", "pattern", "relaxed"),
+    [
+        ("static/index.html", r"static/styles\.css|static/app\.js", r"(?:static/)?styles\.css|(?:static/)?app\.js"),
+        ("web/static/*.html", r'src="web/static/app\.js"', r'src="(?:web/static/)?app\.js"'),
+        ("static/index.html", r"(?:static/)?app\.js", None),  # already optional: unchanged, so a re-enrichment is stable
+        ("static/index.html", r"/static/app\.js", None),  # an absolute reference keeps its prefix
+        ("static/index.html", r"mystatic/app\.js", None),
+        ("index.html", r"static/app\.js", None),
+    ],
+)
+def test_presence_of_a_sibling_by_its_workspace_path_allows_the_relative_reference(glob: str, pattern: str, relaxed: str | None) -> None:
+    s = _step(acceptance=[{"type": "presence", "path_glob": glob, "pattern": pattern}])
+    acceptance, _ = generate_acceptance(s, _ctx())
+    (presence,) = [a for a in acceptance if isinstance(a, PresenceEvidence)]
+    assert presence.pattern == (relaxed or pattern)
+    if relaxed and "styles" in relaxed:
+        assert re.search(presence.pattern, '<link rel="stylesheet" href="styles.css">')
 
 
 @pytest.mark.parametrize("kind", ["review", "test", "research", "ssh", "deploy"])

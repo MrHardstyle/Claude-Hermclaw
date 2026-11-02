@@ -46,6 +46,12 @@ Noch keine.
 
 ## Behobene Bugs
 
+### BUG-405 – Präsenzkriterium verlangt den Workspace-Pfad für einen relativen Verweis
+- Phase: G1-Abnahme auf rc124, 2026-11-02 (Job d8624613) · Komponente: planner (`enrich.py`) · Severity: P1 · blockierend: ja (Fehlalarm blockierte den Frontend-Schritt) · Status: **behoben im Repository** (`tests/unit/test_planner_enrich.py::test_presence_of_a_sibling_by_its_workspace_path_allows_the_relative_reference`)
+- Reproduktion: S006 (Widget) #1: Der Planer verlangte `static/styles\.css|static/app\.js` in `static/index.html`. Der Coder schrieb richtig `href="styles.css"` und `src="app.js"` – der Server aus S005 liefert `static/` als Wurzel aus. Der Verifier meldete blockierend „0 match(es)“; `href="static/styles.css"` hätte beim Ausliefern 404 ergeben, das Kriterium war für eine funktionierende Seite unerfüllbar.
+- Ursache: Der Planer nennt Dateien mit ihrem Pfad im Workspace; eine Datei verweist auf ihre Nachbarn aber relativ zu ihrem eigenen Ordner.
+- Fix: Die Anreicherung macht in einem Präsenzkriterium den Ordner-Präfix des `path_glob` optional (`(?:static/)?app\.js`), wo er am Anfang eines Pfads im Muster steht. Absolute Verweise (`/static/app.js`) und schon optionale Präfixe bleiben unverändert.
+
 ### BUG-404 – Serve-Prüfung ruft eine Route ohne genannte Methode nur mit GET auf
 - Phase: G1-Abnahme auf rc123, 2026-11-01 (Job d266b866) · Komponente: verifier (`serve.py`) · Severity: P1 · blockierend: ja (Fehlalarm blockierte den Frontend-Schritt) · Status: **behoben im Repository** (`tests/unit/test_verifier_serve.py::test_a_route_named_without_its_method_is_tried_with_get_and_post`)
 - Reproduktion: S006 (Widget) #2, #3 und nach dem Replan v2 #1: `static/app.js` nennt seine Routen in einem Objekt (`const api = { test: "/api/test", … }`) und ruft weiter unten `fetchJson(api.test, { method: "POST" })` auf. Die Serve-Prüfung meldete jedes Mal blockierend „/static/app.js calls GET /api/test, but the server answered 404: the route does not exist“; der Server bediente `/api/test` richtig nur per POST. Der Schritt lief in den Replan und scheiterte danach erneut.
