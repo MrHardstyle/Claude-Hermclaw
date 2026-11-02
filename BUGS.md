@@ -46,6 +46,12 @@ Noch keine.
 
 ## Behobene Bugs
 
+### BUG-407 – Secret-Scan hält eine Feldbeschriftung für ein Passwort
+- Phase: G1-Abnahme auf rc125, 2026-11-02 (Job 417a1b72) · Komponente: verifier (`secrets.py`) · Severity: P2 · blockierend: ja (Fehlalarm im Secret-Scan) · Status: **behoben im Repository** (`tests/unit/test_verifier_secrets.py::test_ordinary_code_is_not_reported`)
+- Reproduktion: S002 #1 schrieb in `config.py` Kommentare für die TOML-Datei als Wörterbuch (`"password": "Zugangsdaten (wird lokal gespeichert)"`). Secret-Scan und Sicherheitskriterium meldeten blockierend „possible secret(s) added to config.py: line 133 (secret_assignment)“.
+- Ursache: Das Muster für Zuweisungen nimmt nur das erste Wort des Werts (`Zugangsdaten`); dass der String danach mit Leerzeichen weitergeht, also ein Text ist, sah die Prüfung nicht.
+- Fix: Ein String-Literal im Code, das nach dem gefundenen Wort mit einem Leerzeichen weitergeht, ist eine Beschriftung oder Meldung, kein Geheimnis. Werte ohne Leerzeichen und Konfigurationsdateien werden wie bisher geprüft.
+
 ### BUG-406 – Wortverbot kommt nach dem Replan als Feldname zurück
 - Phase: G1-Abnahme auf rc124, 2026-11-02 (Job d8624613) · Komponente: planner (`enrich.py`) · Severity: P2 · blockierend: ja (Kriterium widerspricht dem Schritt) · Status: **behoben im Repository** (`tests/unit/test_planner_enrich.py::test_absence_of_bare_credential_words_is_left_to_the_secret_scan`)
 - Reproduktion: Nach dem Replan verlangte der neue S006 (Hilfsfunktionen des Widgets, darunter `publicServer` und `credentialsText`, die Zugangsdaten aus der Antwort entfernen) „kein `password|token_value|api_key` in `static/app.js`“. Der BUG-403-Filter ließ das Kriterium stehen, weil `token_value` kein reines Zugangsdaten-Wort ist.

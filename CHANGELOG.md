@@ -4,6 +4,11 @@ Format: [Keep a Changelog](https://keepachangelog.com/de/1.1.0/), Versionen nach
 
 ## [Unreleased]
 
+## [0.1.0rc126] – Release Candidate (2026-11-02)
+
+### Behoben
+- **Feldbeschriftungen sind keine Geheimnisse (BUG-407):** `"password": "Zugangsdaten (wird lokal gespeichert)"` im Code meldet der Secret-Scan nicht mehr; ein String mit Leerzeichen nach dem ersten Wort ist Text.
+
 ## [0.1.0rc125] – Release Candidate (2026-11-02)
 
 ### Behoben

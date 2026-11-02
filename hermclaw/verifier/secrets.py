@@ -161,6 +161,14 @@ def is_placeholder(value: str) -> bool:
     return len(set(v)) <= 2 or v.isdigit()
 
 
+def _is_prose(line: str, quote: str, end: int) -> bool:
+    """The quoted literal goes on after the matched word with a space: ``"password": "Zugangsdaten (wird lokal
+    gespeichert)"`` labels a settings field, it is no secret (live G1 rc125, BUG-407). Only code literals; config
+    values keep their rules."""
+    close = line.find(quote, end)
+    return close > end and line[end].isspace()
+
+
 def _mask(line: str, start: int, end: int) -> str:
     masked = line[:start] + REDACTED + line[end:]
     out = DEFAULT_REDACTOR.text(masked).strip()
@@ -240,6 +248,8 @@ class SecretScanner:
             if language in CODE_LANGUAGES and not quoted:
                 return None  # ``password = get_password()`` – an expression, not a literal
             if is_placeholder(value):
+                return None
+            if quoted and language in CODE_LANGUAGES and _is_prose(line, prefix.rstrip()[-1], m.end(2)):
                 return None
             return "secret_assignment", start, m.end(2)
         if pattern.groups == 1:

@@ -33,6 +33,7 @@ def scan(path: str, *lines: str) -> list[str]:
         ("key.txt", PEM, "private_key"),
         ("id.txt", OPENSSH, "private_key"),
         ("settings.py", 'DB_PASSWORD = "hunter2-correct-horse"', "secret_assignment"),
+        ("config.py", '    "password": "hunter2xyz",  # not a label', "secret_assignment"),
         ("config.yaml", "password: s3cr3t-v4lue", "secret_assignment"),
         (".env.production", "API_KEY=abcd1234efgh", "secret_assignment"),
         ("settings.json", '{"client_secret": "x9f8e7d6c5"}', "secret_assignment"),
@@ -72,6 +73,9 @@ def test_secret_shapes_are_found(path: str, line: str, rule: str) -> None:
         ("app.py", "max_tokens = 4096"),
         ("app.py", 'logo = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPhfDwAChwGA"'),
         ("app.py", "x = foo_bar_baz_qux_quux_corge_grault_garply_waldo(1)"),
+        # BUG-407: a quoted text with spaces after a credential key is a label or message, not a value
+        ("config.py", '    "password": "Zugangsdaten (wird lokal gespeichert)",'),
+        ("app.js", "  api_key: 'API-Key für den Zugriff',"),
         # BUG-256: in PowerShell an unquoted value is a command or variable, not a literal
         ("start.ps1", "$env:HERMCLAW_TOKEN = Get-Content $TokenFile -Raw"),
         ("start.ps1", "$token = [guid]::NewGuid().ToString()"),
