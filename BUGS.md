@@ -46,6 +46,12 @@ Noch keine.
 
 ## Behobene Bugs
 
+### BUG-410 – Secret-Scan hält deutsche Platzhalter für Secrets
+- Phase: G1-Abnahme auf rc127, 2026-11-03 (Job 13202ec3) · Komponente: core (`redaction.py`), verifier (`secrets.py`) · Severity: P2 · blockierend: ja (Fehlalarm im Secret-Scan) · Status: **behoben im Repository** (`tests/unit/test_verifier_secrets.py::test_german_role_words_are_placeholders_too`)
+- Reproduktion: S006 #1 (Server/API) zeigte in `docs/api.md` eine Beispielkonfiguration mit `"token_secret": "geheimer-token"` und testete das Speichern mit `"neuer-geheimer-token"`. Secret-Scan und Sicherheitskriterium meldeten beide Zeilen blockierend; die englischen Gegenstücke (`secret-token`, `new-secret-token`) gelten seit BUG-279 als Platzhalter.
+- Ursache: Das Vokabular der Rollen-Wörter (`valid`, `wrong`, `my`, `secret`, `token` …) kannte nur Englisch; deutsche Projekte benennen ihre Platzhalter auf Deutsch.
+- Fix: Deutsche Rollen-Wörter (geheim/geheimer, passwort, kennwort, schlüssel, neu/neuer, alt, falsch, gültig, mein, dein …) zählen wie die englischen, im Scanner und im Redactor. Werte mit einem zufälligen Anteil (`geheimer-token-9f8e7d6c`) bleiben Funde.
+
 ### BUG-409 – Secret-Scan hält Kommentar-Erklärungen für ein Secret
 - Phase: G1-Abnahme auf rc127, 2026-11-03 (Job 13202ec3) · Komponente: verifier (`secrets.py`) · Severity: P2 · blockierend: ja (Fehlalarm im Secret-Scan) · Status: **behoben im Repository** (`tests/unit/test_verifier_secrets.py::test_ordinary_code_is_not_reported`)
 - Reproduktion: S002 #1 erklärte in `config.example.toml` per Kommentar, wohin das Token-Secret gehört (`# token_secret: Dein API-Token-Secret hier eintragen`). Secret-Scan und Sicherheitskriterium meldeten blockierend „possible secret(s) added to config.example.toml: line 36 (secret_assignment)“.

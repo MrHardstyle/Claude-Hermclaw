@@ -216,6 +216,17 @@ def test_values_made_of_role_words_are_placeholders_real_tokens_are_not() -> Non
     assert not SecretScanner().scan_line("tests/test_api.py", 1, 'r = call(token="valid_token")', language="python")
 
 
+def test_german_role_words_are_placeholders_too() -> None:
+    """Live G1 rc127 (BUG-410): the docs and tests of a German project used "geheimer-token" and "neuer-geheimer-token"
+    for a token secret; both were failed as secrets. German role words count like English ones, a random part still not."""
+    for value in ("geheimer-token", "neuer-geheimer-token", "falsches_passwort", "mein-geheimer-schlüssel"):
+        assert is_placeholder(value), value
+        assert DEFAULT_REDACTOR.text(f'"token_secret": "{value}"') == f'"token_secret": "{value}"', value
+    for value in ("geheimer-token-9f8e7d6c", "passwort-zq81vkpw3mxt5", "Sommer2024!"):
+        assert not is_placeholder(value), value
+    assert not scan("docs/api.md", '      "token_secret": "geheimer-token"')
+
+
 def test_formats_and_names_are_placeholders_values_are_not() -> None:
     """Live G1 (BUG-348): the README's documented token format and a test's ``api_key = "UNRAID_API_KEY"`` failed the
     secret check, and the coder deleted the format. Capital words without digits and values carrying a ``<placeholder>``

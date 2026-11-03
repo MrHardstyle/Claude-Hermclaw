@@ -54,6 +54,11 @@ _PLACEHOLDER_VOCABULARY = frozenset(
         "password", "pass", "passwd", "pwd", "user", "admin", "auth", "bearer", "access", "refresh", "session",
         "client", "demo", "local", "dev", "new", "old", "first", "second", "foo", "bar", "baz", "abc", "some", "super",
         "value", "missing", "no", "empty",
+        # German projects name their stand-ins in German: "geheimer-token", "neues-passwort" (live G1 rc127, BUG-410)
+        "geheim", "geheime", "geheimer", "geheimes", "passwort", "kennwort", "schluessel", "schlüssel", "zugang",
+        "neu", "neue", "neuer", "neues", "alt", "alte", "alter", "altes", "falsch", "falsche", "falscher", "falsches",
+        "gueltig", "gültig", "gueltiger", "gültiger", "ungueltig", "ungültig", "ungueltiger", "ungültiger", "mein",
+        "meine", "dein", "deine", "anderer", "anderes", "benutzer",
     }
 )  # fmt: skip
 _WORD_SPLIT = re.compile(r"[-_.\s]+")
