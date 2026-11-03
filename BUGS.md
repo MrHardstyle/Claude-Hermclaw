@@ -46,6 +46,12 @@ Noch keine.
 
 ## Behobene Bugs
 
+### BUG-412 – Secret-Scan hält Proxmox-Token-Platzhalter für Secrets
+- Phase: G1-Abnahme auf rc130, 2026-11-03 (Job 6ba49687) · Komponente: core (`redaction.py`), verifier (`secrets.py`) · Severity: P2 · blockierend: ja (Fehlalarm im Secret-Scan) · Status: **behoben im Repository** (`tests/unit/test_verifier_secrets.py::test_a_token_pair_with_a_stand_in_secret_part_is_a_placeholder`)
+- Reproduktion: S002 #1 (Collector/Config/API) schrieb das Proxmox-Token in README, Beispielkonfiguration und Test als `viewer@pam!tokenid=uuid`, `automation!AutomationToken=00000000-0000-0000-0000-000000000000` und `viewer@pam!token=uuid` und beschrieb den Header am Satzende mit `PVEAPIToken=USER@REALM!TOKENID=UUID`. — vier blockierende Secret-Funde.
+- Ursache: Die Notation-Regel (BUG-348) kannte nur Großbuchstaben-Formate und sah den Satzpunkt nach dem Backtick als Teil des Werts; ein Token aus Id und Geheimnis wurde als Ganzes bewertet, obwohl nur der Teil nach `=` geheim ist.
+- Fix: Bei `id!name=geheimnis` entscheidet nur der geheime Teil; ist er ein Platzhalter (Rollen-Wort wie `uuid`, Nullen, `x`), ist das Token einer – im Scanner und im Redactor. Satzzeichen am Ende zählen nicht zur Notation. Echte Token-Werte bleiben Funde.
+
 ### BUG-411 – Presence-Muster aus Lookaheads trifft nie
 - Phase: G1-Abnahme auf rc127, 2026-11-03 (Job 13202ec3) · Komponente: verifier (`evidence.py`) · Severity: P2 · blockierend: ja (Fehlalarm im Akzeptanzkriterium) · Status: **behoben im Repository** (`tests/integration/test_verifier_engine.py::test_a_presence_pattern_of_lookaheads_needs_every_term_somewhere_in_the_file`)
 - Reproduktion: Der neu geplante S007 (Frontend) verlangte die Hermclaw-Palette mit `(?i)(?=.*#070707)(?=.*#121212)…(?=.*#EF4444)` in `static/styles.css`. Alle elf Farben standen in der Datei, jede in ihrer eigenen Zeile; das Kriterium meldete „0 match(es) … at least 1 required“.

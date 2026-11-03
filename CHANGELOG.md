@@ -4,6 +4,11 @@ Format: [Keep a Changelog](https://keepachangelog.com/de/1.1.0/), Versionen nach
 
 ## [Unreleased]
 
+## [0.1.0rc131] – Release Candidate (2026-11-03)
+
+### Behoben
+- **Proxmox-Token-Platzhalter (BUG-412):** `viewer@pam!tokenid=uuid`, Null-UUIDs als Token-Geheimnis und `PVEAPIToken=USER@REALM!TOKENID=UUID` am Satzende meldet der Secret-Scan nicht mehr; nur der geheime Teil des Tokens entscheidet.
+
 ## [0.1.0rc130] – Release Candidate (2026-11-03)
 
 ### Behoben

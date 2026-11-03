@@ -53,7 +53,7 @@ _PLACEHOLDER_VOCABULARY = frozenset(
         "another", "right", "my", "your", "the", "a", "test", "testing", "tests", "secret", "token", "key", "api",
         "password", "pass", "passwd", "pwd", "user", "admin", "auth", "bearer", "access", "refresh", "session",
         "client", "demo", "local", "dev", "new", "old", "first", "second", "foo", "bar", "baz", "abc", "some", "super",
-        "value", "missing", "no", "empty",
+        "value", "missing", "no", "empty", "uuid", "guid",
         # German projects name their stand-ins in German: "geheimer-token", "neues-passwort" (live G1 rc127, BUG-410)
         "geheim", "geheime", "geheimer", "geheimes", "passwort", "kennwort", "schluessel", "schlüssel", "zugang",
         "neu", "neue", "neuer", "neues", "alt", "alte", "alter", "altes", "falsch", "falsche", "falscher", "falsches",
@@ -89,10 +89,25 @@ def is_notation_value(value: str) -> bool:
     v = value.strip("\"'`")
     if _EMBEDDED_PLACEHOLDER.search(v):
         return True
+    v = v.rstrip(".,;:)").rstrip("\"'`")  # ``…TOKENID=UUID`.`` at the end of a sentence (live G1 rc130, BUG-412)
     parts = [p for p in _NOTATION_SPLIT.split(v) if p]
     if not parts or not all(_NOTATION_WORD.fullmatch(p) for p in parts):
         return False
     return len(parts) > 1 or len(parts[0]) <= 8
+
+
+# ``viewer@pam!tokenid=uuid``, ``automation!AutomationToken=00000000-0000-0000-0000-000000000000``: a Proxmox-style token
+# is an id and a secret; the id is a name, only the secret part tells a stand-in from a credential (live G1 rc130, BUG-412)
+_TOKEN_PAIR = re.compile(r"^[\w.-]*[@!][\w.@!-]*=([^=\s]+)$")
+
+
+def is_placeholder_token_pair(value: str) -> bool:
+    """An ``id!name=secret`` token whose secret part is a stand-in (a role word like ``uuid``, zeros, ``x``)."""
+    m = _TOKEN_PAIR.match(value.strip("\"'`").rstrip(".,;:)").rstrip("\"'`"))
+    if m is None:
+        return False
+    secret = m.group(1)
+    return is_role_value(secret) or is_notation_value(secret) or not set(secret.lower()) - set("0x*-.")
 
 
 def is_benign_value(value: str, *, quoted: bool) -> bool:
@@ -100,7 +115,7 @@ def is_benign_value(value: str, *, quoted: bool) -> bool:
     low = value.lower()
     if low.startswith(_PLACEHOLDER_START) or any(part in low for part in _PLACEHOLDER_PARTS) or not set(low) - set("x*-."):
         return True
-    if is_notation_value(value):
+    if is_notation_value(value) or is_placeholder_token_pair(value):
         return True
     # cycle 2 M3 on rc60: ``token="test-token-123"`` and ``token="wrong-token"`` both showed as the marker, and the review
     # could not tell the valid-token test from the wrong-token test (BUG-293). Unquoted, such a value is a variable:

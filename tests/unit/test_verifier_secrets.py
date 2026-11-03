@@ -216,6 +216,22 @@ def test_values_made_of_role_words_are_placeholders_real_tokens_are_not() -> Non
     assert not SecretScanner().scan_line("tests/test_api.py", 1, 'r = call(token="valid_token")', language="python")
 
 
+def test_a_token_pair_with_a_stand_in_secret_part_is_a_placeholder() -> None:
+    """Live G1 rc130 (BUG-412): README, example config and tests of a Proxmox collector wrote the token as
+    ``viewer@pam!tokenid=uuid``, ``automation!AutomationToken=00000000-…`` and the documented header format at the end of
+    a sentence; all four lines failed as secrets. Only the secret part of ``id!name=secret`` decides."""
+    zero = "00000000-0000-0000-0000-000000000000"
+    for value in ("viewer@pam!tokenid=uuid", "viewer@pam!token=uuid", f"automation!AutomationToken={zero}", "root@pam!ci=xxxxxxxx"):
+        assert is_placeholder(value), value
+        assert DEFAULT_REDACTOR.text(f'api_token = "{value}"') == f'api_token = "{value}"', value
+    for value in ("viewer@pam!tokenid=8f3a9c2e-1b4d-4e5f-9a6b-7c8d9e0f1a2b", "widget@pve!widget=12345678-90ab-cdef-1234-567890abcdef"):
+        assert not is_placeholder(value), value
+    assert not scan("README.md", "den Header `Authorization: PVEAPIToken=USER@REALM!TOKENID=UUID`.")
+    assert not scan("README.md", 'api_token = "viewer@pam!tokenid=uuid"')
+    assert not scan("tests/test_collector.py", '    server = ServerConfig(id="pve1", api_token="viewer@pam!token=uuid")')
+    assert scan("config.example.toml", 'api_token = "viewer@pam!tokenid=8f3a9c2e-1b4d-4e5f-9a6b-7c8d9e0f1a2b"')
+
+
 def test_german_role_words_are_placeholders_too() -> None:
     """Live G1 rc127 (BUG-410): the docs and tests of a German project used "geheimer-token" and "neuer-geheimer-token"
     for a token secret; both were failed as secrets. German role words count like English ones, a random part still not."""
