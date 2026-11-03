@@ -4,6 +4,11 @@ Format: [Keep a Changelog](https://keepachangelog.com/de/1.1.0/), Versionen nach
 
 ## [Unreleased]
 
+## [0.1.0rc130] – Release Candidate (2026-11-03)
+
+### Behoben
+- **„Alle Begriffe“-Muster in Presence-Kriterien (BUG-411):** `(?=.*a)(?=.*b)…` prüft jetzt, ob jeder Begriff irgendwo in der Datei steht, statt zeilenweise nie zu treffen; fehlende Begriffe stehen in der Meldung.
+
 ## [0.1.0rc129] – Release Candidate (2026-11-03)
 
 ### Behoben

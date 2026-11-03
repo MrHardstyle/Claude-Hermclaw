@@ -603,6 +603,29 @@ async def test_presence_and_absence_evidence(sessionmaker: Any, tmp_path: Path) 
     assert outcome2.report.passed, outcome2.report.summary
 
 
+async def test_a_presence_pattern_of_lookaheads_needs_every_term_somewhere_in_the_file(sessionmaker: Any, tmp_path: Path) -> None:
+    """Live G1 rc127 (BUG-411): ``(?i)(?=.*#070707)(?=.*#121212)…`` asked for a palette in styles.css; every colour was
+    there, each on its own line, and the check counted 0 matches. All terms anywhere in one file count as a match."""
+    repo = init_repo(tmp_path / "repo", {"static/styles.css": "body {}\n"})
+    write(repo, "static/styles.css", ":root {\n  --bg: #070707;\n  --card: #121212;\n  --accent: #f97316;\n}\n")
+    palette = "(?i)(?=.*#070707)(?=.*#121212)(?=.*#F97316)"
+    st = step(
+        "documentation",
+        scope_contract=scope(target_paths=["static/styles.css"]),
+        acceptance=[
+            {"type": "presence", "path_glob": "static/*.css", "pattern": palette},
+            {"type": "presence", "path_glob": "static/*.css", "pattern": palette.replace("F97316", "22C55E")},
+        ],
+    )
+    outcome, *_ = await run(sessionmaker, repo, st, kind="documentation")
+    names = by_name(outcome.report)
+    ok, missing = names["acceptance[0]:presence"], names["acceptance[1]:presence"]
+    assert ok.status == "pass", ok.message
+    assert ok.evidence["files_complete"] == ["static/styles.css"]
+    assert missing.status == "fail" and missing.evidence["missing_terms"] == ["#22C55E"]
+    assert "#22C55E" in missing.message
+
+
 # ------------------------------------------------------------------------------------------- 21.11 command / 21.13 diff
 async def test_command_evidence_exit_code_stdout_and_timeout(sessionmaker: Any, tmp_path: Path) -> None:
     repo = py_repo(tmp_path)

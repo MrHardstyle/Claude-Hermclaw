@@ -173,6 +173,69 @@ def compile_pattern(pattern: str) -> tuple[re.Pattern[str] | None, str]:
         return None, f"invalid regular expression {pattern!r}: {exc}"
 
 
+_INLINE_FLAGS = re.compile(r"\^?(\(\?[aiLmsux]+\))?")
+_ANYWHERE = (".*?", ".*", "[\\s\\S]*?", "[\\s\\S]*")
+
+
+def lookahead_terms(pattern: str) -> tuple[str, list[str]] | None:
+    """``(?i)(?=.*#070707)(?=.*#121212)…`` asks for *all* terms anywhere in the file. Line by line the lookaheads only
+    see the rest of one line and the match is empty, so it never counted (live G1 rc127, BUG-411). Returns the inline
+    flags and the terms, or ``None`` when the pattern is not such a conjunction."""
+    head = _INLINE_FLAGS.match(pattern)
+    flags, i = (head.group(1) or "") if head else "", head.end() if head else 0
+    rest = pattern[i:]
+    for tail in ("$", ".*", ".+"):
+        rest = rest.removesuffix(tail)
+    terms: list[str] = []
+    i = 0
+    while i < len(rest):
+        if not rest.startswith("(?=", i):
+            return None
+        depth, k = 1, i + 3
+        while k < len(rest) and depth:
+            if rest[k] == "\\":
+                k += 1
+            elif rest[k] == "(":
+                depth += 1
+            elif rest[k] == ")":
+                depth -= 1
+            k += 1
+        if depth:
+            return None
+        body = rest[i + 3 : k - 1]
+        lead = next((a for a in _ANYWHERE if body.startswith(a)), None)
+        if lead is None or not body[len(lead) :]:
+            return None
+        terms.append(body[len(lead) :])
+        i = k
+    return (flags, terms) if len(terms) >= 2 else None
+
+
+async def _presence_of_all(
+    ctx: VerifyContext, name: str, ev: PresenceEvidence, found: list[str], conjunction: tuple[str, list[str]]
+) -> VerificationCheck:
+    flags, terms = conjunction
+    glob = clean_glob(ev.path_glob) or ev.path_glob
+    base: dict[str, Any] = {"path_glob": glob, "pattern": ev.pattern, "min_matches": ev.min_matches, "terms": terms}
+    results: list[SearchResult] = []
+    for term in terms:
+        regex, problem = compile_pattern(flags + term)
+        if regex is None:
+            return ctx.check("presence", name, "error", problem, base)
+        results.append(await search(ctx, found, regex))
+    complete = [p for p in found if all(p in r.files_matched for r in results)]
+    missing = [t for t, r in zip(terms, results, strict=True) if not r.total]
+    status: CheckStatus = "pass" if len(complete) >= ev.min_matches else "fail"
+    msg = f"all {len(terms)} terms of {ev.pattern!r} in {len(complete)} of {results[0].files_searched} file(s) matching {glob!r}"
+    if status == "fail":
+        msg += f"; at least {ev.min_matches} required" + (f"; not found anywhere: {', '.join(missing[:10])}" if missing else "")
+    samples = [x for r in results for x in r.samples if x["path"] in complete][:MAX_SAMPLES]
+    evidence = {**base, "matches": len(complete), "files_complete": complete, "missing_terms": missing, "samples": samples}
+    if complete:
+        evidence["path"] = complete[0]
+    return ctx.check("presence", name, status, msg, evidence)
+
+
 # ------------------------------------------------------------------------------------------- presence / absence
 async def presence(ctx: VerifyContext, index: int, ev: PresenceEvidence) -> VerificationCheck:
     name = label(index, ev)
@@ -185,6 +248,9 @@ async def presence(ctx: VerifyContext, index: int, ev: PresenceEvidence) -> Veri
         status: CheckStatus = "pass" if len(found) >= ev.min_matches else "fail"
         msg = f"{len(found)} path(s) match {glob!r}" + ("" if status == "pass" else f"; at least {ev.min_matches} required")
         return ctx.check("presence", name, status, msg, {**base, "matching_paths": found[:MAX_SAMPLES], "count": len(found)})
+    conjunction = lookahead_terms(ev.pattern)
+    if conjunction is not None:
+        return await _presence_of_all(ctx, name, ev, found, conjunction)
     regex, problem = compile_pattern(ev.pattern)
     if regex is None:
         return ctx.check("presence", name, "error", problem, base)

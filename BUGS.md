@@ -46,6 +46,12 @@ Noch keine.
 
 ## Behobene Bugs
 
+### BUG-411 – Presence-Muster aus Lookaheads trifft nie
+- Phase: G1-Abnahme auf rc127, 2026-11-03 (Job 13202ec3) · Komponente: verifier (`evidence.py`) · Severity: P2 · blockierend: ja (Fehlalarm im Akzeptanzkriterium) · Status: **behoben im Repository** (`tests/integration/test_verifier_engine.py::test_a_presence_pattern_of_lookaheads_needs_every_term_somewhere_in_the_file`)
+- Reproduktion: Der neu geplante S007 (Frontend) verlangte die Hermclaw-Palette mit `(?i)(?=.*#070707)(?=.*#121212)…(?=.*#EF4444)` in `static/styles.css`. Alle elf Farben standen in der Datei, jede in ihrer eigenen Zeile; das Kriterium meldete „0 match(es) … at least 1 required“.
+- Ursache: Die Suche läuft mit `re.MULTILINE`, `.` überspringt keine Zeilenumbrüche: Die Lookaheads sahen nur den Rest einer Zeile. Selbst wenn alle Begriffe in einer Zeile stehen, ist der Treffer leer und wird nicht gezählt.
+- Fix: Ein Muster, das nur aus Lookaheads der Form `(?=.*Begriff)` besteht, heißt „alle Begriffe irgendwo in der Datei“. Jeder Begriff wird einzeln gesucht; eine Datei zählt, wenn alle vorkommen. Fehlende Begriffe nennt die Meldung (`not found anywhere: …`).
+
 ### BUG-410 – Secret-Scan hält deutsche Platzhalter für Secrets
 - Phase: G1-Abnahme auf rc127, 2026-11-03 (Job 13202ec3) · Komponente: core (`redaction.py`), verifier (`secrets.py`) · Severity: P2 · blockierend: ja (Fehlalarm im Secret-Scan) · Status: **behoben im Repository** (`tests/unit/test_verifier_secrets.py::test_german_role_words_are_placeholders_too`)
 - Reproduktion: S006 #1 (Server/API) zeigte in `docs/api.md` eine Beispielkonfiguration mit `"token_secret": "geheimer-token"` und testete das Speichern mit `"neuer-geheimer-token"`. Secret-Scan und Sicherheitskriterium meldeten beide Zeilen blockierend; die englischen Gegenstücke (`secret-token`, `new-secret-token`) gelten seit BUG-279 als Platzhalter.
