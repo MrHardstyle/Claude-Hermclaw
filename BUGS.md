@@ -46,6 +46,12 @@ Noch keine.
 
 ## Behobene Bugs
 
+### BUG-409 – Secret-Scan hält Kommentar-Erklärungen für ein Secret
+- Phase: G1-Abnahme auf rc127, 2026-11-03 (Job 13202ec3) · Komponente: verifier (`secrets.py`) · Severity: P2 · blockierend: ja (Fehlalarm im Secret-Scan) · Status: **behoben im Repository** (`tests/unit/test_verifier_secrets.py::test_ordinary_code_is_not_reported`)
+- Reproduktion: S002 #1 erklärte in `config.example.toml` per Kommentar, wohin das Token-Secret gehört (`# token_secret: Dein API-Token-Secret hier eintragen`). Secret-Scan und Sicherheitskriterium meldeten blockierend „possible secret(s) added to config.example.toml: line 36 (secret_assignment)“.
+- Ursache: In Konfigurationsdateien gilt jeder Wert nach `token_secret:` als Literal; das Muster nimmt nur das erste Wort (`Dein`), dass die Kommentarzeile danach mit Text weitergeht, sah die Prüfung nicht (BUG-407 deckte nur String-Literale im Code ab).
+- Fix: Ein Wert ohne Anführungszeichen auf einer Kommentarzeile, nach dem weitere Wörter folgen, ist eine Erklärung, kein Secret. Auskommentierte Werte ohne Text danach (`# password: hunter2xyz`) werden weiter gemeldet.
+
 ### BUG-408 – Verbotene Altlast eines blockierten Schritts scheitert am Scope des neuen Schritts
 - Phase: G1-Abnahme auf rc126, 2026-11-02 (Job 7ecee9db) · Komponente: coder (`handler.py`) · Severity: P2 · blockierend: ja (Scope-Verletzung ohne eigene Änderung, Replan) · Status: **behoben im Repository** (`tests/integration/test_coder_handler.py::test_a_leftover_the_steps_scope_forbids_is_parked_for_the_step_that_names_it`)
 - Reproduktion: S005 (Collector) war nach drei Versuchen blockiert und ließ `collector.py`, `metrics.py`, `docs/api.md` und zwei Testdateien uncommittet zurück. Der Replan gab sie S006 als Repo-Hinweise und verbot sie dem neuen S005 (Beispielkonfiguration). S005 #1 scheiterte mit „5 out-of-scope change(s)“, #2 bat um einen Replan; 33 Minuten und ein zusätzlicher Replan gingen verloren.

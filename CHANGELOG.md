@@ -4,6 +4,11 @@ Format: [Keep a Changelog](https://keepachangelog.com/de/1.1.0/), Versionen nach
 
 ## [Unreleased]
 
+## [0.1.0rc128] – Release Candidate (2026-11-03)
+
+### Behoben
+- **Kommentar-Erklärungen sind keine Secrets (BUG-409):** `# token_secret: Dein API-Token-Secret hier eintragen` meldet der Secret-Scan nicht mehr; ein auskommentierter Wert ohne folgenden Text bleibt ein Fund.
+
 ## [0.1.0rc127] – Release Candidate (2026-11-02)
 
 ### Behoben

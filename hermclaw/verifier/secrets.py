@@ -169,6 +169,17 @@ def _is_prose(line: str, quote: str, end: int) -> bool:
     return close > end and line[end].isspace()
 
 
+_COMMENT_LINE = re.compile(r"^\s*(?:#|//|;|--|/?\*|<!--)")
+_PROSE_AFTER = re.compile(r"\s+[^\W\d_]")
+
+
+def _is_comment_prose(line: str, quoted: bool, end: int) -> bool:
+    """A comment that goes on with words after the matched value explains a field, it holds no secret: ``# token_secret:
+    Dein API-Token-Secret hier eintragen`` (live G1 rc127, BUG-409). Only unquoted values on comment lines; a commented-out
+    value without prose after it (``# password: hunter2xyz``) is still reported."""
+    return not quoted and _COMMENT_LINE.match(line) is not None and _PROSE_AFTER.match(line, end) is not None
+
+
 def _mask(line: str, start: int, end: int) -> str:
     masked = line[:start] + REDACTED + line[end:]
     out = DEFAULT_REDACTOR.text(masked).strip()
@@ -250,6 +261,8 @@ class SecretScanner:
             if is_placeholder(value):
                 return None
             if quoted and language in CODE_LANGUAGES and _is_prose(line, prefix.rstrip()[-1], m.end(2)):
+                return None
+            if _is_comment_prose(line, quoted, m.end(2)):
                 return None
             return "secret_assignment", start, m.end(2)
         if pattern.groups == 1:
