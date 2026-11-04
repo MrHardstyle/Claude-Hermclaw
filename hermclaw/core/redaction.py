@@ -59,15 +59,18 @@ _PLACEHOLDER_VOCABULARY = frozenset(
         "neu", "neue", "neuer", "neues", "alt", "alte", "alter", "altes", "falsch", "falsche", "falscher", "falsches",
         "gueltig", "gültig", "gueltiger", "gültiger", "ungueltig", "ungültig", "ungueltiger", "ungültiger", "mein",
         "meine", "dein", "deine", "anderer", "anderes", "benutzer",
+        # status shown instead of a secret: "gesetzt", "nicht gesetzt", "set" (live G1 rc132, BUG-416)
+        "set", "unset", "gesetzt", "nicht", "leer", "masked", "hidden",
     }
 )  # fmt: skip
 _WORD_SPLIT = re.compile(r"[-_.\s]+")
 
 
 def _role_word(word: str) -> bool:
-    """A placeholder vocabulary word, optionally numbered (``token2``), or a short number of its own."""
+    """A placeholder vocabulary word, optionally numbered (``token2``), a short number of its own, or a single letter
+    that tells stand-ins apart (``value-a`` … ``value-g``, live G1 rc132, BUG-416)."""
     stem = word.rstrip("0123456789")
-    return len(word) - len(stem) <= 3 and (stem in _PLACEHOLDER_VOCABULARY or not stem)
+    return len(word) - len(stem) <= 3 and (stem in _PLACEHOLDER_VOCABULARY or not stem or (len(stem) == 1 and stem.isalpha()))
 
 
 def is_role_value(value: str) -> bool:

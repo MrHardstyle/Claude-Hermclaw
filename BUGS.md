@@ -46,6 +46,12 @@ Noch keine.
 
 ## Behobene Bugs
 
+### BUG-416 – Secret-Scan hält durchbuchstabierte Testwerte und „gesetzt“ für Secrets
+- Phase: G1-Abnahme auf rc132, 2026-11-04 (Job e915e603) · Komponente: core (`redaction.py`) · Severity: P2 · blockierend: ja (Fehlalarm im Secret-Scan) · Status: **behoben im Repository** (`tests/unit/test_verifier_secrets.py::test_lettered_stand_ins_and_status_words_are_placeholders`)
+- Reproduktion: S002 #2 (Konfiguration) unterschied die Geheimnisse seiner Tests als `"value-a"` … `"value-g"` und schickte das öffentliche Kennzeichen `"gesetzt"` für ein unverändertes Geheimnis. Nur `"value-a"` bestand (`a` ist ein Rollen-Wort), elf Zeilen scheiterten als Secrets; der Versuch scheiterte allein daran.
+- Ursache: Rollen-Werte (BUG-279) bestehen nur aus Vokabelwörtern und kurzen Zahlen; Einzelbuchstaben zur Aufzählung und Status-Wörter, die statt eines Geheimnisses gezeigt werden, kannte das Vokabular nicht.
+- Fix: Ein einzelner Buchstabe zählt wie eine kurze Zahl (`value-b`, `token-x`), und `set`, `unset`, `gesetzt`, `nicht`, `leer`, `masked`, `hidden` sind Rollen-Wörter – im Scanner und im Redactor. Werte mit zufälligem Anteil bleiben Funde.
+
 ### BUG-415 – Secret-Scan hält einen Header-Namen nach „token:“ für ein Secret
 - Phase: G1-Abnahme auf rc132, 2026-11-04 (Job e915e603) · Komponente: core (`redaction.py`), verifier (`secrets.py`) · Severity: P2 · blockierend: ja (Fehlalarm im Secret-Scan) · Status: **behoben im Repository** (`tests/unit/test_verifier_secrets.py::test_ordinary_code_is_not_reported`)
 - Reproduktion: S003 #1 (API-Clients) beschrieb in `docs/api-contracts.md` die Anmeldung als ``- API token: `Authorization: PVEAPIToken=<userid>!<tokenid>=<secret>`.`` Secret-Scan und Sicherheitskriterium meldeten Zeile 9 blockierend.

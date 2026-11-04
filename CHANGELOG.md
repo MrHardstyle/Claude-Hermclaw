@@ -4,6 +4,11 @@ Format: [Keep a Changelog](https://keepachangelog.com/de/1.1.0/), Versionen nach
 
 ## [Unreleased]
 
+## [0.1.0rc134] – Release Candidate (2026-11-04)
+
+### Behoben
+- **Durchbuchstabierte Platzhalter (BUG-416):** `"value-b"`, `"token-x"` und Status-Wörter wie `"gesetzt"` meldet der Secret-Scan nicht mehr.
+
 ## [0.1.0rc133] – Release Candidate (2026-11-04)
 
 ### Behoben

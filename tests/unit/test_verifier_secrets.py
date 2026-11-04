@@ -235,6 +235,17 @@ def test_a_token_pair_with_a_stand_in_secret_part_is_a_placeholder() -> None:
     assert scan("config.example.toml", 'api_token = "viewer@pam!tokenid=8f3a9c2e-1b4d-4e5f-9a6b-7c8d9e0f1a2b"')
 
 
+def test_lettered_stand_ins_and_status_words_are_placeholders() -> None:
+    """Live G1 rc132 (BUG-416): config tests told their secrets apart as "value-a" … "value-g" and sent the public
+    marker "gesetzt" for a kept secret; only "value-a" passed ("a" is a role word), the rest failed as secrets."""
+    for value in ("value-b", "value-d", "value-g", "token-x", "gesetzt", "nicht-gesetzt", "secret_set"):
+        assert is_placeholder(value), value
+        assert DEFAULT_REDACTOR.text(f'api_token="{value}"') == f'api_token="{value}"', value
+    for value in ("value-9f8e7d6c", "zq81vkpw3mxt5", "hunter2-correct-horse", "gesetzt-zq81vkpw"):
+        assert not is_placeholder(value), value
+    assert not scan("tests/test_config.py", '        servers=[_proxmox(api_token="value-e", password="value-b")],')
+
+
 def test_german_role_words_are_placeholders_too() -> None:
     """Live G1 rc127 (BUG-410): the docs and tests of a German project used "geheimer-token" and "neuer-geheimer-token"
     for a token secret; both were failed as secrets. German role words count like English ones, a random part still not."""
