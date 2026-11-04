@@ -50,6 +50,9 @@ class VerificationStep:
     #: verifies the whole job change against the job base (job-level review, regression rerun after a base update):
     #: the per-step change limits were enforced on each step's own change and do not apply to the sum (BUG-195)
     job_level: bool = False
+    #: new files the job's other unfinished code steps are to create (step key, path or glob): a page of this step may
+    #: already load such a file (BUG-417)
+    planned_files: tuple[tuple[str, str], ...] = ()
 
     @property
     def is_implement(self) -> bool:
@@ -67,6 +70,7 @@ class VerificationStep:
         title: str = "",
         command_hints: Sequence[str] = (),
         job_level: bool = False,
+        planned_files: Sequence[tuple[str, str]] = (),
     ) -> VerificationStep:
         contract = scope if isinstance(scope, ScopeContract) or scope is None else ScopeContract.model_validate(dict(scope))
         return cls(
@@ -78,6 +82,7 @@ class VerificationStep:
             title=title,
             command_hints=tuple(command_hints),
             job_level=job_level,
+            planned_files=tuple(planned_files),
         )
 
     @classmethod

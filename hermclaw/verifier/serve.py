@@ -31,6 +31,7 @@ from __future__ import annotations
 
 import ast
 import base64
+import fnmatch
 import json
 import re
 import shlex
@@ -465,6 +466,32 @@ class ServeResult:
             if any(_serves(url, path) for url in where for path in changed):
                 out.append(text)
         return out
+
+    def planned_later(self, planned: Iterable[tuple[str, str]], existing: Iterable[str]) -> dict[str, str]:
+        """The problems that are a file a page loads which the project does not have yet and another unfinished step
+        of the plan is to create (``planned``: step key, new path): problem -> ``"S005 creates static/app.js"``."""
+        have = list(existing)
+        out: dict[str, str] = {}
+        for text in self.problems:
+            m = _MISSING_FILE.match(text)
+            if m is None or any(_serves(m.group(1), f) for f in have):
+                continue
+            hit = next(((key, path) for key, path in planned if _planned(m.group(1), path)), None)
+            if hit is not None:
+                out[text] = f"{hit[0]} creates {hit[1]}"
+        return out
+
+
+#: the problem of a file a page loads that the server does not have (the driver's wording)
+_MISSING_FILE = re.compile(r"^the page \S+ loads .+, but GET (\S+) answered 404$")
+
+
+def _planned(url: str, pattern: str) -> bool:
+    """Whether the URL path ``url`` is served from a file the planned path or glob ``pattern`` names."""
+    if not any(c in pattern for c in "*?["):
+        return _serves(url, pattern)
+    rel = url.lstrip("/")
+    return fnmatch.fnmatchcase(rel, pattern) or fnmatch.fnmatchcase(rel, pattern.split("/", 1)[-1])
 
 
 def _serves(url: str, path: str) -> bool:

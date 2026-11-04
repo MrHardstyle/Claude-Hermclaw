@@ -4,6 +4,11 @@ Format: [Keep a Changelog](https://keepachangelog.com/de/1.1.0/), Versionen nach
 
 ## [Unreleased]
 
+## [0.1.0rc135] – Release Candidate (2026-11-04)
+
+### Behoben
+- **Serve-Check und Plan (BUG-417):** Lädt eine Seite eine Datei, die laut Plan erst ein späterer Schritt anlegt, ist der 404 auf dem Einzelschritt nur ein Hinweis; im Job-Review bleibt er blockierend.
+
 ## [0.1.0rc134] – Release Candidate (2026-11-04)
 
 ### Behoben

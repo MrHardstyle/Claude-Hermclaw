@@ -1144,6 +1144,40 @@ async def test_the_delivered_web_server_is_loaded_like_its_user_loads_it(session
     assert by_name(off.report)["serve"].status == "skip"
 
 
+async def test_a_file_the_page_loads_that_a_later_step_creates_does_not_block_the_server_step(sessionmaker: Any, tmp_path: Path) -> None:
+    """Live G1 rc132 (BUG-417): S004 wrote the collector, whose page loads /static/app.js; the plan has S005 create
+    static/app.js. The 404 blocked S004 and its coder began to build the file into the server. A file another unfinished
+    step of the plan is to create is a note on the single step; on the whole job, or once the file exists, it blocks."""
+    repo = py_repo(tmp_path)
+    server = (
+        WEB_SERVER.replace(' api("/api/token");', "")
+        .replace(' api("/api/drop");', "")
+        .replace('<script src="/static/app.js"></script>', '<script src="/static/app.js"></script><script src="/static/later.js"></script>')
+    )
+    write(repo, "server.py", server)
+    st = step(scope_contract=scope(allowed_new_paths=["server.py"], target_paths=["calc.py"]))
+    planned = dataclasses.replace(st, planned_files=(("S005", "static/index.html"), ("S005", "static/later.js")))
+    outcome, *_ = await run(sessionmaker, repo, planned)
+    check = by_name(outcome.report)["serve:server.py"]
+    assert check.status == "fail" and not check.blocking, check.message
+    assert "loads /static/later.js, but GET /static/later.js answered 404" in check.message
+    assert "not blocking: S005 creates static/later.js later in the plan" in check.message
+    assert check.evidence["planned"] == {check.message.split(": ", 1)[1].split(". ", 1)[0]: "S005 creates static/later.js"}
+    # a glob of the later step counts as well
+    globbed, *_ = await run(sessionmaker, repo, dataclasses.replace(st, planned_files=(("S005", "static/*.js"),)))
+    assert not by_name(globbed.report)["serve:server.py"].blocking
+    # without that plan the step answers for the page it wrote
+    alone, *_ = await run(sessionmaker, repo, st)
+    assert by_name(alone.report)["serve:server.py"].blocking
+    # the whole job has no later step
+    job, *_ = await run(sessionmaker, repo, dataclasses.replace(planned, job_level=True), kind="review")
+    assert by_name(job.report)["serve:server.py"].blocking
+    # once the file exists, a server that does not serve it is the server's problem
+    write(repo, "static/later.js", "console.log(1);\n")
+    present, *_ = await run(sessionmaker, repo, planned)
+    assert by_name(present.report)["serve:server.py"].blocking, by_name(present.report)["serve:server.py"].message
+
+
 async def test_a_header_the_server_never_reads_fails_the_serve_check(sessionmaker: Any, tmp_path: Path) -> None:
     """Live G1 on rc96 (BUG-369): the page sent X-Collector-Token, the server checked X-Collector-Guard; the probe's
     POST got 401 like any request without a token, and the check passed. The header is named as a problem."""

@@ -98,9 +98,28 @@ class VerifierAdapter:
             network=step.network,
             command_hints=command_hints,
             job_level=job_level,
+            planned_files=() if job_level else await self._planned_files(job_id, step_id),
         )
         out = await (await self._verifier(workspace, step)).run(vstep, workspace, job_id=job_id, step_id=step_id, attempt_id=attempt_id)
         return VerificationOutcome(report=out.report, run_id=out.run_id)
+
+    async def _planned_files(self, job_id: uuid.UUID, step_id: uuid.UUID) -> list[tuple[str, str]]:
+        """The new files the job's other unfinished code steps are to create (BUG-417)."""
+        async with self.sm() as s:
+            rows = (
+                await s.execute(
+                    select(Step.step_key, Step.allowed_new_paths)
+                    .where(
+                        Step.job_id == job_id,
+                        Step.id != step_id,
+                        Step.superseded.is_(False),
+                        Step.status.not_in(["completed", "failed", "cancelled"]),
+                        Step.kind.in_(list(TOOL_STEP_KINDS)),
+                    )
+                    .order_by(Step.created_at, Step.step_key)
+                )
+            ).all()
+        return [(key, str(path)) for key, paths in rows for path in paths or [] if isinstance(path, str) and path]
 
     async def rerun(self, job_id: uuid.UUID, workspace: WorkspaceHandle) -> tuple[bool, dict[str, Any]]:
         """23.5: after a base update every completed code step of the job is verified again on the rebased tree."""

@@ -575,14 +575,27 @@ async def serve_checks(ctx: VerifyContext) -> list[VerificationCheck]:
             # live G1 rc90: S006 wrote app.js against the finished collector and called POST /api/test, a route it
             # does not have; reported as a note on every step since, the bug reached the final review 4 h later
             # (BUG-361). A problem of a page or script this change wrote, or of a server it changed, is its own.
-            caused = result.problems if ctx.step.job_level else result.caused_by(server.path, touched)
-            if caused and not ctx.step.job_level:
+            blamed = result.problems if ctx.step.job_level else result.caused_by(server.path, touched)
+            # live G1 rc132: S004 wrote the collector whose page loads /static/app.js, which the plan has S005 create;
+            # the 404 blocked S004 and its coder began to fake the file inside the server (BUG-417)
+            later = {} if ctx.step.job_level else result.planned_later(ctx.step.planned_files, files)
+            blamed = [p for p in blamed if p not in later]
+            planned = "; ".join(dict.fromkeys(later.values()))
+            if blamed and not ctx.step.job_level:
                 why += " – this change wrote that server, page or script: call routes the server has, or add the missing route"
-            elif not caused:
-                why += " – not blocking on a single step, a later step may still connect the parts"
-            listed = caused or result.problems
+                if later:
+                    why += f" ({planned} later in the plan: leave that file to that step)"
+            elif not blamed:
+                why += (
+                    f" – not blocking: {planned} later in the plan, leave that file to that step"
+                    if later
+                    else " – not blocking on a single step, a later step may still connect the parts"
+                )
+            if later:
+                evidence["planned"] = later
+            listed = blamed or result.problems
             message = f"started {command} ({how}) and loaded it like its user: " + "; ".join(listed[:8]) + f". {why}"
-            out.append(ctx.check("serve", name, "fail", message, evidence, blocking=bool(caused)))
+            out.append(ctx.check("serve", name, "fail", message, evidence, blocking=bool(blamed)))
     return out
 
 

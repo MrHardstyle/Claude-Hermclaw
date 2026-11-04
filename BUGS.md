@@ -46,6 +46,12 @@ Noch keine.
 
 ## Behobene Bugs
 
+### BUG-417 – Serve-Check blockiert einen Schritt an einer Datei, die laut Plan erst ein späterer Schritt anlegt
+- Phase: G1-Abnahme auf rc132, 2026-11-04 (Job e915e603) · Komponente: verifier (`checks.py`, `serve.py`), runtime (`adapters.py`) · Severity: P2 · blockierend: ja (Schritt scheitert, Coder baut Ersatzdateien in den Server) · Status: **behoben im Repository** (`tests/integration/test_verifier_engine.py::test_a_file_the_page_loads_that_a_later_step_creates_does_not_block_the_server_step`)
+- Reproduktion: S004 schrieb den Collector, dessen Seite `/static/app.js` lädt; `static/app.js` gehört laut Plan zu S005 (`allowed_new_paths`). Der Serve-Check meldete `GET /static/app.js answered 404` blockierend, weil S004 den Server geändert hatte; S004 #2 scheiterte daran, und der Coder begann in #3, ein Ersatz-`app.js` in `collector.py` einzubauen.
+- Ursache: Der Serve-Check kannte nur die Änderung des Schritts, nicht den Plan: eine Datei, die ein noch offener Schritt anlegen soll, galt als fehlende Datei dieses Schritts.
+- Fix: Die Verifikation eines Einzelschritts bekommt die neuen Pfade (auch Globs) der anderen unfertigen Code-Schritte des Jobs (`VerificationStep.planned_files`). Ein 404 auf eine Datei, die im Workspace noch fehlt und die so ein Schritt anlegt, ist ein Hinweis („S005 creates static/app.js later in the plan, leave that file to that step“), nicht blockierend. Im Job-Review und sobald die Datei existiert, bleibt er blockierend.
+
 ### BUG-416 – Secret-Scan hält durchbuchstabierte Testwerte und „gesetzt“ für Secrets
 - Phase: G1-Abnahme auf rc132, 2026-11-04 (Job e915e603) · Komponente: core (`redaction.py`) · Severity: P2 · blockierend: ja (Fehlalarm im Secret-Scan) · Status: **behoben im Repository** (`tests/unit/test_verifier_secrets.py::test_lettered_stand_ins_and_status_words_are_placeholders`)
 - Reproduktion: S002 #2 (Konfiguration) unterschied die Geheimnisse seiner Tests als `"value-a"` … `"value-g"` und schickte das öffentliche Kennzeichen `"gesetzt"` für ein unverändertes Geheimnis. Nur `"value-a"` bestand (`a` ist ein Rollen-Wort), elf Zeilen scheiterten als Secrets; der Versuch scheiterte allein daran.
