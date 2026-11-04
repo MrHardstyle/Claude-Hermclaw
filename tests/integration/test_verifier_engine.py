@@ -1134,6 +1134,12 @@ async def test_the_delivered_web_server_is_loaded_like_its_user_loads_it(session
     write(repo, "server.py", WEB_SERVER.replace("ThreadingHTTPServer((", "raise SystemExit('no config')\n    ThreadingHTTPServer(("))
     quiet, *_ = await run(sessionmaker, repo, job, kind="review")
     assert by_name(quiet.report)["serve:server.py"].status == "skip"
+    # BUG-414: a server that dies of its own bug on start is a blocking crash, not a skip
+    write(repo, "server.py", WEB_SERVER.replace("ThreadingHTTPServer((", "Handler.no_such_helper()\n    ThreadingHTTPServer(("))
+    crashed, *_ = await run(sessionmaker, repo, job, kind="review")
+    crash = by_name(crashed.report)["serve:server.py"]
+    assert crash.status == "fail" and crash.blocking and "crashed on start: AttributeError" in crash.message, crash.message
+    assert crash.evidence["frames"] == ["server.py"]
     off, *_ = await run(sessionmaker, repo, job, verifier=make_verifier(sessionmaker, serve_seconds=0), kind="review")
     assert by_name(off.report)["serve"].status == "skip"
 

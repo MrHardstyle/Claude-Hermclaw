@@ -19,6 +19,7 @@ from hermclaw.verifier.serve import (
     serve_driver,
     servers,
     start_function,
+    startup_crash,
 )
 
 G1_RC90 = {
@@ -174,3 +175,28 @@ def test_a_route_named_without_its_method_is_tried_with_get_and_post(tmp_path: P
     assert result is not None and result.listening, out.stderr
     assert ["POST", "/api/test", 200] in result.probes
     assert result.problems == ["/app.js calls GET or POST /api/gone, but the server answered 404: the route does not exist"]
+
+
+def test_a_program_that_dies_of_its_own_bug_on_start_is_a_crash_the_environment_is_not() -> None:
+    """Live G1 rc131 (BUG-414): ``collector.py`` raised an AttributeError on every start; "exited with code 1" was a
+    skip and the broken server was committed. A traceback ending in a programming error is a crash and names the
+    project files it passed; a missing config file, a port in use or a missing package stays the environment."""
+    crash = (
+        "Traceback (most recent call last):\n"
+        '  File "/workspace/collector.py", line 262, in <module>\n'
+        "    raise SystemExit(main())\n"
+        '  File "/workspace/collector.py", line 246, in main\n'
+        '  File "/usr/lib/python3.12/importlib/__init__.py", line 90, in import_module\n'
+        "AttributeError: module 'config' has no attribute 'generate_protection_token'\n"
+    )
+    found = startup_crash(crash)
+    assert found is not None
+    assert found[0].startswith("AttributeError: module 'config'") and found[1] == ["collector.py"]
+    for env in (
+        "FileNotFoundError: [Errno 2] No such file or directory: 'config.toml'",
+        "OSError: [Errno 98] Address already in use",
+        "ModuleNotFoundError: No module named 'requests'",
+    ):
+        assert startup_crash(f'Traceback (most recent call last):\n  File "/workspace/app.py", line 3, in <module>\n{env}\n') is None
+    assert startup_crash("usage: collector [-h]\ncollector: error: unrecognized arguments: --x\n") is None
+    assert startup_crash("") is None

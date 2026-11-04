@@ -4,6 +4,12 @@ Format: [Keep a Changelog](https://keepachangelog.com/de/1.1.0/), Versionen nach
 
 ## [Unreleased]
 
+## [0.1.0rc132] – Release Candidate (2026-11-04)
+
+### Behoben
+- **Absturz beim Start blockiert (BUG-414):** Ein Server, der beim Start an einem eigenen Programmierfehler stirbt (Traceback mit AttributeError, NameError, TypeError …), lässt den Serve-Check scheitern statt ihn zu überspringen.
+- **Nur Uncommittetes wird geparkt (BUG-413):** Committete Dateien früherer Schritte werden nicht mehr beiseitegelegt und können nicht als veraltete Kopie über einen späteren Commit zurückkommen.
+
 ## [0.1.0rc131] – Release Candidate (2026-11-03)
 
 ### Behoben

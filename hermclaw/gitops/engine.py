@@ -860,8 +860,9 @@ class GitEngine:
 
         Each existing file is copied into the workspace's git directory (invisible to ``git status``, removed with the
         workspace) and the path returns to HEAD – a tracked file is checked out, a new one removed. Deletions and
-        symlinks are not parked. ``unpark_paths`` brings the files back when the owning step starts. Returns the
-        parked paths."""
+        symlinks are not parked, nor a path without uncommitted changes: the changes of the workspace count from the
+        job base, and a committed file of an earlier step parked as a copy came back over a later commit of it
+        (BUG-413). ``unpark_paths`` brings the files back when the owning step starts. Returns the parked paths."""
         clean = self._validate_paths(paths) or []
         if not clean:
             return []
@@ -869,10 +870,11 @@ class GitEngine:
             rec = OpRecord(operation="workspace.park", job_id=info.job_id, step_id=step_id, workspace_id=info.id, ref=info.branch)
             async with self._audited(rec):
                 store = await ops.git_dir(self.runner, path) / PARKED_DIR
+                dirty = {e.path for e in await ops.read_status(self.runner, path)}
                 parked: list[str] = []
                 for rel in clean:
                     src = path / rel
-                    if not await asyncio.to_thread(_parkable, src, path):
+                    if rel not in dirty or not await asyncio.to_thread(_parkable, src, path):
                         continue
                     await asyncio.to_thread(_fs.ensure_dir, (store / rel).parent)
                     await asyncio.to_thread(_fs.copy_if_exists, src, store / rel)

@@ -25,7 +25,7 @@ from hermclaw.verifier.imports import MISSING_EXIT_CODE, interpreter_for, new_un
 from hermclaw.verifier.languages import CODE_LANGUAGES, detect_language, repo_has_tests
 from hermclaw.verifier.report import EXECUTOR_ERROR
 from hermclaw.verifier.secrets import SecretScanner
-from hermclaw.verifier.serve import header_mismatches, pages, parse_serve_output, serve_command, serve_driver, servers
+from hermclaw.verifier.serve import header_mismatches, pages, parse_serve_output, serve_command, serve_driver, servers, startup_crash
 from hermclaw.verifier.syntax import (
     IN_PROCESS,
     SANDBOX_TOOLS,
@@ -549,7 +549,18 @@ async def serve_checks(ctx: VerifyContext) -> list[VerificationCheck]:
         evidence["probes"] = result.probes[:40]
         if result.stderr:
             evidence["stderr"] = ctx.runner.clip(result.stderr, 3000)
-        if not result.listening:
+        crash = startup_crash(result.stderr, (str(ctx.root), "/workspace")) if not result.listening else None
+        if crash is not None:
+            # the program dies of its own bug before it listens: blocking for the step that changed it (BUG-414)
+            line, frames = crash
+            caused = ctx.step.job_level or server.path in touched or bool(touched & set(frames))
+            message = (
+                f"{command} ({how}) crashed on start: {line}. The program must start for its user: fix the error the "
+                "traceback names (stderr in the evidence); the served pages were not checked"
+                + ("" if caused else " – not blocking on a single step, this change did not touch the failing code")
+            )
+            out.append(ctx.check("serve", name, "fail", message, {**evidence, "crash": line, "frames": frames}, blocking=caused))
+        elif not result.listening:
             ended = f"exited with code {result.exit_code}" if result.exit_code is not None else "did not listen"
             message = f"{command} ({how}) {ended} within {seconds:g}s; the served pages were not checked"
             out.append(ctx.check("serve", name, "skip", message, evidence))

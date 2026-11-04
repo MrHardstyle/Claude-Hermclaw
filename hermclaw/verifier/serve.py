@@ -395,6 +395,42 @@ def serve_command(server: Server, interpreter: Sequence[str], hints: Iterable[st
     return " ".join(shlex.quote(w) for w in launcher), "with the project's interpreter"
 
 
+# a Python program that dies with one of these on start has a bug of its own; a missing config file, a port in use or
+# a missing package is the environment (the program may need set-up first) and stays a skip
+_PROGRAMMING_ERRORS = frozenset(
+    {
+        "AttributeError", "NameError", "UnboundLocalError", "TypeError", "SyntaxError", "IndentationError", "TabError",
+        "ImportError", "AssertionError", "RecursionError", "IndexError", "ZeroDivisionError",
+    }
+)  # fmt: skip
+_EXCEPTION_LINE = re.compile(r"^([A-Za-z_][\w.]*)(?::\s.*)?$")
+_FRAME_FILE = re.compile(r'^\s*File "([^"]+)", line \d+')
+
+
+def startup_crash(stderr: str, roots: Sequence[str] = ("/workspace",)) -> tuple[str, list[str]] | None:
+    """``(exception line, project files of the traceback)`` when the program died of a programming error before it
+    listened (live G1 rc131: ``collector.py`` raised ``AttributeError: module 'config' has no attribute …`` on every
+    start, the check was a skip, and the broken server was committed, BUG-414); ``None`` otherwise."""
+    lines = stderr.strip().splitlines()
+    if not any(line.startswith("Traceback (most recent call last):") for line in lines):
+        return None
+    last = lines[-1].strip() if lines else ""
+    m = _EXCEPTION_LINE.match(last)
+    if m is None or m.group(1).rsplit(".", 1)[-1] not in _PROGRAMMING_ERRORS:
+        return None
+    files: list[str] = []
+    for line in lines:
+        frame = _FRAME_FILE.match(line)
+        if frame is None:
+            continue
+        name = frame.group(1)
+        prefixes = [r.rstrip("/") + "/" for r in roots if r]
+        rel = next((name[len(p) :] for p in prefixes if name.startswith(p)), "" if name.startswith(("/", "<")) else name)
+        if rel and rel not in files:
+            files.append(rel)
+    return last[:300], files
+
+
 def serve_driver(interpreter: Sequence[str], command: str, server: Server, page_paths: Sequence[str], seconds: float) -> str:
     """The sandbox command that runs :data:`SERVE_SCRIPT` on the spec; ``ValueError`` when it would still be longer than
     a sandbox command may be (:data:`MAX_COMMAND_CHARS`)."""

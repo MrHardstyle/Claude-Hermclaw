@@ -46,6 +46,18 @@ Noch keine.
 
 ## Behobene Bugs
 
+### BUG-414 – Ein Server, der beim Start abstürzt, gilt beim Serve-Check als übersprungen
+- Phase: G1-Abnahme auf rc131, 2026-11-04 (Job b10aa3a1) · Komponente: verifier (`serve.py`, `checks.py`) · Severity: P1 · blockierend: ja (nicht startendes Produkt wurde committet) · Status: **behoben im Repository** (`tests/unit/test_verifier_serve.py::test_a_program_that_dies_of_its_own_bug_on_start_is_a_crash_the_environment_is_not`, `tests/integration/test_verifier_engine.py::test_the_delivered_web_server_is_loaded_like_its_user_loads_it`)
+- Reproduktion: Ab S002 #2 brach `python collector.py` bei jedem Start mit `AttributeError: module 'config' has no attribute 'generate_protection_token'` ab. Der Serve-Check meldete „exited with code 1 within 15s“ als `skip`, die Verifikation bestand, der Rückfall auf den verifizierten Stand committete den Server; der Job endete `succeeded` mit einem Widget, das nicht startet. Erst das Review von S002 #3 nannte den Absturz als Blocker.
+- Ursache: Ein Programm, das vor dem Lauschen endet, galt immer als Umgebungsfall (fehlende Konfiguration, belegter Port) und wurde übersprungen; ein Traceback aus einem Programmierfehler wurde nicht unterschieden.
+- Fix: Endet der Start mit einem Traceback, dessen Ausnahme ein Programmierfehler ist (AttributeError, NameError, TypeError, ImportError, SyntaxError …), ist der Serve-Check `fail` – blockierend für den Schritt, der den Server oder eine Datei des Tracebacks geändert hat, und auf Job-Ebene. Fehlende Dateien, belegte Ports und fehlende Pakete bleiben `skip`.
+
+### BUG-413 – Parken legt committete Dateien beiseite; ihre Kopie kann einen späteren Commit überschreiben
+- Phase: G1-Abnahme auf rc131, 2026-11-04 (Job b10aa3a1) · Komponente: gitops (`engine.py`) · Severity: P2 · blockierend: nein (latent: stille Regression) · Status: **behoben im Repository** (`tests/integration/test_gitops_engine.py::test_a_committed_file_is_not_parked_and_never_comes_back_over_a_later_commit`)
+- Reproduktion: Nach dem Commit von S002 parkte der Start von S003 acht von S002 committete Dateien (`workspace.park`), weil S003 sie verbietet (BUG-408). Die Kopien entsprachen HEAD. `unpark_paths` schont nur Pfade, die gegenüber HEAD geändert sind: Hätte ein späterer Schritt eine dieser Dateien geändert und committet, hätte der nächste Schritt, der sie nennt, die alte Kopie darübergelegt.
+- Ursache: Die Änderungen des Workspace zählen ab der Job-Basis (`changed_files`), also auch alles Committete; `park_paths` legte jede genannte Datei beiseite.
+- Fix: `park_paths` parkt nur Pfade mit uncommitteten Änderungen (`git status`); committete Dateien bleiben, wo sie sind.
+
 ### BUG-412 – Secret-Scan hält Proxmox-Token-Platzhalter für Secrets
 - Phase: G1-Abnahme auf rc130, 2026-11-03 (Job 6ba49687) · Komponente: core (`redaction.py`), verifier (`secrets.py`) · Severity: P2 · blockierend: ja (Fehlalarm im Secret-Scan) · Status: **behoben im Repository** (`tests/unit/test_verifier_secrets.py::test_a_token_pair_with_a_stand_in_secret_part_is_a_placeholder`)
 - Reproduktion: S002 #1 (Collector/Config/API) schrieb das Proxmox-Token in README, Beispielkonfiguration und Test als `viewer@pam!tokenid=uuid`, `automation!AutomationToken=00000000-0000-0000-0000-000000000000` und `viewer@pam!token=uuid` und beschrieb den Header am Satzende mit `PVEAPIToken=USER@REALM!TOKENID=UUID`. — vier blockierende Secret-Funde.

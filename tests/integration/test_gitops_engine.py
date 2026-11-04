@@ -622,6 +622,25 @@ async def test_parked_leftovers_return_to_head_and_never_overwrite_a_changed_pat
     ]
 
 
+async def test_a_committed_file_is_not_parked_and_never_comes_back_over_a_later_commit(world):
+    """BUG-413 (live G1 rc131): the workspace's changes count from the job base, so the files an earlier step had
+    committed were parked for a step that forbids them – as copies of HEAD. After a later commit of such a file the
+    stale copy would have come back over it. Only uncommitted changes are parked."""
+    job_id = await world.job("park-committed")
+    ws = await world.engine.create_workspace(job_id, world.repo)
+    path = Path(ws.path)
+    write(path, "app.py", "committed by S002\n")
+    git("commit", "-qam", "S002", cwd=path)
+    write(path, "web/page.js", "// left by a blocked step\n")
+    assert sorted(await world.engine.changed_files(ws.id)) == ["app.py", "web/page.js"]
+    assert await world.engine.park_paths(ws.id, ["app.py", "web/page.js"]) == ["web/page.js"]
+    assert not (path / ".git" / "hermclaw-parked" / "app.py").exists()
+    write(path, "app.py", "fixed and committed by a later step\n")
+    git("commit", "-qam", "S005", cwd=path)
+    assert await world.engine.unpark_paths(ws.id, ["app.py", "web/*.js"]) == ["web/page.js"]
+    assert (path / "app.py").read_text() == "fixed and committed by a later step\n"
+
+
 async def test_the_verified_state_comes_back_exactly_after_a_failed_correction(world):
     """BUG-315: the review asked for a correction of verified work; the correction rewrote a file, deleted another,
     created a third and broke the work. restore_verified returns the work tree to the saved state – changed, new and
