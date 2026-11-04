@@ -4,6 +4,11 @@ Format: [Keep a Changelog](https://keepachangelog.com/de/1.1.0/), Versionen nach
 
 ## [Unreleased]
 
+## [0.1.0rc133] – Release Candidate (2026-11-04)
+
+### Behoben
+- **Header-Namen sind keine Secrets (BUG-415):** ``API token: `Authorization: …` `` meldet der Secret-Scan nicht mehr; ein Wort mit Doppelpunkt am Ende benennt den nächsten Schlüssel.
+
 ## [0.1.0rc132] – Release Candidate (2026-11-04)
 
 ### Behoben

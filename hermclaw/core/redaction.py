@@ -110,8 +110,16 @@ def is_placeholder_token_pair(value: str) -> bool:
     return is_role_value(secret) or is_notation_value(secret) or not set(secret.lower()) - set("0x*-.")
 
 
+def is_label_value(value: str) -> bool:
+    """``API token: `Authorization: PVEAPIToken=…` ``: the word after the key ends with a colon, it names the next key
+    or header, it is no value (live G1 rc132, BUG-415)."""
+    return value.rstrip("\"'`").endswith(":")
+
+
 def is_benign_value(value: str, *, quoted: bool) -> bool:
     """A ``key = value`` match that is no secret: an obvious placeholder, or (unquoted) a short code reference."""
+    if is_label_value(value):
+        return True
     low = value.lower()
     if low.startswith(_PLACEHOLDER_START) or any(part in low for part in _PLACEHOLDER_PARTS) or not set(low) - set("x*-."):
         return True

@@ -25,6 +25,7 @@ from hermclaw.core.redaction import (
     DEFAULT_REDACTOR,
     REDACTED,
     Redactor,
+    is_label_value,
     is_notation_value,
     is_placeholder_token_pair,
     is_role_value,
@@ -154,7 +155,7 @@ _REFERENCE = re.compile(r"^(?:(?:file|cred|env|vault):\S+|(?:/[a-z0-9._-]+){2,}/
 
 def is_placeholder(value: str) -> bool:
     v = value.strip().strip("\"'`")
-    if not v:
+    if not v or is_label_value(value.strip()):
         return True
     if _REFERENCE.match(v.rstrip(".,;:)`'\"")):  # a reference (path / secret ref, e.g. LoadCredential=name:/etc/…)
         return True

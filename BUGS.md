@@ -46,6 +46,12 @@ Noch keine.
 
 ## Behobene Bugs
 
+### BUG-415 – Secret-Scan hält einen Header-Namen nach „token:“ für ein Secret
+- Phase: G1-Abnahme auf rc132, 2026-11-04 (Job e915e603) · Komponente: core (`redaction.py`), verifier (`secrets.py`) · Severity: P2 · blockierend: ja (Fehlalarm im Secret-Scan) · Status: **behoben im Repository** (`tests/unit/test_verifier_secrets.py::test_ordinary_code_is_not_reported`)
+- Reproduktion: S003 #1 (API-Clients) beschrieb in `docs/api-contracts.md` die Anmeldung als ``- API token: `Authorization: PVEAPIToken=<userid>!<tokenid>=<secret>`.`` Secret-Scan und Sicherheitskriterium meldeten Zeile 9 blockierend.
+- Ursache: Das Zuweisungsmuster nahm das Wort nach `token:` – `` `Authorization: `` – als Wert; dass es mit einem Doppelpunkt endet, also selbst ein Schlüssel oder Header-Name ist, sah die Prüfung nicht.
+- Fix: Ein Wert, der (ohne Anführungszeichen/Backticks) auf `:` endet, ist eine Beschriftung, kein Secret – im Scanner und im Redactor. `password: hunter2xyz` bleibt ein Fund.
+
 ### BUG-414 – Ein Server, der beim Start abstürzt, gilt beim Serve-Check als übersprungen
 - Phase: G1-Abnahme auf rc131, 2026-11-04 (Job b10aa3a1) · Komponente: verifier (`serve.py`, `checks.py`) · Severity: P1 · blockierend: ja (nicht startendes Produkt wurde committet) · Status: **behoben im Repository** (`tests/unit/test_verifier_serve.py::test_a_program_that_dies_of_its_own_bug_on_start_is_a_crash_the_environment_is_not`, `tests/integration/test_verifier_engine.py::test_the_delivered_web_server_is_loaded_like_its_user_loads_it`)
 - Reproduktion: Ab S002 #2 brach `python collector.py` bei jedem Start mit `AttributeError: module 'config' has no attribute 'generate_protection_token'` ab. Der Serve-Check meldete „exited with code 1 within 15s“ als `skip`, die Verifikation bestand, der Rückfall auf den verifizierten Stand committete den Server; der Job endete `succeeded` mit einem Widget, das nicht startet. Erst das Review von S002 #3 nannte den Absturz als Blocker.

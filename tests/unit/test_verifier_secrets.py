@@ -78,6 +78,9 @@ def test_secret_shapes_are_found(path: str, line: str, rule: str) -> None:
         # BUG-407: a quoted text with spaces after a credential key is a label or message, not a value
         ("config.py", '    "password": "Zugangsdaten (wird lokal gespeichert)",'),
         ("app.js", "  api_key: 'API-Key für den Zugriff',"),
+        # BUG-415: the word after the key names the next key or header (it ends with a colon)
+        ("docs/api-contracts.md", "- API token: `Authorization: PVEAPIToken=<userid>!<tokenid>=<secret>`."),
+        ("README.md", "Token: Authorization: Bearer <token>"),
         # BUG-409: a comment that goes on with words after the value explains the field
         ("config.example.toml", "# token_secret: Dein API-Token-Secret hier eintragen"),
         ("settings.yaml", "  # password: Passwort des Monitoring-Benutzers (nur lesend)"),
