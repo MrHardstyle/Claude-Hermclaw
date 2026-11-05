@@ -4,6 +4,11 @@ Format: [Keep a Changelog](https://keepachangelog.com/de/1.1.0/), Versionen nach
 
 ## [Unreleased]
 
+## [0.1.0rc142] – Release Candidate (2026-11-05)
+
+### Behoben
+- **404 vom Route-Handler (BUG-424):** Antwortet eine Route auf die leere Probe mit einem eigenen 404 („Server nicht gefunden“), meldet die Serve-Prüfung sie nicht mehr als fehlend.
+
 ## [0.1.0rc141] – Release Candidate (2026-11-05)
 
 ### Behoben

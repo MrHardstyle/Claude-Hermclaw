@@ -177,6 +177,31 @@ def test_a_route_named_without_its_method_is_tried_with_get_and_post(tmp_path: P
     assert result.problems == ["/app.js calls GET or POST /api/gone, but the server answered 404: the route does not exist"]
 
 
+def test_a_404_the_route_sends_for_an_unknown_id_is_not_a_missing_route(tmp_path: Path) -> None:
+    """Live G1 on rc140 (BUG-424): POST /api/test without a server id answered 404 {"error": "Server nicht gefunden"},
+    and the probe took it for a missing route. A 404 that differs from the answer for a path nothing handles comes from
+    the route's own handler; one that equals it (here also with the path in the text) is still a missing route."""
+    server = WIDGET_SERVER.replace(
+        '        self._send(200 if self.path == "/api/test" else 404)',
+        '        if self.path == "/api/test":\n'
+        '            return self._send(404, b\'{"error": "Server nicht gefunden"}\')\n'
+        "        self._send(404, b'{\"error\": \"Unbekannter Endpunkt ' + self.path.encode() + b'\"}')",
+    )
+    assert server != WIDGET_SERVER
+    (tmp_path / "app.js").write_text(
+        'const api = { test: "/api/test", gone: "/api/gone" };\nfetch(api.test, { method: "POST", body: "{}" });\n'
+    )
+    (tmp_path / "server.py").write_text(server)
+    driver = serve_driver(
+        [sys.executable], f"{shlex.quote(sys.executable)} server.py", Server("server.py", {"WIDGET_PORT": "port"}), [], 15.0
+    )
+    out = subprocess.run(shlex.split(driver), cwd=tmp_path, capture_output=True, text=True, timeout=120, check=False)
+    result = parse_serve_output(out.stdout)
+    assert result is not None and result.listening, out.stderr
+    assert ["POST", "/api/test", 404] in result.probes
+    assert result.problems == ["/app.js calls POST /api/gone, but the server answered 404: the route does not exist"]
+
+
 def test_a_program_that_dies_of_its_own_bug_on_start_is_a_crash_the_environment_is_not() -> None:
     """Live G1 rc131 (BUG-414): ``collector.py`` raised an AttributeError on every start; "exited with code 1" was a
     skip and the broken server was committed. A traceback ending in a programming error is a crash and names the

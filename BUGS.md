@@ -46,6 +46,12 @@ Noch keine.
 
 ## Behobene Bugs
 
+### BUG-424 – Serve-Prüfung hält ein 404 des Route-Handlers für eine fehlende Route
+- Phase: G1-Abnahme auf rc140, 2026-11-05 (Job e34a8095) · Komponente: verifier (`serve.py`) · Severity: P2 · blockierend: ja (S005 #1 VERIFIER_FAILED) · Status: **behoben im Repository** (`tests/unit/test_verifier_serve.py::test_a_404_the_route_sends_for_an_unknown_id_is_not_a_missing_route`)
+- Reproduktion: `static/app.js` ruft `POST /api/test` mit einer Server-ID auf. Die Probe schickt `{}`; der Handler fand keinen Server und antwortete 404 `{"error": "Server nicht gefunden"}`. Die Prüfung meldete „/app.js calls GET or POST /api/test, but the server answered 404: the route does not exist“, obwohl `server.py` die Route hat.
+- Ursache: Jedes 404 galt als fehlende Route; ein 404 für eine fehlende Ressource sah gleich aus.
+- Fix: Bei 404 fragt die Probe mit derselben Methode einen Pfad ab, den nichts behandelt (`<Präfix>/hermclaw-no-such-route`). Weicht die Antwort der Route davon ab (Pfad im Text ausgeblendet), kommt das 404 vom Handler selbst und die Route existiert. 405/501 und ein 404 wie für den unbehandelten Pfad bleiben Funde.
+
 ### BUG-423 – Hin- und Herschreiben zwischen zwei Fassungen bleibt unkommentiert
 - Phase: G1-Abnahme auf rc140, 2026-11-05 (Job e34a8095) · Komponente: tools (`engine.py`) · Severity: P3 · blockierend: nein (kostete ~6 Züge) · Status: **behoben im Repository** (`tests/integration/test_tools_engine_read_write.py::test_a_write_back_to_an_earlier_version_says_it_undoes_a_change`)
 - Reproduktion: S002 #2 schrieb `tests/test_config.py` in den Zügen 3–5 und 13–15 je dreimal ganz neu, abwechselnd mit `dummy-token-example` und `dummy-token` (A, B, A). Jedes „overwrote“ sah nach Fortschritt aus; die Stagnationserkennung warnte erst einen Zug später allgemein („no workspace change“).

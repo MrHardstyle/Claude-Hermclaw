@@ -14,7 +14,8 @@ verifier starts it once in the sandbox the way the job's own acceptance commands
   image the page references – each must answer 200;
 * calls every route the page's scripts name (``"/api/…"`` string literals, with the ``method`` written next to them or
   passed as an argument, ``requestJson('/api/test', 'POST')``; without one GET, then POST, BUG-404) – 404, 405 and 501
-  mean the route does not exist;
+  mean the route does not exist, unless the 404 differs from the server's answer for a path nothing handles: then the
+  route's own handler found nothing for the probe's empty body (BUG-424);
   401/403/400 are fine, the probe has no token or body; a route that does not answer within the probe's time waits on
   something the sandbox lacks (BUG-358);
 * checks that every HTML page of the project (outside tests, docs and templates) is served by it;
@@ -151,6 +152,20 @@ def same_page(got, want):
     blocks = difflib.SequenceMatcher(None, want, got, autojunk=False).get_matching_blocks()
     return sum(b.size for b in blocks) >= 0.9 * len(want)
 
+missing = {}
+
+def own_404(method, route, text):
+    # a 404 the route's handler sent itself ("server not found" for the probe's empty body) is not a missing route: it
+    # differs from what the server answers for a path nothing handles (live G1 rc140 S005: POST /api/test without an
+    # id answered 404 {"error": "Server nicht gefunden"}, BUG-424)
+    probe = route.rstrip("/").rsplit("/", 1)[0] + "/hermclaw-no-such-route"
+    if (method, probe) not in missing:
+        st, _, body = fetch(method, base + probe, b"{}" if method != "GET" else None)
+        probes.append([method, probe, st])
+        missing[(method, probe)] = (st, body.replace(probe, "<path>"))
+    st, body = missing[(method, probe)]
+    return st == 404 and " ".join(text.replace(route, "<path>").split()) != " ".join(body.split())
+
 def local(ref):
     return ref and not re.match(r"^(?:[a-z][a-z0-9+.-]*:|//|#)", ref, re.I)
 
@@ -209,15 +224,18 @@ try:
                     # no method next to the literal (`api = {test: "/api/test"}`, called as fetch(api.test, {method:
                     # "POST"}) far below): GET, then POST - a POST-only route answered GET with 404 and blocked the
                     # widget step three times (live G1 rc123, BUG-404)
-                    tried = []
+                    tried, own = [], False
                     for method in [found.group(1).upper()] if found else ["GET", "POST"]:
                         tried.append(method)
                         st, _, err = fetch(method, base + route, b"{}" if method != "GET" else None)
                         probes.append([method, route, st])
                         if st not in (404, 405, 501):
                             break
+                        if st == 404 and own_404(method, route, err):
+                            own = True
+                            break
                     method = " or ".join(tried)
-                    if st in (404, 405, 501):
+                    if st in (404, 405, 501) and not own:
                         problem(f"{source} calls {method} {route}, but the server answered {st}: the route does not exist", where)
                     elif st is None and "timed out" not in err.lower():
                         problem(f"{source} calls {method} {route}, but the server gave no answer ({err[:160]})", where)
