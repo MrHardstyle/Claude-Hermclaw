@@ -47,8 +47,8 @@ Noch keine.
 ## Behobene Bugs
 
 ### BUG-419 – Redactor maskiert eine f-String-Interpolation, die ein Secret schreibt
-- Phase: G1-Abnahme auf rc136, 2026-11-05 (Job d0f02588) · Komponente: core (`redaction.py`) · Severity: P2 · blockierend: nein (drei verlorene Turns, Gefahr kaputter Rewrites) · Status: **behoben im Repository** (`tests/unit/test_config_and_redaction.py::test_an_interpolation_that_writes_a_secret_stays_readable`)
-- Reproduktion: S002 schrieb einen TOML-Writer `lines.append(f'password = "{_esc(srv.password)}"')`. Der Coder sah die Zeile als `password = "***REDACTED***"`, hielt seinen eigenen Code für ein maskiertes Secret und verbrachte drei Turns mit abgewiesenen bzw. wirkungslosen Writes (`REDACTED_PLACEHOLDER`, `NO_CHANGE`).
+- Phase: G1-Abnahme auf rc136, 2026-11-05 (Job d0f02588) · Komponente: core (`redaction.py`) · Severity: P2 · blockierend: ja (Review-Fehlbefund, ein ganzer Versuch) · Status: **behoben im Repository** (`tests/unit/test_config_and_redaction.py::test_an_interpolation_that_writes_a_secret_stays_readable`)
+- Reproduktion: S002 schrieb einen TOML-Writer `lines.append(f'password = "{_esc(srv.password)}"')`. Der Coder sah die Zeile als `password = "***REDACTED***"`, hielt seinen eigenen Code für ein maskiertes Secret und verbrachte drei Turns mit abgewiesenen bzw. wirkungslosen Writes (`REDACTED_PLACEHOLDER`, `NO_CHANGE`). Auch das Heavy Review sah den maskierten Diff und meldete als Major „save_config writes password credentials as a redacted placeholder“; S002 #1 scheiterte (mit) daran, und #2 schrieb `config.py` unverändert neu (`NO_CHANGE`).
 - Ursache: Eingebettete Platzhalter erkannte der Redactor nur als `{name}`/`{{ name }}`/`${NAME}`; eine Interpolation mit Aufruf, Index oder Konvertierung (`{_esc(srv.password)}`, `{x[0]}`, `{tok!r}`) galt als Wert. Der Secret-Scanner meldete sie schon nicht.
 - Fix: `{…}` mit einem Ausdruck darin (ohne Anführungszeichen und Klammern-Verschachtelung) ist ein eingebetteter Platzhalter – Code setzt dort den Wert ein; geteilt von Redactor und Scanner. Werte wie `"hunter2xyz{"` oder `"s3cr3t{}value"` bleiben maskiert.
 
