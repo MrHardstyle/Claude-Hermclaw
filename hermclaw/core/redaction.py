@@ -81,7 +81,10 @@ def is_role_value(value: str) -> bool:
 
 # live G1 (rc87): the README's ``PVEAPIToken=USER@REALM!TOKENID=UUID`` and a test's ``api_key = "UNRAID_API_KEY"`` failed
 # the secret check and showed as the marker, and the coder deleted the documented token format instead (BUG-348)
-_EMBEDDED_PLACEHOLDER = re.compile(r"<[A-Za-z][\w .-]*>|\{\{?\s*[A-Za-z_][\w.]*\s*\}\}?|\$\{[^}]+\}")
+# ``{name}``, ``{{ name }}``, ``${NAME}`` and an f-string/format interpolation ``{_esc(srv.password)}``: code writes
+# the value there (live G1 rc136: ``f'password = "{_esc(srv.password)}"'`` showed as the marker, the coder took its own
+# TOML writer for a masked secret and spent three turns on refused writes, BUG-419)
+_EMBEDDED_PLACEHOLDER = re.compile(r"<[A-Za-z][\w .-]*>|\{\{?\s*[A-Za-z_][^{}\"'`]*\}\}?|\$\{[^}]+\}")
 _NOTATION_SPLIT = re.compile(r"[@!=.:/+_-]+")
 _NOTATION_WORD = re.compile(r"[A-Z]{2,12}")
 

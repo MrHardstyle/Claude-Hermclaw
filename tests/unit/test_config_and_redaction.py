@@ -204,3 +204,17 @@ def test_a_block_colon_after_a_secret_name_is_no_value() -> None:
         assert Redactor().text(text) == text, text
     for text in ("password: hunter2x", "api_key = Zr9xkq77", 'password = "raise"'):
         assert REDACTED in Redactor().text(text), text
+
+
+def test_an_interpolation_that_writes_a_secret_stays_readable() -> None:
+    """Live G1 rc136 (BUG-419): the TOML writer ``lines.append(f'password = "{_esc(srv.password)}"')`` showed as the
+    marker; the coder took its own code for a masked secret, and three writes were refused or changed nothing."""
+    for text in (
+        """lines.append(f'password = "{_esc(srv.password)}"')""",
+        """out.write(f'api_key = "{server.api_key!r}"')""",
+        """line = f'token = "{values[0]}"'""",
+        """headers = f'Authorization: PVEAPIToken={self._token_id}={self._secret}'""",
+    ):
+        assert Redactor().text(text) == text, text
+    for text in ('password = "hunter2xyz{"', 'api_key = "Zr9xkq77"', 'token = "s3cr3t{}value"'):
+        assert REDACTED in Redactor().text(text), text

@@ -4,6 +4,11 @@ Format: [Keep a Changelog](https://keepachangelog.com/de/1.1.0/), Versionen nach
 
 ## [Unreleased]
 
+## [0.1.0rc137] – Release Candidate (2026-11-05)
+
+### Behoben
+- **Interpolationen bleiben lesbar (BUG-419):** `f'password = "{_esc(srv.password)}"'` zeigt der Redactor nicht mehr als Marker.
+
 ## [0.1.0rc136] – Release Candidate (2026-11-05)
 
 ### Behoben

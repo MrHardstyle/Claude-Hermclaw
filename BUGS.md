@@ -46,6 +46,12 @@ Noch keine.
 
 ## Behobene Bugs
 
+### BUG-419 – Redactor maskiert eine f-String-Interpolation, die ein Secret schreibt
+- Phase: G1-Abnahme auf rc136, 2026-11-05 (Job d0f02588) · Komponente: core (`redaction.py`) · Severity: P2 · blockierend: nein (drei verlorene Turns, Gefahr kaputter Rewrites) · Status: **behoben im Repository** (`tests/unit/test_config_and_redaction.py::test_an_interpolation_that_writes_a_secret_stays_readable`)
+- Reproduktion: S002 schrieb einen TOML-Writer `lines.append(f'password = "{_esc(srv.password)}"')`. Der Coder sah die Zeile als `password = "***REDACTED***"`, hielt seinen eigenen Code für ein maskiertes Secret und verbrachte drei Turns mit abgewiesenen bzw. wirkungslosen Writes (`REDACTED_PLACEHOLDER`, `NO_CHANGE`).
+- Ursache: Eingebettete Platzhalter erkannte der Redactor nur als `{name}`/`{{ name }}`/`${NAME}`; eine Interpolation mit Aufruf, Index oder Konvertierung (`{_esc(srv.password)}`, `{x[0]}`, `{tok!r}`) galt als Wert. Der Secret-Scanner meldete sie schon nicht.
+- Fix: `{…}` mit einem Ausdruck darin (ohne Anführungszeichen und Klammern-Verschachtelung) ist ein eingebetteter Platzhalter – Code setzt dort den Wert ein; geteilt von Redactor und Scanner. Werte wie `"hunter2xyz{"` oder `"s3cr3t{}value"` bleiben maskiert.
+
 ### BUG-418 – Coder verschenkt den letzten Turn statt complete_step aufzurufen
 - Phase: G1-Abnahme auf rc135, 2026-11-05 (Job a64e8465) · Komponente: context_builder (`sections.py`) · Severity: P2 · blockierend: ja (Abnahme-Kriterium `complete_step`, je Versuch ~50 min) · Status: **behoben im Repository** (`tests/unit/test_context_builder_sections.py::test_the_last_turn_asks_for_complete_step_instead_of_another_test_run`)
 - Reproduktion: S003 (Collectors, 9 Dateien) nutzte in allen drei Versuchen alle 25 Turns; in #2 liefen die Tests in Turn 24 grün, in Turn 25 startete der Coder denselben Test noch einmal. complete_step wurde nie aufgerufen, jeder Versuch endete mit einer Verifier-Prüfung und einem neuen Versuch, der alle Dateien neu las; der Schritt schloss nur über den Rückfall (BUG-315). Der Job blieb mit 475 min unter 480, die Abnahme scheiterte allein an „1 without complete_step“.
