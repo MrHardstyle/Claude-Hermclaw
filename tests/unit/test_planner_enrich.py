@@ -329,6 +329,18 @@ def test_identical_acceptance_criteria_are_dropped() -> None:
     assert [a.type for a in acceptance] == ["diff", "scope"]
 
 
+def test_artifact_evidence_of_a_kind_no_step_produces_is_dropped() -> None:
+    """Live G1 rc140 (BUG-425): the final review step's only criterion was "1 artifact of kind 'review'"; no step leaves
+    such an artifact, so its verification failed every time and blocked it into a replan. Kinds a step does produce
+    (operations output, media) stay."""
+    review = step("S009", "review", "review", "Review the change.", acceptance=[{"type": "artifact", "kind": "review"}])
+    assert generate_acceptance(PlanStep.model_validate(review), _ctx()) == ([], [])
+    ops = {"type": "artifact", "kind": "ops_output", "name_glob": "ssh_service_status*"}
+    check = step("S002", "ssh", "ssh", "Read the service status.", acceptance=[ops, {"type": "artifact", "kind": "log"}])
+    acceptance, _ = generate_acceptance(PlanStep.model_validate(check), _ctx())
+    assert [(a.type, getattr(a, "kind", None)) for a in acceptance] == [("artifact", "ops_output")]
+
+
 def test_duplicate_criteria_are_dropped_from_the_enriched_plan_of_a_verify_step() -> None:
     """Live job 137c9c41 (J2, rc11): the verify step of both plan versions kept 29 identical empty diff criteria –
     the deduplicated list was only applied when acceptance had also been generated, which never happens for a

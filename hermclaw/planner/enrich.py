@@ -26,6 +26,7 @@ from pydantic import BaseModel, ConfigDict, Field, ValidationError
 from hermclaw.contracts.acceptance import (
     AbsenceEvidence,
     AcceptanceCriterion,
+    ArtifactEvidence,
     DiffEvidence,
     PresenceEvidence,
     ScopeEvidence,
@@ -208,6 +209,18 @@ _CREDENTIAL_WORDS = frozenset(
 _PATTERN_NOISE = re.compile(r"\(\?[a-zA-Z]+\)|\\b|\[[-_\s\\]+\][?*+]?|\\s[?*+]?|\\[-_]|[-_?^$]")
 
 
+# the artifact kinds a step can leave behind: operations tool output (tools/engine.py), database backups (dbtools),
+# rollback points (infratools) and rendered media; the job report belongs to the job, not to a step
+PRODUCED_ARTIFACT_KINDS = frozenset({"ops_output", "backup", "rollback", "image", "video"})
+
+
+def _unproducible_artifact(item: AcceptanceCriterion) -> bool:
+    """Artifact evidence of a kind no step produces can never pass: the final review step of G1 got a single criterion
+    "1 artifact of kind 'review'", failed its verification every time and was blocked into a replan (live G1 rc140,
+    BUG-425)."""
+    return isinstance(item, ArtifactEvidence) and item.kind not in PRODUCED_ARTIFACT_KINDS
+
+
 def _forbids_credential_words(item: AcceptanceCriterion) -> bool:
     """An absence criterion whose pattern is nothing but credential words (``(password|token|api_key|api-key)``),
     also as part of a field name: after a replan the ban came back as ``password|token_value|api_key`` (G1 rc124)."""
@@ -249,6 +262,8 @@ def generate_acceptance(
         # the frontend step of a widget with a settings form for API access got "no password|token|api_key in static/**";
         # its coder spelled the field names as ["Pass", "wort"].join("") to get past it (live G1 rc123, BUG-403)
         if _forbids_credential_words(given):
+            continue
+        if _unproducible_artifact(given):
             continue
         # "static/styles\.css|static/app\.js" in static/index.html failed a correct href="styles.css" whose server
         # serves static/ as its root (live G1 rc124, BUG-405)

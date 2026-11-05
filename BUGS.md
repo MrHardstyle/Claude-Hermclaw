@@ -46,6 +46,18 @@ Noch keine.
 
 ## Behobene Bugs
 
+### BUG-426 – Review wertet in den Recherche-Fakten Unerwähntes als Widerspruch
+- Phase: G1-Abnahme auf rc140, 2026-11-05/06 (Job e34a8095) · Komponente: review (`prompt.py`) · Severity: P2 · blockierend: ja (S003 #2 REVIEW_FIX_REQUIRED, widersprüchliche Befunde im Job-Review S009) · Status: **behoben im Repository** (`tests/unit/test_review_prompt.py::test_research_facts_are_their_own_section_with_their_lines`)
+- Reproduktion: Das Review von S003 meldete als major „the Unraid GraphQL query requests a vm/vms section that is not supported by the cited research facts, which list … Array, Docker, Info, Config, and Connect“. Der Coder entfernte die VM-Abfrage; das Job-Review S009 meldete dann, die Anforderung (Unraid-VMs) werde nicht erfüllt.
+- Ursache: Die Regel „must match the RESEARCH FACTS … a contradiction is major“ sagte nicht, dass die Fakten Auszüge sind; das Modell las eine fehlende Erwähnung als Widerspruch.
+- Fix: Regel und Abschnittskopf sagen: Die Fakten sind Auszüge; ein Endpunkt, Feld oder eine Ressource, die sie nicht erwähnen, ist kein Widerspruch und kein Befund.
+
+### BUG-425 – Artefakt-Kriterium einer Art, die kein Schritt erzeugt
+- Phase: G1-Abnahme auf rc140, 2026-11-06 (Job e34a8095) · Komponente: planner (`enrich.py`) · Severity: P2 · blockierend: ja (Review-Schritt S009 blockiert, Replan) · Status: **behoben im Repository** (`tests/unit/test_planner_enrich.py::test_artifact_evidence_of_a_kind_no_step_produces_is_dropped`)
+- Reproduktion: Gemma gab dem Abschluss-Review S009 als einziges Kriterium `{"type": "artifact", "kind": "review"}`. Die Verifikation meldete „0 artifact(s) of kind 'review' … 1 required“ und blockierte den Schritt.
+- Ursache: Artefakte schreiben nur Operations-Werkzeuge (`ops_output`), Datenbank-Backups (`backup`), Rollback-Punkte (`rollback`) und Medienschritte (`image`, `video`); der Job-Bericht (`report`) gehört zum Job, nicht zum Schritt. Ein Review-Artefakt gibt es nicht – das Kriterium konnte nie bestehen.
+- Fix: Die Plan-Anreicherung verwirft Artefakt-Kriterien einer Art, die kein Schritt erzeugt (wie die Dubletten, BUG-175); Kriterien für die erzeugten Arten bleiben.
+
 ### BUG-424 – Serve-Prüfung hält ein 404 des Route-Handlers für eine fehlende Route
 - Phase: G1-Abnahme auf rc140, 2026-11-05 (Job e34a8095) · Komponente: verifier (`serve.py`) · Severity: P2 · blockierend: ja (S005 #1 VERIFIER_FAILED) · Status: **behoben im Repository** (`tests/unit/test_verifier_serve.py::test_a_404_the_route_sends_for_an_unknown_id_is_not_a_missing_route`)
 - Reproduktion: `static/app.js` ruft `POST /api/test` mit einer Server-ID auf. Die Probe schickt `{}`; der Handler fand keinen Server und antwortete 404 `{"error": "Server nicht gefunden"}`. Die Prüfung meldete „/app.js calls GET or POST /api/test, but the server answered 404: the route does not exist“, obwohl `server.py` die Route hat.

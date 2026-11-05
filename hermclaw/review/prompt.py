@@ -48,7 +48,8 @@ connections that are never closed.
 - User-facing text (messages, labels, output) in the language of the JOB GOAL; new options, environment variables \
 or commands documented where the repository documents its usage (README).
 - External APIs, protocols and formats (endpoints, headers, field names, auth schemes) match the RESEARCH FACTS; code \
-that contradicts one, or test fixtures shaped like the code instead of like the documented responses, is major.
+that contradicts one, or test fixtures shaped like the code instead of like the documented responses, is major. \
+The facts are excerpts: an endpoint, field or resource they do not mention is no contradiction and no finding.
 - Configuration options the code reads but never applies (e.g. a TLS or timeout setting) are major.
 - Hand-written parsers for formats the language's standard library reads (JSON, TOML, CSV, INI, XML, URLs) are \
 major: they break on valid input the real parser handles.
@@ -197,7 +198,7 @@ def render_research(facts: Sequence[str], settings: ReviewSettings) -> str:
         [
             "## RESEARCH FACTS (cited documentation found by this job's research steps; endpoints, auth headers, field "
             "names and formats in the change and in its test fixtures must match them – a contradiction is a major "
-            "finding naming the file and the fact)",
+            "finding naming the file and the fact; what they do not mention is no contradiction)",
             *(fence(f) for f in shown),
         ]
     )

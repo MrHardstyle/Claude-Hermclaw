@@ -168,6 +168,8 @@ def test_research_facts_are_their_own_section_with_their_lines() -> None:
     section = user.split("## RESEARCH FACTS", 1)[1]
     assert "PVEAPIToken=USER@REALM!TOKENID=UUID. (S1)\n- GET /nodes/{node}/storage" in section, "one fact per line"
     assert "major" in user.split("## RESEARCH FACTS", 1)[1].split("\n", 1)[0]
+    # live G1 rc140 (BUG-426): "the query requests vm, which the cited facts do not list" – unmentioned is not contradicted
+    assert "what they do not mention is no contradiction" in section.split("\n", 1)[0]
     plan = user.split("## PLAN STEP", 1)[1].split("## ", 1)[0]
     assert "Keep the public API stable." in plan and "PVEAPIToken" not in plan, "shown once, as RESEARCH FACTS"
 

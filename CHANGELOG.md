@@ -4,6 +4,12 @@ Format: [Keep a Changelog](https://keepachangelog.com/de/1.1.0/), Versionen nach
 
 ## [Unreleased]
 
+## [0.1.0rc143] – Release Candidate (2026-11-06)
+
+### Behoben
+- **Unerfüllbare Artefakt-Kriterien (BUG-425):** Verlangt der Plan ein Artefakt einer Art, die kein Schritt erzeugt (etwa `review`), verwirft die Anreicherung das Kriterium.
+- **Recherche-Fakten im Review (BUG-426):** Was die Fakten nicht erwähnen, gilt nicht mehr als Widerspruch.
+
 ## [0.1.0rc142] – Release Candidate (2026-11-05)
 
 ### Behoben
