@@ -122,6 +122,13 @@ if the step cannot be completed, use block_step (or request_replan) with a concr
 # block_step here sent a step with work in progress to a replan; work left when the turns run out is verified and
 # continued in another attempt (ladder A10 #5, BUG-340)
 ALMOST_EXHAUSTED = "Almost out of turns: finish this change or complete_step; leftover work is continued."
+# live G1 rc135: S003 passed its tests in turn 24 of 25 and ran them again in turn 25; in three attempts the step never
+# called complete_step, which in the last turn runs the verifier's checks and grants turns once to fix one that fails
+# (BUG-349) – each attempt instead ended in a verifier run and a new attempt that read every file again (BUG-418)
+LAST_TURN = (
+    "Last turn: call complete_step now if your change is in place – it runs the verifier's checks and may grant a few "
+    "turns to fix one that fails; a test run or a read in this turn is lost, the attempt ends after it."
+)
 
 
 def user_closing(turn: int, max_turns: int) -> str:
@@ -129,7 +136,7 @@ def user_closing(turn: int, max_turns: int) -> str:
     the prompt changed every turn and made the model server process the whole prompt again instead of reusing its
     cache for the unchanged beginning."""
     remaining = max(0, max_turns - turn)
-    warning = f" {ALMOST_EXHAUSTED}" if remaining <= 2 else ""
+    warning = f" {LAST_TURN}" if remaining == 0 else f" {ALMOST_EXHAUSTED}" if remaining <= 2 else ""
     return f"Turn {turn}/{max_turns}, {remaining} left.{warning} Reply with one JSON action."
 
 

@@ -72,8 +72,9 @@ Dependencies: only the shared protocols `RepoContextProvider` (`inventory_summar
   part changed from turn to turn is visible without the content.
 * **user (turn)**: `CURRENT DIFF`, `LATEST FAILURE`, `SHORT STEP HISTORY`, then the
   closing line
-  "Turn N/M, R left. Reply with one JSON action." (with two turns or fewer left: "Almost out of turns: complete_step,
-  block_step or request_replan.").
+  "Turn N/M, R left. Reply with one JSON action." (with one or two turns left: "Almost out of turns: finish this
+  change or complete_step; leftover work is continued."; in the last turn: "Last turn: call complete_step now if your
+  change is in place – …", since complete_step there runs the verifier's checks and may grant turns, BUG-418).
 * **Three cache levels (D-026):** llama.cpp keeps a checkpoint where the system message ends and where the last
   message starts. Measured on .224 (qwen3.6-35b, 2026-10-23, ~18k-token prompts, 4.4k system, 4.3k stable, 6.9k
   files, 2.3k turn): stable part as its own user message – 22 s prefill whatever changed; stable part in the system

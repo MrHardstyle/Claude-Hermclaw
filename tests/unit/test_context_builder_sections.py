@@ -9,7 +9,7 @@ import re
 from hermclaw.context_builder import SECTION_ORDER, CorrectionItem, ToolPromptSpec, TurnRecord, strip_reasoning
 from hermclaw.context_builder.builder import StepBrief
 from hermclaw.context_builder.render import describe_criterion, render_tools
-from hermclaw.context_builder.sections import ALMOST_EXHAUSTED
+from hermclaw.context_builder.sections import ALMOST_EXHAUSTED, LAST_TURN, user_closing
 from hermclaw.contracts.acceptance import (
     AbsenceEvidence,
     ArtifactEvidence,
@@ -552,3 +552,12 @@ def test_research_facts_keep_their_lines_and_shrink_before_one_is_dropped() -> N
     assert "\n  - The proxmox field 'proxmox_0' is documented. (S1)\n" in sec.body, "one fact per line"
     assert "Research S002" in sec.body and "unraid_0" in sec.body, "both research steps are shown"
     assert "more lines not shown" in sec.body and len(sec.body) <= 5800 and sec.truncated
+
+
+def test_the_last_turn_asks_for_complete_step_instead_of_another_test_run() -> None:
+    """Live G1 rc135 (BUG-418): S003 passed its tests in turn 24 of 25, ran them again in turn 25 and never called
+    complete_step in three attempts. The last turn says that complete_step runs the checks and may grant turns."""
+    assert user_closing(25, 25) == f"Turn 25/25, 0 left. {LAST_TURN} Reply with one JSON action."
+    assert "complete_step now" in LAST_TURN and "may grant a few turns" in LAST_TURN
+    assert user_closing(24, 25) == f"Turn 24/25, 1 left. {ALMOST_EXHAUSTED} Reply with one JSON action."
+    assert user_closing(3, 25) == "Turn 3/25, 22 left. Reply with one JSON action."

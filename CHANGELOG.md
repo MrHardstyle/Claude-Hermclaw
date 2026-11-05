@@ -4,6 +4,11 @@ Format: [Keep a Changelog](https://keepachangelog.com/de/1.1.0/), Versionen nach
 
 ## [Unreleased]
 
+## [0.1.0rc136] – Release Candidate (2026-11-05)
+
+### Behoben
+- **Letzter Turn (BUG-418):** Die Schlusszeile im letzten Turn bittet um complete_step, das die Checks ausführt und bei einem Fehler einmalig Turns gewährt, statt den Turn für einen weiteren Testlauf zu verschenken.
+
 ## [0.1.0rc135] – Release Candidate (2026-11-04)
 
 ### Behoben

@@ -46,6 +46,12 @@ Noch keine.
 
 ## Behobene Bugs
 
+### BUG-418 – Coder verschenkt den letzten Turn statt complete_step aufzurufen
+- Phase: G1-Abnahme auf rc135, 2026-11-05 (Job a64e8465) · Komponente: context_builder (`sections.py`) · Severity: P2 · blockierend: ja (Abnahme-Kriterium `complete_step`, je Versuch ~50 min) · Status: **behoben im Repository** (`tests/unit/test_context_builder_sections.py::test_the_last_turn_asks_for_complete_step_instead_of_another_test_run`)
+- Reproduktion: S003 (Collectors, 9 Dateien) nutzte in allen drei Versuchen alle 25 Turns; in #2 liefen die Tests in Turn 24 grün, in Turn 25 startete der Coder denselben Test noch einmal. complete_step wurde nie aufgerufen, jeder Versuch endete mit einer Verifier-Prüfung und einem neuen Versuch, der alle Dateien neu las; der Schritt schloss nur über den Rückfall (BUG-315). Der Job blieb mit 475 min unter 480, die Abnahme scheiterte allein an „1 without complete_step“.
+- Ursache: Die Schlusszeile sagte ab zwei verbleibenden Turns nur „finish this change or complete_step“. Dass complete_step im letzten Turn die Checks des Verifiers ausführt und bei einem Fehler einmalig Turns gewährt (BUG-349), der letzte Turn sonst aber verloren ist, stand nirgends.
+- Fix: Im letzten Turn lautet der Hinweis „Last turn: call complete_step now if your change is in place – it runs the verifier's checks and may grant a few turns to fix one that fails; a test run or a read in this turn is lost …“. Er steht in der Schlusszeile der Turn-Nachricht (D-021, der Cache-Präfix bleibt gleich); die Framing-Reserve rechnet mit dem längeren Satz.
+
 ### BUG-417 – Serve-Check blockiert einen Schritt an einer Datei, die laut Plan erst ein späterer Schritt anlegt
 - Phase: G1-Abnahme auf rc132, 2026-11-04 (Job e915e603) · Komponente: verifier (`checks.py`, `serve.py`), runtime (`adapters.py`) · Severity: P2 · blockierend: ja (Schritt scheitert, Coder baut Ersatzdateien in den Server) · Status: **behoben im Repository** (`tests/integration/test_verifier_engine.py::test_a_file_the_page_loads_that_a_later_step_creates_does_not_block_the_server_step`)
 - Reproduktion: S004 schrieb den Collector, dessen Seite `/static/app.js` lädt; `static/app.js` gehört laut Plan zu S005 (`allowed_new_paths`). Der Serve-Check meldete `GET /static/app.js answered 404` blockierend, weil S004 den Server geändert hatte; S004 #2 scheiterte daran, und der Coder begann in #3, ein Ersatz-`app.js` in `collector.py` einzubauen.

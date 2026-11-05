@@ -123,7 +123,7 @@ async def test_turn_budget_exhaustion_is_announced() -> None:
     user = user_text(built)
     assert "Turn 19/20, 1 left. Almost out of turns" in user and "Almost out" not in built.messages[0].content
     built2 = await builder.build(make_input(turn=25, max_turns=20))
-    assert "0 left. Almost out of turns" in user_text(built2)
+    assert "0 left. Last turn: call complete_step now" in user_text(built2)
 
 
 async def test_concurrency_limit_is_honoured() -> None:

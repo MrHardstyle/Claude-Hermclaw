@@ -331,8 +331,9 @@ async def test_huge_inputs_respect_every_budget() -> None:
     failure = "E   first error line\n" + "noise\n" * 200_000 + "=== 3 failed, 1 passed in 9.0s ===\n"
     # 4096/920: the smallest window the system contract still fits since the turn count moved into the closing line
     # of the user message (framing, D-021); 995 instead of 1000 since the closing line says that leftover work is
-    # continued (BUG-340), 920 since the contract names the file size the context shows (BUG-367)
-    for ctx, out in ((32768, 6144), (8192, 2048), (4096, 920)):
+    # continued (BUG-340), 920 since the contract names the file size the context shows (BUG-367), 880 since the last
+    # turn asks for complete_step (BUG-418)
+    for ctx, out in ((32768, 6144), (8192, 2048), (4096, 880)):
         builder, _, _ = make_builder(repo=repo, git=git, context_tokens=ctx, max_output_tokens=out, safety_margin_tokens=128)
         built = await builder.build(make_input(step=step, history=history, latest_failure=failure))
         plan = builder.plan
