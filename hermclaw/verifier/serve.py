@@ -64,7 +64,7 @@ _START_NAMES = ("main", "serve", "run", "start", "run_server", "serve_forever")
 
 #: runs in the sandbox from the workspace root: ``<spec json>`` → one JSON line
 SERVE_SCRIPT = r"""
-import html.parser, json, os, re, signal, socket, subprocess, sys, tempfile, time, urllib.error, urllib.parse, urllib.request
+import difflib, html.parser, json, os, re, signal, socket, subprocess, sys, tempfile, time, urllib.error, urllib.parse, urllib.request
 spec = json.loads(sys.argv[1])
 env = dict(os.environ)
 probe = socket.socket()
@@ -141,6 +141,15 @@ class Refs(html.parser.HTMLParser):
     def handle_data(self, data):
         if self._script:
             self.inline.append(data)
+
+def same_page(got, want):
+    # the file, or the file with what the server fills in (a token meta tag, a version): live G1 rc137, BUG-420
+    if got == want:
+        return True
+    if not want or len(want) > 100000 or abs(len(got) - len(want)) > max(400, len(want) // 5):
+        return False
+    blocks = difflib.SequenceMatcher(None, want, got, autojunk=False).get_matching_blocks()
+    return sum(b.size for b in blocks) >= 0.9 * len(want)
 
 def local(ref):
     return ref and not re.match(r"^(?:[a-z][a-z0-9+.-]*:|//|#)", ref, re.I)
@@ -233,7 +242,7 @@ try:
             served = None
             for path in tries:
                 st, ct, text = fetch("GET", base + path)
-                if st == 200 and " ".join(text.split()) == want:
+                if st == 200 and same_page(" ".join(text.split()), want):
                     served = path
                     check_page(path, text, ct)
                     break

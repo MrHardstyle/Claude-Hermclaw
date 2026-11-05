@@ -4,6 +4,11 @@ Format: [Keep a Changelog](https://keepachangelog.com/de/1.1.0/), Versionen nach
 
 ## [Unreleased]
 
+## [0.1.0rc138] – Release Candidate (2026-11-05)
+
+### Behoben
+- **Ausgefüllte Seiten (BUG-420):** Setzt der Server Werte in eine Projektseite ein (z. B. ein Token-Meta-Tag), erkennt der Serve-Check sie weiter als ausgeliefert.
+
 ## [0.1.0rc137] – Release Candidate (2026-11-05)
 
 ### Behoben

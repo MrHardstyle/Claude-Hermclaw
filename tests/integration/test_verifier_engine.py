@@ -1144,6 +1144,34 @@ async def test_the_delivered_web_server_is_loaded_like_its_user_loads_it(session
     assert by_name(off.report)["serve"].status == "skip"
 
 
+async def test_a_page_the_server_fills_in_is_still_the_projects_page(sessionmaker: Any, tmp_path: Path) -> None:
+    """Live G1 rc137 (BUG-420): the server inserted a per-start token meta tag into static/index.html before serving it;
+    the check compared the served page with the file, reported that the server does not serve it, and the step was
+    blocked and replanned. A page that is the file plus what the server fills in is served; another page is not."""
+    repo = py_repo(tmp_path)
+    write(repo, "frontend/index.html", "<!doctype html><html><head><title>w</title></head><body>designed page</body></html>\n")
+    page = 'open("frontend/index.html").read().replace("</head>", \'<meta name="app-token" content="k3x9q2">\' + "</head>")'
+    server = (
+        WEB_SERVER.replace(' api("/api/token");', "")
+        .replace(' api("/api/drop");', "")
+        .replace('"/static/app.css": (', f'"/frontend/index.html": ("text/html", {page}), "/static/app.css": (')
+    )
+    write(repo, "server.py", server)
+    st = step(scope_contract=scope(allowed_new_paths=["server.py", "frontend/**"], target_paths=["calc.py"]))
+    job = dataclasses.replace(st, job_level=True)
+    filled, *_ = await run(sessionmaker, repo, job, kind="review")
+    check = by_name(filled.report)["serve:server.py"]
+    assert check.status == "pass", check.message
+    assert ["PAGE", "frontend/index.html", "/frontend/index.html"] in check.evidence["probes"]
+    # a page of its own is still no copy of the file
+    write(repo, "server.py", server.replace(page, '"<!doctype html><html><body>a different page entirely, built in</body></html>"'))
+    other, *_ = await run(sessionmaker, repo, job, kind="review")
+    assert (
+        "frontend/index.html is part of the project, but the running server does not serve it"
+        in by_name(other.report)["serve:server.py"].message
+    )
+
+
 async def test_a_file_the_page_loads_that_a_later_step_creates_does_not_block_the_server_step(sessionmaker: Any, tmp_path: Path) -> None:
     """Live G1 rc132 (BUG-417): S004 wrote the collector, whose page loads /static/app.js; the plan has S005 create
     static/app.js. The 404 blocked S004 and its coder began to build the file into the server. A file another unfinished

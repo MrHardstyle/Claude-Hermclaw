@@ -46,6 +46,12 @@ Noch keine.
 
 ## Behobene Bugs
 
+### BUG-420 – Serve-Check erkennt eine Seite nicht, in die der Server einen Wert einsetzt
+- Phase: G1-Abnahme auf rc137, 2026-11-05 (Job f730728a) · Komponente: verifier (`serve.py`) · Severity: P1 · blockierend: ja (Schritt blockiert, Replan) · Status: **behoben im Repository** (`tests/integration/test_verifier_engine.py::test_a_page_the_server_fills_in_is_still_the_projects_page`)
+- Reproduktion: S005 (Server + Frontend) lieferte `static/index.html` unter `/` aus und fügte vorher ein `<meta name="homelab-token" content="…">` mit dem Schutz-Token des Starts ein. Der Serve-Check verglich die ausgelieferte Seite mit der Datei, fand keine gleiche und meldete „static/index.html is part of the project, but the running server does not serve it“. S005 #3 scheiterte daran, der Schritt wurde blockiert und neu geplant; das neue S005 scheiterte am selben Befund.
+- Ursache: Eine Projektseite galt nur als ausgeliefert, wenn die Antwort (Whitespace normalisiert) der Datei gleich war; ein Server, der Werte einsetzt (Token, Version), lieferte nie „die“ Datei.
+- Fix: Eine Antwort, die mindestens 90 % der Datei in Reihenfolge enthält und höchstens max(400 Zeichen, 20 %) mehr oder weniger hat, ist die Projektseite mit eingesetzten Werten. Eine eigene, eingebaute Seite bleibt ein Befund.
+
 ### BUG-419 – Redactor maskiert eine f-String-Interpolation, die ein Secret schreibt
 - Phase: G1-Abnahme auf rc136, 2026-11-05 (Job d0f02588) · Komponente: core (`redaction.py`) · Severity: P2 · blockierend: ja (Review-Fehlbefund, ein ganzer Versuch) · Status: **behoben im Repository** (`tests/unit/test_config_and_redaction.py::test_an_interpolation_that_writes_a_secret_stays_readable`)
 - Reproduktion: S002 schrieb einen TOML-Writer `lines.append(f'password = "{_esc(srv.password)}"')`. Der Coder sah die Zeile als `password = "***REDACTED***"`, hielt seinen eigenen Code für ein maskiertes Secret und verbrachte drei Turns mit abgewiesenen bzw. wirkungslosen Writes (`REDACTED_PLACEHOLDER`, `NO_CHANGE`). Auch das Heavy Review sah den maskierten Diff und meldete als Major „save_config writes password credentials as a redacted placeholder“; S002 #1 scheiterte (mit) daran, und #2 schrieb `config.py` unverändert neu (`NO_CHANGE`).
