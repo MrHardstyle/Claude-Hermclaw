@@ -296,6 +296,22 @@ async def test_a_rewrite_of_a_long_file_for_a_few_lines_points_to_replace_text(s
     assert res.ok and "repeated" not in res.output
 
 
+async def test_a_write_back_to_an_earlier_version_says_it_undoes_a_change(sessionmaker: SM, repo: Path) -> None:
+    """BUG-423 (live G1 run25 S002): the coder wrote a test file back and forth between two versions twice (A, B, A);
+    each overwrite looked like progress. A write that restores an earlier content of the attempt says so."""
+    h = await make_harness(sessionmaker, repo, contract=scope(**IMPLEMENT_SCOPE))
+    first = await h.call("write_file", path="src/new_feature.py", content='TOKEN = "dummy-token-example"\n')
+    second = await h.call("write_file", path="src/new_feature.py", content='TOKEN = "dummy-token"\n')
+    assert first.ok and second.ok and "undoes" not in first.output + second.output
+    back = await h.call("write_file", path="src/new_feature.py", content='TOKEN = "dummy-token-example"\n')
+    assert back.ok and "back to exactly the content your turn-1 write gave it" in back.output
+    assert "undoes your turn-2 change" in back.output
+    original = (repo / "src" / "calc.py").read_text(encoding="utf-8")
+    assert (await h.call("write_file", path="src/calc.py", content=original + "X = 1\n")).ok
+    res = await h.call("write_file", path="src/calc.py", content=original)
+    assert res.ok and "the content it had before your first write" in res.output
+
+
 async def test_an_overwrite_that_drops_existing_tests_says_which(sessionmaker: SM, repo: Path) -> None:
     """BUG-336 (ladder A10 #4): rewriting tests/test_api.py dropped three tests the job said to keep; the write answered
     plainly "overwrote" and the hidden check found them missing."""

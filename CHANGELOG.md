@@ -4,6 +4,11 @@ Format: [Keep a Changelog](https://keepachangelog.com/de/1.1.0/), Versionen nach
 
 ## [Unreleased]
 
+## [0.1.0rc141] – Release Candidate (2026-11-05)
+
+### Behoben
+- **Zurückschreiben (BUG-423):** Stellt `write_file` eine frühere Fassung der Datei aus demselben Versuch wieder her, nennt die Antwort den rückgängig gemachten Zug.
+
 ## [0.1.0rc140] – Release Candidate (2026-11-05)
 
 ### Behoben

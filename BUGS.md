@@ -46,6 +46,12 @@ Noch keine.
 
 ## Behobene Bugs
 
+### BUG-423 – Hin- und Herschreiben zwischen zwei Fassungen bleibt unkommentiert
+- Phase: G1-Abnahme auf rc140, 2026-11-05 (Job e34a8095) · Komponente: tools (`engine.py`) · Severity: P3 · blockierend: nein (kostete ~6 Züge) · Status: **behoben im Repository** (`tests/integration/test_tools_engine_read_write.py::test_a_write_back_to_an_earlier_version_says_it_undoes_a_change`)
+- Reproduktion: S002 #2 schrieb `tests/test_config.py` in den Zügen 3–5 und 13–15 je dreimal ganz neu, abwechselnd mit `dummy-token-example` und `dummy-token` (A, B, A). Jedes „overwrote“ sah nach Fortschritt aus; die Stagnationserkennung warnte erst einen Zug später allgemein („no workspace change“).
+- Ursache: `write_file` verglich nur mit dem aktuellen Inhalt (NO_CHANGE), nicht mit früheren Fassungen desselben Versuchs.
+- Fix: Das Werkzeug merkt sich je Datei die Inhalte, die die Schreibzugriffe des Versuchs erzeugt haben. Stellt ein Schreiben eine frühere Fassung wieder her, sagt die Antwort, welche Fassung zurückkommt und welchen Zug es rückgängig macht, und bittet, sich für eine Fassung zu entscheiden.
+
 ### BUG-422 – Secret-Scan meldet eine ausgedachte ID aus wiederholten Zeichen
 - Phase: G1-Abnahme auf rc138, 2026-11-05 (Job 206b6b8e) · Komponente: core (`redaction.py`), verifier (`secrets.py`) · Severity: P3 · blockierend: ja (mit echten Testfehlern im selben Versuch) · Status: **behoben im Repository** (`tests/unit/test_verifier_secrets.py::test_an_id_of_repeated_characters_is_a_made_up_example`)
 - Reproduktion: S003 #1 dokumentierte in `docs/external_api.md` das Beispiel `PVEAPIToken=collector@pve!collector-ro=11111111-2222-3333-4444-555555555555`; der Scan meldete Zeile 32 als Secret.

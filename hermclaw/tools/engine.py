@@ -423,6 +423,10 @@ class ToolEngine:
         # re-ran identical commands on unchanged files again and again (analysis 2026-10-16, live job 50784df5)
         # keyed without the timeout: a command that finished is not changed by another timeout (BUG-211)
         self._ran: dict[tuple[str, str], tuple[int, int, str]] = {}
+        # per file the content hashes this attempt's writes produced, in order: (turn, sha256); turn 0 is the content
+        # before the first write. Live G1 run25 S002: the coder wrote a test file back and forth between two versions
+        # twice (A, B, A), each "overwrote" looked like progress (BUG-423)
+        self._versions: dict[str, list[tuple[int, str]]] = {}
         # the same runs keyed by their core (``core_command``): one re-run with another slice of its output (tail, head,
         # grep, -v) is allowed per file-change count, the next is refused like an identical command (BUG-344)
         self._ran_core: dict[tuple[str, str], tuple[int, int, str]] = {}
@@ -1379,6 +1383,7 @@ class ToolEngine:
         )
         if restored:
             note += f"\nnote: {restored} masked line(s) you copied unchanged keep their real value"
+        note += self._reverted_note(rel, old, data, ctx.turn)
         rewritten = _rewritten_for_little(old_text, content) if exists and not args.append else None
         if rewritten is not None:
             note += (
@@ -1398,6 +1403,23 @@ class ToolEngine:
             f"{verb} {rel} ({len(data)} bytes, {lines} lines){note}",
             mutated_paths=[rel],
             data={"path": rel, "operation": op, "bytes": len(data), "changed": True},
+        )
+
+    def _reverted_note(self, rel: str, old: bytes | None, data: bytes, turn: int) -> str:
+        history = self._versions.setdefault(rel, [])
+        if not history and old is not None:
+            history.append((0, hashlib.sha256(old).hexdigest()))
+        digest = hashlib.sha256(data).hexdigest()
+        # the current content is never the target here: an identical write is refused before (NO_CHANGE)
+        back = next((i for i, (_, h) in enumerate(history) if h == digest), None)
+        history.append((turn, digest))
+        if back is None:
+            return ""
+        then = f"your turn-{history[back][0]} write gave it" if history[back][0] else "it had before your first write"
+        undone = f"your turn-{history[back + 1][0]} change" if back + 2 < len(history) else "the edits made since"
+        return (
+            f"\nnote: this write puts {rel} back to exactly the content {then} – it undoes {undone}. "
+            "Decide which version is right and keep it: writing the two versions in turn changes nothing"
         )
 
     async def _replace_text(self, args: ReplaceTextArgs, ctx: CallContext, events: list[PendingEvent]) -> ToolResult:
