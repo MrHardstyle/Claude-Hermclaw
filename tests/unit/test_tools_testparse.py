@@ -5,7 +5,7 @@ from __future__ import annotations
 
 import pytest
 
-from hermclaw.tools.testparse import parse_counts, summarise
+from hermclaw.tools.testparse import parse_counts, summarise, unittest_package_hint
 
 PYTEST_PASS = """\
 ============================= test session starts ==============================
@@ -290,3 +290,16 @@ def test_go_without_verbose_output_counts_packages() -> None:
     from hermclaw.tools.testparse import parse_go
 
     assert parse_go(GO_PKGS).packages_only and not parse_go(GO).packages_only
+
+
+def test_unittest_that_ran_nothing_names_the_test_folder_without_init() -> None:
+    """Live G1 (BUG-421): ``python -m unittest`` ran no test – tests/ had test modules but no ``__init__.py``, which
+    unittest discovery needs – and nothing said why. The hint names the folders; with the package, or tests that ran,
+    there is none."""
+    none = "\n----------------------------------------------------------------------\nRan 0 tests in 0.000s\n\nNO TESTS RAN\n"
+    hint = unittest_package_hint(none, ["config.py", "tests/test_config.py", "tests/unit/test_x.py", "tests/fixtures/a.json"])
+    assert hint is not None and "tests/, tests/unit/ has no __init__.py" in hint
+    assert "add an empty tests/__init__.py, tests/unit/__init__.py" in hint
+    assert unittest_package_hint(none, ["tests/__init__.py", "tests/test_config.py"]) is None
+    assert unittest_package_hint("Ran 4 tests in 0.010s\n\nOK\n", ["tests/test_config.py"]) is None
+    assert unittest_package_hint(none, ["config.py"]) is None

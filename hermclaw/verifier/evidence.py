@@ -29,7 +29,7 @@ from hermclaw.contracts.acceptance import (
 from hermclaw.contracts.scope import normalise_path
 from hermclaw.contracts.verification import CheckStatus, VerificationCheck
 from hermclaw.scope.guard import acceptance_glob_matches
-from hermclaw.tools.testparse import Framework, parse_counts, summarise
+from hermclaw.tools.testparse import Framework, parse_counts, summarise, unittest_package_hint
 from hermclaw.tools.workspace import has_git_segment, regex_is_risky
 from hermclaw.verifier.changes import acceptance_matching, read_text
 from hermclaw.verifier.commands import TestRecord
@@ -449,6 +449,10 @@ async def run_test_evidence(ctx: VerifyContext, index: int, ev: TestEvidence) ->
             )
         elif counts.passed < ev.min_passed:
             problems.append(f"{counts.passed} passed, at least {ev.min_passed} required")
+        hint = unittest_package_hint(output, await ctx.files()) if counts.total == 0 else None
+        if hint:
+            problems.append(hint)
+            evidence["hint"] = hint
         executed = counts.total > 0
         if problems:
             result = TestOutcome(ctx.check(category, name, "fail", f"{summary.line()} – " + "; ".join(problems), evidence), executed, False)

@@ -10,7 +10,7 @@ Parsers only read the runner's own summary lines – no project-specific knowled
 from __future__ import annotations
 
 import re
-from collections.abc import Callable
+from collections.abc import Callable, Iterable
 from dataclasses import dataclass
 from typing import Literal
 
@@ -445,3 +445,31 @@ def summarise(output: str, exit_code: int | None, *, timed_out: bool = False, fr
     if counts is not None and counts.passed == 0:
         return TestSummary(fw, "error", p, f, e, s, exit_code, "no tests passed or ran")
     return TestSummary(fw, "passed", p, f, e, s, exit_code)
+
+
+_UNITTEST_NONE = re.compile(r"^Ran 0 tests? in ", re.M)
+_TEST_MODULE = re.compile(r"^test\w*\.py$")
+
+
+def unittest_package_hint(output: str, files: Iterable[str]) -> str | None:
+    """unittest ran no test while test modules sit in a folder without ``__init__.py``: discovery imports a folder only
+    as a package. Live G1: the final check ran ``python -m unittest`` on a tests/ without it and was replanned (rc132),
+    a step failed on "no tests ran" and its coder completed past the refusal (rc138) – nothing said why (BUG-421)."""
+    if not _UNITTEST_NONE.search(strip_ansi(output)):
+        return None
+    have = set(files)
+    dirs: set[str] = set()
+    for f in have:
+        folder, _, name = f.rpartition("/")
+        if folder and _TEST_MODULE.match(name):
+            parts = folder.split("/")
+            dirs.update("/".join(parts[: i + 1]) for i in range(len(parts)))
+    missing = sorted(d for d in dirs if f"{d}/__init__.py" not in have and not d.startswith("."))
+    if not missing:
+        return None
+    return (
+        "unittest ran no test: its discovery imports a test folder only as a package, and "
+        + ", ".join(f"{d}/" for d in missing[:5])
+        + " has no __init__.py – add an empty "
+        + ", ".join(f"{d}/__init__.py" for d in missing[:5])
+    )

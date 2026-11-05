@@ -4,6 +4,11 @@ Format: [Keep a Changelog](https://keepachangelog.com/de/1.1.0/), Versionen nach
 
 ## [Unreleased]
 
+## [0.1.0rc139] – Release Candidate (2026-11-05)
+
+### Behoben
+- **unittest ohne Paket (BUG-421):** Läuft unittest ohne Test, weil ein Testordner kein `__init__.py` hat, nennen Verifier und Werkzeug den Ordner und die fehlende Datei.
+
 ## [0.1.0rc138] – Release Candidate (2026-11-05)
 
 ### Behoben

@@ -1144,6 +1144,21 @@ async def test_the_delivered_web_server_is_loaded_like_its_user_loads_it(session
     assert by_name(off.report)["serve"].status == "skip"
 
 
+async def test_unittest_discovery_without_a_package_says_what_is_missing(sessionmaker: Any, tmp_path: Path) -> None:
+    """Live G1 (BUG-421): the step's ``python -m unittest`` ran no test because tests/ had no ``__init__.py``; the
+    failure said only "no tests ran". It names the folder and the missing file."""
+    repo = py_repo(tmp_path)
+    write(repo, "tests/test_unit.py", "import unittest\n\n\nclass T(unittest.TestCase):\n    def test_x(self):\n        pass\n")
+    st = step(acceptance=[{"type": "test", "command": "python3 -m unittest", "framework": "unittest"}])
+    outcome, *_ = await run(sessionmaker, repo, st)
+    check = next(c for c in outcome.report.checks if c.evidence.get("command") == "python3 -m unittest")
+    assert check.status == "fail" and "tests/ has no __init__.py – add an empty tests/__init__.py" in check.message, check.message
+    write(repo, "tests/__init__.py", "")
+    fixed, *_ = await run(sessionmaker, repo, st)
+    passed = next(c for c in fixed.report.checks if c.evidence.get("command") == "python3 -m unittest")
+    assert "__init__" not in passed.message
+
+
 async def test_a_page_the_server_fills_in_is_still_the_projects_page(sessionmaker: Any, tmp_path: Path) -> None:
     """Live G1 rc137 (BUG-420): the server inserted a per-start token meta tag into static/index.html before serving it;
     the check compared the served page with the file, reported that the server does not serve it, and the step was

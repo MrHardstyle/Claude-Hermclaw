@@ -414,6 +414,11 @@ async def test_run_test_unittest_generic_and_no_tests(sessionmaker: SM, repo: Pa
     res = await h.call("run_test", command=f"{PY} -m pytest -q -p no:cacheprovider tests/does_not_exist.py")
     assert not res.ok and res.data["status"] in ("error", "failed")
     assert (await h.call("run_test", command="sudo pytest")).error_code == E.COMMAND_FORBIDDEN
+    # BUG-421: discovery ran no test – tests/ is no package; the output says so before the runner's text
+    assert not (repo / "tests" / "__init__.py").exists()
+    res = await h.call("run_test", command=f"{PY} -m unittest", framework="unittest")
+    assert not res.ok and res.output.splitlines()[1].startswith("unittest ran no test: its discovery imports"), res.output
+    assert "add an empty tests/__init__.py" in res.output
 
 
 # ------------------------------------------------------------------------------------------------ 17.7-17.9 requests

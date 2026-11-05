@@ -46,6 +46,12 @@ Noch keine.
 
 ## Behobene Bugs
 
+### BUG-421 – „no tests ran“ ohne Grund, wenn der Testordner kein Paket ist
+- Phase: G1-Abnahmen auf rc132 und rc138, 2026-11-04/05 (Jobs e915e603, 206b6b8e) · Komponente: tools (`testparse.py`, `engine.py`), verifier (`evidence.py`) · Severity: P2 · blockierend: ja (Versuch gescheitert, einmal Replan) · Status: **behoben im Repository** (`tests/unit/test_tools_testparse.py::test_unittest_that_ran_nothing_names_the_test_folder_without_init`, `tests/integration/test_verifier_engine.py::test_unittest_discovery_without_a_package_says_what_is_missing`, `tests/integration/test_tools_engine_exec.py::test_run_test_unittest_generic_and_no_tests`)
+- Reproduktion: Das Kriterium lief `python -m unittest`; die Testmodule lagen in `tests/` ohne `__init__.py`. unittest meldete „Ran 0 tests … NO TESTS RAN“. In run20 scheiterte so der Abschluss-Verify-Schritt und wurde neu geplant; in run24 scheiterte S002 #1 – complete_step meldete den Fehlschlag, der Coder sah keinen Grund und schloss trotzdem ab.
+- Ursache: Weder Verifier noch Werkzeug sagten, dass unittest-Discovery einen Ordner nur als Paket importiert; BUG-351 erinnerte nur daran, die Akzeptanz-Tests so zu laufen wie der Verifier.
+- Fix: Läuft unittest ohne Test und liegen Testmodule in Ordnern ohne `__init__.py`, nennen Testcheck, `run_test`-Ausgabe und complete_step-Rückmeldung die Ordner: „unittest ran no test: its discovery imports a test folder only as a package, and tests/ has no __init__.py – add an empty tests/__init__.py“.
+
 ### BUG-420 – Serve-Check erkennt eine Seite nicht, in die der Server einen Wert einsetzt
 - Phase: G1-Abnahme auf rc137, 2026-11-05 (Job f730728a) · Komponente: verifier (`serve.py`) · Severity: P1 · blockierend: ja (Schritt blockiert, Replan) · Status: **behoben im Repository** (`tests/integration/test_verifier_engine.py::test_a_page_the_server_fills_in_is_still_the_projects_page`)
 - Reproduktion: S005 (Server + Frontend) lieferte `static/index.html` unter `/` aus und fügte vorher ein `<meta name="homelab-token" content="…">` mit dem Schutz-Token des Starts ein. Der Serve-Check verglich die ausgelieferte Seite mit der Datei, fand keine gleiche und meldete „static/index.html is part of the project, but the running server does not serve it“. S005 #3 scheiterte daran, der Schritt wurde blockiert und neu geplant; das neue S005 scheiterte am selben Befund.

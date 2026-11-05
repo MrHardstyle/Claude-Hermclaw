@@ -109,7 +109,7 @@ from hermclaw.tools.registry import (
 from hermclaw.tools.remote import RemoteSandboxExecutor
 from hermclaw.tools.shellread import ShellRead, core_command, shell_read
 from hermclaw.tools.snapshot import DEFAULT_GENERATED_GLOBS, AuditOutcome, Decide, WorkspaceTracker
-from hermclaw.tools.testparse import TestSummary, parse_counts, summarise
+from hermclaw.tools.testparse import TestSummary, parse_counts, summarise, unittest_package_hint
 from hermclaw.tools.workspace import (
     WorkspaceFS,
     canonical_path,
@@ -2293,6 +2293,9 @@ class ToolEngine:
             ],
         )
         body, truncated = self._render_run(args.command, run, budget=self.output_limit - 200, head_ratio=0.15)
+        hint = unittest_package_hint(combined, await self._inventory()) if summary.passed == 0 else None
+        if hint:
+            body = f"{hint}\n{body}"
         error_code: str | None = None
         if run.audit.violations:
             error_code = E.COMMAND_SCOPE_VIOLATION
@@ -2611,7 +2614,9 @@ class ToolEngine:
                 continue
             if run.result.exit_code in (0, 126, 127) and not run.failed_tests:
                 continue  # 126/127: the tool is not in the image, the verifier skips it too
-            return command, self._render_run(command, run, budget=self.output_limit, head_ratio=0.3)[0], kind
+            output = self._render_run(command, run, budget=self.output_limit, head_ratio=0.3)[0]
+            hint = unittest_package_hint(f"{run.result.stdout}\n{run.result.stderr}", await self._inventory())
+            return command, f"{hint}\n{output}" if hint else output, kind
         left = await self._secrets_left() if self._recheck_secrets else []
         if left:
             # live M3: the coder swapped one README placeholder for another for eleven turns while four other flagged
