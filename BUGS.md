@@ -46,6 +46,12 @@ Noch keine.
 
 ## Behobene Bugs
 
+### BUG-422 – Secret-Scan meldet eine ausgedachte ID aus wiederholten Zeichen
+- Phase: G1-Abnahme auf rc138, 2026-11-05 (Job 206b6b8e) · Komponente: core (`redaction.py`), verifier (`secrets.py`) · Severity: P3 · blockierend: ja (mit echten Testfehlern im selben Versuch) · Status: **behoben im Repository** (`tests/unit/test_verifier_secrets.py::test_an_id_of_repeated_characters_is_a_made_up_example`)
+- Reproduktion: S003 #1 dokumentierte in `docs/external_api.md` das Beispiel `PVEAPIToken=collector@pve!collector-ro=11111111-2222-3333-4444-555555555555`; der Scan meldete Zeile 32 als Secret.
+- Ursache: Als Platzhalter eines Token-Paars (BUG-412) galten Rollenwörter, Notation und Nullen/`x`; eine UUID aus je einer wiederholten Ziffer pro Gruppe nicht.
+- Fix: Ein Wert, dessen Gruppen (getrennt durch `-_.:`) je aus einem einzigen wiederholten Zeichen bestehen, ist ein ausgedachtes Beispiel – im Scanner, im Redactor und als Secret-Teil eines Token-Paars. Gemischte IDs bleiben Funde.
+
 ### BUG-421 – „no tests ran“ ohne Grund, wenn der Testordner kein Paket ist
 - Phase: G1-Abnahmen auf rc132 und rc138, 2026-11-04/05 (Jobs e915e603, 206b6b8e) · Komponente: tools (`testparse.py`, `engine.py`), verifier (`evidence.py`) · Severity: P2 · blockierend: ja (Versuch gescheitert, einmal Replan) · Status: **behoben im Repository** (`tests/unit/test_tools_testparse.py::test_unittest_that_ran_nothing_names_the_test_folder_without_init`, `tests/integration/test_verifier_engine.py::test_unittest_discovery_without_a_package_says_what_is_missing`, `tests/integration/test_tools_engine_exec.py::test_run_test_unittest_generic_and_no_tests`)
 - Reproduktion: Das Kriterium lief `python -m unittest`; die Testmodule lagen in `tests/` ohne `__init__.py`. unittest meldete „Ran 0 tests … NO TESTS RAN“. In run20 scheiterte so der Abschluss-Verify-Schritt und wurde neu geplant; in run24 scheiterte S002 #1 – complete_step meldete den Fehlschlag, der Coder sah keinen Grund und schloss trotzdem ab.

@@ -28,6 +28,7 @@ from hermclaw.core.redaction import (
     is_label_value,
     is_notation_value,
     is_placeholder_token_pair,
+    is_repeated_groups,
     is_role_value,
 )
 from hermclaw.verifier.languages import CODE_LANGUAGES, detect_language, is_lock_or_data_file
@@ -164,7 +165,7 @@ def is_placeholder(value: str) -> bool:
         return True
     if any(part in low for part in _PLACEHOLDER_PARTS):
         return True
-    if is_role_value(low) or is_notation_value(v) or is_placeholder_token_pair(v):
+    if is_role_value(low) or is_notation_value(v) or is_placeholder_token_pair(v) or is_repeated_groups(v):
         return True
     return len(set(v)) <= 2 or v.isdigit()
 

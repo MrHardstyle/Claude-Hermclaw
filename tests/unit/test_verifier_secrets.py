@@ -268,3 +268,17 @@ def test_formats_and_names_are_placeholders_values_are_not() -> None:
         assert not is_placeholder(value), value
     assert not scan("README.md", "Header: `Authorization: PVEAPIToken=USER@REALM!TOKENID=UUID`")
     assert scan("README.md", "api_token = widget@pve!widget=12345678-90ab-cdef-1234-567890abcdef")
+
+
+def test_an_id_of_repeated_characters_is_a_made_up_example() -> None:
+    """Live G1 rc138 (BUG-422): the docs showed ``PVEAPIToken=collector@pve!collector-ro=11111111-2222-3333-4444-
+    555555555555``; each group one digit repeated is no credential. Mixed groups stay findings."""
+    scanner = SecretScanner()
+    for line in (
+        "Beispiel: `PVEAPIToken=collector@pve!collector-ro=11111111-2222-3333-4444-555555555555`",
+        'api_key = "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee"',
+    ):
+        assert scanner.scan_line("docs/api.md", 1, line) == [], line
+        assert REDACTED not in DEFAULT_REDACTOR.text(line), line
+    for line in ('api_key = "8f3a1c2e-77b4-4d1a-9e0c-5b6f2a9d1e44"', "PVEAPIToken=root@pam!ci=8f3a1c2e-77b4-4d1a-9e0c-5b6f2a9d1e44"):
+        assert scanner.scan_line("docs/api.md", 1, line), line

@@ -4,6 +4,11 @@ Format: [Keep a Changelog](https://keepachangelog.com/de/1.1.0/), Versionen nach
 
 ## [Unreleased]
 
+## [0.1.0rc140] – Release Candidate (2026-11-05)
+
+### Behoben
+- **Ausgedachte IDs (BUG-422):** `11111111-2222-3333-4444-555555555555` und ähnliche Werte aus wiederholten Zeichen meldet der Secret-Scan nicht mehr.
+
 ## [0.1.0rc139] – Release Candidate (2026-11-05)
 
 ### Behoben

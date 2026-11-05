@@ -107,13 +107,20 @@ def is_notation_value(value: str) -> bool:
 _TOKEN_PAIR = re.compile(r"^[\w.-]*[@!][\w.@!-]*=([^=\s]+)$")
 
 
+def is_repeated_groups(value: str) -> bool:
+    """``11111111-2222-3333-4444-555555555555``, ``aaaa-bbbb``: every group one character repeated, a made-up value in
+    the shape of an id (live G1 rc138: a Proxmox token example in the docs, BUG-422)."""
+    groups = [g for g in re.split(r"[-_.:]", value.strip("\"'`")) if g]
+    return len(groups) >= 2 and all(len(set(g)) == 1 for g in groups)
+
+
 def is_placeholder_token_pair(value: str) -> bool:
     """An ``id!name=secret`` token whose secret part is a stand-in (a role word like ``uuid``, zeros, ``x``)."""
     m = _TOKEN_PAIR.match(value.strip("\"'`").rstrip(".,;:)").rstrip("\"'`"))
     if m is None:
         return False
     secret = m.group(1)
-    return is_role_value(secret) or is_notation_value(secret) or not set(secret.lower()) - set("0x*-.")
+    return is_role_value(secret) or is_notation_value(secret) or is_repeated_groups(secret) or not set(secret.lower()) - set("0x*-.")
 
 
 def is_label_value(value: str) -> bool:
@@ -129,7 +136,7 @@ def is_benign_value(value: str, *, quoted: bool) -> bool:
     low = value.lower()
     if low.startswith(_PLACEHOLDER_START) or any(part in low for part in _PLACEHOLDER_PARTS) or not set(low) - set("x*-."):
         return True
-    if is_notation_value(value) or is_placeholder_token_pair(value):
+    if is_notation_value(value) or is_placeholder_token_pair(value) or is_repeated_groups(value):
         return True
     # cycle 2 M3 on rc60: ``token="test-token-123"`` and ``token="wrong-token"`` both showed as the marker, and the review
     # could not tell the valid-token test from the wrong-token test (BUG-293). Unquoted, such a value is a variable:
