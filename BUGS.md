@@ -46,6 +46,12 @@ Noch keine.
 
 ## Behobene Bugs
 
+### BUG-429 – Platzhalter-Token mit vorangestelltem Schema-Wort gilt als Secret
+- Phase: G1-Abnahme auf rc145, 2026-11-06 (Job bd01bec5) · Komponente: core (`redaction.py`) · Severity: P2 · blockierend: nein (kostete S001 #1 mehrere Züge) · Status: **behoben im Repository** (`tests/unit/test_verifier_secrets.py::test_a_placeholder_token_pair_after_its_scheme_word_is_no_secret`)
+- Reproduktion: Das Konfigurationsbeispiel `config.example.toml` zeigte `# token = "PVEAPIToken=DEIN-BENUTZER@pve!DEIN-TOKENID=DEIN-UUID-GEHEIMNIS"`. Der Scan nach dem Schreiben meldete die Zeile dreimal hintereinander als `secret_assignment`, der Redactor maskierte sie; selbst `PVEAPIToken=USER@REALM!TOKENID=UUID` war ein Fund.
+- Ursache: BUG-412 erkennt ein Token-Paar `id!name=secret` mit Platzhalter-Geheimnis nur ohne das Schema-Wort davor; `PVEAPIToken=` ließ das Muster scheitern.
+- Fix: Vor der Prüfung des Paars fällt ein Schema-Wort (`PVEAPIToken=`, `PVEAPIToken `) weg, wenn danach ein Paar mit `@`/`!` folgt. Ein echtes Geheimnis im Paar bleibt ein Fund.
+
 ### BUG-428 – complete_step nimmt einen Schritt an, dessen Secret-Fund oder hängender Test noch offen ist
 - Phase: G1-Abnahme auf rc143, 2026-11-06 (Job ca57051a) · Komponente: tools (`engine.py`) · Severity: P1 · blockierend: ja (S003 #3 VERIFIER_FAILED, Rückfall auf den verifizierten Stand von #2 – die Review-Korrekturen von #3 gingen verloren) · Status: **behoben im Repository** (`tests/integration/test_tools_engine_read_write.py::test_complete_step_scans_again_what_a_write_flagged`, `tests/integration/test_tools_engine_exec.py::test_an_acceptance_test_that_does_not_finish_counts_as_failing`)
 - Reproduktion: S003 #3 schrieb `static/app.test.js` im vorletzten Zug; der Scan nach dem Schreiben meldete ein Secret in Zeile 197. Im letzten Zug rief der Coder complete_step: Die Vorprüfung startete das Akzeptanzkriterium `node --test`, das nach den Umbauten hing, lief 180 s in ihr Zeitlimit, übersprang den Lauf und nahm den Schritt an. Der Verifier meldete das Secret und „tests timed out after 600s“.

@@ -298,3 +298,18 @@ def test_a_prefix_the_code_joins_with_the_secret_is_no_secret() -> None:
         assert REDACTED not in DEFAULT_REDACTOR.text(line), line
     for line in ('    password = "hunter2xyz" + "!"', '    secret = "abc123def456" + suffix', '    token = "PVEAPIToken="'):
         assert scanner.scan_line("collector.py", 1, line, language="python"), line
+
+
+def test_a_placeholder_token_pair_after_its_scheme_word_is_no_secret() -> None:
+    """Live G1 rc145 (BUG-429): the config example showed ``token = "PVEAPIToken=DEIN-BENUTZER@pve!DEIN-TOKENID=DEIN-UUID-
+    GEHEIMNIS"``; without the scheme word the pair was a stand-in (BUG-412), with it the line was flagged three writes
+    in a row. A real secret part stays a finding."""
+    scanner = SecretScanner()
+    for line in (
+        '# token = "PVEAPIToken=DEIN-BENUTZER@pve!DEIN-TOKENID=DEIN-UUID-GEHEIMNIS"',
+        'token = "PVEAPIToken=USER@REALM!TOKENID=UUID"',
+    ):
+        assert scanner.scan_line("config.example.toml", 1, line, language="toml") == [], line
+        assert REDACTED not in DEFAULT_REDACTOR.text(line), line
+    line = 'token = "PVEAPIToken=root@pam!ci=8f3a1c2e-77b4-4d1a-9e0c-5b6f2a9d1e44"'
+    assert scanner.scan_line("config.example.toml", 1, line, language="toml") and REDACTED in DEFAULT_REDACTOR.text(line)

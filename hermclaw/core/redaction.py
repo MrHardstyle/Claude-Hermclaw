@@ -114,9 +114,15 @@ def is_repeated_groups(value: str) -> bool:
     return len(groups) >= 2 and all(len(set(g)) == 1 for g in groups)
 
 
+# the scheme word in front of a token pair: ``token = "PVEAPIToken=DEIN-BENUTZER@pve!DEIN-TOKENID=DEIN-GEHEIMNIS"`` in a
+# config example was flagged although the pair alone is a stand-in (live G1 rc145, BUG-429)
+_TOKEN_SCHEME = re.compile(r"^[A-Za-z][A-Za-z0-9]{2,30}[= ](?=[^=\s]*[@!])")
+
+
 def is_placeholder_token_pair(value: str) -> bool:
-    """An ``id!name=secret`` token whose secret part is a stand-in (a role word like ``uuid``, zeros, ``x``)."""
-    m = _TOKEN_PAIR.match(value.strip("\"'`").rstrip(".,;:)").rstrip("\"'`"))
+    """An ``id!name=secret`` token whose secret part is a stand-in (a role word like ``uuid``, zeros, ``x``), also after
+    its scheme word (``PVEAPIToken=``)."""
+    m = _TOKEN_PAIR.match(_TOKEN_SCHEME.sub("", value.strip("\"'`"), count=1).rstrip(".,;:)").rstrip("\"'`"))
     if m is None:
         return False
     secret = m.group(1)

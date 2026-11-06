@@ -4,6 +4,11 @@ Format: [Keep a Changelog](https://keepachangelog.com/de/1.1.0/), Versionen nach
 
 ## [Unreleased]
 
+## [0.1.0rc146] – Release Candidate (2026-11-06)
+
+### Behoben
+- **Platzhalter-Token mit Schema-Wort (BUG-429):** `PVEAPIToken=DEIN-BENUTZER@pve!DEIN-TOKENID=DEIN-GEHEIMNIS` und `PVEAPIToken=USER@REALM!TOKENID=UUID` sind keine Secrets mehr.
+
 ## [0.1.0rc145] – Release Candidate (2026-11-06)
 
 ### Behoben
