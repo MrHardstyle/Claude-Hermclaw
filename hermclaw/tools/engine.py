@@ -1392,6 +1392,13 @@ class ToolEngine:
         )
         if restored:
             note += f"\nnote: {restored} masked line(s) you copied unchanged keep their real value"
+        dropped = _lost_definitions(old_text, content) if exists and not args.append and not is_test_path(rel) else []
+        if dropped:
+            note += (
+                f"\nnote: this overwrite removed {len(dropped)} definition(s) the file had: {', '.join(dropped[:12])}"
+                f"{' …' if len(dropped) > 12 else ''}. To write a file in parts, write the first part and add the next "
+                "ones with append=true; to move code into another module, write that module first"
+            )
         note += self._reverted_note(rel, old, data, ctx.turn)
         rewritten = _rewritten_for_little(old_text, content) if exists and not args.append else None
         if rewritten is not None:
@@ -2765,6 +2772,24 @@ _TEST_NAME_RES = (
     re.compile(r"^[ \t]*It[ \t]+(['\"])(.+?)\1", re.MULTILINE),
     re.compile(r"^func[ \t]+(Test\w+)[ \t]*\(", re.MULTILINE),
 )
+
+
+_DEFINED = re.compile(
+    r"^[ \t]{0,8}(?:(?:export|default|public|private|protected|internal|static|async|abstract|final|override|pub)\s+)*"
+    r"(?:def|class|function|fn|struct|enum|interface|trait|func)\s+([A-Za-z_$][\w$]*)",
+    re.M,
+)
+
+
+def _lost_definitions(old: str | None, new: str) -> list[str]:
+    """The definitions an overwrite of a source file dropped, when it dropped many: live G1 rc145 S002 wrote
+    proxmox.py "part 1" over the whole file (437 to 274 lines, the client class gone), fixed lint in it a turn later and
+    wrote the full file again in the third (BUG-430). A few renamed functions are an edit, not a loss."""
+    if old is None:
+        return []
+    before = set(_DEFINED.findall(old))
+    lost = sorted(before - set(_DEFINED.findall(new)))
+    return lost if len(lost) >= 3 and len(lost) * 4 >= len(before) else []
 
 
 def _test_names(text: str) -> set[str]:

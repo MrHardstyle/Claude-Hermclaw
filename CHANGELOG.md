@@ -4,6 +4,11 @@ Format: [Keep a Changelog](https://keepachangelog.com/de/1.1.0/), Versionen nach
 
 ## [Unreleased]
 
+## [0.1.0rc147] – Release Candidate (2026-11-06)
+
+### Behoben
+- **Verlorene Definitionen beim Überschreiben (BUG-430):** Entfernt `write_file` viele Definitionen einer Quelldatei, nennt die Antwort sie und erklärt das Schreiben in Teilen.
+
 ## [0.1.0rc146] – Release Candidate (2026-11-06)
 
 ### Behoben

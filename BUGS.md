@@ -46,6 +46,12 @@ Noch keine.
 
 ## Behobene Bugs
 
+### BUG-430 – Überschreiben als „Teil 1“ löscht den Rest der Datei ohne Hinweis
+- Phase: G1-Abnahme auf rc145, 2026-11-06 (Job bd01bec5) · Komponente: tools (`engine.py`) · Severity: P3 · blockierend: nein (kostete S002 v2 #1 zwei Züge, Versuch endete in STAGNATION) · Status: **behoben im Repository** (`tests/integration/test_tools_engine_read_write.py::test_an_overwrite_that_drops_many_definitions_names_them`)
+- Reproduktion: Der Coder schrieb `proxmox.py` in Zug 9 als „part 1 (helpers + parsers)“ per `write_file` ohne `append` – 437 auf 274 Zeilen, die Klasse `ProxmoxClient` samt Methoden fehlte. Zug 10 behob Lint in diesem Teil, Zug 11 schrieb die ganze Datei neu (590 Zeilen).
+- Ursache: Die Antwort nannte verlorene Tests (BUG-336), aber nicht verlorene Definitionen einer Quelldatei.
+- Fix: Fallen bei einer Überschreibung mindestens drei und mindestens ein Viertel der Definitionen weg (`def`, `class`, `function`, `fn`, `struct`, …), nennt die Antwort sie und sagt: Teile mit `append=true` anhängen, beim Aufteilen in Module das neue Modul zuerst schreiben. Einzelne Umbenennungen bleiben ohne Hinweis.
+
 ### BUG-429 – Platzhalter-Token mit vorangestelltem Schema-Wort gilt als Secret
 - Phase: G1-Abnahme auf rc145, 2026-11-06 (Job bd01bec5) · Komponente: core (`redaction.py`) · Severity: P2 · blockierend: nein (kostete S001 #1 mehrere Züge) · Status: **behoben im Repository** (`tests/unit/test_verifier_secrets.py::test_a_placeholder_token_pair_after_its_scheme_word_is_no_secret`)
 - Reproduktion: Das Konfigurationsbeispiel `config.example.toml` zeigte `# token = "PVEAPIToken=DEIN-BENUTZER@pve!DEIN-TOKENID=DEIN-UUID-GEHEIMNIS"`. Der Scan nach dem Schreiben meldete die Zeile dreimal hintereinander als `secret_assignment`, der Redactor maskierte sie; selbst `PVEAPIToken=USER@REALM!TOKENID=UUID` war ein Fund.

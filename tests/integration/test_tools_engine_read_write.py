@@ -296,6 +296,25 @@ async def test_a_rewrite_of_a_long_file_for_a_few_lines_points_to_replace_text(s
     assert res.ok and "repeated" not in res.output
 
 
+async def test_an_overwrite_that_drops_many_definitions_names_them(sessionmaker: SM, repo: Path) -> None:
+    """BUG-430 (live G1 rc145 S002): the coder wrote proxmox.py "part 1" over the whole file – the client class and its
+    methods gone – fixed lint in it a turn later and wrote the full file again. An overwrite that drops many definitions
+    names them and says how to write in parts; a rename of one or two is an edit and adds nothing."""
+    h = await make_harness(sessionmaker, repo, contract=scope(**IMPLEMENT_SCOPE))
+    full = "".join(f"def parse_{i}(x):\n    return x\n\n\n" for i in range(4)) + "class Client:\n    def fetch(self):\n        return 1\n"
+    assert (await h.call("write_file", path="src/new_feature.py", content=full)).ok
+    part = "".join(f"def parse_{i}(x):\n    return x\n\n\n" for i in range(4))
+    res = await h.call("write_file", path="src/new_feature.py", content=part)
+    assert res.ok and "definition(s) the file had" not in res.output, "two dropped definitions are an edit"
+    assert (await h.call("write_file", path="src/new_feature.py", content=full)).ok
+    res = await h.call("write_file", path="src/new_feature.py", content="def parse_0(x):\n    return x\n")
+    assert res.ok and "removed 5 definition(s) the file had: Client, fetch, parse_1, parse_2, parse_3" in res.output
+    assert "append=true" in res.output
+    renamed = full.replace("parse_3", "parse_three")
+    res = await h.call("write_file", path="src/new_feature.py", content=renamed)
+    assert res.ok and "definition(s) the file had" not in res.output
+
+
 async def test_a_write_back_to_an_earlier_version_says_it_undoes_a_change(sessionmaker: SM, repo: Path) -> None:
     """BUG-423 (live G1 run25 S002): the coder wrote a test file back and forth between two versions twice (A, B, A);
     each overwrite looked like progress. A write that restores an earlier content of the attempt says so."""
