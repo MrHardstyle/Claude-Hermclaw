@@ -1052,6 +1052,19 @@ async def test_complete_step_runs_the_steps_acceptance_tests_as_the_verifier_doe
     assert (await h.call("complete_step", summary="fixed")).ok
 
 
+async def test_an_acceptance_test_that_does_not_finish_counts_as_failing(sessionmaker: SM, repo: Path) -> None:
+    """Live G1 rc143 S003 #3 (BUG-428): after the last rewrite `node --test` hung; complete_step's run of it timed out,
+    was skipped as "cannot run here", the step was accepted and the verifier timed out after 600 s. A test that does not
+    finish now refuses once like a failing one, saying what never ends."""
+    rec = TimeoutRecorder()
+    h = await make_harness(sessionmaker, repo, contract=scope(**SCOPE), executor=rec)
+    h.engine.expect_acceptance_tests(["node --test"])
+    assert (await h.call("write_file", path="src/calc.py", content="x = 1\n")).ok
+    refused = await h.call("complete_step", summary="done")
+    assert refused.error_code == E.CHECK_STILL_FAILING and "did not finish within the time limit" in refused.output
+    assert (await h.call("complete_step", summary="cannot be fixed here")).ok, "refused once only"
+
+
 async def test_a_check_failing_in_the_last_turn_gets_the_grace_turns_once(sessionmaker: SM, repo: Path) -> None:
     """BUG-349: in the last turn complete_step re-ran nothing, the verifier failed the step and a new attempt began.
     Now the checks run there too; a failing one grants ``policies.coder.grace_turns`` once, with its output."""

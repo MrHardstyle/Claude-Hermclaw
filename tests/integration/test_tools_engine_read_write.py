@@ -916,3 +916,16 @@ async def test_a_write_reports_the_secrets_the_verifier_would_find(sessionmaker:
     assert "'dummy'" in res.output and "zq81vkpw3mxt5r7" not in res.output and res.data.get("lint_findings") is True
     fixed = await h.call("replace_text", path="tests/test_api.py", old="zq81vkpw3mxt5r7", new="dummy-token")
     assert fixed.ok and "possible secret" not in fixed.output, fixed.output
+
+
+async def test_complete_step_scans_again_what_a_write_flagged(sessionmaker: SM, repo: Path) -> None:
+    """Live G1 rc143 S003 #3 (BUG-428): a write in the second-to-last turn reported a secret in a test, the coder called
+    complete_step in the last turn, it was accepted, the verifier failed and the attempt fell back. complete_step now
+    rescans the files a write flagged, as it does those the correction names."""
+    h = await make_harness(sessionmaker, repo, contract=scope(target_paths=["tests/test_api.py"], allowed_new_paths=["tests/*"]))
+    res = await h.call("write_file", path="tests/test_api.py", content="TOKEN = 'zq81vkpw3mxt5r7'\n\ndef test_a():\n    assert TOKEN\n")
+    assert res.ok and "possible secret(s): line 1" in res.output
+    left = await h.call("complete_step", summary="tests written")
+    assert left.error_code == E.CHECK_STILL_FAILING and "tests/test_api.py:1" in left.output and "zq81vkpw3mxt5r7" not in left.output
+    assert (await h.call("replace_text", path="tests/test_api.py", old="zq81vkpw3mxt5r7", new="dummy-token")).ok
+    assert (await h.call("complete_step", summary="tests written")).ok

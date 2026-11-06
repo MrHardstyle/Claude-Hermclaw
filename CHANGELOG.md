@@ -4,6 +4,11 @@ Format: [Keep a Changelog](https://keepachangelog.com/de/1.1.0/), Versionen nach
 
 ## [Unreleased]
 
+## [0.1.0rc145] – Release Candidate (2026-11-06)
+
+### Behoben
+- **Offene Funde bei complete_step (BUG-428):** complete_step scannt Dateien erneut, in denen ein Schreiben ein Secret meldete, und wertet einen Test, der nicht fertig wird, als fehlschlagend.
+
 ## [0.1.0rc144] – Release Candidate (2026-11-06)
 
 ### Behoben

@@ -358,6 +358,12 @@ def _rewritten_for_little(old: str | None, new: str) -> int | None:
     return changed if 0 < changed <= len(a) * _REWRITE_SHARE else None
 
 
+TESTS_DID_NOT_FINISH = (
+    "the tests did not finish within the time limit – the verifier runs them the same way and will time out too. Look "
+    "for what never ends: a server, timer or interval started when a module is imported, a wait for input, a loop"
+)
+
+
 class ToolEngine:
     def __init__(  # noqa: PLR0917 - positional order is the documented component contract
         self,
@@ -453,6 +459,9 @@ class ToolEngine:
         self._correction_paths: list[str] = []
         self._recheck_commands: list[str] = []  # failed lint/test checks a correction must resolve (BUG-276)
         self._recheck_secrets: list[str] = []  # files whose secret check failed (BUG-279)
+        # files in which the scan after a write found a secret: complete_step scans them again – live G1 rc143 S003 #3 wrote
+        # a flagged test value in its second-to-last turn, completed in the last, and the attempt fell back (BUG-428)
+        self._written_secrets: list[str] = []
         self._changed_now: set[str] = set()
         self._correction_reminded = False
         # test runs of this attempt whose last result failed, by core, and the step's acceptance test commands:
@@ -2472,7 +2481,7 @@ class ToolEngine:
     async def _secrets_left(self) -> list[str]:
         """Lines of the flagged files, not in their base version, on which the verifier's scanner still finds a
         secret – as the verifier shows them (masked)."""
-        found = await self._secret_findings(self._recheck_secrets)
+        found = await self._secret_findings(list(dict.fromkeys([*self._recheck_secrets, *self._written_secrets])))
         return [f"{f.path}:{f.line} ({f.rule}): {f.preview}" for findings in found.values() for f in findings]
 
     async def _secret_findings(self, paths: Sequence[str]) -> dict[str, list[SecretFinding]]:
@@ -2513,6 +2522,7 @@ class ToolEngine:
         from hermclaw.verifier.checks import secret_remedy
 
         found = await self._secret_findings(paths)
+        self._written_secrets.extend(rel for rel in found if rel not in self._written_secrets)
         return [
             f"{rel}: possible secret(s): " + ", ".join(f"line {f.line} ({f.rule})" for f in findings[:5]) + f". {secret_remedy(rel)}"
             for rel, findings in found.items()
@@ -2632,14 +2642,21 @@ class ToolEngine:
                 if exc.code == E.COMMAND_REPEATED and not exc.data.get("passed") and not missing_tool:
                     return command, self._ran_output.get((cwd, core_command(command)), "(output not kept)"), kind
                 continue
-            if run.sandbox_failed or run.result is None or run.result.timed_out:
+            if run.sandbox_failed or run.result is None:
+                continue
+            if run.result.timed_out and kind != "check":
+                # live G1 rc143 S003 #3: the step's `node --test` hung after the last rewrite, the check here ran into its
+                # time limit and was skipped, the step was accepted, and the verifier timed out after 600 s (BUG-428)
+                output = self._render_run(command, run, budget=self.output_limit, head_ratio=0.3)[0]
+                return command, f"{TESTS_DID_NOT_FINISH}\n{output}", kind
+            if run.result.timed_out:
                 continue
             if run.result.exit_code in (0, 126, 127) and not run.failed_tests:
                 continue  # 126/127: the tool is not in the image, the verifier skips it too
             output = self._render_run(command, run, budget=self.output_limit, head_ratio=0.3)[0]
             hint = unittest_package_hint(f"{run.result.stdout}\n{run.result.stderr}", await self._inventory())
             return command, f"{hint}\n{output}" if hint else output, kind
-        left = await self._secrets_left() if self._recheck_secrets else []
+        left = await self._secrets_left() if self._recheck_secrets or self._written_secrets else []
         if left:
             # live M3: the coder swapped one README placeholder for another for eleven turns while four other flagged
             # lines stayed, and re-wrote a masked test token unchanged; nothing told it which lines still failed (BUG-279)
