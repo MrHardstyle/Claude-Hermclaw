@@ -30,6 +30,7 @@ from hermclaw.core.redaction import (
     is_placeholder_token_pair,
     is_repeated_groups,
     is_role_value,
+    is_value_part,
 )
 from hermclaw.verifier.languages import CODE_LANGUAGES, detect_language, is_lock_or_data_file
 from hermclaw.verifier.types import AddedLine
@@ -268,6 +269,8 @@ class SecretScanner:
             if language in CODE_LANGUAGES and not quoted:
                 return None  # ``password = get_password()`` – an expression, not a literal
             if is_placeholder(value):
+                return None
+            if quoted and language in CODE_LANGUAGES and is_value_part(line, start, m.end(2)):
                 return None
             if quoted and language in CODE_LANGUAGES and _is_prose(line, prefix.rstrip()[-1], m.end(2)):
                 return None

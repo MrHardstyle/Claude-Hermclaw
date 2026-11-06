@@ -282,3 +282,19 @@ def test_an_id_of_repeated_characters_is_a_made_up_example() -> None:
         assert REDACTED not in DEFAULT_REDACTOR.text(line), line
     for line in ('api_key = "8f3a1c2e-77b4-4d1a-9e0c-5b6f2a9d1e44"', "PVEAPIToken=root@pam!ci=8f3a1c2e-77b4-4d1a-9e0c-5b6f2a9d1e44"):
         assert scanner.scan_line("docs/api.md", 1, line), line
+
+
+def test_a_prefix_the_code_joins_with_the_secret_is_no_secret() -> None:
+    """Live G1 rc143 (BUG-427): the review asked for the ``PVEAPIToken=`` prefix, the coder wrote ``token =
+    "PVEAPIToken=" + token``, the scan flagged it and the attempt fell back – losing its seven review fixes. A short
+    literal ending in a separator or holding a format slot, joined with code, is the fixed part of the value."""
+    scanner = SecretScanner()
+    for line in (
+        '        token = "PVEAPIToken=" + token',
+        '    api_token = "PVEAPIToken=%s" % api_token',
+        '    token = "PVEAPIToken={}".format(t)',
+    ):
+        assert scanner.scan_line("collector.py", 1, line, language="python") == [], line
+        assert REDACTED not in DEFAULT_REDACTOR.text(line), line
+    for line in ('    password = "hunter2xyz" + "!"', '    secret = "abc123def456" + suffix', '    token = "PVEAPIToken="'):
+        assert scanner.scan_line("collector.py", 1, line, language="python"), line

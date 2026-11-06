@@ -4,6 +4,11 @@ Format: [Keep a Changelog](https://keepachangelog.com/de/1.1.0/), Versionen nach
 
 ## [Unreleased]
 
+## [0.1.0rc144] – Release Candidate (2026-11-06)
+
+### Behoben
+- **Präfix vor dem Token (BUG-427):** `token = "PVEAPIToken=" + token` und ähnliche Bausteine (`"Bearer %s" % key`) meldet der Secret-Scan nicht mehr, der Redactor maskiert sie nicht mehr.
+
 ## [0.1.0rc143] – Release Candidate (2026-11-06)
 
 ### Behoben

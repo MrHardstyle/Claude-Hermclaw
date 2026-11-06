@@ -46,6 +46,12 @@ Noch keine.
 
 ## Behobene Bugs
 
+### BUG-427 – Secret-Scan meldet das Präfix, das der Code mit dem Token verbindet
+- Phase: G1-Abnahme auf rc143, 2026-11-06 (Job ca57051a) · Komponente: core (`redaction.py`), verifier (`secrets.py`) · Severity: P1 · blockierend: ja (S002 #3 VERIFIER_FAILED, Rückfall auf den verifizierten Stand von #2 – die sieben Review-Korrekturen von #3 gingen verloren) · Status: **behoben im Repository** (`tests/unit/test_verifier_secrets.py::test_a_prefix_the_code_joins_with_the_secret_is_no_secret`)
+- Reproduktion: Das Review von S002 #2 verlangte das `PVEAPIToken=`-Präfix im Proxmox-Header. #3 schrieb `token = "PVEAPIToken=" + token`; der Scan meldete die Zeile als `secret_assignment`, der Redactor zeigte dem Coder `token = "***REDACTED***" + token`. Fünf Schreibzüge lang stand der Fund in den Werkzeugantworten, die Verifikation scheiterte, und der Rückfall (BUG-315) stellte den vom Review abgelehnten Stand wieder her.
+- Ursache: Ein quotiertes Literal nach einem Credential-Schlüssel galt als Wert, auch wenn der Code es nur mit einer Variablen verbindet.
+- Fix: Ein kurzes Literal (≤ 40 Zeichen), das mit einem Trenner endet (`=`, `:`, `/`, `_`, `-`, `.`, Leerzeichen) oder einen Format-Platzhalter hält (`%s`, `{}`), und das der Code mit `+`, `%`, `.format(` oder `.join(` weiterbaut, ist der feste Teil des Werts – im Scanner (nur Code) und im Redactor. Ein Literal ohne diese Form (`"abc123def456" + suffix`) und eine Verbindung zweier Literale bleiben Funde.
+
 ### BUG-426 – Review wertet in den Recherche-Fakten Unerwähntes als Widerspruch
 - Phase: G1-Abnahme auf rc140, 2026-11-05/06 (Job e34a8095) · Komponente: review (`prompt.py`) · Severity: P2 · blockierend: ja (S003 #2 REVIEW_FIX_REQUIRED, widersprüchliche Befunde im Job-Review S009) · Status: **behoben im Repository** (`tests/unit/test_review_prompt.py::test_research_facts_are_their_own_section_with_their_lines`)
 - Reproduktion: Das Review von S003 meldete als major „the Unraid GraphQL query requests a vm/vms section that is not supported by the cited research facts, which list … Array, Docker, Info, Config, and Connect“. Der Coder entfernte die VM-Abfrage; das Job-Review S009 meldete dann, die Anforderung (Unraid-VMs) werde nicht erfüllt.

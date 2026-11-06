@@ -129,6 +129,24 @@ def is_label_value(value: str) -> bool:
     return value.rstrip("\"'`").endswith(":")
 
 
+# ``token = "PVEAPIToken=" + token``, ``"Bearer %s" % key``, ``"PVEAPIToken={}".format(t)``: a short literal the code
+# joins with a variable is the fixed part of the value, the secret comes from the variable (live G1 rc143: the reviewed
+# prefix fix was flagged, the attempt fell back and its seven review fixes were lost, BUG-427)
+_BUILDS_ON = re.compile(r"""["'`][ \t]*(?:\+[ \t]*(?!["'`])[\w(]|%[ \t]*[\w(]|\.(?:join|format)\()""")
+
+
+_TEMPLATE_SLOT = re.compile(r"%[sd]|\{\w*\}")
+
+
+def is_value_part(line: str, start: int, end: int) -> bool:
+    """The quoted literal ``line[start:end]`` is a part the code builds a value from, not the value itself: short, ending
+    in a separator (``PVEAPIToken=``) or holding a format slot (``%s``, ``{}``), joined with code. A literal joined
+    with a variable that does not look like a prefix (``"abc123def456" + suffix``) stays a finding."""
+    part = line[start:end]
+    shaped = part[-1:] in "=:/_-. " or _TEMPLATE_SLOT.search(part) is not None
+    return len(part) <= 40 and shaped and _BUILDS_ON.match(line, end) is not None
+
+
 def is_benign_value(value: str, *, quoted: bool) -> bool:
     """A ``key = value`` match that is no secret: an obvious placeholder, or (unquoted) a short code reference."""
     if is_label_value(value):
@@ -158,7 +176,8 @@ _COUNTER_KEYS = re.compile(r"(?i)(tokens|_count|_ms|_seconds|_bytes|_chars)$|^(m
 
 
 def _mask_key_value(m: re.Match[str]) -> str:
-    if is_benign_value(m.group(2), quoted=m.group(1).endswith(("'", '"'))):
+    quoted = m.group(1).endswith(("'", '"'))
+    if is_benign_value(m.group(2), quoted=quoted) or (quoted and is_value_part(m.string, m.start(2), m.end(2))):
         return m.group(0)
     return m.group(1) + REDACTED
 
